@@ -10371,7 +10371,7 @@ fn mount_virtual_list(
 }
 
 fn scroll_by(context: &mut VisualTestContext, dy: f32) {
-    context.simulate_event(gpui::ScrollWheelEvent {
+    context.simulate_event(gpui::ScrollEvent {
         position: point(px(150.), px(100.)),
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(dy))),
         ..Default::default()
@@ -11174,8 +11174,9 @@ fn a_list_reports_which_item_was_clicked(cx: &mut TestAppContext) {
 }
 
 /// A transcript in a `list`: a hundred twenty-pixel rows in a 200px box, and
-/// under it three controls that change the collection the way a chat does —
-/// a page of older items above, one newer item below, and one item taken out.
+/// under it four controls that change the collection the way a chat does —
+/// a page of older items above, one newer item below, one item taken out, and
+/// the last item grown to 60px, as a message being streamed grows.
 /// `builders` is appended to the list's own chain.
 ///
 /// The key under a click is written into the tree, which is how a test reads
@@ -11191,6 +11192,7 @@ export default class Transcript extends View {{
     this.items = [];
     for (let index = 0; index < 100; index++) this.items.push(`m${{index}}`);
     this.pages = 0;
+    this.tall = "";
     this.clicked = "none";
   }}
 
@@ -11213,7 +11215,7 @@ export default class Transcript extends View {{
           .h(200)
           .child(
             list("rows", this.items.length, (index) => this.items[index], (index) =>
-              div().h(20).child(this.items[index]),
+              div().h(this.items[index] === this.tall ? 60 : 20).child(this.items[index]),
             )
               .on_item_click((key, cx) => {{
                 this.clicked = key;
@@ -11232,6 +11234,9 @@ export default class Transcript extends View {{
       }}))
       .child(this.control("take out m7", () => {{
         this.items = this.items.filter((key) => key !== "m7");
+      }}))
+      .child(this.control("grow the last", () => {{
+        this.tall = this.items[this.items.length - 1];
       }}))
       .child(`clicked ${{this.clicked}}`);
   }}
@@ -11302,6 +11307,65 @@ fn a_list_keeps_the_reader_on_their_item_when_the_count_changes(cx: &mut TestApp
     // position stays at its index, where the next item now is.
     click_at(&mut context, 300.);
     assert_eq!(transcript_key_at(&mut context, &view, 5.), "m8");
+}
+
+#[gpui::test]
+fn a_list_following_its_tail_stays_at_the_end_until_the_reader_scrolls_up(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) =
+        mount_list_source(cx, &transcript_source(r#".with_follow_mode("tail")"#));
+
+    // It opens at the end: `m99` is flush with the bottom of the box.
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m99");
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m90");
+
+    // An item added below is followed, and so is the last item growing.
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m1100");
+    click_at(&mut context, 340.);
+    assert_eq!(
+        transcript_key_at(&mut context, &view, 145.),
+        "m1100",
+        "the grown last item must fill the bottom 60px of the box"
+    );
+
+    // Scrolling up stops it: the next item lands below the fold and the item
+    // being read stays where it is.
+    scroll_by(&mut context, 60.);
+    let reading = transcript_key_at(&mut context, &view, 5.);
+    click_at(&mut context, 260.);
+    assert_eq!(
+        transcript_key_at(&mut context, &view, 5.),
+        reading,
+        "a reader who scrolled up must not be pulled back down"
+    );
+
+    // Back at the end, it follows again.
+    scroll_by(&mut context, -1000.);
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m1102");
+}
+
+/// A follow mode GPUI does not have is refused where it was written, rather
+/// than leaving the list in whichever mode it was in.
+#[gpui::test]
+fn a_follow_mode_other_than_normal_or_tail_is_refused(cx: &mut TestAppContext) {
+    let message = render_error(
+        cx,
+        "follow.js",
+        r#"
+import { div, View, list } from "gpui-kit";
+
+export default class Transcript extends View {
+  render() {
+    return list("rows", 1, () => "only", () => div()).with_follow_mode("bottom");
+  }
+}
+"#,
+    );
+    assert!(
+        message.contains(r#"with_follow_mode(mode) expects "normal" or "tail""#),
+        "the message has to name the method and the modes it takes: {message}"
+    );
 }
 
 /// A `list` of a hundred twenty-pixel rows in a 200px box, a `Scrollbar` paired
@@ -11405,6 +11469,33 @@ fn a_list_reports_its_visible_range_however_it_changed(cx: &mut TestAppContext) 
         start > 5 && end - start == 10 && count == 101,
         "a jump on the scrollbar must be reported: {start}..{end} of {count}"
     );
+}
+
+/// Tail following and after-frame reports share the same retained list state.
+#[gpui::test]
+fn a_list_reports_its_visible_range_while_following_its_tail(cx: &mut TestAppContext) {
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").with_follow_mode(\"tail\").on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+    assert_eq!(reported_visible_range(&mut context, &view), (90, 100, 100));
+
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (91, 101, 101));
+
+    scroll_by(&mut context, 60.);
+    let reading = reported_visible_range(&mut context, &view);
+    assert!(reading.1 < reading.2, "scrolling up pauses following");
+    click_at(&mut context, 220.);
+    assert_eq!(
+        reported_visible_range(&mut context, &view),
+        (reading.0, reading.1, 102),
+    );
+
+    scroll_by(&mut context, -1000.);
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (93, 103, 103));
 }
 
 #[gpui::test]

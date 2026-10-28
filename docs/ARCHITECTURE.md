@@ -355,6 +355,80 @@ Platform-specific behavior is isolated behind adapters. For example, folding is
 disabled on WebAssembly, time uses `web_time` where needed, and native text
 content support is conditionally compiled.
 
+## Text Rendering for External Components
+
+`gpui_base::text::editor_host` adapts the same renderer used by `TextView`.
+It is a rendering boundary for externally owned rich-text components, not an
+editing engine. The host projects its own document into `BlockNode` values;
+Base owns shaping, wrapping, inline-object layout and geometry. The host owns
+document identity and revisions, editing semantics, commands, history, selection,
+focus, accessibility integration, native input and scrolling policy.
+
+### Identity and lifecycle
+
+There are two independent identities. A stable GPUI element ID scopes retained
+render state; `BlockNode::render_with_id` provides that scope for top-level
+blocks. Leaf keys identify geometry and decorations within one collection.
+Keys must be unique in that collection. Cloning the AST shares runtime state;
+calling `with_leaf_key` detaches the leaf's runtime text/selection state so
+rekeying a clone does not rename the original leaf. Independently rendered
+instances need distinct keys.
+
+Run `collect_leaf_geometry` around child prepaint, not rendering or painting.
+The scope is synchronous, nests with isolation and restores its predecessor
+during unwinding. Only prepainted leaves are reported. A virtualized or cached
+subtree that does not prepaint is absent; a missing entry does not remove a leaf
+from the host document.
+
+`LeafGeometry` copies bounds and retains immutable shaped lines. It does not
+retain mutable `TextLayout` handles. A later frame cannot change an existing
+snapshot, but that snapshot describes only its original content, typography,
+width and scroll offset. Hosts must associate geometry with their own document
+revision and replace it when those inputs change.
+
+### Coordinates and presentation
+
+Leaf offsets are UTF-8 bytes. Each inline image or custom inline node occupies
+one U+FFFC (three bytes), independent of its fallback text. Window coordinates
+are logical pixels, before display scaling. Hard breaks and empty lines retain
+caret positions, including the final empty line. Native input APIs that use
+UTF-16 require conversion in the host.
+
+Decorations are ordered half-open byte ranges. Text decorations paint behind
+glyphs. Any nonempty overlap with an atom decorates its entire box, over the
+content, so an opaque image can show its selected state. The host supplies the
+color and should use translucency for an atom overlay. Empty ranges paint
+nothing. Decorations do not change layout.
+
+`RenderContext::new` accepts local presentation without application globals;
+`from_app` uses TextView defaults. A host can override syntax highlighting,
+image resolution and link activation locally. Reference links need definitions
+from the entire document, including blocks outside the viewport. Register them
+through `with_link_reference`.
+
+### Evolution boundary
+
+Keep the sink, layout caches, flow fragments and shaping implementations private.
+The public AST is a projection into the renderer, not a canonical editor model
+or persistence format. Do not add editor-specific document operations, history,
+collaboration or serializer policy to Base merely to serve one consumer.
+
+This boundary currently supports horizontal text rendered through TextView's
+block flow. It is not a complete contract for every future editor. In particular,
+a future extension for visual navigation must represent caret affinity at soft
+wraps and bidirectional runs; a byte index alone is insufficient. Per-position
+caret metrics and range rectangles should be designed together with that
+contract, not inferred from one leaf-wide line height. Pagination, arbitrary
+block-level widgets, native accessibility text ranges and vertical writing need
+their own demonstrated requirements and contract tests before being promised.
+
+The newly public `BlockNode` enum is non-exhaustive so variants may be added.
+Its existing named variant fields still constrain changes to those variants;
+non-exhaustiveness is not permission to rename fields or add required fields.
+Prefer new private-field option types and additive constructors when extending
+the seam. Preserve existing public types and import paths; a pre-1.0 disclaimer
+does not replace this project's compatibility requirement.
+
 ## Overlay and Positioning Architecture
 
 Overlay modules separate lifecycle from placement and presentation.

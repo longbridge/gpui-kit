@@ -1803,6 +1803,19 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     with_item_to_measure_index<Self extends Element>(this: Self, index: number): Self;
     /**
+     * Whether a `list` follows its tail — GPUI's `FollowMode`. With `"tail"`
+     * the list opens at its end and stays there as items are added and as the
+     * last one grows, the way a transcript being written is read. Scrolling
+     * up stops it; scrolling back to the end, with the wheel or a
+     * `Scrollbar`, starts it again. `"normal"`, the default, never scrolls on
+     * its own.
+     *
+     * Switching to `"tail"` scrolls to the end once, on the frame it is
+     * switched on; keeping it on does not pull a reader who scrolled up back
+     * down. Only `list` has a follow mode; on other elements it is ignored.
+     */
+    with_follow_mode<Self extends Element>(this: Self, mode: "normal" | "tail"): Self;
+    /**
      * The handle a `Select` or `Combobox` moves the keyboard to when it opens,
      * and away from when Escape closes it.
      *
@@ -2196,9 +2209,10 @@ const ELEMENTS: &str = r#"
    * it, the same distance into it. So a page of older items put above, or a
    * new one added below, leaves the view where it was — also at the very top,
    * where the new items stay above the fold. If that item is gone, the view
-   * stays at the same index. A list scrolled past its last item stays at the
-   * end. To find the key, `get_key` is called near the item's old index from
-   * inside layout, so it must stay a plain lookup.
+   * stays at the same index. A list scrolled past its last item, or following
+   * its tail (`with_follow_mode("tail")`), stays at the end. To find the key,
+   * `get_key` is called near the item's old index from inside layout, so it
+   * must stay a plain lookup.
    *
    * To load more items as the reader nears either end, use
    * `on_visible_range_change`: it reports which items are shown once the
@@ -4321,6 +4335,7 @@ mod tests {
         "track_focus",
         "track_scroll",
         "with_item_to_measure_index",
+        "with_follow_mode",
         "content_focus_handle",
         "tab_index",
         "tab_stop",

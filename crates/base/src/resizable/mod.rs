@@ -454,8 +454,8 @@ mod tests {
     };
 
     use gpui::{
-        App, AppContext as _, Context, InteractiveElement as _, IntoElement, Modifiers,
-        MouseButton, ParentElement as _, Pixels, Render, Styled as _, TestAppContext,
+        App, AppContext as _, Context, InputEvent as _, InteractiveElement as _, IntoElement,
+        Modifiers, MouseButton, ParentElement as _, Pixels, Render, Styled as _, TestAppContext,
         VisualTestContext, Window, div, point, prelude::FluentBuilder as _, px, size,
     };
 
@@ -882,6 +882,115 @@ mod tests {
             assert_eq!(state.sizes(), &vec![px(220.), px(180.)]);
         });
         assert_eq!(resizes.get(), 1);
+    }
+
+    #[gpui::test]
+    fn dragging_before_the_next_paint_resizes_and_emits_once(cx: &mut TestAppContext) {
+        let (cx, state, resizes) = harness(cx);
+        let boundary = cx.debug_bounds("second-panel").unwrap().left();
+
+        // Dispatch the whole gesture in one update. The simulation helpers
+        // allow a paint between events and hide stale listener state.
+        cx.update(|window, cx| {
+            window.dispatch_event(
+                gpui::MouseDownEvent {
+                    position: point(boundary - px(2.), px(50.)),
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            for x in [boundary + px(10.), px(220.)] {
+                window.dispatch_event(
+                    gpui::MouseMoveEvent {
+                        position: point(x, px(50.)),
+                        pressed_button: Some(MouseButton::Left),
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            }
+            assert_eq!(state.read(cx).resizing_panel_ix, Some(0));
+            assert_eq!(state.read(cx).sizes(), &vec![px(220.), px(180.)]);
+            assert_eq!(resizes.get(), 0);
+
+            // Repeated release and subsequent movement must not reuse the
+            // active index from the gesture that just finished.
+            for _ in 0..2 {
+                window.dispatch_event(
+                    gpui::MouseUpEvent {
+                        position: point(px(220.), px(50.)),
+                        button: MouseButton::Left,
+                        click_count: 1,
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            }
+            window.dispatch_event(
+                gpui::MouseMoveEvent {
+                    position: point(px(260.), px(50.)),
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            assert_eq!(state.read(cx).resizing_panel_ix, None);
+            assert_eq!(state.read(cx).sizes(), &vec![px(220.), px(180.)]);
+            assert_eq!(resizes.get(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn cancelled_drag_does_not_reuse_the_painted_index(cx: &mut TestAppContext) {
+        let (cx, state, resizes) = harness(cx);
+        let boundary = cx.debug_bounds("second-panel").unwrap().left();
+        cx.simulate_mouse_down(
+            point(boundary - px(2.), px(50.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(boundary + px(10.), px(50.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            assert_eq!(state.read(cx).resizing_panel_ix, Some(0));
+            window.draw(cx).clear(cx);
+            state.update(cx, |state, cx| state.resize_panel(0, px(210.), window, cx));
+            cx.stop_active_drag(window);
+            assert_eq!(state.read(cx).resizing_panel_ix, None);
+
+            // Cancel after painting the active index, then deliver queued
+            // events without replacing that frame's listeners.
+            window.dispatch_event(
+                gpui::MouseMoveEvent {
+                    position: point(px(260.), px(50.)),
+                    pressed_button: Some(MouseButton::Left),
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::MouseUpEvent {
+                    position: point(px(260.), px(50.)),
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }
+                .to_platform_input(),
+                cx,
+            );
+            assert_eq!(state.read(cx).sizes(), &vec![px(210.), px(190.)]);
+            assert_eq!(state.read(cx).resizing_panel_ix, None);
+            assert_eq!(resizes.get(), 0);
+        });
     }
 
     /// Reports every state its divider is rendered in, so a drag can be watched

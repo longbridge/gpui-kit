@@ -1,25 +1,113 @@
+use std::{cell::Cell, rc::Rc};
+
 use gpui_kit::{
     App, AppContext as _, Context, Entity, HighlightStyle, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
+    Render, SharedString, Styled, Task, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use gpui_kit::component::{
-    ActiveTheme, button::Button, h_flex, input::*, menu::PopupMenuItem, tab::TabBar, v_flex,
+    ActiveTheme, button::Button, h_flex, input::*, label::Label, menu::PopupMenuItem, tab::TabBar,
+    v_flex,
 };
 
 use crate::story_toolbar_group;
 
 const EXAMPLE_CODE: &str = include_str!("./editor_preview.rs");
 
+/// Words chosen so `fl` and `log` light up different spans under each highlighter.
+const COMPLETION_WORDS: [&str; 6] = [
+    "flag",
+    "profile",
+    "file_loader",
+    "fallback",
+    "dialog_log",
+    "catalog",
+];
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StoryCompletionHighlight {
+    Prefix,
+    Contains,
+    Characters,
+}
+
+impl StoryCompletionHighlight {
+    fn highlighter(self) -> Rc<CompletionHighlighter> {
+        match self {
+            Self::Prefix => Rc::new(highlight_prefix),
+            Self::Contains => Rc::new(highlight_contains),
+            Self::Characters => Rc::new(highlight_characters),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Prefix => "Prefix",
+            Self::Contains => "Contains",
+            Self::Characters => "Characters",
+        }
+    }
+
+    /// Whether `label` should stay in the menu for this highlighter.
+    ///
+    /// An empty query keeps every word. Prefix checks the start of the label;
+    /// the other two keep a word only when their highlighter finds a match.
+    fn matches(self, query: &str, label: &str) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+
+        match self {
+            Self::Prefix => starts_with_ignore_case(label, query),
+            Self::Contains => !highlight_contains(query, &completion_item(label)).is_empty(),
+            Self::Characters => !highlight_characters(query, &completion_item(label)).is_empty(),
+        }
+    }
+}
+
+fn starts_with_ignore_case(label: &str, query: &str) -> bool {
+    let mut label = label.chars();
+    query.chars().all(|query_char| {
+        label.next().is_some_and(|label_char| {
+            query_char == label_char
+                || query_char.eq_ignore_ascii_case(&label_char)
+                || query_char.to_lowercase().eq(label_char.to_lowercase())
+        })
+    })
+}
+
+fn completion_item(label: &str) -> lsp_types::CompletionItem {
+    lsp_types::CompletionItem {
+        label: label.to_string(),
+        ..Default::default()
+    }
+}
+
+fn completion_items(mode: StoryCompletionHighlight, query: &str) -> Vec<lsp_types::CompletionItem> {
+    COMPLETION_WORDS
+        .into_iter()
+        .filter(|label| mode.matches(query, label))
+        .map(completion_item)
+        .collect()
+}
+
+const COMPLETION_HIGHLIGHTS: [StoryCompletionHighlight; 3] = [
+    StoryCompletionHighlight::Prefix,
+    StoryCompletionHighlight::Contains,
+    StoryCompletionHighlight::Characters,
+];
+
 pub struct EditorStory {
     editor_state: Entity<EditorState>,
     decorations_state: Entity<EditorState>,
+    completions_state: Entity<EditorState>,
     _decorations: TextDecorationCollection,
     _range_decorations: RangeDecorationCollection,
     active_tab: usize,
     readonly: bool,
     font_family: Option<SharedString>,
     font_size: Pixels,
+    completion_highlight: Rc<Cell<StoryCompletionHighlight>>,
 }
 impl super::Story for EditorStory {
     fn title() -> &'static str {
@@ -149,15 +237,27 @@ impl EditorStory {
             )
         });
 
+        let completion_highlight = Rc::new(Cell::new(StoryCompletionHighlight::Prefix));
+        let provider_highlight = completion_highlight.clone();
+        let completions_state = cx.new(|cx| {
+            let mut state = EditorState::new(window, cx).language("text");
+            state.lsp_mut().completion_provider = Some(Rc::new(StoryCompletions {
+                highlight: provider_highlight,
+            }));
+            state
+        });
+
         Self {
             editor_state,
             decorations_state,
+            completions_state,
             _decorations: decorations,
             _range_decorations: range_decorations,
             active_tab: 0,
             readonly: false,
             font_family: None,
             font_size: cx.theme().mono_font_size,
+            completion_highlight,
         }
     }
 }
@@ -174,6 +274,7 @@ impl EditorStory {
         let readonly = self.readonly;
         let family = self.font_family.clone();
         let size = self.font_size;
+        let highlight = self.completion_highlight.get();
 
         story_toolbar_group().dropdown_child(
             Button::new("editor-options").label("Options"),
@@ -198,9 +299,9 @@ impl EditorStory {
                         ))
                     });
 
-                Self::FONT_SIZES
-                    .iter()
-                    .fold(menu.separator().label("Font size"), |menu, &item| {
+                let menu = Self::FONT_SIZES.iter().fold(
+                    menu.separator().label("Font size"),
+                    |menu, &item| {
                         menu.item(
                             PopupMenuItem::new(item.to_string())
                                 .checked(size == item)
@@ -209,9 +310,61 @@ impl EditorStory {
                                     cx.notify();
                                 })),
                         )
-                    })
+                    },
+                );
+
+                COMPLETION_HIGHLIGHTS.into_iter().fold(
+                    menu.separator().label("Completion highlight"),
+                    |menu, mode| {
+                        menu.item(
+                            PopupMenuItem::new(mode.label())
+                                .checked(highlight == mode)
+                                .on_click(window.listener_for(&story, move |this, _, _, cx| {
+                                    this.set_completion_highlight(mode, cx);
+                                })),
+                        )
+                    },
+                )
             },
         )
+    }
+
+    fn set_completion_highlight(&mut self, mode: StoryCompletionHighlight, cx: &mut Context<Self>) {
+        self.completion_highlight.set(mode);
+        self.completions_state.update(cx, |state, cx| {
+            state
+                .lsp_mut()
+                .set_completion_highlighter(mode.highlighter());
+            let (open, query, start) = {
+                let menu = state.completion_menu_state();
+                (
+                    menu.open,
+                    menu.query.clone(),
+                    menu.trigger_start_offset.unwrap_or(0),
+                )
+            };
+            if open {
+                state.present_completion_items(
+                    start,
+                    query.clone(),
+                    completion_items(mode, &query),
+                    cx,
+                );
+            } else {
+                cx.notify();
+            }
+        });
+        cx.notify();
+    }
+
+    fn styled_editor(&self, state: &Entity<EditorState>) -> Editor {
+        Editor::new(state)
+            .when_some(self.font_family.clone(), |this, family| {
+                this.font_family(family)
+            })
+            .text_size(self.font_size)
+            .readonly(self.readonly)
+            .size_full()
     }
 }
 
@@ -225,7 +378,7 @@ impl Render for EditorStory {
                     .justify_between()
                     .child(
                         TabBar::new("editor-story-tabs")
-                            .w_64()
+                            .w(px(420.))
                             .underline()
                             .selected_index(self.active_tab)
                             .on_click(cx.listener(|this, selected: &usize, _, cx| {
@@ -233,29 +386,56 @@ impl Render for EditorStory {
                                 cx.notify();
                             }))
                             .child("Code")
-                            .child("Decorations"),
+                            .child("Decorations")
+                            .child("Completions"),
                     )
                     .child(self.render_toolbar(cx)),
             )
-            .child(div().min_h_0().flex_1().child(if self.active_tab == 0 {
-                Editor::new(&self.editor_state)
-                    .when_some(self.font_family.clone(), |this, family| {
-                        this.font_family(family)
-                    })
-                    .text_size(self.font_size)
-                    .readonly(self.readonly)
-                    .size_full()
-                    .into_any_element()
-            } else {
-                Editor::new(&self.decorations_state)
-                    .when_some(self.font_family.clone(), |this, family| {
-                        this.font_family(family)
-                    })
-                    .text_size(self.font_size)
-                    .readonly(self.readonly)
-                    .size_full()
-                    .into_any_element()
-            }))
+            .child(
+                div().min_h_0().flex_1().child(match self.active_tab {
+                    0 => self.styled_editor(&self.editor_state).into_any_element(),
+                    1 => self
+                        .styled_editor(&self.decorations_state)
+                        .into_any_element(),
+                    _ => v_flex()
+                        .size_full()
+                        .gap_2()
+                        .child(
+                            Label::new("Type fl or log to compare highlights.")
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground),
+                        )
+                        .child(
+                            self.styled_editor(&self.completions_state)
+                                .flex_1()
+                                .min_h_0(),
+                        )
+                        .into_any_element(),
+                }),
+            )
+    }
+}
+
+struct StoryCompletions {
+    highlight: Rc<Cell<StoryCompletionHighlight>>,
+}
+
+impl CompletionProvider for StoryCompletions {
+    fn completions(
+        &self,
+        _text: &Rope,
+        _offset: usize,
+        trigger: lsp_types::CompletionContext,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Task<anyhow::Result<lsp_types::CompletionResponse>> {
+        let query = trigger.trigger_character.unwrap_or_default();
+        let items = completion_items(self.highlight.get(), &query);
+        Task::ready(Ok(lsp_types::CompletionResponse::Array(items)))
+    }
+
+    fn is_completion_trigger(&self, _offset: usize, _new_text: &str, _cx: &mut App) -> bool {
+        true
     }
 }
 

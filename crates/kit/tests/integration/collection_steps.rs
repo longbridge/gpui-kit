@@ -96,8 +96,8 @@ fn list_activation_uses_modifiers_at_release_and_not_at_pointer_down(cx: &mut Te
         let position = window.find_by_label("Release notes").bounds().center();
 
         for (held_at_down, held_at_up, secondary) in [
-            (Modifiers::default(), Modifiers::secondary_key(), true),
-            (Modifiers::secondary_key(), Modifiers::default(), false),
+            (Modifiers::default(), Modifiers::secondary_key(cx), true),
+            (Modifiers::secondary_key(cx), Modifiers::default(), false),
         ] {
             let count = list.read(cx).delegate().confirmed.len();
             window.change_modifiers(held_at_down, cx);
@@ -128,7 +128,7 @@ fn list_drag_out_release_does_not_activate_or_replace_selection(cx: &mut TestApp
         window.click("Roadmap", cx);
         let position = window.find_by_label("Meeting notes").bounds().center();
         let outside = window.find("outside-list").bounds().center();
-        window.change_modifiers(Modifiers::secondary_key(), cx);
+        window.change_modifiers(Modifiers::secondary_key(cx), cx);
         window.pointer_down(position, MouseButton::Left, cx);
         window.pointer_move(outside, Some(MouseButton::Left), cx);
         window.pointer_up(outside, MouseButton::Left, cx);
@@ -166,7 +166,7 @@ fn list_repeated_navigation_confirms_current_item_and_cancel_clears_selection(
         assert!(list.read(cx).delegate().confirmed.is_empty());
         assert!(window.find_by_label("Release notes").visible());
 
-        window.change_modifiers(Modifiers::secondary_key(), cx);
+        window.change_modifiers(Modifiers::secondary_key(cx), cx);
         window.key_down("enter", false, cx);
         assert_eq!(
             list.read(cx).delegate().confirmed,

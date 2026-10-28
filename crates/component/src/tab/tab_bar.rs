@@ -25,6 +25,9 @@ use crate::{
 struct TabIndicatorBounds {
     container: Bounds<Pixels>,
     tabs: Vec<Bounds<Pixels>>,
+    /// Where the last render placed the indicator: its left edge from the
+    /// first tab's, and its width (zero before the tabs were measured).
+    placed: (Pixels, Pixels),
 }
 
 impl TabIndicatorBounds {
@@ -32,6 +35,7 @@ impl TabIndicatorBounds {
         Self {
             container: Bounds::default(),
             tabs: vec![Bounds::default(); num_tabs],
+            placed: (px(0.), px(0.)),
         }
     }
 
@@ -228,6 +232,9 @@ impl TabBar {
         self.update_anim_params(selected_ix, bounds_rc, &prev_selected, &anim_params, cx);
 
         let (to_left, to_width, epoch) = *anim_params.read(cx);
+        if let Some(rc) = bounds_rc {
+            rc.borrow_mut().placed = (to_left, to_width);
+        }
         if to_width <= px(0.) {
             return None;
         }
@@ -478,9 +485,14 @@ impl RenderOnce for TabBar {
         let indicator_ready = indicator_element.is_some();
 
         let has_suffix_or_menu = self.suffix.is_some() || self.menu;
-        let mut item_metas: Vec<(Option<SharedString>, Option<Icon>, bool)> = Vec::new();
+        let view = window.current_view();
+        let mut item_metas: Vec<(
+            Option<SharedString>,
+            Option<Icon>,
+            bool,
+            Option<TabClickHandler>,
+        )> = Vec::new();
         let selected_index = self.selected_index;
-        let on_click = self.on_click.clone();
         let tabs = self.base;
         let mut rendered_tabs = Vec::with_capacity(self.children.len());
         let max_width = self.max_width;
@@ -493,7 +505,12 @@ impl RenderOnce for TabBar {
         let has_shape = |ix| selected_index == Some(ix) || hovered_ix == Some(ix);
 
         for (ix, child) in self.children.into_iter().enumerate() {
-            item_metas.push((child.label.clone(), child.icon.clone(), child.disabled));
+            item_metas.push((
+                child.label.clone(),
+                child.icon.clone(),
+                child.disabled,
+                None,
+            ));
             let tab_bar_prefix = child.tab_bar_prefix.unwrap_or(true);
             let mut tab = child
                 .ix(ix)
@@ -533,6 +550,11 @@ impl RenderOnce for TabBar {
                     });
                     tab
                 });
+            // The overflow menu item runs the same handler as the visible tab:
+            // the bar's callback when set, otherwise the tab's own.
+            if let Some(meta) = item_metas.last_mut() {
+                meta.3 = tab.on_click.clone();
+            }
             // The wrapper below is the flex item the bar lays out, so a tab's
             // own `flex_grow` / `flex_basis` (e.g. `flex_1()`) must size it.
             let flex_grow = tab.style().flex_grow;
@@ -540,6 +562,7 @@ impl RenderOnce for TabBar {
 
             rendered_tabs.push(if let Some(ref rc) = bounds_rc {
                 let rc = rc.clone();
+                let selected = selected_index == Some(ix);
                 // `tabs-inner` is tracked by `ScrollHandle`, which indexes its
                 // direct children. Keep the indicator inside the first tab so
                 // only logical tabs occupy those indices.
@@ -550,9 +573,26 @@ impl RenderOnce for TabBar {
                         this.style().flex_basis = flex_basis;
                         this
                     })
-                    .on_prepaint(move |bounds, _, _| {
-                        if let Some(slot) = rc.borrow_mut().tabs.get_mut(ix) {
+                    .on_prepaint(move |bounds, window, _| {
+                        let mut measured = rc.borrow_mut();
+                        if let Some(slot) = measured.tabs.get_mut(ix) {
                             *slot = bounds;
+                        }
+                        // Render places the indicator from the bounds an
+                        // earlier frame measured, and a view that nothing
+                        // changed may not render again. When the selected tab
+                        // is measured elsewhere than its indicator (on the
+                        // bar's first frame above all), render the view again
+                        // on the next frame. Not while the bar has no width:
+                        // render leaves the indicator where it was then.
+                        if selected && measured.container.size.width > px(0.) {
+                            let first = measured
+                                .tabs
+                                .first()
+                                .map_or(bounds.origin.x, |tab| tab.origin.x);
+                            if (bounds.origin.x - first, bounds.size.width) != measured.placed {
+                                window.on_next_frame(move |_, cx| cx.notify(view));
+                            }
                         }
                     })
                     .relative()
@@ -664,7 +704,9 @@ impl RenderOnce for TabBar {
                         .dropdown_caret(true)
                         .dropdown_menu(move |mut this, _, _| {
                             this = this.scrollable(true);
-                            for (ix, (label, icon, disabled)) in item_metas.iter().enumerate() {
+                            for (ix, (label, icon, disabled, on_click)) in
+                                item_metas.iter().enumerate()
+                            {
                                 let base = if let Some(label) = label.clone() {
                                     PopupMenuItem::new(label)
                                 } else if let Some(icon) = icon.clone() {
@@ -676,10 +718,8 @@ impl RenderOnce for TabBar {
                                     base.checked(selected_index == Some(ix))
                                         .disabled(*disabled)
                                         .when_some(on_click.clone(), |this, on_click| {
-                                            let reveal = reveal.clone();
-                                            this.on_click(move |_, window, cx| {
-                                                reveal.reveal(ix, cx);
-                                                on_click(&ix, window, cx)
+                                            this.on_click(move |event, window, cx| {
+                                                on_click(event, window, cx)
                                             })
                                         }),
                                 );
@@ -818,9 +858,12 @@ impl TabReveal {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
-    use gpui::{Context, Modifiers, Render, TestAppContext};
+    use gpui::{Context, Modifiers, MouseButton, MouseUpEvent, Render, TestAppContext};
 
     use super::*;
     use crate::scroll::ScrollableElement as _;
@@ -902,6 +945,128 @@ mod tests {
         cx.simulate_click(position, Modifiers::default());
         assert_eq!(child_clicks.get(), 0);
         assert_eq!(group_clicks.get(), 0);
+    }
+
+    struct MenuHarness {
+        group_handler: bool,
+        clicks: Rc<RefCell<Vec<String>>>,
+        events: Rc<RefCell<Vec<ClickEvent>>>,
+    }
+
+    impl Render for MenuHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let events = self.events.clone();
+            let tab = |label: &'static str, clicks: Rc<RefCell<Vec<String>>>| {
+                let events = events.clone();
+                Tab::new()
+                    .debug_selector(move || format!("{label}-tab"))
+                    .label(label)
+                    .on_click(move |event, _, _| {
+                        clicks.borrow_mut().push(format!("tab {label}"));
+                        events.borrow_mut().push(event.clone());
+                    })
+            };
+            let clicks = self.clicks.clone();
+            div().size_full().child(
+                TabBar::new("menu-tabs")
+                    .w(px(240.))
+                    .menu(true)
+                    .child(tab("First", self.clicks.clone()))
+                    .child(tab("Second", self.clicks.clone()))
+                    .when(self.group_handler, |tabs| {
+                        tabs.on_click(move |ix, _, _| clicks.borrow_mut().push(format!("bar {ix}")))
+                    }),
+            )
+        }
+    }
+
+    /// Opens the overflow menu and activates its first item.
+    fn choose_first_menu_item(
+        group_handler: bool,
+        activate: impl FnOnce(&mut gpui::VisualTestContext),
+        cx: &mut TestAppContext,
+    ) -> (Vec<String>, Vec<ClickEvent>) {
+        cx.update(crate::init);
+        let clicks = Rc::new(RefCell::new(Vec::new()));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let clicks = clicks.clone();
+            let events = events.clone();
+            move |_, _| MenuHarness {
+                group_handler,
+                clicks,
+                events,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let tab = cx.debug_bounds("First-tab").unwrap();
+        // The menu button is the last thing in the 240px bar.
+        let more = point(px(232.), tab.center().y);
+        cx.simulate_mouse_down(more, MouseButton::Left, Modifiers::default());
+        cx.simulate_event(MouseUpEvent {
+            position: more,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        activate(cx);
+        cx.run_until_parked();
+        (clicks.borrow().clone(), events.borrow().clone())
+    }
+
+    #[gpui::test]
+    fn overflow_menu_runs_the_tab_callback_without_a_bar_callback(cx: &mut TestAppContext) {
+        assert_eq!(
+            choose_first_menu_item(false, |cx| cx.simulate_keystrokes("down enter"), cx).0,
+            vec!["tab First".to_string()]
+        );
+    }
+
+    #[gpui::test]
+    fn overflow_menu_prefers_the_bar_callback(cx: &mut TestAppContext) {
+        assert_eq!(
+            choose_first_menu_item(true, |cx| cx.simulate_keystrokes("down enter"), cx).0,
+            vec!["bar 0".to_string()]
+        );
+    }
+
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn overflow_menu_preserves_pointer_events_and_keyboard_activation(cx: &mut TestAppContext) {
+        let position = Cell::new(point(px(0.), px(0.)));
+        let (clicks, events) = choose_first_menu_item(
+            false,
+            |cx| {
+                let item = cx.update(|window, _| {
+                    gpui_base::test_support::find_all(window, &[], &ElementId::from(0usize))
+                        .into_iter()
+                        .find(|item| item.role() == Some(gpui::Role::MenuItem))
+                        .expect("first overflow menu item")
+                });
+                position.set(item.bounds().center());
+                cx.simulate_click(
+                    position.get(),
+                    Modifiers {
+                        shift: true,
+                        ..Modifiers::default()
+                    },
+                );
+            },
+            cx,
+        );
+        assert_eq!(clicks, vec!["tab First"]);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ClickEvent::Mouse(_)));
+        assert!(events[0].modifiers().shift);
+        assert_eq!(events[0].mouse_position(), Some(position.get()));
+
+        let (clicks, events) =
+            choose_first_menu_item(false, |cx| cx.simulate_keystrokes("down enter"), cx);
+        assert_eq!(clicks, vec!["tab First"]);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ClickEvent::Keyboard(_)));
     }
 
     struct ContentHarness;
@@ -1501,7 +1666,7 @@ mod tests {
         delta: gpui::ScrollDelta,
         touch_phase: gpui::TouchPhase,
     ) {
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position,
             delta,
             touch_phase,
@@ -1891,5 +2056,83 @@ mod tests {
         let first_after = cx.debug_bounds("wheel-tab-0").unwrap();
         assert!(first_after.left() < first_before.left());
         assert_eq!(first_after.top(), first_before.top());
+    }
+
+    /// A bar of two underlined tabs, the first selected, in a box `width`
+    /// wide, which the view shows once `shown`.
+    struct LateBar {
+        shown: bool,
+        width: Pixels,
+    }
+
+    impl Render for LateBar {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(self.width)
+                .overflow_hidden()
+                .when(self.shown, |this| {
+                    this.child(
+                        TabBar::new("late-tabs")
+                            .underline()
+                            .selected_index(0)
+                            .child(Tab::new().label("First"))
+                            .child(Tab::new().label("Second")),
+                    )
+                })
+        }
+    }
+
+    /// Shows a bar in a window drawn before, as a view shows one once its
+    /// data came, and draws the bar's first frame.
+    fn show_late_bar(cx: &mut TestAppContext, width: Pixels) -> &mut gpui::VisualTestContext {
+        cx.update(crate::theme::init);
+        let (view, cx) = cx.add_window_view(move |_, _| LateBar {
+            shown: false,
+            width,
+        });
+        draw(cx);
+        view.update(cx, |bar, cx| {
+            bar.shown = true;
+            cx.notify();
+        });
+        draw(cx);
+        cx
+    }
+
+    /// The underline indicators the frame drawn last painted.
+    fn painted_indicators(cx: &mut gpui::VisualTestContext) -> Vec<Bounds<Pixels>> {
+        cx.update(|window, cx| {
+            let primary: Background = cx.theme().tokens.primary.into();
+            let scale_factor = window.scale_factor();
+            window
+                .painted_quads()
+                .into_iter()
+                .filter(|quad| quad.background == primary)
+                .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
+                .filter(|bounds| bounds.size.height == px(2.))
+                .collect()
+        })
+    }
+
+    /// The frame after a bar's first, which measured its tabs, draws the
+    /// indicator under the selected tab, though nothing the view holding
+    /// the bar renders from changed. Then the bar asks for no more frames.
+    #[gpui::test]
+    fn a_bar_shown_later_draws_its_indicator_on_the_next_frame(cx: &mut TestAppContext) {
+        let cx = show_late_bar(cx, px(300.));
+        next_frame(cx);
+        let indicators = painted_indicators(cx);
+        assert_eq!(indicators.len(), 1, "{indicators:?}");
+        assert!(indicators[0].size.width > px(0.), "{indicators:?}");
+        assert!(indicators[0].right() <= px(150.), "{indicators:?}");
+        assert_eq!(cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
+    }
+
+    /// A bar squeezed to no width asks for no frames to place its indicator.
+    #[gpui::test]
+    fn a_bar_with_no_width_asks_for_no_frames(cx: &mut TestAppContext) {
+        let cx = show_late_bar(cx, px(0.));
+        next_frame(cx);
+        assert_eq!(cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
     }
 }

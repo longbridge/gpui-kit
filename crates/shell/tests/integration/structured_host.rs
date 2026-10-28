@@ -2,6 +2,8 @@
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 
+use gpui_shell::gpui as shell_gpui;
+
 use std::{
     fs,
     ops::Deref,
@@ -40,13 +42,13 @@ impl Drop for TempApp {
 
 struct Empty;
 
-impl gpui_shell::gpui::Render for Empty {
+impl shell_gpui::Render for Empty {
     fn render(
         &mut self,
-        _: &mut gpui_shell::gpui::Window,
-        _: &mut gpui_shell::gpui::Context<Self>,
-    ) -> impl gpui_shell::gpui::IntoElement {
-        gpui_shell::gpui::div()
+        _: &mut shell_gpui::Window,
+        _: &mut shell_gpui::Context<Self>,
+    ) -> impl shell_gpui::IntoElement {
+        shell_gpui::div()
     }
 }
 
@@ -75,7 +77,7 @@ fn position(tree: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("missing `{needle}` in snapshot:\n{tree}"))
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn structured_components_materialize_nested_children_in_script_order(cx: &mut TestAppContext) {
     let source = r#"
 import { View, div } from "gpui-kit";
@@ -107,8 +109,8 @@ export default class StructuredApp extends View {
     let (mut context, view) = mount(cx, source);
 
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(800.), gpui_shell::gpui::px(600.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(800.), shell_gpui::px(600.)),
         {
             let view = view.clone();
             move |_, _| gpui::IntoElement::into_any_element(view)

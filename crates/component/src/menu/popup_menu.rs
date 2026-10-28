@@ -851,14 +851,24 @@ impl PopupMenu {
             .filter(|(_, item)| item.is_clickable())
     }
 
-    fn on_click(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_click(
+        &mut self,
+        ix: usize,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         cx.stop_propagation();
         window.prevent_default();
         self.selected_index = Some(ix);
-        self.confirm(&Confirm { secondary: false }, window, cx);
+        self.activate(event, window, cx);
     }
 
     fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        self.activate(&ClickEvent::default(), window, cx);
+    }
+
+    fn activate(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         match self.selected_index {
             Some(index) => {
                 let item = self.menu_items.get(index);
@@ -867,7 +877,7 @@ impl PopupMenu {
                         handler, action, ..
                     }) => {
                         if let Some(handler) = handler {
-                            handler(&ClickEvent::default(), window, cx);
+                            handler(event, window, cx);
                         } else if let Some(action) = action.as_ref() {
                             self.dispatch_confirm_action(action, window, cx);
                         }
@@ -878,7 +888,7 @@ impl PopupMenu {
                         handler, action, ..
                     }) => {
                         if let Some(handler) = handler {
-                            handler(&ClickEvent::default(), window, cx);
+                            handler(event, window, cx);
                         } else if let Some(action) = action.as_ref() {
                             self.dispatch_confirm_action(action, window, cx);
                         }
@@ -1290,9 +1300,9 @@ impl PopupMenu {
                 ..
             } => this
                 .when(!disabled, |this| {
-                    this.on_click(
-                        cx.listener(move |this, _, window, cx| this.on_click(ix, window, cx)),
-                    )
+                    this.on_click(cx.listener(move |this, event, window, cx| {
+                        this.on_click(ix, event, window, cx)
+                    }))
                 })
                 .disabled(*disabled)
                 .child(
@@ -1324,9 +1334,9 @@ impl PopupMenu {
                 let key = self.render_key_binding(action, window, cx);
 
                 this.when(!disabled, |this| {
-                    this.on_click(
-                        cx.listener(move |this, _, window, cx| this.on_click(ix, window, cx)),
-                    )
+                    this.on_click(cx.listener(move |this, event, window, cx| {
+                        this.on_click(ix, event, window, cx)
+                    }))
                 })
                 .disabled(*disabled)
                 .h(item_height)
@@ -1532,6 +1542,52 @@ impl Render for PopupMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn custom_menu_item_preserves_mouse_event(cx: &mut gpui::TestAppContext) {
+        use gpui::{Modifiers, MouseButton, MouseUpEvent};
+        use std::cell::RefCell;
+
+        cx.update(crate::init);
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let events = events.clone();
+            move |_, cx| {
+                PopupMenu::new(cx).item(
+                    PopupMenuItem::element(|_, _| {
+                        div()
+                            .debug_selector(|| "custom-menu-content".into())
+                            .w(px(100.))
+                            .h(px(20.))
+                            .child("Custom")
+                    })
+                    .on_click(move |event, _, _| events.borrow_mut().push(event.clone())),
+                )
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let position = cx.debug_bounds("custom-menu-content").unwrap().center();
+        let modifiers = Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        };
+        cx.simulate_mouse_down(position, MouseButton::Left, modifiers);
+        cx.simulate_event(MouseUpEvent {
+            position,
+            button: MouseButton::Left,
+            modifiers,
+            click_count: 2,
+        });
+        cx.run_until_parked();
+        let events = events.borrow();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].mouse_position(), Some(position));
+        assert_eq!(events[0].modifiers(), modifiers);
+        let ClickEvent::Mouse(event) = &events[0] else {
+            panic!("expected the original mouse click");
+        };
+        assert_eq!(event.up.click_count, 2);
+    }
 
     #[gpui::test]
     fn popup_menu_item_a11y_label_uses_visible_label(cx: &mut gpui::TestAppContext) {

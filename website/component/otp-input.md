@@ -10,7 +10,12 @@ A specialized input component for one-time passwords (OTP) that displays multipl
 ## Import
 
 ```rust
-use gpui_kit::component::input::{OtpInput, OtpState};
+use gpui_kit::component::{
+    Disableable as _, Sizable as _, button::Button,
+    input::{OtpEvent, OtpInput, OtpState}, v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 ```
 
 ## Usage
@@ -99,24 +104,46 @@ OtpInput::new(&auth_state).groups(2)
 
 ### Handle OTP Events
 
-```rust
-let otp_state = cx.new(|cx| OtpState::new(6, window, cx));
+Store the `Subscription` returned by `cx.subscribe` on the view. Dropping it cancels the subscription immediately.
 
-cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-    match event {
-        InputEvent::Change => {
-            let code = state.read(cx).value();
-            if code.len() == 6 {
-                println!("Complete OTP: {}", code);
-                // Automatically submit when complete
-                this.verify_otp(&code, cx);
-            }
+```rust
+struct OtpForm {
+    otp_state: Entity<OtpState>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl OtpForm {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let otp_state = cx.new(|cx| OtpState::new(6, window, cx));
+
+        let _subscriptions = vec![
+            cx.subscribe(&otp_state, |this, state, event: &OtpEvent, cx| {
+                match event {
+                    OtpEvent::Change => {
+                        // Fires after every edit.
+                    }
+                    OtpEvent::Complete => {
+                        // Fires when the final digit is entered.
+                        let code = state.read(cx).value().to_string();
+                        this.verify_otp(&code, cx);
+                    }
+                    OtpEvent::Focus => println!("OTP input focused"),
+                    OtpEvent::Blur => println!("OTP input lost focus"),
+                }
+            }),
+        ];
+
+        Self {
+            otp_state,
+            _subscriptions,
         }
-        InputEvent::Focus => println!("OTP input focused"),
-        InputEvent::Blur => println!("OTP input lost focus"),
-        _ => {}
     }
-});
+
+    fn verify_otp(&mut self, code: &str, cx: &mut Context<Self>) {
+        println!("Complete OTP: {}", code);
+        cx.notify();
+    }
+}
 ```
 
 ### Programmatic Control
@@ -137,8 +164,8 @@ otp_state.update(cx, |state, cx| {
     state.focus(window, cx);
 });
 
-// Get current value
-let current_value = otp_state.read(cx).value();
+// Get current value (clone it before using `cx` mutably again)
+let current_value = otp_state.read(cx).value().to_string();
 ```
 
 ## API Reference
@@ -163,17 +190,18 @@ let current_value = otp_state.read(cx).value();
 | `new(state)`     | Create OTP input with state entity       |
 | `groups(n)`      | Set number of visual groups (default: 2) |
 | `disabled(bool)` | Set disabled state                       |
-| `small()`        | Small size (6x6 px fields)               |
-| `large()`        | Large size (11x11 px fields)             |
+| `small()`        | Small size                               |
+| `large()`        | Large size                               |
 | `with_size(px)`  | Custom field size                        |
 
-### InputEvent
+### OtpEvent
 
-| Event    | Description                                       |
-| -------- | ------------------------------------------------- |
-| `Change` | Emitted when OTP is complete (all digits entered) |
-| `Focus`  | Input received focus                              |
-| `Blur`   | Input lost focus                                  |
+| Event      | Description                                       |
+| ---------- | ------------------------------------------------- |
+| `Change`   | Emitted after every successful edit               |
+| `Complete` | Emitted when the final digit is entered           |
+| `Focus`    | The OTP input received focus                      |
+| `Blur`     | The OTP input lost focus                          |
 
 ## Examples
 
@@ -184,23 +212,27 @@ struct SmsVerification {
     otp_state: Entity<OtpState>,
     phone_number: String,
     is_verifying: bool,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl SmsVerification {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let otp_state = cx.new(|cx| OtpState::new(6, window, cx));
 
-        cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                let code = state.read(cx).value();
-                this.verify_sms_code(&code, cx);
-            }
-        });
+        let _subscriptions = vec![
+            cx.subscribe(&otp_state, |this, state, event: &OtpEvent, cx| {
+                if let OtpEvent::Complete = event {
+                    let code = state.read(cx).value().to_string();
+                    this.verify_sms_code(&code, cx);
+                }
+            }),
+        ];
 
         Self {
             otp_state,
             phone_number: "+1234567890".to_string(),
             is_verifying: false,
+            _subscriptions,
         }
     }
 
@@ -213,7 +245,7 @@ impl SmsVerification {
 }
 
 impl Render for SmsVerification {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_4()
             .child(format!("Enter the 6-digit code sent to {}", self.phone_number))
@@ -235,10 +267,7 @@ struct TwoFactorAuth {
 
 impl TwoFactorAuth {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let otp_state = cx.new(|cx|
-            OtpState::new(6, window, cx)
-                .masked(true)
-        );
+        let otp_state = cx.new(|cx| OtpState::new(6, window, cx).masked(true));
 
         Self {
             otp_state,
@@ -246,16 +275,22 @@ impl TwoFactorAuth {
         }
     }
 
-    fn toggle_visibility(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_visibility(
+        &mut self,
+        _: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.is_masked = !self.is_masked;
+        let masked = self.is_masked;
         self.otp_state.update(cx, |state, cx| {
-            state.set_masked(self.is_masked, window, cx);
+            state.set_masked(masked, window, cx);
         });
     }
 }
 
 impl Render for TwoFactorAuth {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_4()
             .child("Enter your authenticator code")
@@ -263,7 +298,7 @@ impl Render for TwoFactorAuth {
             .child(
                 Button::new("toggle-visibility")
                     .label(if self.is_masked { "Show" } else { "Hide" })
-                    .on_click(cx.listener(Self::toggle_visibility))
+                    .on_click(cx.listener(Self::toggle_visibility)),
             )
     }
 }
@@ -276,30 +311,40 @@ struct PinEntry {
     pin_state: Entity<OtpState>,
     attempts: usize,
     max_attempts: usize,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl PinEntry {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let pin_state = cx.new(|cx|
-            OtpState::new(4, window, cx)
-                .masked(true)
-        );
+        let pin_state = cx.new(|cx| OtpState::new(4, window, cx).masked(true));
 
-        cx.subscribe(&pin_state, |this, state, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                let pin = state.read(cx).value();
-                this.verify_pin(&pin, cx);
-            }
-        });
+        let _subscriptions = vec![
+            cx.subscribe_in(
+                &pin_state,
+                window,
+                |this, state, event: &OtpEvent, window, cx| {
+                    if let OtpEvent::Complete = event {
+                        let pin = state.read(cx).value().to_string();
+                        this.verify_pin(&pin, window, cx);
+                    }
+                },
+            ),
+        ];
 
         Self {
             pin_state,
             attempts: 0,
             max_attempts: 3,
+            _subscriptions,
         }
     }
 
-    fn verify_pin(&mut self, pin: &str, cx: &mut Context<Self>) {
+    fn verify_pin(
+        &mut self,
+        pin: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.attempts += 1;
 
         // Simulate PIN verification
@@ -319,7 +364,7 @@ impl PinEntry {
 }
 
 impl Render for PinEntry {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_locked = self.attempts >= self.max_attempts;
 
         v_flex()
@@ -351,44 +396,49 @@ impl Render for PinEntry {
 - **Auto-Focus**: Automatically moves to next field when digit is entered
 - **Backspace**: Removes current digit and moves to previous field
 - **Length Limit**: Prevents input beyond specified length
-- **Auto-Complete**: Emits `Change` event when all fields are filled
+- **Auto-Complete**: Emits `Complete` when all fields are filled
+
+`OtpState` emits `OtpEvent`:
+
+- `Change` after every successful edit
+- `Complete` when the final digit is entered
+- `Focus` / `Blur` when the OTP input gains or loses focus
 
 ### Visual Feedback
 
-- **Focus Indicator**: Blue border and blinking cursor on active field
+- **Focus Indicator**: Highlighted border and blinking cursor on active field
 - **Masking**: Shows asterisk icons instead of numbers when enabled
 - **Grouping**: Visual separation of fields into groups for better readability
 - **Disabled State**: Grayed out appearance when disabled
 
 ### Keyboard Navigation
 
-- **Arrow Keys**: Navigate between fields
-- **Tab**: Move to next focusable element
-- **Shift+Tab**: Move to previous focusable element
-- **Backspace**: Delete current digit and move backward
-- **Delete**: Clear current field
+- **Tab**: Move focus to the next focusable element. The OTP cells share one focus target.
+- **Shift+Tab**: Move focus to the previous focusable element.
+- **Backspace**: Delete the last digit.
+- **Arrow Keys / Delete**: Not handled by `OtpInput`.
 
 ## Common Patterns
 
 ### Auto-Submit on Complete
 
 ```rust
-cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-    if let InputEvent::Change = event {
-        let code = state.read(cx).value();
-        if code.len() == 6 {
-            // Auto-submit when complete
-            this.submit_verification_code(&code, cx);
-        }
+// Keep the returned Subscription in the view.
+cx.subscribe(&otp_state, |this, state, event: &OtpEvent, cx| {
+    if let OtpEvent::Complete = event {
+        let code = state.read(cx).value().to_string();
+        this.submit_verification_code(&code, cx);
     }
 });
 ```
 
 ### Clear on Focus
 
+Use `subscribe_in` when the callback needs `window`:
+
 ```rust
-cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-    if let InputEvent::Focus = event {
+cx.subscribe_in(&otp_state, window, |this, state, event: &OtpEvent, window, cx| {
+    if let OtpEvent::Focus = event {
         // Clear previous value when user starts entering new code
         state.update(cx, |state, cx| {
             state.set_value("", window, cx);

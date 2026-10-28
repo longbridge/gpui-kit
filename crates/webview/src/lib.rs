@@ -1,13 +1,15 @@
 extern crate gpui_kit as gpui;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "gpui-fast", target_os = "macos"))]
 mod composition;
 #[cfg(target_os = "linux")]
 mod linux;
-
 #[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(all(feature = "gpui-fast", target_os = "macos"))]
 use composition::NativeWebViewSurface;
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "gpui-fast", target_os = "linux"))]
 use linux::NativeWebViewSurface;
 
 use std::{cell::Cell, ops::Deref, rc::Rc};
@@ -18,6 +20,21 @@ use gpui::{
     App, Bounds, ContentMask, DismissEvent, Element, ElementId, Entity, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, Hitbox, InteractiveElement, IntoElement, LayoutId, MouseDownEvent,
     ParentElement as _, Pixels, Render, Size, Style, Styled as _, Window, canvas, div,
+};
+
+// `gpui-kit` selects the GPUI backend; this crate's `gpui-fast` feature only follows it, so
+// the two must agree. A mismatch would otherwise keep the gpui-pre attachment on GPUI Fast.
+const _: () = {
+    assert!(
+        !gpui::GPUI_FAST || cfg!(feature = "gpui-fast"),
+        "gpui-kit is built with `gpui-fast`, but gpui-webview is not: enable the \
+         `gpui-webview/gpui-fast` feature so the WebView uses GPUI Fast's window composition"
+    );
+    assert!(
+        gpui::GPUI_FAST || !cfg!(feature = "gpui-fast"),
+        "gpui-webview is built with `gpui-fast`, but gpui-kit is not: enable the \
+         `gpui-kit/gpui-fast` feature, which selects the GPUI backend"
+    );
 };
 
 /// An owned, UI-thread-local handle to the raw wry webview.
@@ -37,6 +54,10 @@ impl WebViewHandle {
 
 /// A webview based on wry WebView.
 ///
+/// With the `gpui-fast` feature, macOS and Linux host the native view in a window
+/// composition surface, so deferred GPUI overlays render above the page. Without it, the
+/// native view covers GPUI content in its bounds and extends past a container that clips it.
+///
 /// [experimental]
 pub struct WebView {
     focus_handle: FocusHandle,
@@ -45,7 +66,9 @@ pub struct WebView {
     bounds: Bounds<Pixels>,
     /// The page zoom the script asked for, before any display scale compensation.
     zoom: Cell<f64>,
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    /// Whether the last geometry update failed, so each failure is logged once until it recovers.
+    geometry_failed: Cell<bool>,
+    #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
     composition: Option<NativeWebViewSurface>,
     /// The GPUI scale factor the page zoom was last matched to.
     #[cfg(target_os = "linux")]
@@ -58,7 +81,7 @@ pub struct WebView {
 impl Drop for WebView {
     fn drop(&mut self) {
         self.hide();
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
         if let Some(surface) = self.composition.take() {
             surface.release(self.webview.clone());
         }
@@ -70,7 +93,7 @@ impl WebView {
     pub fn new(webview: wry::WebView, window: &mut Window, cx: &mut App) -> Self {
         let _ = webview.set_bounds(Rect::default());
 
-        #[cfg(target_os = "macos")]
+        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
         let composition = match NativeWebViewSurface::new(&webview, window, cx) {
             Ok(surface) => Some(surface),
             Err(error) => {
@@ -84,7 +107,7 @@ impl WebView {
         linux::forward_mouse_down(&webview, origin.clone(), window, cx);
         #[cfg(target_os = "linux")]
         linux::match_scale_factor(&webview, window.scale_factor(), 1.0);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(any(all(feature = "gpui-fast", target_os = "macos"), target_os = "linux")))]
         let _ = window;
 
         Self {
@@ -92,10 +115,11 @@ impl WebView {
             visible: Cell::new(true),
             bounds: Bounds::default(),
             zoom: Cell::new(1.0),
+            geometry_failed: Cell::new(false),
             webview: Rc::new(webview),
-            #[cfg(target_os = "macos")]
+            #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
             composition,
-            #[cfg(target_os = "linux")]
+            #[cfg(all(feature = "gpui-fast", target_os = "linux"))]
             composition: None,
             #[cfg(target_os = "linux")]
             scale_factor: Cell::new(window.scale_factor()),
@@ -108,8 +132,8 @@ impl WebView {
     ///
     /// On Linux the window must run on X11 or XWayland: start the application with
     /// `gpui_kit::platform::linux(WindowingModes::X11)`. A Wayland window returns an error.
-    /// This also initializes GTK and drives its main loop from GPUI. The webview is built in a
-    /// window composition surface so GPUI overlays can render above it.
+    /// This also initializes GTK and drives its main loop from GPUI. With the `gpui-fast` feature,
+    /// the webview is built in a window composition surface so GPUI overlays can render above it.
     pub fn build(
         builder: wry::WebViewBuilder,
         window: &mut Window,
@@ -120,6 +144,7 @@ impl WebView {
             let parent = linux::X11Parent::new(window)?;
             linux::ensure_gtk(cx)?;
 
+            #[cfg(feature = "gpui-fast")]
             match NativeWebViewSurface::new(window, cx) {
                 Ok(surface) => {
                     let webview = builder.build_as_child(&surface.parent()?)?;
@@ -141,7 +166,7 @@ impl WebView {
     /// Set window-relative bounds, including offscreen loading bounds.
     /// With window composition, position the managed container and its child together.
     pub fn set_bounds(&self, bounds: Rect) -> wry::Result<()> {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
         if let Some(surface) = &self.composition {
             return surface
                 .set_bounds(&self.webview, bounds)
@@ -152,8 +177,8 @@ impl WebView {
 
     /// Apply full document bounds and an inherited clip without changing the DOM viewport.
     /// Empty clips hide the native surface while preserving the loaded document.
-    /// On macOS and Linux, partial clipping requires native window composition;
-    /// fully visible documents also work without composition.
+    /// Partial clipping requires native window composition; without it, the native view
+    /// takes the full document bounds and extends past the clip.
     pub fn set_geometry(
         &self,
         document: Bounds<Pixels>,
@@ -162,7 +187,7 @@ impl WebView {
         let visible = document.intersect(&clip);
         if visible.is_empty() || !self.visible.get() {
             self.set_native_visible(false)?;
-            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
             if let Some(surface) = &self.composition {
                 // Hidden preparation still gives WebKit its real layout width.
                 if self.visible.get() && !document.is_empty() {
@@ -171,18 +196,13 @@ impl WebView {
             }
             return Ok(());
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
         if let Some(surface) = &self.composition {
             surface.set_geometry(&self.webview, document, visible)?;
             surface.set_visible(true)?;
             self.webview.set_visible(true)?;
             return Ok(());
         }
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        anyhow::ensure!(
-            visible == document,
-            "Inline WebView clipping requires native window composition"
-        );
         #[cfg(target_os = "linux")]
         let rect = linux::device_bounds(document, self.scale_factor.get());
         #[cfg(not(target_os = "linux"))]
@@ -207,7 +227,7 @@ impl WebView {
     // visibility preference, so prepaint can retry when the view becomes unclipped.
     fn set_native_visible(&self, visible: bool) -> wry::Result<()> {
         self.webview.set_visible(visible)?;
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
         if let Some(surface) = &self.composition {
             surface
                 .set_visible(visible)
@@ -273,7 +293,7 @@ impl WebView {
         #[cfg(target_os = "linux")]
         linux::set_theme(theme);
         #[cfg(target_os = "macos")]
-        composition::set_theme(&self.webview, theme);
+        macos::set_theme(&self.webview, theme);
         #[cfg(target_os = "windows")]
         wry::WebViewExtWindows::set_theme(&*self.webview, theme)?;
         #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -421,7 +441,7 @@ impl Element for WebViewElement {
         }
 
         let parent = self.parent.read(cx);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
         if let Some(surface) = &parent.composition {
             surface.set_scale_factor(window.scale_factor());
         }
@@ -433,10 +453,13 @@ impl Element for WebViewElement {
         parent.origin.set(bounds.origin);
         let clip = window.content_mask().bounds;
         if let Err(error) = parent.set_geometry(bounds, clip) {
-            log::warn!("WebView geometry update failed: {error:#}");
+            if !parent.geometry_failed.replace(true) {
+                log::warn!("WebView geometry update failed: {error:#}");
+            }
             let _ = parent.set_native_visible(false);
             return None;
         }
+        parent.geometry_failed.set(false);
         let visible = bounds.intersect(&clip);
         if visible.is_empty() {
             return None;

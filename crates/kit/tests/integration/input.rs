@@ -161,6 +161,38 @@ fn clear_button_is_named(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+struct Prompted {
+    name: Entity<InputState>,
+}
+impl Render for Prompted {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            Input::new(&self.name)
+                .id("name")
+                .aria_label("Project name")
+                .w(px(240.)),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn placeholder_is_read_from_the_editor_and_is_not_a_value(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let (handle, _) = common::open_window(cx, None, |window, cx| {
+        cx.new(|cx| Prompted {
+            name: cx.new(|cx| InputState::new(window, cx).placeholder("Untitled")),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        let name = window.find("name");
+        assert_eq!(name.label(), Some("Project name"));
+        assert_eq!(name.placeholder(), Some("Untitled"));
+        assert_eq!(name.value(), Some(""));
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn masked_input_is_a_password_field(cx: &mut TestAppContext) {
     let (handle, _) = inputs(cx);
@@ -226,14 +258,20 @@ impl Render for ScopedInputs {
             .flex_col()
             .gap_4()
             .child(
-                div()
-                    .id("left")
-                    .child(Input::new(&self.left).id("name").w(px(240.))),
+                div().id("left").child(
+                    Input::new(&self.left)
+                        .id("name")
+                        .aria_label("Contact name")
+                        .w(px(240.)),
+                ),
             )
             .child(
-                div()
-                    .id("right")
-                    .child(Input::new(&self.right).id("name").w(px(240.))),
+                div().id("right").child(
+                    Input::new(&self.right)
+                        .id("name")
+                        .aria_label("Contact name")
+                        .w(px(240.)),
+                ),
             )
     }
 }
@@ -254,6 +292,13 @@ fn scoped_keyboard_uses_the_focused_input_in_the_selected_scope(cx: &mut TestApp
     let (handle, _) = scoped_inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
+        for scope in ["left", "right"] {
+            let name = window.within(scope).find("name");
+            assert_eq!(name.role(), Some(gpui_kit::Role::TextInput));
+            assert_eq!(name.label(), Some("Contact name"));
+            assert_eq!(name.value(), Some(""));
+            assert_eq!(name.bounds().size.width, px(240.));
+        }
         let mut dialog = window.within("right");
         dialog.click("name", cx);
         dialog.input("Ada中", cx);

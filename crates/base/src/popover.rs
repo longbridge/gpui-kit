@@ -13,12 +13,19 @@ use crate::{
 };
 
 const CONTEXT: &str = "Popover";
+const CONTENT_CONTEXT: &str = "PopoverContent";
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
         KeyBinding::new("space", Confirm { secondary: false }, Some(CONTEXT)),
+        KeyBinding::new("escape", Cancel, Some(CONTENT_CONTEXT)),
+        // The content is still a descendant of the trigger's dispatch node.
+        // Leave activation to its controls, not the trigger or an outer dialog.
+        // More deeply scoped input bindings retain precedence.
+        KeyBinding::new("enter", gpui::NoAction, Some(CONTENT_CONTEXT)),
+        KeyBinding::new("space", gpui::NoAction, Some(CONTENT_CONTEXT)),
     ]);
 }
 
@@ -168,6 +175,10 @@ type ContentBuilder =
     Box<dyn FnOnce(&mut PopoverState, &mut Window, &mut Context<PopoverState>) -> AnyElement>;
 
 /// An unstyled popover owning trigger interaction, open state, dismissal, and focus.
+///
+/// Enter and Space on the trigger toggle the popover. Inside its content, those
+/// keys belong to the focused control instead; Escape dismisses the popover and
+/// restores the previous focus.
 #[derive(IntoElement)]
 pub struct Popover {
     id: ElementId,
@@ -357,7 +368,7 @@ impl RenderOnce for Popover {
             .occlude()
             .tab_group()
             .track_focus(&focus_handle)
-            .key_context(CONTEXT)
+            .key_context(CONTENT_CONTEXT)
             .on_action(window.listener_for(&state, PopoverState::on_action_cancel))
             .when_some(self.content, |this, content| {
                 this.child(state.update(cx, |state, cx| (content)(state, window, cx)))

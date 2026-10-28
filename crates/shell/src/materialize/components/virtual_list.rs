@@ -138,6 +138,13 @@ pub(in crate::materialize) fn virtual_list(
     // role or hit state for any of this to land on.
     warn_unhonoured_a11y(&behavior, name, &[]);
     warn_lazy_list_misuse(name, &children, &states);
+    if behavior.follow_mode.is_some() {
+        tracing::warn!(
+            "with_follow_mode is ignored on a {name}: it places rows by the sizes the script \
+             states and has no follow mode. `scroll_to_bottom` on its VirtualListScrollHandle \
+             is how a script keeps it at the end"
+        );
+    }
     if behavior.on_visible_range_change.is_some() {
         tracing::warn!(
             "on_visible_range_change is ignored on a {name}: it is list that reports its \

@@ -132,6 +132,12 @@ catalog) for macOS, Linux and Windows:
 curl -fsSL https://gpui-kit.com/shell/install.sh | sh
 ```
 
+The same runtime is available from crates.io:
+
+```bash
+cargo install gpui-shell --version 0.8.1 --locked
+```
+
 To follow `main` ahead of a release, build it from Git instead (into
 `~/.cargo/bin`; run it again to update):
 

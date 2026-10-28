@@ -2,10 +2,9 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AccessibleAction, AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Rems, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, TouchPhase,
-    Window, div, px, relative,
+    AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, Rems, RenderOnce, Role, SharedString,
+    StyleRefinement, Styled, TextAlign, TouchPhase, Window, div, px, relative,
 };
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
@@ -86,12 +85,11 @@ fn accessibility_role(
     })
 }
 
-fn exposes_accessibility_value(masked: bool, content_type: Option<InputContentType>) -> bool {
-    !masked
-        && !matches!(
-            content_type,
-            Some(InputContentType::Password | InputContentType::NewPassword)
-        )
+fn exposes_accessibility_value(content_type: Option<InputContentType>) -> bool {
+    !matches!(
+        content_type,
+        Some(InputContentType::Password | InputContentType::NewPassword)
+    )
 }
 
 /// Returns `(background, foreground)` colors for input-like components.
@@ -495,27 +493,6 @@ impl Input {
             })
     }
 
-    fn handle_accessibility_set_value(
-        state: &TextInputState,
-        data: Option<&gpui::accesskit::ActionData>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let Some(gpui::accesskit::ActionData::Value(value)) = data else {
-            return;
-        };
-        if !state.presentation(cx).is_editable() {
-            return;
-        }
-        state.replace_all(value.to_string(), window, cx);
-    }
-
-    fn handle_accessibility_focus(state: &TextInputState, window: &mut Window, cx: &mut App) {
-        if !state.presentation(cx).is_disabled() {
-            state.focus(window, cx);
-        }
-    }
-
     /// This method must after the refine_style.
     fn render_editor(
         input_state: TextInputState,
@@ -690,12 +667,6 @@ impl RenderOnce for Input {
                 .then_some(InputContentType::Password)),
             self.role,
         );
-        let accessibility_state = state.clone();
-        // Tests read the same accessibility value as assistive technology.
-        // Avoid materializing the rope in normal builds without a client.
-        let accessibility_value = ((window.is_a11y_active() || cfg!(feature = "test-support"))
-            && exposes_accessibility_value(presentation.is_masked(), content_type))
-        .then(|| state.text(cx).to_string());
         let input_focused =
             presentation.focus_handle().is_focused(window) && !presentation.is_disabled();
         if input_focused {
@@ -748,10 +719,19 @@ impl RenderOnce for Input {
             None if placeholder_is_mask => None,
             None => placeholder.clone(),
         };
+        state.set_accessibility(
+            gpui_base::input::InputAccessibility::new(accessibility_role)
+                .with_label(aria_label)
+                .with_placeholder(placeholder)
+                .with_accessibility_id(self.accessibility_id)
+                .with_value_exposed(exposes_accessibility_value(content_type)),
+            cx,
+        );
         let id = self
             .id
             .unwrap_or_else(|| ("input", state.entity_id()).into());
         BaseInput::new(id)
+            .semantic_owner(state.entity_id())
             .focused(focused)
             .disabled(disabled)
             .track_focus(&frame_focus_handle)
@@ -775,22 +755,10 @@ impl RenderOnce for Input {
                     )
                 })
             })
-            .role(accessibility_role)
-            .when_some(self.accessibility_id, |this, id| this.accessibility_id(id))
-            .when_some(aria_label, |this, label| this.aria_label(label))
-            .when_some(placeholder, |this, placeholder| {
-                this.aria_placeholder(placeholder)
-            })
-            .when_some(accessibility_value, |this, value| this.aria_value(value))
-            .on_a11y_action(AccessibleAction::Focus, {
-                let state = state.clone();
-                move |_, window, cx| Self::handle_accessibility_focus(&state, window, cx)
-            })
-            .when(presentation.is_editable(), |this| {
-                this.on_a11y_action(AccessibleAction::SetValue, move |data, window, cx| {
-                    Self::handle_accessibility_set_value(&accessibility_state, data, window, cx);
-                })
-            })
+            // The editor owns text semantics. The frame still scopes addon
+            // controls, custom IDs and focus styling without registering the
+            // editor's FocusHandle a second time.
+            .role(RoleOverride::Presentational)
             .flex()
             .size_full()
             .line_height(LINE_HEIGHT)
@@ -873,6 +841,7 @@ impl RenderOnce for Input {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ElementExt as _;
     use crate::input::AnyInputState;
 
     #[test]
@@ -1061,15 +1030,16 @@ mod tests {
 
     #[gpui::test]
     fn editable_input_offers_accessibility_write_action(cx: &mut gpui::TestAppContext) {
-        use crate::ElementExt as _;
-        use gpui::{AppContext as _, Element as _, IntoElement as _, Render};
-        use std::sync::{Arc, Mutex};
+        use gpui::{AccessibleAction, AppContext as _, Element as _, IntoElement as _, Render};
+        use std::cell::RefCell;
 
         type EmittedState = Option<(Option<String>, bool)>;
 
         struct InputA11yProbe {
             state: Entity<InputState>,
-            emitted: Arc<Mutex<EmittedState>>,
+            emitted: Rc<RefCell<EmittedState>>,
+            disabled: bool,
+            readonly: bool,
         }
 
         impl Render for InputA11yProbe {
@@ -1081,25 +1051,33 @@ mod tests {
                 let state = self.state.clone();
                 let emitted = self.emitted.clone();
                 div()
-                    .child(Input::new(&state))
+                    .child(
+                        Input::new(&state)
+                            .disabled(self.disabled)
+                            .readonly(self.readonly),
+                    )
                     .on_prepaint(move |_, window, cx| {
-                        let input = Input::new(&state).render(window, cx).into_element();
-                        let mut node = gpui::accesskit::Node::new(Role::TextInput);
-                        input.write_a11y_info(&mut node);
-                        *emitted.lock().unwrap() = Some((
-                            node.value().map(ToOwned::to_owned),
-                            node.supports_action(AccessibleAction::SetValue),
-                        ));
+                        state.update(cx, |state, cx| {
+                            let input = state.render(window, cx).into_element();
+                            let mut node = gpui::accesskit::Node::new(Role::Unknown);
+                            input.write_a11y_info(&mut node);
+                            *emitted.borrow_mut() = Some((
+                                node.value().map(ToOwned::to_owned),
+                                node.supports_action(AccessibleAction::SetValue),
+                            ));
+                        });
                     })
             }
         }
 
         cx.update(crate::init);
-        let emitted = Arc::new(Mutex::new(None));
+        let emitted = Rc::new(RefCell::new(None));
         let captured = emitted.clone();
         let (probe, cx) = cx.add_window_view(move |window, cx| InputA11yProbe {
             state: cx.new(|cx| InputState::new(window, cx).default_value("initial")),
             emitted,
+            disabled: false,
+            readonly: false,
         });
         cx.update(|window, cx| {
             let _ = window.draw(cx);
@@ -1107,103 +1085,41 @@ mod tests {
         // Normal builds leave the value lazy without an accessibility client;
         // test-support reads that same production value path eagerly.
         let expected_value = cfg!(feature = "test-support").then(|| "initial".to_owned());
-        assert_eq!(*captured.lock().unwrap(), Some((expected_value, true)));
+        assert_eq!(*captured.borrow(), Some((expected_value.clone(), true)));
 
         let state = probe.read_with(cx, |probe, _| probe.state.clone());
-        let base: TextInputState = state.clone().into();
-        cx.update(|window, cx| {
-            Input::handle_accessibility_set_value(&base, None, window, cx);
-            Input::handle_accessibility_focus(&base, window, cx);
-            assert!(base.presentation(cx).focus_handle().is_focused(window));
-            window.draw(cx).clear(cx);
-        });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
-
-        let changes = std::rc::Rc::new(std::cell::Cell::new(0));
-        let observed = changes.clone();
-        let _subscription = cx.update(|_, cx| {
-            cx.subscribe(&state, move |_, event: &super::super::InputEvent, _| {
-                if matches!(event, super::super::InputEvent::Change) {
-                    observed.set(observed.get() + 1);
-                }
-            })
-        });
-        let action = gpui::accesskit::ActionData::Value("updated🦀".into());
-        cx.update(|window, cx| {
-            Input::handle_accessibility_set_value(&base, Some(&action), window, cx);
-        });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
-        assert_eq!(changes.get(), 1);
         for disabled in [false, true] {
-            cx.update(|window, cx| {
-                base.set_disabled(disabled, cx);
-                base.set_readonly(!disabled, cx);
-                window.blur(cx);
-                Input::handle_accessibility_focus(&base, window, cx);
-                assert_eq!(
-                    base.presentation(cx).focus_handle().is_focused(window),
-                    !disabled
-                );
-                let action = gpui::accesskit::ActionData::Value("rejected".into());
-                Input::handle_accessibility_set_value(&base, Some(&action), window, cx);
+            probe.update(cx, |probe, cx| {
+                probe.disabled = disabled;
+                probe.readonly = !disabled;
+                cx.notify();
             });
-            assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
-            assert_eq!(changes.get(), 1);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(*captured.borrow(), Some((expected_value.clone(), false)));
         }
-        cx.update(|window, cx| {
-            base.set_disabled(false, cx);
-            base.set_readonly(false, cx);
-            Input::handle_accessibility_focus(&base, window, cx);
-            window.draw(cx).clear(cx);
-            window.dispatch_action(Box::new(super::super::Undo), cx);
+        probe.update(cx, |probe, cx| {
+            probe.disabled = false;
+            probe.readonly = false;
+            cx.notify();
         });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
         cx.update(|window, cx| {
             state.update(cx, |state, cx| state.set_masked(true, window, cx));
-            Input::handle_accessibility_set_value(&base, Some(&action), window, cx);
             window.draw(cx).clear(cx);
         });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
-        assert_eq!(*captured.lock().unwrap(), Some((None, true)));
-    }
-
-    #[gpui::test]
-    fn accessibility_set_value_preserves_exact_editor_text(cx: &mut gpui::TestAppContext) {
-        use gpui::{AppContext as _, Render};
-
-        struct Probe(Entity<crate::input::EditorState>);
-
-        impl Render for Probe {
-            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-                div().child(crate::input::Editor::new(&self.0))
-            }
-        }
-
-        cx.update(crate::init);
-        let (probe, cx) = cx.add_window_view(|window, cx| {
-            Probe(cx.new(|cx| crate::input::EditorState::new(window, cx).language("rust")))
-        });
-        let editor = probe.read_with(cx, |probe, _| probe.0.clone());
-        let state: TextInputState = editor.clone().into();
-        let action = gpui::accesskit::ActionData::Value("(".into());
-
-        cx.update(|window, cx| {
-            Input::handle_accessibility_set_value(&state, Some(&action), window, cx)
-        });
-        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
+        assert_eq!(*captured.borrow(), Some((None, true)));
     }
 
     #[gpui::test]
     fn input_emits_accessibility_id(cx: &mut gpui::TestAppContext) {
-        use crate::ElementExt as _;
         use gpui::{AppContext as _, Element as _, IntoElement as _, Render};
-        use std::sync::{Arc, Mutex};
+        use std::cell::RefCell;
 
         type EmittedIds = Vec<Option<String>>;
 
         struct InputA11yProbe {
-            state: Entity<InputState>,
-            emitted: Arc<Mutex<EmittedIds>>,
+            states: [Entity<InputState>; 2],
+            emitted: Rc<RefCell<EmittedIds>>,
         }
 
         impl Render for InputA11yProbe {
@@ -1212,55 +1128,50 @@ mod tests {
                 _window: &mut Window,
                 _cx: &mut gpui::Context<Self>,
             ) -> impl IntoElement {
-                let state = self.state.clone();
+                let states = self.states.clone();
                 let emitted = self.emitted.clone();
-                div().on_prepaint(move |_, window, cx| {
-                    let mut author_id_of = |input: Input| {
-                        let mut node = gpui::accesskit::Node::new(Role::TextInput);
-                        input
-                            .render(window, cx)
-                            .into_element()
-                            .write_a11y_info(&mut node);
-                        node.author_id().map(ToOwned::to_owned)
-                    };
-
-                    *emitted.lock().unwrap() = vec![
-                        author_id_of(Input::new(&state)),
-                        author_id_of(Input::new(&state).accessibility_id("search.query")),
-                    ];
-                })
+                div()
+                    .child(Input::new(&states[0]))
+                    .child(Input::new(&states[1]).accessibility_id("search.query"))
+                    .on_prepaint(move |_, window, cx| {
+                        *emitted.borrow_mut() = states
+                            .iter()
+                            .map(|state| {
+                                state.update(cx, |state, cx| {
+                                    let input = state.render(window, cx).into_element();
+                                    let mut node = gpui::accesskit::Node::new(Role::Unknown);
+                                    input.write_a11y_info(&mut node);
+                                    node.author_id().map(ToOwned::to_owned)
+                                })
+                            })
+                            .collect();
+                    })
             }
         }
 
         cx.update(crate::init);
-        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted = Rc::new(RefCell::new(Vec::new()));
         let captured = emitted.clone();
         let (_, cx) = cx.add_window_view(move |window, cx| InputA11yProbe {
-            state: cx.new(|cx| InputState::new(window, cx)),
+            states: std::array::from_fn(|_| cx.new(|cx| InputState::new(window, cx))),
             emitted,
         });
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });
 
-        assert_eq!(
-            *captured.lock().unwrap(),
-            vec![None, Some("search.query".into())]
-        );
+        assert_eq!(*captured.borrow(), vec![None, Some("search.query".into())]);
     }
 
     #[test]
-    fn accessibility_value_is_hidden_for_secret_inputs() {
-        assert!(exposes_accessibility_value(false, None));
-        assert!(!exposes_accessibility_value(true, None));
-        assert!(!exposes_accessibility_value(
-            false,
-            Some(InputContentType::Password)
-        ));
-        assert!(!exposes_accessibility_value(
-            false,
-            Some(InputContentType::NewPassword)
-        ));
+    fn password_content_types_keep_accessibility_values_private() {
+        assert!(exposes_accessibility_value(None));
+        assert!(!exposes_accessibility_value(Some(
+            InputContentType::Password
+        )));
+        assert!(!exposes_accessibility_value(Some(
+            InputContentType::NewPassword
+        )));
     }
 
     #[gpui::test]

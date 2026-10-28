@@ -490,3 +490,69 @@ markdown(source)
         gpui_kit::div().child(format!("Run {}", code_block.lang().unwrap_or_default()))
     })
 ```
+
+## Inline code style
+
+`TextView::inline_code_style(StyleRefinement)` refines inline code after the
+resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The existing `TextViewStyle::inline_code(HighlightStyle)` continues to work;
+the view-level refinement takes precedence without changing the public
+`TextViewStyle` struct fields.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "Run `cargo build` first.")
+    .inline_code_style(
+        StyleRefinement::default()
+            .text_size(rems(1.))
+            .px(rems(0.25))
+            .border_1()
+            .border_color(cx.theme().border),
+    )
+```
+
+Supported properties are font family, size, features, fallbacks, weight,
+italic, color, underline, strikethrough, background, border widths/color/style,
+corner radii, and padding. Font sizes use pixels or window-relative rems;
+non-finite or non-positive sizes retain the default. Without a font-size override,
+code remains 0.875 times its surrounding text. Without a border override, code
+has no border. Padding and border widths participate in wrapping and table
+measurement. Margin, positioning, flex, explicit box size, overflow, and
+interaction properties are not used; line height remains owned by the paragraph.
+
+## List and blockquote style
+
+`TextView::list_style(StyleRefinement)` and
+`blockquote_style(StyleRefinement)` refine list markers and blockquotes after
+the resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The public `TextViewStyle` struct fields are unchanged.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(cx.theme().primary))
+    .blockquote_style(StyleRefinement::default().border_color(cx.theme().primary))
+```
+
+The list marker refinement applies to the bullet or number column of each
+item, over its defaults: muted text color, a minimum width of the list indent,
+right-aligned text, and a right padding of 0.3 times that indent. Text
+properties such as color, font family, size, and weight style the marker; box
+properties such as width and padding change the marker column. Its text color
+also outlines an unchecked task-list checkbox; a checked one keeps the link
+color.
+
+The blockquote refinement applies to the quote container, over its defaults:
+muted text color, a 2px left border in the border color, and a left padding of
+0.9 times the body font size. Border widths and color style the quote bar;
+text properties, background, padding, and corner radii style the quote and the
+blocks inside it. Child blocks keep their own explicit styles, including
+heading and table font sizes. Other element properties apply to the container
+as they do to any `div`. Code blocks, tables, rules, and done tasks keep the
+shared muted and border colors.

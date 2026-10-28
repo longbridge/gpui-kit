@@ -88,7 +88,10 @@ impl Presence {
             } else {
                 1.0
             };
-            let duration = self.transition.duration.mul_f32(reversing_factor);
+            let duration = self
+                .transition
+                .duration
+                .mul_f64(f64::from(reversing_factor));
             state.update(cx, |state, _| {
                 state.from = sampled;
                 state.target = target;

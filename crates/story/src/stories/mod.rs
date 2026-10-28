@@ -33,6 +33,7 @@ mod group_box_story;
 mod hover_card_story;
 mod icon_story;
 mod image_story;
+mod input_completion;
 mod input_group_story;
 mod input_story;
 mod input_tokens;

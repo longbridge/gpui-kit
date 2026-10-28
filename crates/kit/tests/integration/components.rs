@@ -3,11 +3,11 @@ use gpui_component::{
     Disableable, TitleBar,
     button::{Button, DropdownButton},
     clipboard::Clipboard,
-    input::{Input, InputState},
+    input::{Input, InputState, Textarea, TextareaState},
     popover::Popover,
     progress::{Progress, ProgressCircle},
 };
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::test::{TestQueryExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 
 struct Controls {
@@ -75,6 +75,90 @@ fn kit_controls_use_native_events_and_report_state(cx: &mut TestAppContext) {
         assert_eq!(view.clicks, 0)
     })
     .unwrap();
+}
+
+struct PopoverKeyboard {
+    draft: Entity<TextareaState>,
+    applied: usize,
+}
+
+impl Render for PopoverKeyboard {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let owner = cx.entity().downgrade();
+        let draft = self.draft.clone();
+        div().size_full().p_4().child(
+            Popover::new("keyboard-popover")
+                .trigger(Button::new("keyboard-trigger").label("Compose"))
+                .content(move |_, _, _| {
+                    let owner = owner.clone();
+                    div()
+                        .id("keyboard-content")
+                        .test_support()
+                        .w(px(280.))
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(Button::new("keyboard-apply").label("Apply").on_click(
+                            move |_, _, cx| {
+                                let _ = owner.update(cx, |view, cx| {
+                                    view.applied += 1;
+                                    cx.notify();
+                                });
+                            },
+                        ))
+                        .child(Textarea::new(&draft).aria_label("Draft").h(px(100.)))
+                }),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn popover_content_keeps_keyboard_activation_and_text_input(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    for activation in ["enter", "space"] {
+        let (handle, view) =
+            common::open_window(cx, Some(size(px(600.), px(500.))), |window, cx| {
+                cx.new(|cx| PopoverKeyboard {
+                    draft: cx.new(|cx| TextareaState::new(window, cx)),
+                    applied: 0,
+                })
+            });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.focus_next(cx);
+            window.render_frame(cx);
+            assert_eq!(window.find("keyboard-trigger").focused(), Some(true));
+            window.press(activation, cx);
+            assert!(window.find("keyboard-content").visible());
+            window.press("tab", cx);
+            assert_eq!(window.find("keyboard-apply").focused(), Some(true));
+            window.press(activation, cx);
+            assert_eq!(view.read(cx).applied, 1, "{activation} activates the child");
+            assert!(window.find("keyboard-content").visible());
+
+            window.press("tab", cx);
+            assert_eq!(window.find_by_label("Draft").focused(), Some(true));
+            window.input("A", cx);
+            window.press("enter", cx);
+            window.press("space", cx);
+            window.input("B", cx);
+            assert_eq!(view.read(cx).draft.read(cx).value(), "A\n B");
+            assert!(window.find("keyboard-content").visible());
+            // Textarea owns Shift-Tab for outdent; use the traversal primitive.
+            window.focus_prev(cx);
+            window.render_frame(cx);
+            assert_eq!(window.find("keyboard-apply").focused(), Some(true));
+            window.press("escape", cx);
+            assert!(window.try_find("keyboard-content").is_none());
+            assert_eq!(window.find("keyboard-trigger").focused(), Some(true));
+            assert_eq!(
+                view.read(cx).applied,
+                1,
+                "dismissal must not activate again"
+            );
+        })
+        .unwrap();
+    }
 }
 
 struct NamedButton;

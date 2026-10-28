@@ -92,7 +92,7 @@ where
         let content_id = (self.id.clone(), "content");
         let scrollbar_id = (self.id.clone(), "scrollbar");
 
-        let content = self
+        let mut content = self
             .element
             .id(content_id)
             .flex_none()
@@ -101,6 +101,15 @@ where
                 ScrollbarAxis::Horizontal => this.w_auto().min_w_full(),
                 ScrollbarAxis::Both => this.size_auto().min_size_full(),
             });
+        // The wrapper holds the caller's maximum size. Left on the content
+        // too, it would cap the content at the area's size on the scrolled
+        // axis, so nothing would overflow and the area would not scroll.
+        let max_size = &mut content.style().max_size;
+        match self.axis {
+            ScrollbarAxis::Vertical => max_size.height = None,
+            ScrollbarAxis::Horizontal => max_size.width = None,
+            ScrollbarAxis::Both => *max_size = Default::default(),
+        }
 
         // Keep the scroll area in the normal flow: its content size must
         // propagate to auto-sized ancestors (e.g. a Dialog that grows with
@@ -121,11 +130,23 @@ where
             .lock_scroll_axis()
             .child(content);
 
+        // The wrapper lays the area out as a flex item along the scrolled
+        // axis, so the area shrinks to the wrapper's size. Sized by its 100%
+        // alone, the area is not held to a maximum size on the wrapper with
+        // GPUI Fast: in a column whose height follows its content, inside a
+        // row, the area came out as tall as that column and the wrapper
+        // clipped the rows past its maximum height instead of scrolling to
+        // them.
         div()
             .id(root_id)
             .size_full()
             .refine_style(&root_style)
             .relative()
+            .flex()
+            .map(|this| match self.axis {
+                ScrollbarAxis::Horizontal => this.flex_row(),
+                ScrollbarAxis::Vertical | ScrollbarAxis::Both => this.flex_col(),
+            })
             .child(scroll_area)
             .child(render_scrollbar(
                 scrollbar_id,
@@ -212,11 +233,15 @@ fn render_scrollbar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Bounds, Context, Pixels, Render, TestAppContext, VisualTestContext, canvas, px};
+    use gpui::{
+        Bounds, Context, Pixels, Render, ScrollDelta, ScrollEvent, TestAppContext,
+        VisualTestContext, canvas, point, px,
+    };
     use std::{cell::Cell, rc::Rc};
 
     struct FlexItemScrollableTest {
         header_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+        last_row_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
         footer_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     }
 
@@ -242,7 +267,8 @@ mod tests {
                 .child(Scrollable::new(
                     gpui_base::v_flex()
                         .flex_1()
-                        .children((0..6).map(|_| div().h(px(50.)).flex_shrink_0())),
+                        .children((0..5).map(|_| div().h(px(50.)).flex_shrink_0()))
+                        .child(tracked_block(px(50.), &self.last_row_bounds)),
                     ScrollbarAxis::Vertical,
                 ))
                 .child(
@@ -262,9 +288,11 @@ mod tests {
         // Debug selectors are disabled in release builds; capture laid-out
         // bounds directly so the Shell's release test suite checks the layout.
         let header_bounds = Rc::new(Cell::new(None));
+        let last_row_bounds = Rc::new(Cell::new(None));
         let footer_bounds = Rc::new(Cell::new(None));
         let (_, cx) = cx.add_window_view(|_, _| FlexItemScrollableTest {
             header_bounds: header_bounds.clone(),
+            last_row_bounds: last_row_bounds.clone(),
             footer_bounds: footer_bounds.clone(),
         });
         let cx: &mut VisualTestContext = cx;
@@ -282,6 +310,171 @@ mod tests {
         assert_eq!(
             footer_bounds.get().expect("footer was laid out").top(),
             px(80.)
+        );
+
+        // Scrolled to the end, the last row ends where the footer starts.
+        cx.simulate_event(ScrollEvent {
+            position: point(px(50.), px(50.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-1000.))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert_eq!(
+            last_row_bounds
+                .get()
+                .expect("last row was laid out")
+                .bottom(),
+            px(80.)
+        );
+    }
+
+    fn tracked_block(height: Pixels, bounds: &Rc<Cell<Option<Bounds<Pixels>>>>) -> Div {
+        let bounds = bounds.clone();
+        div()
+            .h(height)
+            .flex_shrink_0()
+            .child(canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {}).size_full())
+    }
+
+    struct MaxHeightScrollableTest {
+        first_row_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+        last_row_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+        below_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    }
+
+    impl Render for MaxHeightScrollableTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            // Six rows of 50px in an area that may grow to 100px, between two
+            // blocks in a column as tall as its content, in a row. In such a
+            // column the area's full height once came out as the column's,
+            // 140px, rather than the 100px of the wrapper around it.
+            gpui_base::h_flex().w(px(100.)).child(
+                gpui_base::v_flex()
+                    .w_full()
+                    .child(div().h(px(20.)).flex_shrink_0())
+                    .child(Scrollable::new(
+                        gpui_base::v_flex()
+                            .max_h(px(100.))
+                            .child(tracked_block(px(50.), &self.first_row_bounds))
+                            .children((0..4).map(|_| div().h(px(50.)).flex_shrink_0()))
+                            .child(tracked_block(px(50.), &self.last_row_bounds)),
+                        ScrollbarAxis::Vertical,
+                    ))
+                    .child(tracked_block(px(20.), &self.below_bounds)),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn scrollable_with_a_max_height_scrolls_what_overflows_it(cx: &mut TestAppContext) {
+        let first_row_bounds = Rc::new(Cell::new(None));
+        let last_row_bounds = Rc::new(Cell::new(None));
+        let below_bounds = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view(|_, _| MaxHeightScrollableTest {
+            first_row_bounds: first_row_bounds.clone(),
+            last_row_bounds: last_row_bounds.clone(),
+            below_bounds: below_bounds.clone(),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        let first_row = first_row_bounds.get().expect("first row was laid out");
+        let top = first_row.top();
+        // The area stops at its maximum height.
+        assert_eq!(
+            below_bounds.get().expect("block was laid out").top() - top,
+            px(100.)
+        );
+
+        let mut scroll = |dy: f32| {
+            cx.simulate_event(ScrollEvent {
+                position: point(first_row.center().x, top + px(10.)),
+                delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                ..Default::default()
+            });
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+        // The rows past it scroll into view, down to the last one, which
+        // ends at the area's bottom edge.
+        scroll(-40.);
+        assert_eq!(
+            first_row_bounds
+                .get()
+                .expect("first row was laid out")
+                .top()
+                - top,
+            px(-40.)
+        );
+        scroll(-1000.);
+        assert_eq!(
+            last_row_bounds
+                .get()
+                .expect("last row was laid out")
+                .bottom()
+                - top,
+            px(100.)
+        );
+    }
+
+    struct MaxWidthScrollableTest {
+        first_column_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    }
+
+    impl Render for MaxWidthScrollableTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let first_column_bounds = self.first_column_bounds.clone();
+            // Six columns of 50px in an area that may grow to 100px wide.
+            gpui_base::h_flex().h(px(40.)).child(Scrollable::new(
+                gpui_base::h_flex()
+                    .h_full()
+                    .max_w(px(100.))
+                    .child(
+                        div().w(px(50.)).h_full().flex_shrink_0().child(
+                            canvas(
+                                move |bounds, _, _| first_column_bounds.set(Some(bounds)),
+                                |_, _, _, _| {},
+                            )
+                            .size_full(),
+                        ),
+                    )
+                    .children((0..5).map(|_| div().w(px(50.)).h_full().flex_shrink_0())),
+                ScrollbarAxis::Horizontal,
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn scrollable_with_a_max_width_scrolls_what_overflows_it(cx: &mut TestAppContext) {
+        let first_column_bounds = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view(|_, _| MaxWidthScrollableTest {
+            first_column_bounds: first_column_bounds.clone(),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        cx.simulate_event(ScrollEvent {
+            position: point(px(10.), px(10.)),
+            delta: ScrollDelta::Pixels(point(px(-40.), px(0.))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert_eq!(
+            first_column_bounds
+                .get()
+                .expect("first column was laid out")
+                .left(),
+            px(-40.)
         );
     }
 }

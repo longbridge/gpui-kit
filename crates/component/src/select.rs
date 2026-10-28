@@ -1156,4 +1156,63 @@ mod tests {
             cx.update(|_, cx| assert_eq!(state.read(cx).state.open, unavailable));
         }
     }
+
+    /// A page holding a select under retained views.
+    #[cfg(feature = "gpui-fast")]
+    mod retained {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{
+            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+            TestAppContext, Window, div, px,
+        };
+
+        use crate::{
+            searchable_list::SearchableVec,
+            select::{Select, SelectState},
+        };
+
+        /// A page that shows a select and what it selected, counting its
+        /// renders.
+        struct Page {
+            state: Entity<SelectState<SearchableVec<&'static str>>>,
+            renders: Rc<Cell<usize>>,
+        }
+
+        impl Render for Page {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                let selected = self.state.read(cx).selected_index(cx);
+                div()
+                    .w(px(240.))
+                    .child(Select::new(&self.state))
+                    .child(format!("{selected:?}"))
+            }
+        }
+
+        /// Drawing a select again changes nothing in it: the page around it,
+        /// which reads its selection, is not built again for it.
+        #[gpui::test]
+        fn drawing_a_select_again_leaves_the_page_around_it_retained(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let renders = Rc::new(Cell::new(0));
+            let (_, cx) = cx.add_window_view({
+                let renders = renders.clone();
+                move |window, cx| {
+                    let items = SearchableVec::new(vec!["Rust", "Go", "C++"]);
+                    Page {
+                        state: cx.new(|cx| SelectState::new(items, None, window, cx)),
+                        renders,
+                    }
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let rendered = renders.get();
+            for _ in 0..3 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert_eq!(renders.get(), rendered, "the page was built again");
+        }
+    }
 }

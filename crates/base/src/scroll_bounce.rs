@@ -5,7 +5,7 @@ use crate::{OngoingScrollExt as _, ScrollbarHandle};
 use gpui::{
     AnyElement, App, Bounds, ContentMask, DispatchPhase, Element, ElementId, Global,
     GlobalElementId, Hitbox, HitboxBehavior, HitboxId, InspectorElementId, IntoElement, LayoutId,
-    OngoingScroll, Pixels, ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
+    OngoingScroll, Pixels, ScrollDelta, ScrollEvent, TouchPhase, Window, point, px,
 };
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
@@ -385,7 +385,7 @@ impl Element for ScrollBounce {
         if self.scroll_wheel {
             let hitbox = prepaint.hitbox.id;
             let handle = self.handle.clone();
-            window.on_mouse_event(move |_: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |_: &ScrollEvent, phase, window, cx| {
                 if phase == DispatchPhase::Capture
                     && hitbox.should_handle_scroll(window)
                     && max_scroll_extent(handle.as_ref()) > px(0.)
@@ -402,7 +402,7 @@ impl Element for ScrollBounce {
             let on_scroll = self.on_scroll.clone();
             let mut before = 0.;
             let mut allow_end_bounce = false;
-            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                 let ScrollDelta::Pixels(mut delta) = event.delta else {
                     if phase == DispatchPhase::Capture && hitbox.should_handle_scroll(window) {
                         let mut state = state.borrow_mut();
@@ -554,7 +554,7 @@ impl Element for ScrollBounce {
             let handle = self.handle.clone();
             let view = window.current_view();
             let on_scroll = self.on_scroll.clone();
-            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                 if phase != DispatchPhase::Capture
                     || !hitbox.should_handle_scroll(window)
                     || !owns_scroll(hitbox, cx)
@@ -591,9 +591,16 @@ impl Element for ScrollBounce {
                         |dy| {
                             let before = handle.offset();
                             let mut offset = before;
-                            offset.y = (before.y + px(dy)).clamp(-max, px(0.));
+                            let requested = before.y + px(dy);
+                            offset.y = requested.clamp(-max, px(0.));
                             handle.set_offset(offset);
-                            (offset.y - before.y).as_f32()
+                            // Only clamping leaves unused input; subtraction
+                            // can leave a rounding residue inside the list.
+                            if offset.y == requested {
+                                dy
+                            } else {
+                                (offset.y - before.y).as_f32()
+                            }
                         },
                     )
                 };
@@ -817,7 +824,7 @@ mod tests {
     }
 
     fn scroll(cx: &mut VisualTestContext, delta: f32, phase: TouchPhase) {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(100.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
             touch_phase: phase,
@@ -825,7 +832,7 @@ mod tests {
         });
     }
 
-    struct WheelViewport(ScrollHandle);
+    struct WheelViewport(ScrollHandle, Pixels);
 
     impl Render for WheelViewport {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -838,10 +845,39 @@ mod tests {
                     .h(px(200.))
                     .overflow_y_scroll()
                     .track_scroll(&self.0)
-                    .child(div().h(px(600.)).w_full()),
+                    .child(div().h(self.1).w_full()),
             )
             .enabled(true)
             .scroll_wheel(true)
+        }
+    }
+
+    #[gpui::test]
+    fn fractional_wheel_input_keeps_scrolling_deep_in_a_long_list(cx: &mut TestAppContext) {
+        for delta in [-0.09_f32, 0.09] {
+            let mut app = cx.new_app();
+            let handle = ScrollHandle::new();
+            let (_, cx) = app.add_window_view({
+                let handle = handle.clone();
+                move |_, _| WheelViewport(handle, px(2_000_000.))
+            });
+            draw(cx);
+            handle.set_offset(point(px(0.), px(-1_000_000.)));
+            draw(cx);
+            let origin = handle.bounds().origin;
+            scroll(cx, delta, TouchPhase::Started);
+            scroll(cx, delta.signum() * 20., TouchPhase::Moved);
+            scroll(cx, 0., TouchPhase::Ended);
+            cx.executor().advance_clock(Duration::from_millis(16));
+            draw(cx);
+            scroll(cx, delta, TouchPhase::Moved);
+            scroll(cx, 0., TouchPhase::Started);
+            scroll(cx, delta.signum() * 20., TouchPhase::Moved);
+            draw(cx);
+            // Here each 0.09px delta rounds to 0.0625px in the stored offset.
+            let expected = -1_000_000. + delta.signum() * 40.125;
+            assert!((handle.offset().y.as_f32() - expected).abs() < 0.001);
+            assert_eq!(handle.bounds().origin, origin);
         }
     }
 
@@ -850,11 +886,11 @@ mod tests {
         let handle = ScrollHandle::new();
         let (_, cx) = cx.add_window_view({
             let handle = handle.clone();
-            move |_, _| WheelViewport(handle)
+            move |_, _| WheelViewport(handle, px(600.))
         });
         draw(cx);
         let origin = handle.bounds().origin;
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(100.)),
             delta: ScrollDelta::Lines(point(0., -100.)),
             ..Default::default()
@@ -871,11 +907,11 @@ mod tests {
         let handle = ScrollHandle::new();
         let (_, cx) = cx.add_window_view({
             let handle = handle.clone();
-            move |_, _| WheelViewport(handle)
+            move |_, _| WheelViewport(handle, px(600.))
         });
         draw(cx);
         let wheel = |cx: &mut VisualTestContext, dy| {
-            cx.simulate_event(ScrollWheelEvent {
+            cx.simulate_event(ScrollEvent {
                 position: point(px(100.), px(100.)),
                 delta: ScrollDelta::Lines(point(0., dy)),
                 ..Default::default()
@@ -957,7 +993,7 @@ mod tests {
     }
 
     fn scroll_at(cx: &mut VisualTestContext, y: f32, delta: f32, phase: TouchPhase) {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(y)),
             delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
             touch_phase: phase,
@@ -1049,7 +1085,7 @@ mod tests {
         cx.update(|window, cx| {
             for (delta, phase) in [(-30., TouchPhase::Started), (0., TouchPhase::Ended)] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::Scroll(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
                         touch_phase: phase,
@@ -1080,7 +1116,7 @@ mod tests {
         cx.update(|window, cx| {
             for (delta, phase) in [(-30., TouchPhase::Started), (5., TouchPhase::Moved)] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::Scroll(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
                         touch_phase: phase,
@@ -1369,7 +1405,7 @@ mod tests {
         cx.update(|window, cx| {
             for delta in [point(px(30.), px(-20.)), point(px(0.), px(-20.))] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::Scroll(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(delta),
                         touch_phase: TouchPhase::Moved,

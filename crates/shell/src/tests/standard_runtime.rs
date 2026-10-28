@@ -52,13 +52,22 @@ fn llrt_pure_modules_execute_inside_the_shell_runtime(cx: &mut TestAppContext) {
         move |_, _| view_to_draw.into_any_element(),
     );
 
+    // A missing snapshot means the script threw, so report its error rather
+    // than an empty result.
     let rendered = context.update(|_, cx| {
-        view.read(cx)
-            .snapshot()
-            .map(crate::RenderSnapshot::debug_tree)
-            .unwrap_or_default()
+        let view = view.read(cx);
+        match view.snapshot() {
+            Some(snapshot) => snapshot.debug_tree(),
+            None => panic!(
+                "the render produced no snapshot; the build failed with: {}",
+                view.build_error().unwrap_or("no error was recorded either")
+            ),
+        }
     });
-    let joined_path = format!("a{}b", std::path::MAIN_SEPARATOR);
+    // The snapshot quotes text the way `Debug` does, so a Windows backslash comes back escaped.
+    let joined_path = format!("a{}b", std::path::MAIN_SEPARATOR)
+        .escape_debug()
+        .to_string();
     let expected = format!(
         "7368656c6c|{joined_path}|example.com|shell|\
          ce635c4eabff5e4f56dba8fb1e39ca235530aa2b6b18533eef1af3862016c577"
@@ -137,11 +146,17 @@ fn text_encoder_and_decoder_follow_the_encoding_standard(cx: &mut TestAppContext
         gpui::size(gpui::px(400.), gpui::px(300.)),
         move |_, _| view_to_draw.into_any_element(),
     );
+    // A missing snapshot means the script threw, so report its error rather
+    // than an empty result.
     let rendered = context.update(|_, cx| {
-        view.read(cx)
-            .snapshot()
-            .map(crate::RenderSnapshot::debug_tree)
-            .unwrap_or_default()
+        let view = view.read(cx);
+        match view.snapshot() {
+            Some(snapshot) => snapshot.debug_tree(),
+            None => panic!(
+                "the render produced no snapshot; the build failed with: {}",
+                view.build_error().unwrap_or("no error was recorded either")
+            ),
+        }
     });
     let expected = "utf-8|\
         104,195,169,228,184,173,240,159,152,128|\
@@ -220,11 +235,17 @@ export default class Probe extends View {
         gpui::size(gpui::px(400.), gpui::px(300.)),
         move |_, _| view_to_draw.into_any_element(),
     );
+    // A missing snapshot means the script threw, so report its error rather
+    // than an empty result.
     let rendered = context.update(|_, cx| {
-        view.read(cx)
-            .snapshot()
-            .map(crate::RenderSnapshot::debug_tree)
-            .unwrap_or_default()
+        let view = view.read(cx);
+        match view.snapshot() {
+            Some(snapshot) => snapshot.debug_tree(),
+            None => panic!(
+                "the render produced no snapshot; the build failed with: {}",
+                view.build_error().unwrap_or("no error was recorded either")
+            ),
+        }
     });
     assert!(
         // `process.env` holds only granted variables and `os.homedir` names a
@@ -283,11 +304,17 @@ export default class Probe extends View {
         gpui::size(gpui::px(400.), gpui::px(300.)),
         move |_, _| view_to_draw.into_any_element(),
     );
+    // A missing snapshot means the script threw, so report its error rather
+    // than an empty result.
     let rendered = context.update(|_, cx| {
-        view.read(cx)
-            .snapshot()
-            .map(crate::RenderSnapshot::debug_tree)
-            .unwrap_or_default()
+        let view = view.read(cx);
+        match view.snapshot() {
+            Some(snapshot) => snapshot.debug_tree(),
+            None => panic!(
+                "the render produced no snapshot; the build failed with: {}",
+                view.build_error().unwrap_or("no error was recorded either")
+            ),
+        }
     });
     assert!(
         rendered.contains("limited:") && rendered.contains("outstanding host task limit"),

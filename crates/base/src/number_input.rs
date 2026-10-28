@@ -4,8 +4,8 @@ use std::rc::Rc;
 use gpui::Focusable;
 use gpui::{
     AnyElement, App, Entity, EventEmitter, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Window, actions, div, prelude::FluentBuilder as _,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _,
 };
 
 use crate::{Button, InputBase, StyledExt as _};
@@ -105,6 +105,7 @@ pub struct NumberInput {
     increment_button: Option<ButtonDecorator>,
     input: Option<AnyElement>,
     controls_right: bool,
+    accessibility_label: Option<SharedString>,
 }
 
 /// The built-in text region of a [`NumberInput`].
@@ -166,6 +167,7 @@ impl NumberInput {
             increment_button: None,
             input: None,
             controls_right: false,
+            accessibility_label: None,
         }
     }
 
@@ -203,6 +205,15 @@ impl NumberInput {
     /// Stack both step buttons on the right side of the text region.
     pub fn controls_right(mut self) -> Self {
         self.controls_right = true;
+        self
+    }
+
+    /// Sets the name exposed to accessibility clients.
+    ///
+    /// A number input has no visible text of its own to be named by, so set
+    /// this unless the input is named some other way.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
         self
     }
 }
@@ -302,6 +313,9 @@ impl RenderOnce for NumberInput {
             .items_center()
             .disabled(disabled)
             .role(Role::SpinButton)
+            .when_some(self.accessibility_label, |this, label| {
+                this.aria_label(label)
+            })
             .when_some(value, |this, value| this.aria_numeric_value(value))
             .key_context(CONTEXT)
             .on_action({

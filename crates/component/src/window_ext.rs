@@ -103,6 +103,9 @@ pub trait WindowExt: Sized {
         F: Fn(AlertDialog, &mut Window, &mut App) -> AlertDialog + 'static;
 
     /// Return true, if there is an active Dialog.
+    ///
+    /// A dialog that is playing its exit transition is no longer active: it
+    /// accepts no input and will unmount when the transition finishes.
     fn has_active_dialog(&mut self, cx: &mut App) -> bool;
 
     /// Closes the last active Dialog.
@@ -191,7 +194,10 @@ impl WindowExt for Window {
 
     #[inline]
     fn has_active_dialog(&mut self, cx: &mut App) -> bool {
-        !WindowState::read(self, cx).active_dialogs.is_empty()
+        WindowState::read(self, cx)
+            .active_dialogs
+            .iter()
+            .any(|dialog| !dialog.closing)
     }
 
     #[inline]

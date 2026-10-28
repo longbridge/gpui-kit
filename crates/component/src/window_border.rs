@@ -121,6 +121,20 @@ pub(crate) fn window_content_insets(window: &Window) -> Edges<Pixels> {
     }
 }
 
+/// Per-side inset from the window bounds to the part of the window that is
+/// fully visible: not under the system bars, a display cutout or the on-screen
+/// keyboard ([`Window::fully_visible_bounds`]). Zero on desktop.
+pub(crate) fn window_safe_insets(window: &Window) -> Edges<Pixels> {
+    let viewport = window.viewport_size();
+    let visible = window.fully_visible_bounds();
+    Edges {
+        top: visible.top(),
+        right: viewport.width - visible.right(),
+        bottom: viewport.height - visible.bottom(),
+        left: visible.left(),
+    }
+}
+
 impl ParentElement for WindowBorder {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);

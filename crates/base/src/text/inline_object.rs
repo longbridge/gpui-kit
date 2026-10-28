@@ -14,7 +14,7 @@ use gpui::{
 use super::{
     InlineElement, TextViewMultiClickKind, inline::point_in_text_selection, state::LineSpan,
 };
-use crate::GlobalState;
+use crate::{GlobalState, touch_selection::caret_line_box};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct InlineMetrics {
@@ -146,6 +146,43 @@ impl MeasuredInlineObject {
             false,
         )
     }
+}
+
+pub(super) struct InlineObjectSelectionProjection {
+    selected: std::sync::Weak<Mutex<bool>>,
+    bounds: Bounds<Pixels>,
+}
+
+impl InlineObjectSelectionProjection {
+    pub(super) fn project(&self, start: gpui::Point<Pixels>, end: gpui::Point<Pixels>) {
+        if let Some(selected) = self.selected.upgrade()
+            && let Ok(mut selected) = selected.lock()
+        {
+            *selected = object_in_selection(self.bounds, start, end);
+        }
+    }
+
+    pub(super) fn deselect(&self) {
+        if let Some(selected) = self.selected.upgrade()
+            && let Ok(mut selected) = selected.lock()
+        {
+            *selected = false;
+        }
+    }
+}
+
+fn object_in_selection(
+    bounds: Bounds<Pixels>,
+    start: gpui::Point<Pixels>,
+    end: gpui::Point<Pixels>,
+) -> bool {
+    point_in_text_selection(
+        bounds.origin,
+        bounds.size.width,
+        start,
+        end,
+        bounds.size.height,
+    )
 }
 
 /// Atomic selection wrapper that leaves child styling and interaction to GPUI.
@@ -313,15 +350,11 @@ impl Element for InlineObject {
                             |row| row.contains(&bounds.center()),
                         )
                     })
-                    || state.selection_points(cx).is_some_and(|(start, end)| {
-                        point_in_text_selection(
-                            self.selection_bounds.origin,
-                            self.selection_bounds.size.width,
-                            start,
-                            end,
-                            self.selection_bounds.size.height,
-                        )
-                    }))
+                    || state
+                        .painted_selection_points(cx)
+                        .is_some_and(|(start, end)| {
+                            object_in_selection(self.selection_bounds, start, end)
+                        }))
         });
         if let Ok(mut value) = self.selected.lock() {
             *value = selected;
@@ -360,6 +393,19 @@ impl Element for InlineObject {
             });
         }
         if selectable {
+            view.as_ref()
+                .unwrap()
+                .read(cx)
+                .selection_adapter
+                .register_copy_projection(
+                    super::selection_adapter::CopyProjection::InlineObject(
+                        InlineObjectSelectionProjection {
+                            selected: Arc::downgrade(&self.selected),
+                            bounds: self.selection_bounds,
+                        },
+                    ),
+                    cx,
+                );
             if self.link.is_none() {
                 window.set_cursor_style(CursorStyle::IBeam, hitbox);
             }
@@ -376,6 +422,7 @@ impl Element for InlineObject {
             let text = self.text.to_string();
             let current_view = window.current_view();
             let line_bounds = self.line_bounds;
+            let object_bounds = self.selection_bounds;
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if !phase.bubble()
                     || !hitbox.is_hovered(window)
@@ -397,6 +444,13 @@ impl Element for InlineObject {
                                 event.position,
                                 TextViewMultiClickKind::Word,
                                 text.clone(),
+                                (
+                                    caret_line_box(object_bounds.origin, object_bounds.size.height),
+                                    caret_line_box(
+                                        object_bounds.top_right(),
+                                        object_bounds.size.height,
+                                    ),
+                                ),
                                 cx,
                             );
                         }

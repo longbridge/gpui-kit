@@ -39,6 +39,11 @@ const FRAME: f32 = 1. / 60.;
 /// through a long list, just as it runs into the top.
 const SPEED_SPAN: Duration = Duration::from_millis(50);
 
+/// The most a packet's unused part can be and still be rounding. Far from
+/// its start an `f32` offset cannot hold every fraction, so text that used a
+/// whole packet can report a hair more or less, which is not an edge.
+const ROUNDING: f32 = 0.01;
+
 #[derive(Default)]
 pub(crate) struct Overscroll {
     physics: Physics,
@@ -157,7 +162,7 @@ impl Overscroll {
             };
             if rest != 0. {
                 let unused = rest - scroll(rest);
-                if unused != 0. {
+                if unused.abs() > ROUNDING {
                     self.physics.pull(unused);
                 }
             }
@@ -165,7 +170,14 @@ impl Overscroll {
                 let moving = self
                     .moved_at
                     .is_some_and(|at| now.saturating_duration_since(at) < STILL);
-                let velocity = if moving { self.velocity } else { 0. };
+                // Only an edge held past its end carries the finger's speed.
+                // Let go within the text, the momentum that follows scrolls
+                // it, and throws the edge only if it runs into it.
+                let velocity = if moving && self.offset() != 0. {
+                    self.velocity
+                } else {
+                    0.
+                };
                 self.physics.let_go(velocity * CARRY);
                 thrown = true;
                 self.spent = self.offset() != 0.;
@@ -179,7 +191,7 @@ impl Overscroll {
             // and when the text runs into the edge it throws the edge as
             // fast as it arrived, once.
             let unused = dy - scroll(dy);
-            if unused != 0. {
+            if unused.abs() > ROUNDING {
                 self.physics.let_go(self.velocity * CARRY);
                 thrown = true;
                 self.spent = true;
@@ -401,6 +413,116 @@ mod tests {
         overscroll.step(lifted + Duration::from_millis(55));
         let half = overscroll.offset() / held;
         assert!((0.45..=0.55).contains(&half), "{half}");
+    }
+
+    /// Text `end` px long whose offset is an `f32`, as a scroll handle's is.
+    fn long_text(offset: &mut f32, end: f32) -> impl FnMut(f32) -> f32 + '_ {
+        move |dy: f32| {
+            let before = *offset;
+            *offset = (before + dy).clamp(-end, 0.);
+            *offset - before
+        }
+    }
+
+    #[test]
+    fn a_drag_back_off_a_far_edge_keeps_scrolling_the_text() {
+        let start = Instant::now();
+        let end = 8902.5;
+        for returned_ms in 1..60 {
+            let mut overscroll = Overscroll::default();
+            let mut offset = -end;
+            overscroll.packet(
+                0.,
+                TouchPhase::Started,
+                600.,
+                start,
+                long_text(&mut offset, end),
+            );
+            overscroll.packet(
+                -200.,
+                TouchPhase::Moved,
+                600.,
+                start,
+                long_text(&mut offset, end),
+            );
+            let lifted = start + Duration::from_millis(100);
+            overscroll.packet(
+                0.,
+                TouchPhase::Ended,
+                600.,
+                lifted,
+                long_text(&mut offset, end),
+            );
+            // Caught on its way back, then dragged past the edge into the text.
+            let caught = lifted + Duration::from_millis(returned_ms);
+            overscroll.step(caught);
+            overscroll.packet(
+                0.,
+                TouchPhase::Started,
+                600.,
+                caught,
+                long_text(&mut offset, end),
+            );
+            overscroll.packet(
+                300.,
+                TouchPhase::Moved,
+                600.,
+                caught,
+                long_text(&mut offset, end),
+            );
+            let before = offset;
+            overscroll.packet(
+                122.,
+                TouchPhase::Moved,
+                600.,
+                caught,
+                long_text(&mut offset, end),
+            );
+            assert_eq!(
+                overscroll.offset(),
+                0.,
+                "the edge stays put ({returned_ms} ms)"
+            );
+            assert!(
+                (offset - before - 122.).abs() < 0.01,
+                "the drag scrolls the text"
+            );
+        }
+    }
+
+    #[test]
+    fn a_flick_away_from_the_edges_leaves_the_next_drag_to_the_text() {
+        let start = Instant::now();
+        let frame = Duration::from_millis(16);
+        let mut overscroll = Overscroll::default();
+        let mut room = 10_000.;
+        overscroll.packet(0., TouchPhase::Started, 400., start, text(&mut room));
+        for n in 1..=6 {
+            overscroll.packet(
+                -70.,
+                TouchPhase::Moved,
+                400.,
+                start + frame * n,
+                text(&mut room),
+            );
+        }
+        let lifted = start + frame * 7;
+        overscroll.packet(0., TouchPhase::Ended, 400., lifted, text(&mut room));
+        overscroll.step(lifted + frame);
+        assert_eq!(overscroll.offset(), 0., "no edge to throw");
+        // Fingers back down at once, dragging on the same way.
+        let before = room;
+        let again = lifted + frame * 2;
+        overscroll.packet(0., TouchPhase::Started, 400., again, text(&mut room));
+        overscroll.packet(
+            -50.,
+            TouchPhase::Moved,
+            400.,
+            again + frame,
+            text(&mut room),
+        );
+        assert_eq!(before - room, 50., "the drag scrolls the text");
+        assert_eq!(overscroll.offset(), 0.);
     }
 
     #[test]

@@ -121,15 +121,20 @@ impl Column {
         self
     }
 
-    /// Set the text alignment of the column to center.
+    /// Center the column's text, in its header and in its cells.
+    ///
+    /// The table aligns text; a cell that renders its own layout, such as a
+    /// flex row, aligns that layout itself.
     pub fn text_center(mut self) -> Self {
         self.align = TextAlign::Center;
         self
     }
 
-    /// Set the alignment of the column text, default is left.
+    /// Right-align the column's text, in its header and in its cells. The
+    /// default is left.
     ///
-    /// Only `text_left`, `text_right` is supported.
+    /// The table aligns text; a cell that renders its own layout, such as a
+    /// flex row, aligns that layout itself.
     pub fn text_right(mut self) -> Self {
         self.align = TextAlign::Right;
         self

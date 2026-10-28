@@ -940,11 +940,12 @@ impl RenderOnce for QuestionnaireChoice {
             })
             .children(self.children);
 
+        let os = cx.platform_info().os;
         let default_shortcut = || {
             let Some(shortcut) = shortcut.clone() else {
                 return gpui::Empty.into_any_element();
             };
-            let Ok(keystroke) = gpui::Keystroke::parse(&shortcut.to_lowercase()) else {
+            let Ok(keystroke) = gpui::Keystroke::parse_with_os(&shortcut.to_lowercase(), os) else {
                 return gpui::Empty.into_any_element();
             };
             Kbd::new(keystroke)
@@ -1569,7 +1570,8 @@ mod tests {
     }
 
     fn simulate_key(cx: &mut VisualTestContext, key: &str, is_held: bool, simulate_ime: bool) {
-        let mut keystroke = Keystroke::parse(key).unwrap();
+        let os = cx.update(|_, cx| cx.platform_info().os);
+        let mut keystroke = Keystroke::parse_with_os(key, os).unwrap();
         if simulate_ime {
             keystroke = keystroke.with_simulated_ime();
         }
@@ -2089,7 +2091,8 @@ mod tests {
     }
 
     fn press(cx: &mut VisualTestContext, key: &str) {
-        let keystroke = Keystroke::parse(key).unwrap();
+        let os = cx.update(|_, cx| cx.platform_info().os);
+        let keystroke = Keystroke::parse_with_os(key, os).unwrap();
         cx.simulate_event(KeyDownEvent {
             keystroke: keystroke.clone(),
             is_held: false,

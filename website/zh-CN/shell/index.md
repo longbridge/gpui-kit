@@ -255,6 +255,6 @@ GPUI 的元素是**被消费**的值：`RenderOnce::render` 按值取走 `self`�
 
 ## 当前状态
 
-该 crate 处于 **M0** 里程碑：一条可行性基线，而不是稳定接口。它没有发布到 crates.io，脚本 API 预计还会变化。本节文档写到的都是已经实现并可用的部分；缺失的部分，会写在你最可能去找它的那一页上。
+该 crate 处于 **M0** 里程碑：一条可行性基线，而不是稳定接口。Rust crate 从 0.8.1 起发布到 crates.io；脚本 API 仍处于实验阶段，预计还会变化。本节文档写到的都是已经实现并可用的部分；缺失的部分，会写在你最可能去找它的那一页上。
 
 设计详见 [GPUI Shell 设计文档](https://github.com/longbridge/gpui-kit/blob/main/docs/gpui-shell.md)，代码位于 [`crates/shell`](https://github.com/longbridge/gpui-kit/tree/main/crates/shell)。

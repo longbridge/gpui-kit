@@ -38,6 +38,10 @@ If the application already calls `gpui_kit::component::init`, Base initializatio
 
 TextView is selectable by default. While dragging a selection near a viewport edge, the shared selection layer scrolls the related `overflow_*_scroll` region automatically; no TextView scroll or selection parameter is required. Use `.selectable(false)` only to disable selection explicitly.
 
+Double-click selects a word and triple-click a paragraph. A drag that continues the click, or a Shift-click after it, extends the selection by whole words or paragraphs and keeps the first one selected.
+
+A drag that starts in a table cell selects only in that cell; when the pointer leaves the cell, the selection stops at its edge. A drag that starts outside the table selects through it. Use `table_actions` to offer a copy of the whole table.
+
 ## Markdown and HTML
 
 Use the helpers for call-site-derived IDs, or constructors when an explicit stable ID is useful:
@@ -276,7 +280,7 @@ view's own list, an enclosing `gpui::list`, or `TextView::on_reveal` for any
 other container; see [Highlight ranges](../component/text-view.md#highlight-ranges)
 and [Scroll to a range](../component/text-view.md#scroll-to-a-range).
 
-Selection can copy rendered text or Markdown source through `SelectionFormat`. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
+Selection can copy rendered text or Markdown source through `SelectionFormat`; `SelectionFormat::SourceAcrossStyles` copies the source only when the selection takes in more than one style, such as text on both sides of a `**bold**` boundary or two blocks. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
 
 ## Runnable source
 
@@ -291,3 +295,106 @@ cargo run -p gpui-base-examples -- text-view
 ## Selection across presentation changes
 
 Completed selections retain their logical text range and Copy payload when styles, syntax highlighting, inherited fonts, or width change. Current presentation and wrapping still apply. Moving the mounted view does not reinterpret the old pointer rectangle. A new selection gesture or explicit clear updates the selection normally. Replacing the source or Markdown parser configuration clears the selection. The owning view must keep the state and selection participant mounted; this behavior does not pin rows in an outer virtual list.
+
+
+## Build an external rich-text component
+
+`gpui_kit::base::text::editor_host` exposes the TextView renderer without
+requiring an external component to adopt its editing model. Project your own
+document into `BlockNode` values; keep commands, history, selection, focus and
+native input in your component.
+
+- Build leaves with `Paragraph::with_leaf_key` or `CodeBlock::with_leaf_key`.
+  Keys must be unique within a collection scope. Clones initially share runtime
+  state; rekeying a clone detaches its leaf state from the original.
+- Use `RenderContext::new(style)` for local presentation or `from_app(cx)`
+  for TextView defaults. Local overrides include
+  `with_code_block_highlighter`, `with_image_source`, `on_link_click` and
+  `with_link_reference`.
+- Render blocks with `render_with_id` using stable domain IDs. Leaf geometry
+  keys and GPUI element IDs serve separate purposes.
+- In a custom element's prepaint, call
+  `collect_leaf_geometry(decorations, || child.prepaint(window, cx))`.
+  It returns only leaves prepainted in that scope. Nested scopes are isolated.
+- Replace geometry after content, typography, width or scrolling changes.
+  `LeafGeometry` is an immutable snapshot in window logical pixels; offsets
+  are UTF-8 bytes with three bytes per inline atom (U+FFFC).
+- Decorations are ordered half-open ranges. Text backgrounds paint behind
+  glyphs; atom decorations cover the whole atom and paint over its content.
+  Use translucent colors for atom selection.
+
+This API shares TextView's horizontal block-flow renderer. The host still owns
+UTF-16 conversion for native input, accessibility integration and virtualization.
+The current byte-index geometry does not represent bidirectional caret affinity
+or both sides of a soft-wrap boundary; do not treat it as a complete visual
+navigation API.
+
+## Inline code style
+
+`TextView::inline_code_style(StyleRefinement)` refines inline code after the
+resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The Base style also exposes `TextViewStyle::with_inline_code_style` and the
+`inline_code_style()` reader. Existing `with_inline_code(HighlightStyle)`
+continues to work; the new refinement takes precedence.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+
+let border = gpui_kit::base::Theme::global(cx).tokens.colors.border;
+
+TextView::markdown("notes", "Run `cargo build` first.")
+    .inline_code_style(
+        StyleRefinement::default()
+            .text_size(rems(1.))
+            .px(rems(0.25))
+            .border_1()
+            .border_color(border),
+    )
+```
+
+Supported properties are font family, size, features, fallbacks, weight,
+italic, color, underline, strikethrough, background, border widths/color/style,
+corner radii, and padding. Font sizes use pixels or window-relative rems;
+non-finite or non-positive sizes retain the default. Without a font-size override,
+code remains 0.875 times its surrounding text. Without a border override, code
+has no border. Padding and border widths participate in wrapping and table
+measurement. Margin, positioning, flex, explicit box size, overflow, and
+interaction properties are not used; line height remains owned by the paragraph.
+
+## List and blockquote style
+
+`TextView::list_style(StyleRefinement)` and
+`blockquote_style(StyleRefinement)` refine list markers and blockquotes after
+the resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The Base style also exposes `TextViewStyle::with_list_style` and
+`with_blockquote_style`, with `list_style()` and `blockquote_style()`
+readers.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+
+let primary = gpui_kit::base::Theme::global(cx).tokens.colors.primary;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(primary))
+    .blockquote_style(StyleRefinement::default().border_color(primary))
+```
+
+The list marker refinement applies to the bullet or number column of each
+item, over its defaults: muted text color, a minimum width of the list indent,
+right-aligned text, and a right padding of 0.3 times that indent. Text
+properties such as color, font family, size, and weight style the marker; box
+properties such as width and padding change the marker column. Its text color
+also outlines an unchecked task-list checkbox; a checked one keeps the link
+color.
+
+The blockquote refinement applies to the quote container, over its defaults:
+muted text color, a 2px left border in the border color, and a left padding of
+0.9 times the body font size. Border widths and color style the quote bar;
+text properties, background, padding, and corner radii style the quote and the
+blocks inside it. Child blocks keep their own explicit styles, including
+heading and table font sizes. Other element properties apply to the container
+as they do to any `div`. Code blocks, tables, rules, and done tasks keep the
+shared muted and border colors.

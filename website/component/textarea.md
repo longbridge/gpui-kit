@@ -41,6 +41,13 @@ Textarea::new(&message)
 
 The control grows until `max_rows`; overflowing content then scrolls.
 
+## Sizing to content
+
+For host-controlled sizing, read `notes.read(cx).display_map().wrap_row_count()`.
+The same [prewrap pattern as Editor](./editor.md#sizing-to-content) prepares the
+count before the first layout; use the textarea's actual font, font size and
+text-area width rather than the editor's monospace defaults.
+
 ## Scrolling
 
 A scroll over a textarea whose text can scroll stays in the textarea, even at

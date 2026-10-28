@@ -25,7 +25,11 @@ fn open_and_notify(window: &mut Window, cx: &mut App) {
 
 #[gpui_kit::test]
 fn a_root_renders_the_layers_a_plain_view_leaves_out(cx: &mut TestAppContext) {
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        // This test checks layer hosting, independently of animation time.
+        cx.set_reduce_motion(true);
+    });
     let (handle, _) = common::open_window(cx, Some(size(px(800.), px(600.))), |_window, cx| {
         let view = cx.new(|_| PlainView);
         view
@@ -49,7 +53,11 @@ fn a_root_renders_the_layers_a_plain_view_leaves_out(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn open_window_wraps_the_view_in_a_root_and_returns_the_view(cx: &mut TestAppContext) {
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        // This test checks layer hosting, independently of animation time.
+        cx.set_reduce_motion(true);
+    });
     let (handle, view) = cx
         .update(|cx| {
             gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| PlainView))

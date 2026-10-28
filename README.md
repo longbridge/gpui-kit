@@ -255,7 +255,7 @@ See the [comparison with Iced, egui and Qt 6](https://gpui-kit.com/docs/comparis
 
 ## Related project: Native Shell
 
-[Native Shell](https://native-shell.com) ([source](https://github.com/longbridge/native-shell)) is a sibling project that lets AI generate UI and renders it natively on iOS, Android, Linux (GTK) and macOS (AppKit). Its GPUI desktop backend is in development and will be built on GPUI Kit.
+[Native Shell](https://nsh.dev) ([source](https://github.com/longbridge/native-shell)) is a sibling project that lets AI generate UI and renders it natively on iOS, Android, Linux (GTK) and macOS (AppKit). Its GPUI desktop backend is in development and will be built on GPUI Kit.
 
 ## License
 

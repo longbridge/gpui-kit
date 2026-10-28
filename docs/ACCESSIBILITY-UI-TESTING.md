@@ -61,6 +61,17 @@ Undo                                -> empty
 Redo                                -> value "ab"
 ```
 
+For Input, Textarea and Editor, require the named, typed text node itself to
+match keyboard editor focus. A named outer frame or a window-root focus is not
+equivalent. Exercise both Tab directions with independently focusable prefix
+and suffix buttons, activate those buttons, and confirm they neither keep the
+text node focused nor edit its value. Component-ID queries retain frame geometry
+and addon scopes while reading semantics from that same native editor; labels
+are not a required replacement for an assigned component ID. The developer
+accessibility ID belongs to the semantic editor. Recheck native SetValue after
+read-only/disabled transitions, and verify masked or password-typed content
+never publishes its hidden source as a value.
+
 Also verify that a no-op edit, such as Backspace at offset zero, does not
 destroy an existing redo branch.
 

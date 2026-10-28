@@ -6,6 +6,7 @@ use gpui::{
     App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, Pixels, SharedString, Visibility, Window, px,
 };
+use smallvec::SmallVec;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -14,6 +15,9 @@ use std::{
 };
 
 /// Owned facts from the last paint of an observed element.
+///
+/// A component-ID query may read semantics from an explicitly declared native
+/// owner, while keeping the component frame's path, bounds and visibility.
 #[derive(Clone)]
 pub struct ElementSnapshot {
     role: Option<gpui::Role>,
@@ -29,6 +33,8 @@ pub struct ElementSnapshot {
     focus_action: bool,
     disabled: Option<bool>,
     label: Option<SharedString>,
+    description: Option<SharedString>,
+    placeholder: Option<SharedString>,
 }
 impl fmt::Debug for ElementSnapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -57,6 +63,8 @@ impl fmt::Debug for ElementSnapshot {
             .field("focus_action", &self.focus_action)
             .field("disabled", &self.disabled)
             .field("label", &self.label)
+            .field("description", &self.description)
+            .field("placeholder", &self.placeholder)
             .finish()
     }
 }
@@ -92,6 +100,8 @@ impl ElementSnapshot {
         self.visible
     }
     /// Whether the tracked focus scope contains the current keyboard focus.
+    /// For a component with an explicit semantic owner, this is the owner's
+    /// focus scope, not the frame's independently focusable addon controls.
     /// `None` means no focus binding or native focus capability was observed.
     /// Panics if the native element advertises `Action::Focus` but its binding was missed.
     /// Custom elements omitting that action cannot be diagnosed and may return `None`.
@@ -112,6 +122,14 @@ impl ElementSnapshot {
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
     }
+    /// The accessibility description, read after the label; it does not replace it.
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+    /// The accessibility placeholder: a prompt shown while the element has no value.
+    pub fn placeholder(&self) -> Option<&str> {
+        self.placeholder.as_deref()
+    }
 }
 
 // Each Window owns a distinct Arc<WindowTextSystem>, stable even during initial
@@ -126,6 +144,7 @@ pub struct Registration {
     window: WindowKey,
     global_id: GlobalElementId,
     facts: RefCell<ElementSnapshot>,
+    semantic_owner: RefCell<Option<GlobalElementId>>,
 }
 impl Drop for Registration {
     fn drop(&mut self) {
@@ -139,6 +158,49 @@ impl Drop for Registration {
                 }
             }
         });
+    }
+}
+
+impl Registration {
+    fn snapshot(&self, entries: &HashMap<GlobalElementId, Weak<Registration>>) -> ElementSnapshot {
+        let facts = self.facts.borrow();
+        let owner = self.semantic_owner.borrow();
+        let Some(owner_id) = owner.as_ref() else {
+            return facts.clone();
+        };
+        let owner = entries
+            .get(owner_id)
+            .and_then(Weak::upgrade)
+            .unwrap_or_else(|| panic!("semantic owner {owner_id:?} was not observed"));
+        let semantics = owner.facts.borrow();
+        // Identity and pointer targeting belong to the frame; semantic facts
+        // belong only to the explicitly named native editor.
+        ElementSnapshot {
+            path: facts.path.clone(),
+            bounds: facts.bounds,
+            visible: facts.visible,
+            role: semantics.role,
+            checked: semantics.checked,
+            indeterminate: semantics.indeterminate,
+            selected: semantics.selected,
+            expanded: semantics.expanded,
+            value: semantics.value.clone(),
+            focused: semantics.focused,
+            focus_action: semantics.focus_action,
+            disabled: semantics.disabled,
+            label: semantics.label.clone(),
+            description: semantics.description.clone(),
+            placeholder: semantics.placeholder.clone(),
+        }
+    }
+}
+
+fn descendant_id(window: &mut Window, path: &[ElementId]) -> GlobalElementId {
+    let (id, rest) = path.split_first().expect("semantic owner path is nonempty");
+    if rest.is_empty() {
+        window.with_global_id(id.clone(), |id, _| id.clone())
+    } else {
+        window.with_id(id.clone(), |window| descendant_id(window, rest))
     }
 }
 
@@ -172,7 +234,7 @@ pub fn find_all(window: &Window, scope: &[ElementId], id: &ElementId) -> Vec<Ele
                     && entry.global_id.starts_with(scope)
                     && entry.global_id.last() == Some(id)
             })
-            .map(|entry| entry.facts.borrow().clone())
+            .map(|entry| entry.snapshot(entries))
             .collect()
     });
     matches.sort_unstable_by_key(|entry| (entry.bounds.origin.y, entry.bounds.origin.x));
@@ -247,6 +309,7 @@ pub fn registered_paths(window: &Window) -> String {
 pub struct Observed<E> {
     inner: E,
     focus: Option<FocusHandle>,
+    semantic_owner: Option<SmallVec<[ElementId; 2]>>,
 }
 impl<E: Element> Observed<E> {
     /// Repeated observation keeps one registration and the same native identity.
@@ -263,6 +326,7 @@ impl<E: Element> Observed<E> {
         Observed {
             inner: self.inner.id(id),
             focus: self.focus,
+            semantic_owner: self.semantic_owner,
         }
     }
 
@@ -272,7 +336,17 @@ impl<E: Element> Observed<E> {
         Observed {
             inner: f(self.inner),
             focus: self.focus,
+            semantic_owner: self.semantic_owner,
         }
+    }
+
+    /// Query semantics come from this exact descendant, without changing native
+    /// accessibility, focus registration, frame geometry or GPUI identity.
+    pub(crate) fn semantic_owner(mut self, path: impl IntoIterator<Item = ElementId>) -> Self {
+        let path: SmallVec<_> = path.into_iter().collect();
+        assert!(!path.is_empty(), "semantic owner path is nonempty");
+        self.semantic_owner = Some(path);
+        self
     }
 
     pub(crate) fn new(inner: E) -> Self {
@@ -280,7 +354,11 @@ impl<E: Element> Observed<E> {
             Element::id(&inner).is_some(),
             "test_support requires an existing ElementId"
         );
-        Self { inner, focus: None }
+        Self {
+            inner,
+            focus: None,
+            semantic_owner: None,
+        }
     }
 }
 impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> IntoElement for Observed<E> {
@@ -335,6 +413,8 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
             focus_action: node.supports_action(gpui::accesskit::Action::Focus),
             disabled: node.is_disabled().then_some(true),
             label: node.label().map(|label| label.to_owned().into()),
+            description: node.description().map(|text| text.to_owned().into()),
+            placeholder: node.placeholder().map(|text| text.to_owned().into()),
         };
         let registration =
             window.with_element_state(global_id, |state: Option<Rc<Registration>>, window| {
@@ -343,9 +423,22 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
                         window: std::sync::Arc::as_ptr(window.text_system()) as usize,
                         global_id: global_id.clone(),
                         facts: RefCell::new(facts.clone()),
+                        semantic_owner: RefCell::new(None),
                     })
                 });
                 *registration.facts.borrow_mut() = facts;
+                let owner_changed = registration
+                    .semantic_owner
+                    .borrow()
+                    .as_ref()
+                    .map(|owner| &owner[global_id.len()..])
+                    != self.semantic_owner.as_deref();
+                if owner_changed {
+                    *registration.semantic_owner.borrow_mut() = self
+                        .semantic_owner
+                        .as_ref()
+                        .map(|path| descendant_id(window, path));
+                }
                 REGISTRY.with(|registry| {
                     registry
                         .borrow_mut()

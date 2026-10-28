@@ -142,6 +142,16 @@ pub trait TableDelegate: Sized + 'static {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement;
 
+    /// Return the text a screen reader should read for the cell at the given
+    /// row and column, usually the text [`render_td`](Self::render_td) draws.
+    ///
+    /// Plain text drawn by a cell is not exposed to assistive technology, so
+    /// without this a cell is announced with no content. Returns `None` by
+    /// default.
+    fn cell_label(&self, row_ix: usize, col_ix: usize, cx: &App) -> Option<SharedString> {
+        None
+    }
+
     /// Move the column at the given `col_ix` so that it ends up at the index `to_ix`.
     ///
     /// e.g.: `let col = self.columns.remove(col_ix); self.columns.insert(to_ix, col);`

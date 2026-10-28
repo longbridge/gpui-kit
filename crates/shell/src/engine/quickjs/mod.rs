@@ -4316,7 +4316,7 @@ impl ShellRuntime {
     pub(crate) fn dispatch_scroll_wheel(
         self: &Rc<Self>,
         id: CallbackId,
-        event: &gpui::ScrollWheelEvent,
+        event: &gpui::ScrollEvent,
         line_height: gpui::Pixels,
         bounds: Option<gpui::Bounds<gpui::Pixels>>,
         window: &mut Window,
@@ -7333,6 +7333,7 @@ impl ShellRuntime {
                 "default_open",
                 "overlay_closable",
                 "with_item_to_measure_index",
+                "with_follow_mode",
             ]
             .into_iter()
             .enumerate()
@@ -8310,6 +8311,7 @@ impl ShellRuntime {
             | "track_focus"
             | "track_scroll"
             | "with_item_to_measure_index"
+            | "with_follow_mode"
             | "content_focus_handle"
             | "key_context"
             | "aria_level"
@@ -8364,6 +8366,7 @@ impl ShellRuntime {
                     "track_focus" => "track_focus",
                     "track_scroll" => "track_scroll",
                     "with_item_to_measure_index" => "with_item_to_measure_index",
+                    "with_follow_mode" => "with_follow_mode",
                     "content_focus_handle" => "content_focus_handle",
                     "key_context" => "key_context",
                     "aria_level" => "aria_level",
@@ -8430,6 +8433,19 @@ impl ShellRuntime {
                         ctx,
                         "tooltip(text) expects a string; a tooltip built from an element is not \
                          bound yet",
+                    ));
+                }
+                // Anything else would leave the list in whichever mode it was
+                // in, with nothing on screen to say why it is not following.
+                if name == "with_follow_mode"
+                    && !matches!(
+                        bridged.first().and_then(|value| value.as_str().ok()),
+                        Some("normal" | "tail")
+                    )
+                {
+                    return Err(js_error::type_error(
+                        ctx,
+                        r#"with_follow_mode(mode) expects "normal" or "tail""#,
                     ));
                 }
                 // A bar that silently sits at zero because the percentage

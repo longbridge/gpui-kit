@@ -57,7 +57,13 @@ impl AssetSource for AppAssets {
 
 actions!(speech, [ToggleSpeech]);
 
-const TOGGLE_KEYS: &str = "secondary-shift-d";
+fn toggle_keys(cx: &App) -> &'static str {
+    if cx.platform_info().is_mac() {
+        "cmd-shift-d"
+    } else {
+        "ctrl-shift-d"
+    }
+}
 /// Most log entries kept; older ones scroll away.
 const LOG_LIMIT: usize = 200;
 
@@ -509,7 +515,7 @@ impl SpeechApp {
             ),
         };
         let capturing = status.is_capturing();
-        let toggle_keys = Keystroke::parse(TOGGLE_KEYS).ok().map(Kbd::new);
+        let toggle_keys = Keystroke::parse(toggle_keys(cx)).ok().map(Kbd::new);
 
         h_flex()
             .gap_3()
@@ -837,7 +843,7 @@ fn main() {
             return;
         }
 
-        cx.bind_keys([KeyBinding::new(TOGGLE_KEYS, ToggleSpeech, None)]);
+        cx.bind_keys([KeyBinding::new(toggle_keys(cx), ToggleSpeech, None)]);
         cx.activate(true);
 
         let window_options = WindowOptions {

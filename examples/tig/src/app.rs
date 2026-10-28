@@ -67,6 +67,7 @@ mod commands {
 use commands::*;
 
 pub(super) fn init(cx: &mut App) {
+    let is_mac = cx.platform_info().is_mac();
     cx.bind_keys([
         KeyBinding::new("down", OlderCommit, Some("TigHistory")),
         KeyBinding::new("j", OlderCommit, Some("TigHistory")),
@@ -83,10 +84,26 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("escape", FocusHistory, Some("Tig")),
         KeyBinding::new("n", NextChange, Some("Tig")),
         KeyBinding::new("shift-n", PreviousChange, Some("Tig")),
-        KeyBinding::new("secondary-b", ToggleSidebar, Some("Tig")),
-        KeyBinding::new("secondary-r", Refresh, Some("Tig")),
-        KeyBinding::new("secondary-shift-c", CopyHash, Some("Tig")),
-        KeyBinding::new("secondary-q", Quit, Some("Tig")),
+        KeyBinding::new(
+            if is_mac { "cmd-b" } else { "ctrl-b" },
+            ToggleSidebar,
+            Some("Tig"),
+        ),
+        KeyBinding::new(
+            if is_mac { "cmd-r" } else { "ctrl-r" },
+            Refresh,
+            Some("Tig"),
+        ),
+        KeyBinding::new(
+            if is_mac {
+                "cmd-shift-c"
+            } else {
+                "ctrl-shift-c"
+            },
+            CopyHash,
+            Some("Tig"),
+        ),
+        KeyBinding::new(if is_mac { "cmd-q" } else { "ctrl-q" }, Quit, Some("Tig")),
     ]);
 }
 

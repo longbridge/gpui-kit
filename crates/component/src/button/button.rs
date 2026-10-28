@@ -10,9 +10,9 @@ use crate::{
     tooltip::{ManagedTooltipExt as _, Tooltip},
 };
 use gpui::{
-    AnyElement, App, Background, ClickEvent, Corners, Edges, ElementId, Hsla, InteractiveElement,
-    Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
+    AnyElement, App, Background, ClickEvent, Corners, Edges, ElementId, FocusHandle, Hsla,
+    InteractiveElement, Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce,
+    Role, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _, relative, transparent_white,
 };
 
@@ -227,6 +227,7 @@ pub struct Button {
     loading: bool,
     loading_icon: Option<Icon>,
     focus_ring_enabled: bool,
+    focus_handle: Option<FocusHandle>,
 
     tab_index: isize,
     tab_stop: bool,
@@ -272,6 +273,7 @@ impl Button {
             tooltip_builder: None,
             on_click: None,
             focus_ring_enabled: true,
+            focus_handle: None,
             on_hover: None,
             loading: false,
             compact: false,
@@ -476,6 +478,16 @@ impl Button {
         self
     }
 
+    /// Use a caller-owned focus handle instead of the one the button keeps for
+    /// itself, so the application can focus the button and restore focus to it.
+    ///
+    /// The handle drives the focus ring, Enter and Space activation and the
+    /// accessibility focus state alike.
+    pub fn track_focus(mut self, focus_handle: &FocusHandle) -> Self {
+        self.focus_handle = Some(focus_handle.clone());
+        self
+    }
+
     /// Set the tab index of the button, it will be used to focus the button by tab key.
     ///
     /// Default is 0.
@@ -637,10 +649,12 @@ impl RenderOnce for Button {
             FocusLine::Inside(normal_style.fg.opacity(FOCUS_LINE_OPACITY))
         };
 
-        let focus_handle = window
-            .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
-            .read(cx)
-            .clone();
+        let focus_handle = self.focus_handle.clone().unwrap_or_else(|| {
+            window
+                .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
+                .read(cx)
+                .clone()
+        });
         let is_focused = focus_handle.is_focused(window);
 
         let rounding = match self.rounded {
@@ -1515,6 +1529,65 @@ mod tests {
         assert_eq!(keyboard_clicks.get(), 2);
     }
 
+    /// A button keeps the application's focus handle, so focus the application
+    /// gives it shows on the button and activates it from the keyboard.
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn caller_owned_focus_handle_drives_focus_and_keyboard_activation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{Context, KeyDownEvent, KeyUpEvent, Keystroke, Render};
+
+        struct Harness {
+            focus_handle: FocusHandle,
+            clicks: Rc<Cell<usize>>,
+        }
+
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let clicks = self.clicks.clone();
+                div().size(px(100.)).child(
+                    Button::new("details")
+                        .label("Details")
+                        .track_focus(&self.focus_handle)
+                        .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+                )
+            }
+        }
+
+        cx.update(crate::init);
+        let clicks = Rc::new(Cell::new(0));
+        let (view, cx) = cx.add_window_view({
+            let clicks = clicks.clone();
+            move |_, cx| Harness {
+                focus_handle: cx.focus_handle(),
+                clicks,
+            }
+        });
+        let focus_handle = cx.update(|_, cx| view.read(cx).focus_handle.clone());
+        cx.update(|window, cx| {
+            focus_handle.focus(window, cx);
+            window.draw(cx).clear(cx);
+        });
+
+        let button = cx.update(|window, _| {
+            gpui_base::test_support::find(window, &[], &ElementId::from("details"))
+                .expect("button is painted")
+        });
+        assert_eq!(button.focused(), Some(true));
+
+        let keystroke = Keystroke::parse("enter").unwrap();
+        cx.simulate_event(KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(KeyUpEvent { keystroke });
+        assert_eq!(clicks.get(), 1);
+    }
+
     #[gpui::test]
     fn loading_button_keeps_existing_pointer_blocking(cx: &mut gpui::TestAppContext) {
         use std::{cell::Cell, rc::Rc};
@@ -1678,6 +1751,7 @@ mod tests {
         assert!(!button.disabled);
         assert!(!button.selected);
         assert_eq!(button.toggled, None);
+        assert!(button.focus_handle.is_none());
         assert_eq!(button.tab_index, 1);
         assert!(button.tab_stop);
         assert!(!button.dropdown_caret);

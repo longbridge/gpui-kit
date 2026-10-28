@@ -8,7 +8,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{
-    AppContext, Context, Entity, Focusable, TestAppContext, Window, div, prelude::*, px, size,
+    AppContext, Bounds, Context, Entity, Focusable, TestAppContext, Window, div, point, prelude::*,
+    px, size,
 };
 use std::time::Duration;
 
@@ -84,7 +85,11 @@ impl Render for Workspace {
 
 #[gpui_kit::test]
 async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut TestAppContext) {
-    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        // Validation and scoped input should not depend on animation progress.
+        cx.set_reduce_motion(true);
+    });
     let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
         let view = cx.new(|cx| Workspace {
             saved: cx.new(|cx| InputState::new(window, cx)),
@@ -103,7 +108,7 @@ async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut
     })
     .await;
     cx.update_window(handle.into(), |_, window, cx| {
-        let dialog = window.within("dialog").find(0usize).bounds();
+        let dialog = window.within("dialog").find("surface").bounds();
         assert!(dialog.left() >= px(0.) && dialog.right() <= window.viewport_size().width);
         assert!(dialog.top() >= px(0.) && dialog.bottom() <= window.viewport_size().height);
         window.within("dialog").click("ok", cx);
@@ -227,6 +232,47 @@ async fn escape_dismisses_dialog_and_sheet_and_restores_focus(cx: &mut TestAppCo
     .await;
     cx.update_window(handle.into(), |_, window, _| {
         assert_eq!(window.find("name").focused(), Some(true));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+async fn sheet_and_notifications_stay_in_the_fully_visible_area(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(400.), px(800.))), |window, cx| {
+        cx.new(|cx| Workspace {
+            saved: cx.new(|cx| InputState::new(window, cx)),
+            draft: cx.new(|cx| InputState::new(window, cx)),
+        })
+    });
+    // As on a phone: a status bar above, the on-screen keyboard below.
+    let visible = Bounds::new(point(px(0.), px(40.)), size(px(400.), px(500.)));
+    cx.simulate_window_visual_viewport_change(handle.into(), visible);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.fully_visible_bounds(), visible);
+        window.click("notify", cx);
+        window.click("inspect", cx);
+    })
+    .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("sheet-content").is_some() && window.try_find("notification").is_some()
+    })
+    .await;
+    // Let the sheet's 150 ms entrance finish (see above).
+    std::thread::sleep(Duration::from_millis(160));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let sheet = window.find("sheet-content").bounds();
+        assert!(
+            sheet.top() >= visible.top() && sheet.bottom() <= visible.bottom(),
+            "sheet {sheet:?} outside {visible:?}"
+        );
+        let toast = window.find("notification").bounds();
+        assert!(
+            toast.top() >= visible.top() && toast.bottom() <= visible.bottom(),
+            "notification {toast:?} outside {visible:?}"
+        );
     })
     .unwrap();
 }

@@ -541,7 +541,7 @@ mod tests {
         assert_eq!(top(cx).item_ix, 10);
 
         // A wheel scroll by one row: its 40px and the 32px gap after it.
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: gpui::point(px(200.), px(200.)),
             delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-72.))),
             ..Default::default()

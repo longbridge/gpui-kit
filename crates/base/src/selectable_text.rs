@@ -6,9 +6,9 @@ use gpui::{
     SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
 };
 
-use crate::{TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
+use crate::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
 
-/// Plain text that participates in the window-scoped [`TextSelection`].
+/// Plain text that participates in the window-scoped [`TextSelection`](crate::TextSelection).
 ///
 /// Use [`Self::new`] for an independent run, or [`Self::with_handle`] when
 /// several elements form one selectable document.
@@ -207,7 +207,7 @@ impl Element for SelectableText {
         cx: &mut App,
     ) {
         let layout = self.styled_text.layout().clone();
-        let selected_text_before = TextSelection::selected_text(window, cx);
+        let copy_text_before = handle.projected_copy_text(cx);
         let projection = handle.update_runs(
             &[
                 TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)
@@ -215,7 +215,7 @@ impl Element for SelectableText {
             ],
             cx,
         );
-        if selected_text_before != TextSelection::selected_text(window, cx) {
+        if copy_text_before != handle.projected_copy_text(cx) {
             window.refresh();
         }
         let color = self
@@ -238,6 +238,8 @@ impl Element for SelectableText {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, rc::Rc};
+
     use gpui::{
         Bounds, Context, IntoElement, Modifiers, MouseButton, ParentElement as _, Render,
         Styled as _, TestAppContext, Window, div, point, px, size,
@@ -293,6 +295,53 @@ mod tests {
             let _ = window.draw(cx);
             assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
         });
+    }
+
+    struct CopyCallbackTestView {
+        handle: TextSelectionHandle,
+    }
+
+    impl Render for CopyCallbackTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(TextSelectionLayer)
+                .child(SelectableText::new("local", "alpha beta"))
+                .child(SelectableText::with_handle(
+                    "custom",
+                    self.handle.clone(),
+                    "gamma",
+                ))
+        }
+    }
+
+    #[gpui::test]
+    fn paint_does_not_resolve_window_selected_text(cx: &mut TestAppContext) {
+        let copies = Rc::new(Cell::new(0));
+        let handle = cx.update(|cx| {
+            let handle = TextSelectionHandle::new("gamma", cx);
+            let copies = copies.clone();
+            handle.copy_with(
+                move |_| {
+                    copies.set(copies.get() + 1);
+                    "gamma".into()
+                },
+                cx,
+            );
+            handle.set_local_selection(true, cx);
+            handle
+        });
+        let (_, cx) = cx.add_window_view(|_, _| CopyCallbackTestView { handle });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        copies.set(0);
+
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        assert_eq!(copies.get(), 0);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { div, Background } from 'gpui-kit';
-import { Spinner, Empty, EmptyHeader, EmptyMedia } from 'gpui-component';
+import { Button, Spinner, Empty, EmptyHeader, EmptyMedia } from 'gpui-component';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, TextareaState } from 'gpui-component';
 
 // @ts-expect-error Group sizing uses the standard control tiers.
@@ -71,3 +71,8 @@ div().shadow([{ y: 1 }]);
 div().shadow([{ blur_radius: 2, color: '#000' }]);
 // @ts-expect-error Only `bg` takes a Background; a border colour is a colour.
 div().border_color(Background.solid('#000'));
+
+// @ts-expect-error An accessible button name must be a string.
+Button.new('action').p(2).accessibility_label(123);
+// @ts-expect-error An accessible button name is required.
+Button.new('action').accessibility_label();

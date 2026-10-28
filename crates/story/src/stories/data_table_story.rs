@@ -688,12 +688,19 @@ impl TableDelegate for StockTableDelegate {
             .on_click(cx.listener(move |table, ev: &ClickEvent, _window, cx| {
                 println!(
                     "You have clicked row with secondary: {}",
-                    ev.modifiers().secondary()
+                    ev.modifiers().secondary(cx)
                 );
 
                 table.delegate_mut().clicked_row = Some(row_ix);
                 cx.notify();
             }))
+    }
+
+    fn cell_label(&self, row_ix: usize, col_ix: usize, _: &App) -> Option<SharedString> {
+        let stock = self.stocks.get(row_ix)?;
+        let col = self.columns.get(col_ix)?;
+        let text = format_cell(stock, &col.key).map_or("--".to_string(), |(text, _)| text);
+        Some(text.into())
     }
 
     /// NOTE: Performance metrics

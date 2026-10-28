@@ -7,9 +7,9 @@ use std::{
 };
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, EventEmitter, FocusHandle, Focusable, ListAlignment,
-    ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size, Subscription, Task, Window,
-    WindowId, point, px,
+    App, AppContext as _, Context, ElementId, EventEmitter, FocusHandle, Focusable, HighlightStyle,
+    ListAlignment, ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size, Subscription,
+    Task, Window, WindowId, point, px,
 };
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
@@ -17,7 +17,9 @@ use super::{
     DiffAnnotation, DiffConflictResolution, DiffFile, DiffFileStatus, DiffInlineUnit,
     DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
     conflict::ConflictPart,
-    presentation::{FilePresentation, PresentationOptions, SyntaxHighlighters},
+    presentation::{
+        DiffSyntaxHighlighter, FilePresentation, PresentationOptions, SyntaxHighlighters,
+    },
     selection::SelectionGeometry,
 };
 
@@ -100,6 +102,7 @@ pub(crate) struct LayoutKey {
     font_family: SharedString,
     mode: DiffMode,
     line_number: bool,
+    marker_lane: bool,
     soft_wrap: bool,
 }
 
@@ -110,6 +113,7 @@ impl LayoutKey {
         font_family: SharedString,
         mode: DiffMode,
         line_number: bool,
+        marker_lane: bool,
         soft_wrap: bool,
     ) -> Self {
         Self {
@@ -118,6 +122,7 @@ impl LayoutKey {
             font_family,
             mode,
             line_number,
+            marker_lane,
             soft_wrap,
         }
     }
@@ -225,6 +230,7 @@ pub struct DiffState {
     selection_cursor: Option<DiffLinePosition>,
     selecting: bool,
     presentation_options: PresentationOptions,
+    syntax_highlighter: Option<DiffSyntaxHighlighter>,
     presentations: Vec<Option<Arc<FilePresentation>>>,
     viewport: Size<Pixels>,
     layout: Option<LayoutKey>,
@@ -359,6 +365,7 @@ impl DiffState {
                 inline_max_line_length: 1000,
                 syntax_max_line_length: 1000,
             },
+            syntax_highlighter: None,
             viewport: Size::default(),
             layout: None,
             content_width: px(0.),
@@ -424,6 +431,50 @@ impl DiffState {
         self.presentation_options.syntax_max_line_length = length;
         self.reset_presentation();
         self
+    }
+
+    /// Highlights syntax with the application's highlighter instead of GPUI
+    /// Kit's. Given a file's [language](DiffFile::language) and the source
+    /// text of one side of one hunk, it returns byte ranges into that text
+    /// with their styles; a range that splits a character is ignored.
+    ///
+    /// It runs on the background executor, once for each side of each hunk,
+    /// so an unterminated comment in one hunk cannot color the next. Styles
+    /// are kept as returned rather than resolved against the theme when a line
+    /// paints; set a new highlighter when its colors change.
+    pub fn with_syntax_highlighter<F>(mut self, highlighter: F) -> Self
+    where
+        F: Fn(&str, &str) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync + 'static,
+    {
+        self.syntax_highlighter = Some(Arc::new(highlighter));
+        self.reset_presentation();
+        self
+    }
+
+    /// Replaces the application's highlighter, preparing syntax again without
+    /// resetting selection or scrolling. See [`Self::with_syntax_highlighter`].
+    pub fn set_syntax_highlighter<F>(&mut self, highlighter: F, cx: &mut Context<Self>)
+    where
+        F: Fn(&str, &str) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync + 'static,
+    {
+        self.replace_syntax_highlighter(Some(Arc::new(highlighter)), cx);
+    }
+
+    /// Returns to GPUI Kit's highlighter, preparing syntax again without
+    /// resetting selection or scrolling.
+    pub fn clear_syntax_highlighter(&mut self, cx: &mut Context<Self>) {
+        self.replace_syntax_highlighter(None, cx);
+    }
+
+    fn replace_syntax_highlighter(
+        &mut self,
+        highlighter: Option<DiffSyntaxHighlighter>,
+        cx: &mut Context<Self>,
+    ) {
+        self.syntax_highlighter = highlighter;
+        self.reset_presentation();
+        self.ensure_presentation(cx);
+        cx.notify();
     }
 
     /// Changes the number of lines each disclosure reveals, preserving selection and scrolling.
@@ -1391,17 +1442,20 @@ impl DiffState {
             return;
         }
         let options = self.presentation_options;
+        let custom = self.syntax_highlighter.clone();
         self.preparing = Some(generation);
         self._presentation = cx.spawn(async move |this, cx| {
             let mut highlighters = Some(SyntaxHighlighters::default());
             for (ix, file) in pending {
                 let mut moved = highlighters.take();
+                let custom = custom.clone();
                 let (presentation, returned) = cx
                     .background_spawn(async move {
                         let presentation = FilePresentation::prepare(
                             &file,
                             options,
                             moved.get_or_insert_default(),
+                            custom.as_ref(),
                         );
                         (presentation, moved)
                     })

@@ -59,6 +59,10 @@ impl Button {
     }
 
     /// Sets whether the button ignores pointer and keyboard activation.
+    ///
+    /// Disabled buttons are skipped during Tab traversal. If this button already
+    /// owns focus when it becomes disabled, it retains the focus binding until
+    /// focus moves away, so keyboard traversal can continue in either direction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -235,13 +239,18 @@ impl RenderOnce for Button {
             .when_some(self.accessibility_label, |this, label| {
                 this.aria_label(label)
             })
-            .when(!disabled && self.focusable, |this| {
-                this.track_focus(
-                    &focus_handle
-                        .tab_index(self.tab_index)
-                        .tab_stop(self.tab_stop),
-                )
-            })
+            // Keep the current focus in the dispatch tree when activation
+            // disables this button, so Tab can still leave it in either direction.
+            .when(
+                self.focusable && (!disabled || focus_handle.is_focused(window)),
+                |this| {
+                    this.track_focus(
+                        &focus_handle
+                            .tab_index(self.tab_index)
+                            .tab_stop(self.tab_stop && !disabled),
+                    )
+                },
+            )
             .when(disabled, |this| {
                 this.on_mouse_down(MouseButton::Left, |_, _, cx| {
                     cx.stop_propagation();
@@ -272,8 +281,8 @@ mod tests {
     };
 
     use gpui::{
-        ClickEvent, Context, Element as _, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Render,
-        TestAppContext, VisualTestContext, accesskit, canvas, point, px,
+        AppContext as _, ClickEvent, Context, Element as _, KeyDownEvent, KeyUpEvent, Keystroke,
+        Modifiers, Render, TestAppContext, VisualTestContext, accesskit, canvas, point, px,
     };
 
     struct ButtonHarness {
@@ -358,7 +367,8 @@ mod tests {
         });
 
         for key in ["enter", "space"] {
-            let keystroke = Keystroke::parse(key).unwrap();
+            let keystroke =
+                cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
             cx.simulate_event(KeyDownEvent {
                 keystroke: keystroke.clone(),
                 is_held: false,
@@ -381,6 +391,113 @@ mod tests {
 
         assert_eq!(button_clicks.get(), 0);
         assert_eq!(parent_clicks.get(), 0);
+    }
+
+    struct DisableDuringFocus {
+        handles: [FocusHandle; 3],
+        disabled: bool,
+        activations: usize,
+    }
+
+    impl Render for DisableDuringFocus {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .flex()
+                .tab_group()
+                .child(
+                    Button::new("before")
+                        .track_focus(&self.handles[0])
+                        .child("Before"),
+                )
+                .child(
+                    Button::new("disable-self")
+                        .track_focus(&self.handles[1])
+                        .disabled(self.disabled)
+                        .child("Disable self")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.disabled = true;
+                            this.activations += 1;
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("after")
+                        .track_focus(&self.handles[2])
+                        .child("After"),
+                )
+        }
+    }
+
+    fn press_transition_key(cx: &mut VisualTestContext, key: &str) {
+        let keystroke =
+            cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
+        cx.simulate_event(KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(KeyUpEvent { keystroke });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    #[gpui::test]
+    fn disabling_focused_button_preserves_bidirectional_traversal(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for (key, expected, back, opposite) in
+            [("tab", 2, "shift-tab", 0), ("shift-tab", 0, "tab", 2)]
+        {
+            let handles = cx.update(|cx| std::array::from_fn(|_| cx.focus_handle()));
+            let controls = cx.new(|_| DisableDuringFocus {
+                handles: handles.clone(),
+                disabled: false,
+                activations: 0,
+            });
+            let (_, cx) =
+                cx.add_window_view(|window, cx| crate::Root::new(controls.clone(), window, cx));
+            cx.update(|window, cx| {
+                window.activate_window();
+                window.draw(cx).clear(cx);
+                handles[0].focus(window, cx);
+                window.draw(cx).clear(cx);
+            });
+            press_transition_key(cx, "tab");
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(window.focused(cx).as_ref(), Some(&handles[1]));
+            });
+            press_transition_key(cx, "space");
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert!(controls.read(cx).disabled);
+                assert_eq!(controls.read(cx).activations, 1);
+            });
+            press_transition_key(cx, "enter");
+            press_transition_key(cx, "space");
+            cx.update(|_, cx| {
+                assert_eq!(controls.read(cx).activations, 1, "disabled stays inert");
+            });
+            press_transition_key(cx, key);
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(window.focused(cx).as_ref(), Some(&handles[expected]));
+            });
+            press_transition_key(cx, back);
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(window.focused(cx).as_ref(), Some(&handles[opposite]));
+            });
+            controls.update(cx, |this, cx| {
+                this.disabled = false;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            press_transition_key(cx, key);
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(window.focused(cx).as_ref(), Some(&handles[1]));
+            });
+        }
     }
 
     #[gpui::test]

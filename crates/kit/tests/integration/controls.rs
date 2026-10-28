@@ -4,12 +4,14 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     radio::{Radio, RadioGroup},
     select::{SearchableVec, Select, SelectEvent, SelectState},
+    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
     switch::Switch,
     tab::{Tab, TabBar},
 };
-use gpui_kit::test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestQueryExt, TestWindowExt};
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size,
+    AnyWindowHandle, App, AppContext, Context, Entity, Role, SharedString, TestAppContext, Window,
+    div, prelude::*, px, size,
 };
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
@@ -492,4 +494,115 @@ fn radio_group_keeps_a_disabled_item_disabled(cx: &mut TestAppContext) {
         None,
         "an enabled item inside a disabled group"
     );
+}
+
+struct BoolSettings;
+impl Render for BoolSettings {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let items = vec![
+            SettingItem::new(
+                "Autosave",
+                SettingField::checkbox(|_: &App| true, |_: bool, _: &mut App| {}),
+            ),
+            SettingItem::new(
+                "Line numbers",
+                SettingField::switch(|_: &App| false, |_: bool, _: &mut App| {}),
+            ),
+        ];
+        let page = SettingPage::new("General")
+            .default_open(true)
+            .group(SettingGroup::new().items(items));
+
+        div()
+            .size_full()
+            .child(Settings::new("settings").pages(vec![page]))
+    }
+}
+
+/// A setting's checkbox or switch has no visible text of its own, so it is named
+/// after the setting's title instead of being announced without a name.
+#[gpui_kit::test]
+fn bool_settings_are_named_after_their_titles(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(600.))), |_, cx| {
+        cx.new(|_| BoolSettings)
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let labels: Vec<_> = window
+            .find_all("check")
+            .iter()
+            .map(|control| control.label().map(str::to_owned))
+            .collect();
+        assert_eq!(
+            labels,
+            [Some("Autosave".to_owned()), Some("Line numbers".to_owned())]
+        );
+    })
+    .unwrap();
+}
+
+struct ValueSettings;
+impl Render for ValueSettings {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let themes = vec![
+            ("dark".into(), "Dark".into()),
+            ("light".into(), "Light".into()),
+        ];
+        let items = vec![
+            SettingItem::new(
+                "Theme",
+                SettingField::dropdown(
+                    themes,
+                    |_: &App| "dark".into(),
+                    |_: SharedString, _: &mut App| {},
+                ),
+            ),
+            SettingItem::new(
+                "Font size",
+                SettingField::number_input(
+                    NumberFieldOptions::default(),
+                    |_: &App| 14.,
+                    |_: f64, _: &mut App| {},
+                ),
+            ),
+            SettingItem::new(
+                "User name",
+                SettingField::input(|_: &App| "Ada".into(), |_: SharedString, _: &mut App| {}),
+            ),
+        ];
+        let page = SettingPage::new("General")
+            .default_open(true)
+            .group(SettingGroup::new().items(items));
+
+        div()
+            .size_full()
+            .child(Settings::new("settings").pages(vec![page]))
+    }
+}
+
+/// Dropdown, number and text settings are named after their titles as well. A
+/// dropdown's button shows only the selected option, so its name has both.
+#[gpui_kit::test]
+fn value_settings_are_named_after_their_titles(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(600.))), |_, cx| {
+        cx.new(|_| ValueSettings)
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find_by_label("Theme: Dark").role(),
+            Some(Role::Button)
+        );
+        assert_eq!(
+            window.find_by_label("Font size").role(),
+            Some(Role::SpinButton)
+        );
+        assert_eq!(
+            window.find_by_label("User name").role(),
+            Some(Role::TextInput)
+        );
+    })
+    .unwrap();
 }

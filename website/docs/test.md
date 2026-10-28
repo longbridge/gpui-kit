@@ -127,7 +127,7 @@ observation adds no layout container:
 | Control | Native properties beyond geometry and visibility |
 | --- | --- |
 | Button | Accessibility label, focus scope |
-| Input | Non-sensitive accessibility value, label, focus scope |
+| Input | Non-sensitive accessibility value, label, placeholder, focus scope |
 | Checkbox | Checked, indeterminate, label, focus scope |
 | Switch / Toggle | Checked, label, focus scope |
 | Radio | Checked, selected, label, focus scope |
@@ -154,6 +154,14 @@ their defaults include the state entity ID. Tabs inside a TabBar use their
 index as ID. Select's existing `"input"` child identifies its trigger:
 `window.within("language").click("input", cx)`.
 
+For Input, Textarea and Editor, `window.find(component_id)` keeps the outer
+frame's path, bounds and visibility, including its prefix/suffix scopes.
+Role, accessible name, value and focus come from the explicitly associated
+native editor. Existing ID queries need no label migration or internal editor
+ID. Focusing an independent addon does not focus the component's text owner.
+Named and role queries still enumerate the actual native editor once; the
+component-ID relationship adds neither a native text node nor a focus stop.
+
 Native divs opt in without supplying a second description of their state:
 
 ```rust
@@ -167,8 +175,9 @@ returns the original native element with its exact type. With the feature enable
 it preserves identity, layout, events and accessibility, without adding a layout
 container. Repeated observation keeps one registration. Call `.test_support()` before
 `.track_focus(&handle)` so the wrapper sees the actual binding. Kit controls do this
-internally. `focused()` checks whether that focus scope contains keyboard focus,
-including the nested editor inside an Input frame. If GPUI advertises focus support
+internally. `focused()` checks whether that observed scope contains keyboard focus.
+An Input component query uses the editor's scope; independent addon focus does not
+count. If GPUI advertises focus support
 but the binding was not observed, `focused()` panics with a diagnostic instead of
 silently returning `None`. This catches `.track_focus(&handle).test_support()`;
 implicit `.focusable()` handles are also unavailable, so use an explicit handle.
@@ -179,13 +188,16 @@ not prove that the element cannot receive focus. Debug output marks a detected m
 binding as `focused: <binding missed>` without panicking.
 
 Snapshots read native `role`, `aria_toggled`, `aria_selected`, `aria_expanded`,
-`aria_label` and `aria_value`. There are no `TestProps` or hand-supplied fallback values.
+`aria_label`, `aria_description`, `aria_placeholder` and `aria_value`. There are no
+`TestProps` or hand-supplied fallback values.
 Input uses its existing accessibility-value path in tests, with the same masking and
 sensitive-content restrictions. Select's `value()` is its accessible value, including
 any title prefix; it is not a selected item ID.
 
 `label()` means accessibility label, not visible text. `value()` means accessibility
-value, not pixels. These properties can still contain component bugs. Do not add
+value, not pixels. `description()` is read after the label and does not replace it;
+`placeholder()` is the prompt shown while the element has no value, not a value.
+These properties can still contain component bugs. Do not add
 `aria_label` or `aria_value` solely to make a visual assertion pass. The example's
 Status role and label serve the production accessibility announcement. Arbitrary
 child text is not discovered automatically, and there is no `text()` shortcut that
@@ -278,9 +290,10 @@ character, with scope checks against each completed frame.
 
 `ElementSnapshot` is an owned, immutable record of a completed paint. Its readers
 are `role()`, `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `label()`,
-`value()`, `checked()`, `indeterminate()`, `selected()` and `expanded()`.
+`description()`, `placeholder()`, `value()`, `checked()`, `indeterminate()`,
+`selected()` and `expanded()`.
 Focused, disabled, checked, indeterminate, selected and expanded readers return
-`Option<bool>`: `None` means unavailable, not false. Label/value are also optional. Re-query after interactions:
+`Option<bool>`: `None` means unavailable, not false. Label, description, placeholder and value are also optional. Re-query after interactions:
 
 ```rust
 let before = window.find("agree");

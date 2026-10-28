@@ -126,6 +126,14 @@ impl TextInputState {
             .update(cx, |state, _| state.set_editor_style(style)))
     }
 
+    pub(crate) fn set_accessibility(
+        &self,
+        accessibility: gpui_base::input::InputAccessibility,
+        cx: &mut App,
+    ) {
+        dispatch!(self, |state| state
+            .update(cx, |state, _| state.set_accessibility(accessibility)))
+    }
     pub(crate) fn set_editor_paddings(&self, paddings: gpui::Edges<gpui::Pixels>, cx: &mut App) {
         dispatch!(self, |state| state
             .update(cx, |state, _| state.set_editor_paddings(paddings)))
@@ -217,11 +225,6 @@ impl TextInputState {
         dispatch!(self, |state| super::overlay::render_overlays(
             state, window, cx
         ))
-    }
-
-    pub(crate) fn replace_all(&self, value: String, window: &mut Window, cx: &mut App) {
-        dispatch!(self, |state| state
-            .update(cx, |state, cx| state.replace_all(value, window, cx)))
     }
 
     /// The text element itself, as a child to place in the frame.

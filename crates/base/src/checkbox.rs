@@ -129,6 +129,9 @@ impl Checkbox {
     }
 
     /// Sets the label exposed to accessibility clients.
+    ///
+    /// A checkbox without text children has no accessible name, so set this
+    /// whenever it is drawn without visible text.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self

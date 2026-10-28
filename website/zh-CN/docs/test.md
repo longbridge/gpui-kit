@@ -99,7 +99,7 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 | 控件 | 除几何与可见性以外报告的状态 |
 | --- | --- |
 | Button | 无障碍名称、焦点作用域 |
-| Input | 非敏感无障碍值、名称、焦点作用域 |
+| Input | 非敏感无障碍值、名称、placeholder、焦点作用域 |
 | Checkbox | 勾选、半选、名称、焦点作用域 |
 | Switch / Toggle | 勾选、名称、焦点作用域 |
 | Radio | 勾选、选中、名称、焦点作用域 |
@@ -125,6 +125,12 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 TabBar 内的 Tab 使用下标 ID。Select 已有的 `"input"` 子元素是触发区域：
 `window.within("language").click("input", cx)`。
 
+对于 Input、Textarea 和 Editor，`window.find(component_id)` 保留外框的路径、
+边界和可见性，以及前后附加控件的查询作用域。角色、无障碍名称、值和焦点
+来自明确关联的原生编辑器。现有 ID 查询无需改用标签，也无需知道内部编辑器 ID。
+独立附加按钮获得焦点时，控件的文本 owner 不会报告焦点。名称和角色查询
+仍然只枚举实际的原生编辑器；组件 ID 的关联不会增加原生文本节点或 Tab 停靠点。
+
 原生 div 只注册观察，不再填写另一份测试状态：
 
 ```rust
@@ -136,9 +142,10 @@ let target = div().id("details").test_support().child(content);
 `TestSupportExt` 始终可用。关闭 `test-support` 时，`.test_support()` 直接返回原生元素，
 保留其准确类型；启用后保留身份、布局、事件与无障碍接口，不增加布局容器。
 重复调用只保留一个注册项。先调用 `.test_support()`，再调用 `.track_focus(&handle)`，
-让包装器观察实际焦点绑定；Kit 控件在内部完成这件事。`focused()` 检查焦点作用域内
-是否存在键盘焦点，也包括 Input 外框中的编辑器。如果 GPUI 声明元素可聚焦，但没有
-观察到绑定，`focused()` 会报错并给出修复提示，不再静默返回 `None`。这能发现
+让包装器观察实际焦点绑定；Kit 控件在内部完成这件事。`focused()` 检查被观察的
+焦点作用域内是否存在键盘焦点。Input 的 ID 查询只观察编辑器的作用域，不计入
+独立附加控件的焦点。如果 GPUI 声明元素可聚焦，但没有观察到绑定，`focused()`
+会报错并给出修复提示，不再静默返回 `None`。这能发现
 `.track_focus(&handle).test_support()` 的顺序错误；隐式 `.focusable()` 句柄也无法读取，
 应改用显式句柄。没有观察到绑定、也没有声明焦点 action 时返回 `None`。
 这个诊断是尽力而为的，依赖原生 accessibility 的 `Action::Focus`。
@@ -147,11 +154,14 @@ let target = div().id("details").test_support().child(content);
 `focused: <binding missed>`，格式化本身不会 panic。
 
 快照直接读取 `role`、`aria_toggled`、`aria_selected`、`aria_expanded`、
-`aria_label` 和 `aria_value`。没有 `TestProps` 或手填的备用值。Input 在测试中启用
+`aria_label`、`aria_description`、`aria_placeholder` 和 `aria_value`。
+没有 `TestProps` 或手填的备用值。Input 在测试中启用
 已有的无障碍值生成路径，沿用相同的遮蔽与敏感内容限制。Select 的 `value()` 是包含
 标题前缀的无障碍值，不是选中项 ID。
 
 `label()` 表示无障碍名称，不是屏幕文字；`value()` 表示无障碍值，不是像素。
+`description()` 在名称之后读出，不能代替名称；`placeholder()` 是元素没有值时显示的
+提示，不是值。
 组件仍然可能把这些属性写错。不要仅为让视觉断言通过而添加 `aria_label` 或
 `aria_value`。完整示例中的 Status 角色和名称服务于生产环境的无障碍播报。
 框架不自动发现任意子元素文字，也不提供用模型字符串冒充绘制文本的 `text()`。
@@ -235,9 +245,10 @@ dialog.hover("help", cx);
 每次作用域检查都读取已完成的帧。
 
 `ElementSnapshot` 是某次完成绘制的独立、不可变记录。它提供 `role()`、`path()`、`bounds()`、
-`visible()`、`focused()`、`disabled()`、`label()`、`value()`、`checked()`、
+`visible()`、`focused()`、`disabled()`、`label()`、`description()`、`placeholder()`、
+`value()`、`checked()`、
 `indeterminate()`、`selected()` 和 `expanded()`。焦点、禁用、勾选、半选、选中、展开状态返回 `Option<bool>`：
-`None` 表示无法取得，不等于 false。名称与值也可能无法取得。交互后重新查询：
+`None` 表示无法取得，不等于 false。名称、description、placeholder 与值也可能无法取得。交互后重新查询：
 
 ```rust
 let before = window.find("agree");

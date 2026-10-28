@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{AnyElement, App, Entity, EntityId, Global, IntoElement, WeakEntity, Window};
 use ropey::Rope;
@@ -8,6 +9,7 @@ use super::{
     popovers::{CodeActionMenu, CompletionMenu, DiagnosticPopover, HoverPopover},
     search::SearchPanel,
 };
+use gpui_base::input::CompletionHighlighter;
 
 struct InputOverlayRegistry<M: OverlayMode> {
     hosts: HashMap<EntityId, (WeakEntity<InputBaseState<M>>, InputOverlayHost<M>)>,
@@ -71,6 +73,11 @@ pub(crate) struct LspOverlays {
     code_action_signature: OverlaySignature,
     hover_signature: Option<std::ops::Range<usize>>,
     diagnostic_signature: Option<std::rc::Rc<gpui_base::input::DiagnosticEntry>>,
+    /// Highlighter last copied onto the completion menu.
+    ///
+    /// Compared by `Rc` identity, so swapping the host's closure repaints an
+    /// open menu without rebuilding its items.
+    completion_highlight: Option<Rc<CompletionHighlighter>>,
 }
 
 /// What the state read out of the engine for one sync pass.
@@ -194,6 +201,7 @@ impl OverlayMode for crate::input::EditorMode {
             code_action_signature: OverlaySignature::default(),
             hover_signature: None,
             diagnostic_signature: None,
+            completion_highlight: None,
         })
     }
 
@@ -205,6 +213,17 @@ impl OverlayMode for crate::input::EditorMode {
         cx: &mut App,
     ) {
         let cursor = snapshot.cursor;
+
+        let highlight = state.read(cx).lsp().completion_highlighter().clone();
+        if lsp
+            .completion_highlight
+            .as_ref()
+            .is_none_or(|current| !Rc::ptr_eq(current, &highlight))
+        {
+            lsp.completion_highlight = Some(highlight.clone());
+            lsp.completion
+                .update(cx, |menu, cx| menu.set_highlight(highlight, cx));
+        }
 
         if snapshot.completion != lsp.completion_signature {
             lsp.completion_signature = OverlaySignature {

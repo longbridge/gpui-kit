@@ -167,6 +167,92 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// `Rows`, with each cell's text also given to assistive technology.
+struct LabelledRows;
+impl TableDelegate for LabelledRows {
+    fn columns_count(&self, cx: &App) -> usize {
+        Rows.columns_count(cx)
+    }
+    fn rows_count(&self, cx: &App) -> usize {
+        Rows.rows_count(cx)
+    }
+    fn column(&self, ix: usize, cx: &App) -> Column {
+        Rows.column(ix, cx)
+    }
+    fn render_td(
+        &mut self,
+        row: usize,
+        col: usize,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div().child(format!("{row}:{col}"))
+    }
+    fn cell_label(&self, row: usize, col: usize, _: &App) -> Option<gpui_kit::SharedString> {
+        Some(format!("{row}:{col}").into())
+    }
+}
+struct LabelledRecords {
+    table: Entity<TableState<LabelledRows>>,
+}
+impl Render for LabelledRecords {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(DataTable::new(&self.table))
+    }
+}
+
+/// Plain text in a cell is invisible to a screen reader, so the table exposes
+/// its own structure: a grid, column headers named after their columns, and
+/// cells named by the delegate.
+#[gpui_kit::test]
+fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| LabelledRecords {
+            table: cx.new(|cx| TableState::new(LabelledRows, window, cx)),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.find("table-inner").role(),
+            Some(gpui_kit::Role::Grid)
+        );
+        for (ix, name) in ["Name", "Status"].into_iter().enumerate() {
+            let header = window.find(("col-header", ix));
+            assert_eq!(header.role(), Some(gpui_kit::Role::ColumnHeader));
+            assert_eq!(header.label(), Some(name));
+        }
+        let cell = window.find("table-cell-3:1");
+        assert_eq!(cell.role(), Some(gpui_kit::Role::Cell));
+        assert_eq!(cell.label(), Some("3:1"));
+    })
+    .unwrap();
+}
+
+/// In cell selection mode each cell is a grid cell that reports whether it is
+/// selected, which is how a screen reader learns the selection.
+#[gpui_kit::test]
+fn selectable_cells_report_their_selection(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| LabelledRecords {
+                table: cx.new(|cx| TableState::new(LabelledRows, window, cx).cell_selectable(true)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        let table = content.read(cx).table.clone();
+        table.update(cx, |table, cx| table.set_selected_cell(2, 1, cx));
+        window.render_frame(cx);
+        let selected = window.find("table-cell-2:1");
+        assert_eq!(selected.role(), Some(gpui_kit::Role::GridCell));
+        assert_eq!(selected.selected(), Some(true));
+        assert_eq!(window.find("table-cell-2:0").selected(), Some(false));
+    })
+    .unwrap();
+}
+
 struct RecordsBelowLabel {
     table: Entity<TableState<Rows>>,
 }
@@ -652,7 +738,7 @@ fn table_reports_one_scrollable_column_with_and_without_fixed_columns(cx: &mut T
 #[gpui_kit::test]
 fn table_modifier_clicks_select_rows_unless_turned_off(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let secondary = Modifiers::secondary_key();
+    let secondary = cx.update(|cx| Modifiers::secondary_key(cx));
     let shift = Modifiers::shift();
     // The row header, shown in cell selection, is the narrow column before
     // the cells.
@@ -721,7 +807,7 @@ fn table_modifier_clicks_on_the_selected_cell_escalate_unless_turned_off(cx: &mu
             assert_eq!(table.read(cx).selection(), TableSelection::Cell(1, 0));
             window.click_with_options(
                 ("row", 1usize),
-                first_cell.with_modifiers(Modifiers::secondary_key()),
+                first_cell.with_modifiers(Modifiers::secondary_key(cx)),
                 cx,
             );
             assert_eq!(table.read(cx).selection(), expected);
@@ -780,7 +866,7 @@ fn list_click_confirms_as_secondary_with_the_secondary_modifier(cx: &mut TestApp
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click(("choice", 0usize), cx);
-        window.click_with_modifiers(("choice", 1usize), Modifiers::secondary_key(), cx);
+        window.click_with_modifiers(("choice", 1usize), Modifiers::secondary_key(cx), cx);
         let list = picker.read(cx).list.clone();
         assert_eq!(list.read(cx).delegate().confirmed, [false, true]);
     })

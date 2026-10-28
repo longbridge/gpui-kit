@@ -168,6 +168,7 @@ pub(crate) fn match_scale_factor(webview: &wry::WebView, scale_factor: f32, zoom
 
 /// A GPUI Fast composition surface hosting the webview: an X11 child window that GPUI cuts
 /// its overlays out of, so they render above the page.
+#[cfg(feature = "gpui-fast")]
 pub(crate) struct NativeWebViewSurface {
     surface: gpui::WindowCompositionSurface,
     scale_factor: std::cell::Cell<f32>,
@@ -175,6 +176,7 @@ pub(crate) struct NativeWebViewSurface {
     cx: gpui::AsyncApp,
 }
 
+#[cfg(feature = "gpui-fast")]
 impl NativeWebViewSurface {
     pub(crate) fn new(window: &Window, cx: &App) -> anyhow::Result<Self> {
         let surface = window

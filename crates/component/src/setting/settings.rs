@@ -1,7 +1,8 @@
 use std::ops::Range;
 
 use crate::{
-    IconName, Sizable, Size, StyledExt,
+    Icon, IconName, Sizable, Size, StyledExt,
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
     input::{Input, InputState},
@@ -10,9 +11,9 @@ use crate::{
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, container_query, div, prelude::FluentBuilder as _,
-    px, relative,
+    App, AppContext as _, Axis, ElementId, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
 
@@ -126,7 +127,28 @@ impl Settings {
                 .into_any_element();
         }
 
+        if filter.visible_pages().next().is_none() {
+            return div()
+                .size_full()
+                .debug_selector(|| "settings-no-results".into())
+                .child(Self::render_no_results())
+                .into_any_element();
+        }
+
         div().into_any_element()
+    }
+
+    fn render_no_results() -> impl IntoElement {
+        Empty::new().size_full().header(
+            EmptyHeader::new()
+                .media(
+                    EmptyMedia::new()
+                        .with_variant(EmptyMediaVariant::Icon)
+                        .child(Icon::new(IconName::Search)),
+                )
+                .title(EmptyTitle::new().child(t!("Settings.no_results")))
+                .description(EmptyDescription::new().child(t!("Settings.no_results_description"))),
+        )
     }
 
     fn render_sidebar(

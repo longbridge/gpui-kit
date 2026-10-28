@@ -255,7 +255,8 @@ fn buffer_source<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Vec<u8>> {
         )
     };
     if let Some(buffer) = ArrayBuffer::from_value(value.clone()) {
-        return Ok(buffer.as_bytes().unwrap_or_default().to_vec());
+        // SAFETY: no JavaScript runs between borrowing and copying the bytes.
+        return Ok(unsafe { buffer.as_bytes() }.unwrap_or_default().to_vec());
     }
     let array_buffer: Object = ctx.globals().get("ArrayBuffer")?;
     let is_view: Function = array_buffer.get("isView")?;
@@ -267,8 +268,8 @@ fn buffer_source<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Vec<u8>> {
     let offset: usize = view.get("byteOffset")?;
     let length: usize = view.get("byteLength")?;
     // A detached buffer reads as no bytes, as the standard's copy step does.
-    Ok(buffer
-        .as_bytes()
+    // SAFETY: all JS property reads finished above; only slice and copy the bytes.
+    Ok(unsafe { buffer.as_bytes() }
         .and_then(|bytes| bytes.get(offset..offset + length))
         .unwrap_or_default()
         .to_vec())

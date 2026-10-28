@@ -96,7 +96,7 @@ impl InputBaseState<EditorMode> {
             self.clear_hover_state(cx);
             return;
         }
-        if event.modifiers.secondary() {
+        if event.modifiers.secondary(cx) {
             self.handle_hover_definition(offset, window, cx);
         } else {
             // Repaint only when the definition underline goes away; the hover

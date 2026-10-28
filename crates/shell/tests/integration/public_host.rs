@@ -2,6 +2,8 @@
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 
+use gpui_shell::gpui as shell_gpui;
+
 use std::{
     fs,
     ops::Deref,
@@ -43,13 +45,13 @@ impl Drop for TempApp {
 
 struct Empty;
 
-impl gpui_shell::gpui::Render for Empty {
+impl shell_gpui::Render for Empty {
     fn render(
         &mut self,
-        _: &mut gpui_shell::gpui::Window,
-        _: &mut gpui_shell::gpui::Context<Self>,
-    ) -> impl gpui_shell::gpui::IntoElement {
-        gpui_shell::gpui::div()
+        _: &mut shell_gpui::Window,
+        _: &mut shell_gpui::Context<Self>,
+    ) -> impl shell_gpui::IntoElement {
+        shell_gpui::div()
     }
 }
 
@@ -78,7 +80,7 @@ fn mount(
     (context, view, runtime)
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn public_host_api_mounts_and_materializes_registered_component_js(cx: &mut TestAppContext) {
     let source = r#"
 import { div, View } from "gpui-kit";
@@ -93,8 +95,8 @@ export default class ComponentApp extends View {
     let (mut context, view, _runtime) = mount(cx, source);
 
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(400.), gpui_shell::gpui::px(300.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(400.), shell_gpui::px(300.)),
         {
             let view = view.clone();
             move |_, _| view.into_any_element()
@@ -112,7 +114,7 @@ export default class ComponentApp extends View {
     assert!(tree.contains(":size(registered)"), "{tree}");
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn registered_component_argument_errors_are_reported_during_render(cx: &mut TestAppContext) {
     let source = r#"
 import { View } from "gpui-kit";
@@ -127,8 +129,8 @@ export default class InvalidComponentApp extends View {
     let (mut context, view, _runtime) = mount(cx, source);
 
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(400.), gpui_shell::gpui::px(300.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(400.), shell_gpui::px(300.)),
         {
             let view = view.clone();
             move |_, _| view.into_any_element()
@@ -148,7 +150,7 @@ export default class InvalidComponentApp extends View {
     assert!(error.contains("at render"), "{error}");
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn all_retained_form_bindings_materialize_and_keep_their_state_across_frames(
     cx: &mut TestAppContext,
 ) {
@@ -183,8 +185,8 @@ export default class RetainedForms extends View {
     let (mut context, view, _runtime) = mount(cx, source);
     for _ in 0..2 {
         context.draw(
-            gpui_shell::gpui::Point::default(),
-            gpui_shell::gpui::size(gpui_shell::gpui::px(400.), gpui_shell::gpui::px(300.)),
+            shell_gpui::Point::default(),
+            shell_gpui::size(shell_gpui::px(400.), shell_gpui::px(300.)),
             {
                 let view = view.clone();
                 move |_, _| view.into_any_element()
@@ -218,7 +220,7 @@ export default class RetainedForms extends View {
     }
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn retained_otp_rejects_an_ordinary_child_during_public_host_materialization(
     cx: &mut TestAppContext,
 ) {
@@ -232,8 +234,8 @@ export default class InvalidOtp extends View {
 "#;
     let (mut context, view, _runtime) = mount(cx, source);
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(400.), gpui_shell::gpui::px(300.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(400.), shell_gpui::px(300.)),
         {
             let view = view.clone();
             move |_, _| view.into_any_element()
@@ -250,7 +252,7 @@ export default class InvalidOtp extends View {
     assert!(tree.contains("not allowed"), "{tree}");
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn retained_state_constructor_rejects_rounded_overflow_from_js(cx: &mut TestAppContext) {
     let source = r#"
 import { View } from "gpui-kit";
@@ -276,7 +278,7 @@ export default class InvalidOtpState extends View {
     assert!(error.to_string().contains("positive integer"), "{error}");
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn loaded_applications_are_single_mount_and_runtime_bound(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_shell::components::init(cx);
@@ -314,7 +316,7 @@ export default class Reusable extends View { render() { return div().child("ok")
     );
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn failed_owner_mount_consumes_the_loaded_application(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_shell::components::init(cx);
@@ -348,7 +350,7 @@ export default class Broken extends View {
     );
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn public_host_materializes_real_typed_compound_children_in_script_order(cx: &mut TestAppContext) {
     let source = r#"
 import { View, div } from "gpui-kit";
@@ -375,8 +377,8 @@ export default class TypedCompounds extends View {
 "#;
     let (mut context, view, _runtime) = mount(cx, source);
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(700.), gpui_shell::gpui::px(600.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(700.), shell_gpui::px(600.)),
         {
             let view = view.clone();
             move |_, _| view.into_any_element()
@@ -408,7 +410,7 @@ export default class TypedCompounds extends View {
     assert_eq!(tree.matches(".w[Number(500.0)]").count(), 4, "{tree}");
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn component_state_exports_do_not_shadow_same_named_gpui_base_exports(cx: &mut TestAppContext) {
     let source = r#"
 import { View } from "gpui-kit";
@@ -424,8 +426,8 @@ export default class CoexistingStates extends View {
 "#;
     let (mut context, view, _runtime) = mount(cx, source);
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(400.), gpui_shell::gpui::px(120.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(400.), shell_gpui::px(120.)),
         {
             let view = view.clone();
             move |_, _| view.into_any_element()
@@ -453,14 +455,14 @@ impl gpui_shell::ComponentMaterializer for HostBadge {
     fn materialize(
         &self,
         request: gpui_shell::MaterializeRequest<'_>,
-    ) -> gpui_shell::anyhow::Result<gpui_shell::gpui::AnyElement> {
+    ) -> gpui_shell::anyhow::Result<shell_gpui::AnyElement> {
         let label = request
             .payload()
             .downcast_ref::<String>()
             .ok_or_else(|| gpui_shell::anyhow::anyhow!("HostBadge payload"))?
             .clone();
         HOST_BADGE_LABELS.lock().unwrap().push(label.clone());
-        Ok(gpui_shell::gpui::div().child(label).into_any_element())
+        Ok(shell_gpui::div().child(label).into_any_element())
     }
 }
 
@@ -484,12 +486,12 @@ fn host_badge(name: &'static str, export: &'static str) -> gpui_shell::Component
 
 /// The catalog's own startup, then the host's, as `components::registry`
 /// tells a host to chain them.
-fn host_init(cx: &mut gpui_shell::gpui::App) {
+fn host_init(cx: &mut shell_gpui::App) {
     gpui_component::init(cx);
     HOST_INIT_CALLS.fetch_add(1, Ordering::SeqCst);
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn an_embedding_host_registers_its_own_component_beside_the_catalog(cx: &mut TestAppContext) {
     let mut registry = gpui_shell::components::registry()
         .expect("catalog")
@@ -528,8 +530,8 @@ export default class ExtendedCatalog extends View {
         .update(|window, cx| runtime.mount_application(&loaded, window, cx))
         .expect("mount application");
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(400.), gpui_shell::gpui::px(120.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(400.), shell_gpui::px(120.)),
         {
             let view = view.clone();
             move |_, _| view.into_any_element()

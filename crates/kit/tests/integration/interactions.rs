@@ -154,21 +154,19 @@ fn modified_clicks_carry_modifiers_on_every_pointer_event(cx: &mut TestAppContex
     cx.update_window(handle.into(), |_, window, cx| {
         let focus = view.read(cx).focus.clone();
         window.focus(&focus, cx);
-        window.click_with_modifiers("surface", Modifiers::secondary_key(), cx);
+        window.click_with_modifiers("surface", Modifiers::secondary_key(cx), cx);
         assert_eq!(window.modifiers(), Modifiers::default());
     })
     .unwrap();
     let recorded = std::mem::take(&mut *events.borrow_mut());
-    assert_eq!(
-        recorded.first(),
-        Some(&("modifiers", Modifiers::secondary_key()))
-    );
+    let secondary = cx.update(|cx| Modifiers::secondary_key(cx));
+    assert_eq!(recorded.first(), Some(&("modifiers", secondary)));
     assert_eq!(recorded.last(), Some(&("modifiers", Modifiers::default())));
     for kind in ["move", "down", "up", "click"] {
         assert!(
             recorded
                 .iter()
-                .any(|(event, modifiers)| *event == kind && modifiers.secondary()),
+                .any(|(event, modifiers)| *event == kind && *modifiers == secondary),
             "{kind} did not carry the secondary modifier: {recorded:?}"
         );
     }

@@ -150,7 +150,7 @@ where
         let content_id = (self.id.clone(), "content");
         let scrollbar_id = (self.id.clone(), "scrollbar");
 
-        let content = self
+        let mut content = self
             .element
             .id(content_id)
             .flex_none()
@@ -159,6 +159,15 @@ where
                 ScrollbarAxis::Horizontal => this.w_auto().min_w_full(),
                 ScrollbarAxis::Both => this.size_auto().min_size_full(),
             });
+        // The wrapper holds the caller's maximum size. Left on the content
+        // too, it would cap the content at the area's size on the scrolled
+        // axis, so nothing would overflow and the area would not scroll.
+        let max_size = &mut content.style().max_size;
+        match self.axis {
+            ScrollbarAxis::Vertical => max_size.height = None,
+            ScrollbarAxis::Horizontal => max_size.width = None,
+            ScrollbarAxis::Both => *max_size = Default::default(),
+        }
 
         // Keep the scroll area in the normal flow: its content size must
         // propagate to auto-sized ancestors (e.g. a Dialog that grows with
@@ -179,11 +188,23 @@ where
             .lock_scroll_axis()
             .child(content);
 
+        // The wrapper lays the area out as a flex item along the scrolled
+        // axis, so the area shrinks to the wrapper's size. Sized by its 100%
+        // alone, the area is not held to a maximum size on the wrapper with
+        // GPUI Fast: in a column whose height follows its content, inside a
+        // row, the area came out as tall as that column and the wrapper
+        // clipped the rows past its maximum height instead of scrolling to
+        // them.
         div()
             .id(root_id)
             .size_full()
             .refine_style(&root_style)
             .relative()
+            .flex()
+            .map(|this| match self.axis {
+                ScrollbarAxis::Horizontal => this.flex_row(),
+                ScrollbarAxis::Vertical | ScrollbarAxis::Both => this.flex_col(),
+            })
             .child(
                 gpui_base::ScrollBounce::new(
                     (self.id.clone(), "bounce"),
@@ -320,8 +341,7 @@ impl<E> ScrollableElement for gpui_base::test_support::Observed<E> where
 mod tests {
     use super::*;
     use gpui::{
-        Context, Render, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point,
-        px,
+        Context, Render, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point, px,
     };
 
     fn draw(cx: &mut VisualTestContext) {
@@ -332,7 +352,7 @@ mod tests {
     }
 
     fn scroll(cx: &mut VisualTestContext, x: f32, y: f32, dx: f32, dy: f32) {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(x), px(y)),
             delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
             ..Default::default()
@@ -465,6 +485,103 @@ mod tests {
         assert!(cx.debug_bounds("max-height-last-row").unwrap().origin.y < last_initial_y);
     }
 
+    struct MaxHeightScrollableTest;
+
+    impl Render for MaxHeightScrollableTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            // Six rows of 50px in an area that may grow to 100px, between two
+            // blocks in a column as tall as its content, in a row. In such a
+            // column the area's full height once came out as the column's,
+            // 140px, rather than the 100px of the wrapper around it.
+            crate::h_flex().w(px(100.)).child(
+                crate::v_flex()
+                    .w_full()
+                    .child(plain_row(20.))
+                    .child(
+                        crate::v_flex()
+                            .max_h(px(100.))
+                            .overflow_y_scrollbar()
+                            .child(row("max-size-first-row", 50.))
+                            .children((0..4).map(|_| plain_row(50.)))
+                            .child(row("max-size-last-row", 50.)),
+                    )
+                    .child(row("max-size-below", 20.)),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn max_height_scrollable_scrolls_to_its_last_row(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| MaxHeightScrollableTest);
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+
+        let first_row = cx.debug_bounds("max-size-first-row").unwrap();
+        let top = first_row.top();
+        // The area stops at its maximum height.
+        assert_eq!(
+            cx.debug_bounds("max-size-below").unwrap().top() - top,
+            px(100.)
+        );
+
+        let scroll_by = |cx: &mut VisualTestContext, dy: f32| {
+            cx.simulate_event(ScrollEvent {
+                position: first_row.center(),
+                delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                ..Default::default()
+            });
+            draw(cx);
+        };
+        // The rows past it scroll into view, down to the last one, which
+        // ends at the area's bottom edge.
+        scroll_by(cx, -40.);
+        assert_eq!(
+            cx.debug_bounds("max-size-first-row").unwrap().top() - top,
+            px(-40.)
+        );
+        scroll_by(cx, -1000.);
+        assert_eq!(
+            cx.debug_bounds("max-size-last-row").unwrap().bottom() - top,
+            px(100.)
+        );
+    }
+
+    struct MaxWidthScrollableTest;
+
+    impl Render for MaxWidthScrollableTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            // Six items of 50px in an area that may grow to 100px wide.
+            crate::h_flex().h(px(20.)).child(
+                crate::h_flex()
+                    .max_w(px(100.))
+                    .overflow_x_scrollbar()
+                    .child(item("max-size-first-item", 50.))
+                    .children((0..5).map(|_| plain_item(50.))),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn max_width_scrollable_scrolls_what_overflows_it(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| MaxWidthScrollableTest);
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+
+        let first_item = cx.debug_bounds("max-size-first-item").unwrap();
+        cx.simulate_event(ScrollEvent {
+            position: first_item.center(),
+            delta: ScrollDelta::Pixels(point(px(-40.), px(0.))),
+            ..Default::default()
+        });
+        draw(cx);
+        assert_eq!(
+            cx.debug_bounds("max-size-first-item").unwrap().left() - first_item.left(),
+            px(-40.)
+        );
+    }
+
     struct FlexItemScrollableTest;
 
     impl Render for FlexItemScrollableTest {
@@ -585,7 +702,7 @@ mod tests {
                 .x
         };
         let initial_x = first_item_x(cx);
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(50.), px(10.)),
             delta: ScrollDelta::Lines(point(0., -1.)),
             ..Default::default()

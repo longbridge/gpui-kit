@@ -1,11 +1,24 @@
 [default]
-extend-ignore-re = ['\\u\{[0-9A-Fa-f]+\}']
+# The v0.8.0 release notes credit two contributors whose GitHub handles the
+# tokenizer reads as misspelled words; ignoring the exact handles keeps the
+# rest of the file checked.
+extend-ignore-re = [
+    '\\u\{[0-9A-Fa-f]+\}',
+    '@UncertaintyDeterminesYou4ndMe',
+    '@alex-vas',
+    # Valid Portuguese translations; keep English spellings checked elsewhere.
+    'pt-BR: "Alteração atual"',
+    'pt-BR: "Aceitar a atual"',
+    'pt-BR: "Atual aceita"',
+]
 
 [default.extend-words]
 # Official Lucide icon name for the astroid curve.
 astroid = "astroid"
 # Correct Italian singular of "command".
 comando = "comando"
+# Correct Portuguese word for "current" in localized UI labels.
+atual = "atual"
 # A deliberately misspelled manifest key: `crates/shell/src/plugin.rs` refuses
 # it by name, and the test that proves it has to contain the misspelling.
 capabilites = "capabilites"

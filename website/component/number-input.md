@@ -171,6 +171,16 @@ NumberInput::new(&input)
 NumberInput::new(&input).disabled(true)
 ```
 
+### Accessible Name
+
+A number input has no visible text of its own, so screen readers can't tell it apart from other
+inputs. Name it with `.accessibility_label(...)`, usually after the label shown next to it. This
+doesn't add a visible label:
+
+```rust
+NumberInput::new(&input).accessibility_label("Font size")
+```
+
 ### Without Default Styling
 
 ```rust
@@ -250,6 +260,7 @@ NumberInput::decrement(&number_input, window, cx);
 | `prefix(el)`                   | Add prefix element                         |
 | `suffix(el)`                   | Add suffix element                         |
 | `appearance(bool)`             | Enable/disable default styling             |
+| `accessibility_label(str)`     | Name announced by screen readers           |
 | `disabled(bool)`               | Set disabled state                         |
 | `increment(state, window, cx)` | Increment value programmatically           |
 | `decrement(state, window, cx)` | Decrement value programmatically           |

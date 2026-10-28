@@ -69,7 +69,8 @@ impl Switch {
     ///
     /// A switch's name comes from its [`label`](Self::label) by default.
     /// Setting this replaces the announced name without changing what is
-    /// displayed.
+    /// displayed. A switch without a label has no accessible name, so set this
+    /// whenever the switch is drawn without visible text.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
@@ -391,7 +392,8 @@ mod tests {
     }
 
     fn activate_key(cx: &mut VisualTestContext, key: &str) {
-        let keystroke = Keystroke::parse(key).unwrap();
+        let keystroke =
+            cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
         cx.simulate_event(KeyDownEvent {
             keystroke: keystroke.clone(),
             is_held: false,

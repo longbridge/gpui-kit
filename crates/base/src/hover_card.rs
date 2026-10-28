@@ -2,12 +2,12 @@ use std::rc::Rc;
 
 use gpui::{
     Anchor, AnyElement, App, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, RenderOnce, Stateful, StatefulInteractiveElement as _, Task,
-    Window, div, prelude::FluentBuilder as _,
+    ParentElement as _, Render, RenderOnce, Stateful, StatefulInteractiveElement as _,
+    StyleRefinement, Styled, Task, Window, div, prelude::FluentBuilder as _,
 };
 use instant::Duration;
 
-use crate::Popup;
+use crate::{Popup, StyledExt as _};
 
 type ContentBuilder = Box<
     dyn FnOnce(
@@ -23,6 +23,7 @@ type OpenChangeHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct HoverCard {
     id: ElementId,
+    style: StyleRefinement,
     anchor: Anchor,
     tap_to_open: bool,
     trigger: Option<AnyElement>,
@@ -36,6 +37,7 @@ impl HoverCard {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
+            style: StyleRefinement::default(),
             anchor: Anchor::TopCenter,
             tap_to_open: crate::is_mobile(),
             trigger: None,
@@ -85,6 +87,14 @@ impl HoverCard {
     ) -> Self {
         self.on_open_change = Some(Rc::new(callback));
         self
+    }
+}
+
+/// Styles the trigger container: the element that takes part in the parent
+/// layout and whose bounds the card is anchored to.
+impl Styled for HoverCard {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
     }
 }
 
@@ -241,6 +251,7 @@ impl RenderOnce for HoverCard {
                     }))
                 }),
         )
+        .refine_style(&self.style)
         .anchor(self.anchor);
 
         if !open {
@@ -270,7 +281,7 @@ impl RenderOnce for HoverCard {
 mod tests {
     use std::cell::RefCell;
 
-    use gpui::{Context, Render, Styled as _, TestAppContext, point, px};
+    use gpui::{Context, Render, TestAppContext, point, px};
 
     use super::*;
 

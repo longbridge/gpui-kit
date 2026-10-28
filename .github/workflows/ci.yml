@@ -57,13 +57,13 @@ jobs:
           components: clippy
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       # Lints every member and, as a side effect, type-checks the example
-      # crates that the `test` job leaves out. `gpui-webview` enables
+      # crates that the `test` job leaves out. The WebView example enables
       # `gpui-kit/gpui-fast`, which feature unification would spread to every
-      # member, so it and its example are linted on their own.
+      # member, so it is linted on its own.
       - name: Lint
-        run: cargo clippy --workspace --exclude gpui-shell --exclude gpui-webview --exclude webview --locked -- --deny warnings
+        run: cargo clippy --workspace --exclude gpui-shell --exclude webview --locked -- --deny warnings
       - name: Lint WebView (GPUI Fast)
-        run: cargo clippy -p gpui-webview -p webview --locked -- --deny warnings
+        run: cargo clippy -p gpui-webview -p webview --features gpui-kit/gpui-fast,gpui-webview/gpui-fast --locked -- --deny warnings
 
   no-default-features:
     name: No default features
@@ -115,8 +115,8 @@ jobs:
       # most of the warm-cache build time; the `lint` job type-checks them
       # instead. Leaving them out changes no crate's feature set. The recipes
       # crate stays in: its tests are what certify the documentation's code.
-      # `gpui-webview` enables `gpui-kit/gpui-fast`, which feature unification
-      # would spread to every member; the GPUI Fast job tests it instead.
+      # `gpui-webview`'s tests cover GPUI Fast composition, so the GPUI Fast
+      # job runs them; the `webview-gpui-pre` job lints the gpui-pre build.
       # `jq -j` writes the list as one line with no newline at all: on Windows
       # `jq` emits CRLF, and a `\r` left on a name breaks `--exclude`.
       - name: Leave the example crates to the lint job
@@ -177,8 +177,35 @@ jobs:
         run: script/bootstrap
       - name: Test GPUI Fast facade and UI integration
         run: cargo test -p gpui-kit --features gpui-fast,test-support --locked
+      - name: Test Component tooltip lifecycle with GPUI Fast
+        run: >-
+          cargo test -p gpui-component --features gpui-fast,test-support
+          --lib tooltip::tests:: --locked
       - name: Test WebView
-        run: cargo test -p gpui-webview --locked
+        run: cargo test -p gpui-webview --features gpui-fast,gpui-kit/gpui-fast --locked
+
+  # `gpui-webview` defaults to gpui-pre, where the native view is attached to
+  # the window directly; this keeps that build compiling on every platform.
+  webview-gpui-pre:
+    name: WebView on gpui-pre (${{ matrix.run_on }})
+    strategy:
+      fail-fast: false
+      matrix:
+        run_on: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.run_on }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
+      - name: Install system dependencies
+        if: ${{ matrix.run_on != 'windows-latest' }}
+        run: script/bootstrap
+      - name: Lint WebView on gpui-pre
+        run: cargo clippy -p gpui-webview --all-targets --locked -- --deny warnings
 
   gpui-fast-web:
     name: GPUI Fast (WebAssembly)

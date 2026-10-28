@@ -30,6 +30,10 @@
 //! same distance into it. [`KeyedList`] does both around GPUI's own layout,
 //! because asking the script for a key is something only layout may do here.
 //!
+//! A list following its tail (`with_follow_mode("tail")`, GPUI's
+//! `FollowMode::Tail`) is the exception: it is kept at the end, and the key
+//! is not looked for.
+//!
 //! # A `list` reports what it shows after the frame
 //!
 //! A script that loads older items when the reader reaches the top has to be
@@ -51,10 +55,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, DefiniteLength, Edges, Element, ElementId, Empty, Entity, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, ListAlignment, ListOffset, ListState, Pixels,
-    Refineable as _, SharedString, StyleRefinement, Styled as _, UniformListScrollHandle, Window,
-    list as gpui_list, px, uniform_list,
+    AnyElement, App, DefiniteLength, Edges, Element, ElementId, Empty, Entity, FollowMode,
+    GlobalElementId, InspectorElementId, IntoElement, LayoutId, ListAlignment, ListOffset,
+    ListState, Pixels, Refineable as _, SharedString, StyleRefinement, Styled as _,
+    UniformListScrollHandle, Window, list as gpui_list, px, uniform_list,
 };
 
 use crate::{
@@ -83,12 +87,14 @@ use crate::{
 const LIST_OVERDRAW: gpui::Pixels = px(160.);
 
 /// The retained side of a `list`: GPUI's measurements, the count they were
-/// taken for, the item the viewport started at when it was last laid out, and
-/// the visible range and count last reported to the script.
+/// taken for, the item the viewport started at when it was last laid out,
+/// whether GPUI was told to follow the tail, and the visible range and count
+/// last reported to the script.
 struct MeasuredItems {
     state: ListState,
     item_count: usize,
     top: Option<TopItem>,
+    follows_tail: bool,
     reported: Option<(Range<usize>, usize)>,
 }
 
@@ -161,6 +167,12 @@ pub(in crate::materialize) fn list(
             if let Some(index) = behavior.item_to_measure_index {
                 list = list.with_width_from_item(Some(index));
             }
+            if behavior.follow_mode.is_some() {
+                tracing::warn!(
+                    "with_follow_mode is ignored on a uniform_list: GPUI's uniform list has no \
+                     follow mode. It is list that follows its tail"
+                );
+            }
             if behavior.on_visible_range_change.is_some() {
                 tracing::warn!(
                     "on_visible_range_change is ignored on a uniform_list: it is list that \
@@ -183,10 +195,25 @@ pub(in crate::materialize) fn list(
                     state: ListState::new(item_count, ListAlignment::Top, LIST_OVERDRAW),
                     item_count,
                     top: None,
+                    follows_tail: false,
                     reported: None,
                 }
             });
-            let state = retained.read(cx).state.clone();
+            let follows_tail = behavior.follow_mode == Some(FollowMode::Tail);
+            let state = retained.update(cx, |retained, _| {
+                // Only on a change: setting `Tail` scrolls to the end, so
+                // setting it on every frame would undo the scroll up that
+                // pauses following.
+                if retained.follows_tail != follows_tail {
+                    retained.state.set_follow_mode(if follows_tail {
+                        FollowMode::Tail
+                    } else {
+                        FollowMode::Normal
+                    });
+                    retained.follows_tail = follows_tail;
+                }
+                retained.state.clone()
+            });
             shared_scroll_position(&identity.clone(), window, cx)
                 .update(cx, |shared, _| *shared = SharedScroll::List(state.clone()));
 
@@ -268,8 +295,10 @@ impl KeyedList {
         let position = state.logical_scroll_top();
 
         // A position past the last item is the end of the list, and a splice
-        // of everything leaves it at the new end.
-        let target = (position.item_ix < old_count).then(|| {
+        // of everything leaves it at the new end. A list following its tail
+        // is put at the end by its own layout; scrolling it to an item here
+        // would stop it following.
+        let target = (position.item_ix < old_count && !state.is_following_tail()).then(|| {
             let moved_to = remembered.and_then(|(index, key)| {
                 let found =
                     self.find_key(&key, search_order(index, old_count, new_count), window, cx)?;

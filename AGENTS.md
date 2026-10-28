@@ -26,7 +26,10 @@ natural Chinese rather than word-for-word translation.
 
 ## Project Overview
 
-GPUI Kit is a Rust desktop application framework built on GPUI, published at <https://gpui-kit.com>. It ships as three crates: `gpui-base` (unstyled behavior and infrastructure), `gpui-shell` (JavaScript extensions for a Rust host), and `gpui-component` (GPUI Component, the styled component library with 60+ cross-platform desktop UI components, inspired by macOS/Windows controls and combined with shadcn/ui design). Applications depend on the umbrella crate `gpui-kit` (`crates/kit`), which pins the matching `gpui-pre-*` snapshot of GPUI and puts GPUI at its root (`use gpui_kit::*;`) with `gpui_kit::platform`, `gpui_kit::base`, `gpui_kit::component` and `gpui_kit::assets` reachable by name, so they never list GPUI itself. `gpui-shell` is not part of `gpui-kit` and is not published yet (its `llrt_*` dependencies are git-only); use it as a git dependency.
+GPUI Kit is a Rust desktop application framework built on GPUI, published at <https://gpui-kit.com>. It ships as three crates: `gpui-base` (unstyled behavior and infrastructure), `gpui-shell` (JavaScript extensions for a Rust host), and `gpui-component` (GPUI Component, the styled component library with 60+ cross-platform desktop UI components, inspired by macOS/Windows controls and combined with shadcn/ui design). Applications depend on the umbrella crate `gpui-kit` (`crates/kit`), which pins the matching `gpui-pre-*` snapshot of GPUI and puts GPUI at its root (`use gpui_kit::*;`) with `gpui_kit::platform`, `gpui_kit::base`, `gpui_kit::component` and `gpui_kit::assets` reachable by name, so they never list GPUI itself. `gpui-shell` is published separately and is not part of `gpui-kit`.
+
+Its QuickJS bindings, JIT runtime and standard modules use matching crates.io
+releases.
 
 This is a Rust workspace project with the following main crates:
 
@@ -290,13 +293,36 @@ The `Icon` element does not include SVG files by default. You need to:
 
 ## Dependencies
 
-- GPUI: Git version from Zed repository
+- GPUI: Exact version-aligned `gpui-pre-*` snapshots of Zed, with optional GPUI Fast
 - Tree-sitter: For syntax highlighting
 - Ropey: Rope data structure for text, and `RopeExt` trait with more features.
 - Markdown rendering: `markdown` crate
 - HTML rendering: `html5ever` (basic support)
 - Charts: Built-in chart components
 - LSP: `lsp-types` crate
+
+## Release Requirements
+
+- Before every release, check crates.io for the latest non-yanked stable
+  `gpui-pre` and `gpui-fast` releases. Update each family together: GPUI,
+  platform, Web, macros, collections and other directly named snapshot crates.
+  Keep `gpui-pre-*` requirements exact. Independently versioned packages such
+  as `gpui-pre-reqwest` must be checked separately.
+- Refresh Cargo.lock after updating both backends, and verify the resolved
+  versions. Do not tag or publish while either backend remains on an older
+  published release. If already current, record that verification.
+- Compile the default and `gpui-fast` configurations, and check public API
+  compatibility against the previous release. Patch releases may include
+  behavior changes, but must not require existing Rust consumers to change
+  signatures, imports, exhaustive struct literals or associated-type bounds.
+  If the user explicitly authorizes an upstream GPUI API migration in a patch
+  release, list those upstream changes and migration steps in its release notes;
+  preserve Kit-owned API compatibility.
+- Publish `gpui-shell` with the other release crates, after its Kit and WebView
+  dependencies. Its QuickJS dependencies must come from crates.io, use the
+  same release, and share one VM implementation without a local patch facade.
+- Follow CONTRIBUTING.md for versioning and release order, and prepare release
+  notes before pushing a release tag.
 
 ## Internationalization
 

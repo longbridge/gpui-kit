@@ -218,15 +218,13 @@ pub(super) fn write_file<'js>(
                 "fs.writeFile(path, contents) expects a string or Uint8Array",
             )
         })?;
-        bytes
-            .as_bytes()
-            .ok_or_else(|| {
-                js_error::type_error(
-                    &ctx,
-                    "fs.writeFile(path, contents) received a detached Uint8Array",
-                )
-            })?
-            .to_vec()
+        // SAFETY: copy the bytes before any JavaScript can run again.
+        unsafe { bytes.as_bytes().map(<[u8]>::to_vec) }.ok_or_else(|| {
+            js_error::type_error(
+                &ctx,
+                "fs.writeFile(path, contents) received a detached Uint8Array",
+            )
+        })?
     };
     let grant = grant(&ctx, &path, Access::Write)?;
     let name = grant.describe();
@@ -367,7 +365,7 @@ pub(super) fn exists<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>>
 /// remove would turn one mistyped path into the loss of an application's whole
 /// data directory; a script that means it walks the tree itself.
 pub(super) fn remove_file<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
-    let grant = grant(&ctx, &path, Access::Write)?;
+    let grant = grant_link(&ctx, &path, Access::Write)?;
     let name = grant.describe();
     let (dir, relative) = grant.into_parts();
 
@@ -379,7 +377,7 @@ pub(super) fn remove_file<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<
 
 /// Removes an **empty** directory. A non-empty one is an error, not a tree walk.
 pub(super) fn remove_dir<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
-    let grant = grant(&ctx, &path, Access::Write)?;
+    let grant = grant_link(&ctx, &path, Access::Write)?;
     let name = grant.describe();
     let (dir, relative) = grant.into_parts();
 
@@ -432,7 +430,7 @@ pub(super) fn stat<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
 
 /// Describes the symlink itself rather than what it names.
 pub(super) fn lstat<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
-    let grant = grant(&ctx, &path, Access::Read)?;
+    let grant = grant_link(&ctx, &path, Access::Read)?;
     let name = grant.describe();
     let (dir, relative) = grant.into_parts();
 
@@ -443,13 +441,14 @@ pub(super) fn lstat<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> 
     })
 }
 
-/// Moves a file or directory, replacing a file already at the destination.
+/// Moves a file or directory, replacing a file already at the destination. A
+/// symlink at either end is the thing moved or replaced, not what it names.
 ///
 /// Both ends need write access: taking a file out of a directory changes that
 /// directory as much as putting one in does.
 pub(super) fn rename<'js>(ctx: Ctx<'js>, from: String, to: String) -> JsResult<Promise<'js>> {
-    let source = grant(&ctx, &from, Access::Write)?;
-    let destination = grant(&ctx, &to, Access::Write)?;
+    let source = grant_link(&ctx, &from, Access::Write)?;
+    let destination = grant_link(&ctx, &to, Access::Write)?;
     let name = source.describe();
     let (source_dir, source_path) = source.into_parts();
     let (destination_dir, destination_path) = destination.into_parts();
@@ -465,7 +464,7 @@ pub(super) fn rename<'js>(ctx: Ctx<'js>, from: String, to: String) -> JsResult<P
 /// every root. Reading the text is not following it; `stat` and `readFile`
 /// still refuse to go there.
 pub(super) fn readlink<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
-    let grant = grant(&ctx, &path, Access::Read)?;
+    let grant = grant_link(&ctx, &path, Access::Read)?;
     let name = grant.describe();
     let (dir, relative) = grant.into_parts();
 
@@ -667,10 +666,18 @@ fn check_readdir_budget(entries: usize, name_bytes: usize) -> std::io::Result<()
 }
 
 /// The single path gate. Nothing in this module touches the filesystem except
-/// through a [`Grant`] it got back from here.
+/// through a [`Grant`] it got back from here, or from [`grant_link`].
 pub(super) fn grant(ctx: &Ctx<'_>, path: &str, access: Access) -> JsResult<Grant> {
     capabilities()
         .open(Path::new(path), access)
+        .map_err(|error| js_error::type_error(ctx, &denial(&error)))
+}
+
+/// [`grant`] for an operation on the path's final component itself, which does
+/// not follow it when it is a symlink. See [`Capabilities::open_link`].
+pub(super) fn grant_link(ctx: &Ctx<'_>, path: &str, access: Access) -> JsResult<Grant> {
+    capabilities()
+        .open_link(Path::new(path), access)
         .map_err(|error| js_error::type_error(ctx, &denial(&error)))
 }
 

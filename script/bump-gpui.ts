@@ -91,6 +91,10 @@ const DEPENDENCY_OVERRIDES: Record<
   // Zed pins a git revision; `test-support` compiles against the crates.io
   // release, which has the `attr-macro` feature Zed enables.
   proptest: { package: "proptest", version: "1" },
+  // Adapt Zed's unreleased APIs in adaptWgpuRelease below.
+  // crates.io cannot retain its unreleased Vulkan surface-drop fix
+  // (gfx-rs/wgpu#10230); pick it up when a 30.x release ships it.
+  wgpu: { package: "wgpu", version: "30.0.1" },
 };
 
 const ZED_GIT_URL = "https://github.com/zed-industries/zed";
@@ -445,7 +449,7 @@ function loadWorkspace(zed: string): Workspace {
   return ws;
 }
 
-/** Point overridden workspace dependencies at their hand-published crates. */
+/** Point overridden workspace dependencies at their crates.io releases. */
 function applyDependencyOverrides(ws: Workspace) {
   const dependencies = workspaceDependencies(ws);
   for (const [name, override] of Object.entries(DEPENDENCY_OVERRIDES)) {
@@ -1120,6 +1124,7 @@ function stageWorkspace(
   installFacadeAwareMacroPaths(staging, crates, zedSha);
   makeDeclarativeMacrosCrateRelative(staging, crates, zedSha);
   vendorGpuiSourcesForApple(staging, crates, zedSha);
+  adaptWgpuRelease(staging, crates, zedSha);
   carryLicenseFiles(ws.root, staging, crates);
 
   writeFileSync(
@@ -1432,7 +1437,111 @@ function installFacadeAwareMacroPaths(
   logInfo(`gpui_macros: made ${wrapped.count} proc-macro entry points facade-aware`);
 }
 
+/** Adapt the unreleased APIs Zed uses to their wgpu 30.0.1 equivalents. */
+function rewriteWgpuSource(source: string): string {
+  const rewritten = source.replace(
+    /^[ \t]*default_queue: wgpu::QueueDescriptor::default\(\),\r?\n/gm,
+    "",
+  );
+  if (
+    rewritten.includes("default_queue:") ||
+    rewritten.includes("wgpu::QueueDescriptor")
+  )
+    throw new BumpError("wgpu queue configuration changed; update adaptWgpuRelease before publishing");
+  return rewritten.replaceAll(".has_srgb_suffix()", ".is_srgb()");
+}
+
+function adaptWgpuRelease(staging: string, crates: Crate[], zedSha: string) {
+  const renderer = crates.find((crate) => crate.name === "gpui_wgpu");
+  if (renderer === undefined) return;
+  for (const file of ["wgpu_context.rs", "wgpu_atlas.rs", "wgpu_renderer.rs"]) {
+    const path = join(staging, renderer.relDir, "src", file);
+    if (!existsSync(path)) continue;
+    const source = readFileSync(path, "utf8");
+    const rewritten = rewriteWgpuSource(source);
+    if (rewritten !== source)
+      writeFileSync(
+        path,
+        modificationNotice(zedSha, "adapt device queues and sRGB detection to wgpu 30.0.1") + rewritten,
+      );
+  }
+  logWarn("wgpu: using crates.io 30.0.1 without the unreleased Vulkan surface-drop fix (gfx-rs/wgpu#10230)");
+}
+
 function runSelfTest() {
+  const queueFixture = "wgpu::DeviceDescriptor {\n    label: None,\n    default_queue: wgpu::QueueDescriptor::default(),\n}\n";
+  const queueExpected = "wgpu::DeviceDescriptor {\n    label: None,\n}\n";
+  if (rewriteWgpuSource(queueFixture) !== queueExpected ||
+      rewriteWgpuSource(queueExpected) !== queueExpected)
+    throw new BumpError("self-test did not adapt the wgpu device descriptor");
+  if (rewriteWgpuSource("!format.has_srgb_suffix()") !== "!format.is_srgb()")
+    throw new BumpError("self-test did not adapt wgpu sRGB detection");
+  let queueDriftFailed = false;
+  try {
+    rewriteWgpuSource(queueFixture.replace("::default()", ' { label: Some("custom") }'));
+  } catch (error) {
+    if (!(error instanceof BumpError)) throw error;
+    queueDriftFailed = true;
+  }
+  if (!queueDriftFailed)
+    throw new BumpError("self-test silently discarded a custom wgpu queue configuration");
+  const dependencyFixture: Workspace = {
+    root: ".",
+    manifest: {
+      workspace: {
+        dependencies: {
+          reqwest: { git: "https://github.com/zed-industries/reqwest.git" },
+          proptest: { git: "https://github.com/proptest-rs/proptest" },
+          wgpu: {
+            git: "https://github.com/gfx-rs/wgpu",
+            rev: "3b3506ea31154edc04de64debda0e780cba2639c",
+            "default-features": false,
+            features: ["wgsl"],
+          },
+        },
+      },
+    },
+    members: new Map(),
+    pruned: new Map(),
+  };
+  applyDependencyOverrides(dependencyFixture);
+  const wgpu = workspaceDependencies(dependencyFixture).wgpu;
+  if (
+    wgpu.package !== "wgpu" ||
+    wgpu.version !== "30.0.1" ||
+    SOURCE_KEYS.some((key) => !["package", "version"].includes(key) && key in wgpu) ||
+    wgpu["default-features"] !== false ||
+    JSON.stringify(wgpu.features) !== JSON.stringify(["wgsl"]) ||
+    !isPublishableSource(wgpu)
+  ) {
+    throw new BumpError("self-test did not replace wgpu's git source while preserving its options");
+  }
+  const rendererFixture: Crate = {
+    relDir: "crates/gpui_wgpu",
+    name: "gpui_wgpu",
+    publishedName: "gpui-pre-wgpu",
+    version: "0.1.0",
+    manifest: {
+      target: Object.fromEntries(
+        ["unix", "windows", "wasm"].map((cfg) => [
+          `cfg(${cfg})`,
+          { dependencies: { wgpu: { workspace: true } } },
+        ]),
+      ),
+    },
+    prunedDeps: [],
+    prunedFeatures: [],
+    relaxedDeps: [],
+  };
+  pruneUnpublishable(dependencyFixture, [rendererFixture]);
+  if (depTables(rendererFixture.manifest).length !== 3)
+    throw new BumpError("self-test pruned a required wgpu target dependency");
+  const generatedWorkspace = Bun.TOML.parse(
+    tomlDump(workspaceManifest(dependencyFixture, [rendererFixture], "0.3.0")),
+  );
+  if (JSON.stringify(generatedWorkspace.workspace.dependencies.wgpu) !== JSON.stringify(wgpu))
+    throw new BumpError("self-test changed the wgpu override when generating TOML");
+  logSuccess("Dependency override self-test passed");
   const declarativeFixture = [
     "macro_rules! actions {",
     "    ($ns:path, [ $($name:ident),* ]) => { $( #[derive(gpui::Action)] pub struct $name; )* };",
@@ -2092,10 +2201,10 @@ async function verifyKitAgainstStaging(
 
     // The same commands the repository's CI runs. Clippy stays scoped to the
     // crates this repository publishes; `--no-deps` keeps it off the staged
-    // crates, whose warnings are Zed's to fix. `gpui-webview` enables
+    // crates, whose warnings are Zed's to fix. The WebView example enables
     // `gpui-kit/gpui-fast`, which would switch every member off gpui-pre.
     const commands = [
-      ["cargo", "check", ...patches, "--workspace", "--exclude", "gpui-webview", "--exclude", "webview", "--all-targets"],
+      ["cargo", "check", ...patches, "--workspace", "--exclude", "webview", "--all-targets"],
       ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings"],
       ["cargo", "test", ...patches, "--workspace", "--exclude", "gpui-shell", "--exclude", "gpui-webview", "--exclude", "webview", "--features", "gpui-component-story/test-support"],
     ];

@@ -29,8 +29,9 @@ pub trait TestEventExt {
     fn key_up(&mut self, key: &str, cx: &mut App);
 }
 
-fn parse_key(key: &str) -> Keystroke {
-    Keystroke::parse(key).unwrap_or_else(|error| panic!("invalid test keystroke: {error}"))
+fn parse_key(key: &str, cx: &App) -> Keystroke {
+    Keystroke::parse_with_os(key, cx.platform_info().os)
+        .unwrap_or_else(|error| panic!("invalid test keystroke: {error}"))
 }
 
 impl TestEventExt for Window {
@@ -94,7 +95,7 @@ impl TestEventExt for Window {
         self.render_frame(cx);
     }
     fn key_down(&mut self, key: &str, is_held: bool, cx: &mut App) {
-        let mut keystroke = parse_key(key);
+        let mut keystroke = parse_key(key, cx);
         self.render_frame(cx);
         keystroke.modifiers |= self.modifiers();
         self.dispatch_event(
@@ -109,7 +110,7 @@ impl TestEventExt for Window {
         self.render_frame(cx);
     }
     fn key_up(&mut self, key: &str, cx: &mut App) {
-        let mut keystroke = parse_key(key);
+        let mut keystroke = parse_key(key, cx);
         self.render_frame(cx);
         keystroke.modifiers |= self.modifiers();
         self.dispatch_event(KeyUpEvent { keystroke }.to_platform_input(), cx);

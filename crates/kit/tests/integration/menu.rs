@@ -277,7 +277,7 @@ fn assert_selection_menu(
 }
 
 fn press_context_menu_key(handle: AnyWindowHandle, key: &str, cx: &mut TestAppContext) {
-    let keystroke = Keystroke::parse(key).unwrap();
+    let keystroke = cx.update(|cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
     cx.update_window(handle, |_, window, cx| {
         window.dispatch_event(
             KeyDownEvent {

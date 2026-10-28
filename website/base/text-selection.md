@@ -47,7 +47,7 @@ The complete flow is:
 5. Paint each returned byte range behind its glyphs.
 6. Read or clear the window selection through `TextSelection`.
 
-The installed layer also provides familiar multi-click behavior: double-click selects a word using the same boundary rules as `Input`, while triple-click and later clicks select the newline-delimited logical line.
+The installed layer also provides familiar multi-click behavior: double-click selects a word using the same boundary rules as `Input`, while triple-click and later clicks select the newline-delimited logical line. A drag that continues the click, or a Shift-click after it, extends the selection by whole words or lines and keeps the first one selected.
 
 The window state belongs to the retained `TextSelectionLayer` element. Handles and callbacks never receive or own that internal state.
 

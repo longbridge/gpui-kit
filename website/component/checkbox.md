@@ -91,8 +91,12 @@ Checkbox::new("checkbox")
 
 ### Without Label
 
+A checkbox without visible text has no accessible name, so screen readers can't tell it apart
+from other checkboxes. Name it with `.accessibility_label(...)`. This doesn't add a visible label:
+
 ```rust
-Checkbox::new("checkbox")
+Checkbox::new("remember")
+    .accessibility_label("Remember me")
     .checked(true)
 ```
 

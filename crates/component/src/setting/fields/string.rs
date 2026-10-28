@@ -15,12 +15,15 @@ use crate::{
 };
 
 pub(crate) struct StringField<T> {
+    /// The setting's title, the input's accessible name.
+    title: SharedString,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T> StringField<T> {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(title: SharedString) -> Self {
         Self {
+            title,
             _marker: std::marker::PhantomData,
         }
     }
@@ -89,6 +92,7 @@ where
         let state = state_entity.read(cx);
 
         Input::new(&state.input)
+            .aria_label(self.title.clone())
             .disabled(options.is_disabled())
             .with_size(options.size())
             .map(|this| {

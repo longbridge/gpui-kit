@@ -782,7 +782,14 @@ impl RenderOnce for SliderIndicator {
             .children(self.children)
             .on_prepaint({
                 let state = self.state;
-                move |bounds, _, cx| state.update(cx, |state, _| state.set_bounds(bounds))
+                // Only when they moved: with retained views, an update while
+                // the window draws renders every view that reads the state
+                // again.
+                move |bounds, _, cx| {
+                    if state.read(cx).bounds != bounds {
+                        state.update(cx, |state, _| state.set_bounds(bounds));
+                    }
+                }
             })
     }
 }
@@ -937,5 +944,89 @@ mod tests {
     #[should_panic(expected = "`min` must be greater than 0")]
     fn legacy_logarithmic_validation_is_preserved() {
         let _ = SliderState::new().scale(SliderScale::Logarithmic);
+    }
+
+    /// A slider's bar beside a view that reads its state, under retained views.
+    #[cfg(feature = "gpui-fast")]
+    mod retained {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{
+            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+            TestAppContext, Window, div, px,
+        };
+
+        use super::super::{SliderIndicator, SliderState};
+
+        /// A view that shows a slider's value, counting its renders.
+        struct Readout {
+            state: Entity<SliderState>,
+            renders: Rc<Cell<usize>>,
+        }
+
+        impl Render for Readout {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                div().child(self.state.read(cx).value().to_string())
+            }
+        }
+
+        /// A slider's bar in a view of its own.
+        struct Bar {
+            state: Entity<SliderState>,
+        }
+
+        impl Render for Bar {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(120.))
+                    .h(px(24.))
+                    .child(SliderIndicator::new(&self.state).size_full())
+            }
+        }
+
+        /// The bar and the readout side by side.
+        struct Pair {
+            bar: Entity<Bar>,
+            readout: Entity<Readout>,
+        }
+
+        impl Render for Pair {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .child(self.bar.clone())
+                    .child(self.readout.clone())
+            }
+        }
+
+        /// Drawing a slider's bar again where it was changes nothing in the
+        /// slider's state: a view beside it that reads the state is not built
+        /// again for it.
+        #[gpui::test]
+        fn drawing_a_slider_again_leaves_its_readers_retained(cx: &mut TestAppContext) {
+            let renders = Rc::new(Cell::new(0));
+            let (view, cx) = cx.add_window_view({
+                let renders = renders.clone();
+                move |_, cx| {
+                    let state = cx.new(|_| SliderState::new());
+                    Pair {
+                        bar: cx.new(|_| Bar {
+                            state: state.clone(),
+                        }),
+                        readout: cx.new(|_| Readout { state, renders }),
+                    }
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let rendered = renders.get();
+            for _ in 0..3 {
+                view.update(cx, |pair, cx| pair.bar.update(cx, |_, cx| cx.notify()));
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(renders.get(), rendered, "the readout was built again");
+        }
     }
 }

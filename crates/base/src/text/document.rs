@@ -9,7 +9,7 @@ use std::{
 
 use crate::text::{
     SelectionFormat,
-    node::{BlockNode, NodeContext, SourceRangeSelection},
+    node::{BlockNode, NodeContext, SelectionStyles, SourceRangeSelection},
 };
 
 /// The parsed document AST.
@@ -52,8 +52,11 @@ pub(crate) enum PrevBlock {
 /// that shows anything, and the visible block before it. Link definitions
 /// and other blocks that render nothing are skipped, so a document opening
 /// with `[ref]: url` still starts flush.
-pub(crate) fn flow_position(blocks: &[BlockNode], ix: usize) -> (bool, PrevBlock) {
-    let prev = blocks[..ix].iter().rev().find(|block| {
+pub(crate) fn flow_position<B: std::borrow::Borrow<BlockNode>>(
+    blocks: &[B],
+    ix: usize,
+) -> (bool, PrevBlock) {
+    let prev = blocks[..ix].iter().rev().map(B::borrow).find(|block| {
         !matches!(
             block,
             BlockNode::Definition { .. } | BlockNode::Break { .. } | BlockNode::Unknown
@@ -90,16 +93,13 @@ impl ParsedDocument {
     /// top-level blocks are joined with a blank line so the result re-renders
     /// with the same block structure.
     ///
-    /// A block only learns its selection when it is painted, so in a scrollable
-    /// (virtualized) view every block the user scrolled past reports nothing.
-    /// The selection is one continuous range, so blocks it spans that came up
-    /// empty are inside it and are emitted whole rather than dropped. `blocks`
-    /// bounds that span; it comes from the selection endpoints, which hold on to
-    /// their block index even after it scrolls out of view (the painted blocks
-    /// alone cannot bound the span, because the press that starts a drag leaves
-    /// an empty selection that never reaches paint). Without it, fall back to
-    /// the painted blocks. (Source mode is only used by non-scrollable views,
-    /// where `blocks` is `None` and every block paints.)
+    /// Paint and synchronous Copy project the current gesture onto retained
+    /// native layouts. In a scrollable (virtualized) view some covered blocks
+    /// have never been laid out and report nothing. The selection is continuous,
+    /// so its interior blocks are emitted whole rather than dropped. `blocks`
+    /// bounds that span; it comes from the selection endpoints, which hold on
+    /// to their block index even after scrolling out of view. Without it, fall
+    /// back to the blocks with projected selections.
     ///
     /// A standalone image (a paragraph that is only an image) has no selectable
     /// text run, so it never carries a selection of its own. It is therefore
@@ -129,6 +129,20 @@ impl ParsedDocument {
         let (first, last) = match blocks {
             Some(blocks) => (*blocks.start().min(&last_ix), *blocks.end().min(&last_ix)),
             None => (painted_first, painted_last),
+        };
+
+        // A selection within one style copies as the text it renders; one
+        // that is only partly painted cannot tell, and keeps its source.
+        let format = match format {
+            SelectionFormat::SourceAcrossStyles
+                if first == last
+                    && painted[first]
+                    && self.blocks[first].selection_styles() != SelectionStyles::Mixed =>
+            {
+                SelectionFormat::Plain
+            }
+            SelectionFormat::SourceAcrossStyles => SelectionFormat::Source,
+            format => format,
         };
 
         if format == SelectionFormat::Plain {

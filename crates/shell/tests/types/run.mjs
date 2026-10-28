@@ -1,4 +1,4 @@
-import { mkdtempSync, copyFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, copyFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,11 @@ function run([command, ...args], timeout) {
 
 try {
   run([...shell, 'types', temporary]);
+  const declarations = readFileSync(join(temporary, 'gpui-kit.d.ts'), 'utf8');
+  const button = declarations.split('export type ButtonElement = ')[1]?.split('\n  }')[0];
+  if (!button?.includes('accessibility_label(accessibility_label: string): ButtonElement;')) {
+    throw new Error('Button must declare its registered accessibility_label method');
+  }
   copyFileSync(join(directory, 'fluent.ts'), join(temporary, 'fluent.ts'));
   copyFileSync(join(directory, 'rejected.ts'), join(temporary, 'rejected.ts'));
   copyFileSync(join(workspace, 'examples/js_story/stories/registered.js'), join(temporary, 'registered.js'));
@@ -39,6 +44,8 @@ try {
   run([...shell, 'check', temporary], 30000);
 
   for (const [expression, diagnostic] of [
+    ["Button.new('action').accessibility_label(123)", 'accessibility_label'],
+    ["Button.new('action').accessibility_label()", 'accessibility_label'],
     ["new Spinner().transition('opacity', 120)", 'transition'],
     ["new Spinner().p(4).transition('opacity', 120)", 'transition'],
     ["new Spinner().role('status')", 'role'],
@@ -46,7 +53,7 @@ try {
     ['new Spinner().p(4).on_click(() => {})', 'on_click'],
     ["new Spinner().when(true, element => element).size('huge')", 'size(size) expects'],
   ]) {
-    writeFileSync(join(temporary, 'main.js'), `import { View } from 'gpui-kit'; import { Spinner } from 'gpui-component'; export default class Invalid extends View { render() { return ${expression}; } }`);
+    writeFileSync(join(temporary, 'main.js'), `import { View } from 'gpui-kit'; import { Button, Spinner } from 'gpui-component'; export default class Invalid extends View { render() { return ${expression}; } }`);
     const [command, ...args] = shell;
     const result = spawnSync(command, [...args, 'check', temporary], {
       cwd: workspace, encoding: 'utf8', timeout: 30000,

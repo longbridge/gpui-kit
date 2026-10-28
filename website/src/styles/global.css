@@ -1436,14 +1436,20 @@ html.dark .astro-code span {
 }
 .site-nav__projects-menu a {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  align-items: center;
+  gap: 0.65rem;
   padding: 0.45rem 0.55rem;
   border-radius: var(--radius-control);
   color: var(--foreground);
   text-decoration: none;
 }
 .site-nav__projects-menu a:hover { background: var(--secondary); }
+.site-nav__project-logo { flex-shrink: 0; width: 1.75rem; height: 1.75rem; }
+.site-nav__project-copy { display: flex; flex-direction: column; gap: 0.1rem; }
+.site-nav__native-shell-top { stop-color: #b5df4d; }
+.site-nav__native-shell-bottom { stop-color: #7ea51f; }
+.dark .site-nav__native-shell-top { stop-color: #e2fb9f; }
+.dark .site-nav__native-shell-bottom { stop-color: #a9d63f; }
 .site-nav__projects-menu strong { font-size: 0.8125rem; font-weight: 600; }
 .site-nav__projects-menu span { color: var(--muted-foreground); font-size: 0.75rem; }
 .site-nav__projects-menu a.is-current { background: var(--secondary); }

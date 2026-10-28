@@ -33,7 +33,9 @@ pub fn handle_key_down(
             && state.focused_current_choice(window).is_some()
     };
 
-    let handled = if key == "enter" && modifiers.secondary() && modifiers.number_of_modifiers() == 1
+    let handled = if key == "enter"
+        && modifiers.secondary(cx)
+        && modifiers.number_of_modifiers() == 1
     {
         state.update(cx, |state, cx| state.confirm_current(window, cx))
     } else if modifiers.number_of_modifiers() != 0 {

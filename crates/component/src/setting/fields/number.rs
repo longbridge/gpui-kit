@@ -36,12 +36,15 @@ impl Default for NumberFieldOptions {
 
 pub(crate) struct NumberField {
     options: NumberFieldOptions,
+    /// The setting's title, the input's accessible name.
+    title: SharedString,
 }
 
 impl NumberField {
-    pub(crate) fn new(options: Option<&NumberFieldOptions>) -> Self {
+    pub(crate) fn new(options: Option<&NumberFieldOptions>, title: SharedString) -> Self {
         Self {
             options: options.cloned().unwrap_or_default(),
+            title,
         }
     }
 }
@@ -138,6 +141,7 @@ impl SettingFieldRender for NumberField {
         let state = state_entity.read(cx);
 
         NumberInput::new(&state.input)
+            .accessibility_label(self.title.clone())
             .disabled(options.is_disabled())
             .with_size(options.size())
             .map(|this| {

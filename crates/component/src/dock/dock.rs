@@ -101,9 +101,7 @@ impl DockAreaRenderer for DockSkin {
         cx: &mut App,
     ) -> Option<Arc<dyn PanelView>> {
         let state = state.clone();
-        Some(panel_handle(cx.new(|cx| {
-            InvalidPanel::new(state.panel_name.clone(), state, cx)
-        })))
+        Some(panel_handle(cx.new(|cx| InvalidPanel::new(state, cx))))
     }
 
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {

@@ -114,12 +114,40 @@ export default class App extends View {
     );
 }
 
-/// A `Button` whose materializer honours `MaterializeRequest::on_click` still
-/// cannot be clicked unless its descriptor declares the method: the engine
-/// refuses a common behavior a registered component has not declared, so the
-/// wiring on both ends is live and the call never arrives.
+/// The registered Button must pass its explicit accessible name to the real
+/// component without replacing its visible label or losing the click callback.
 #[gpui::test]
-fn clicking_a_button_reaches_the_script(cx: &mut TestAppContext) {
+fn a_named_button_preserves_its_visible_label_and_click_handler(cx: &mut TestAppContext) {
+    // GPUI Fast's test window builds accessibility data only when requested.
+    // Run in a child so its cached environment flag is set before any frame,
+    // without changing process-global environment during parallel tests.
+    #[cfg(feature = "gpui-fast")]
+    if std::env::var("GPUI_A11Y_ACTIVE").as_deref() != Ok("1") {
+        use wait_timeout::ChildExt as _;
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "controls_host::a_named_button_preserves_its_visible_label_and_click_handler",
+                "--nocapture",
+            ])
+            .env("GPUI_A11Y_ACTIVE", "1")
+            .spawn()
+            .unwrap();
+        let status = child
+            .wait_timeout(std::time::Duration::from_secs(30))
+            .unwrap();
+        let Some(status) = status else {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("accessible Button regression timed out");
+        };
+        assert!(
+            status.success(),
+            "accessible Button regression failed: {status}"
+        );
+        return;
+    }
     let source = r#"
 import { View, div } from "gpui-kit";
 import { Button } from "gpui-component";
@@ -127,8 +155,10 @@ export default class App extends View {
   init(_props, _cx) { this.hits = 0; }
   render() {
     return div().size_full()
-      .child(new Button("press").primary().label("Press me").absolute().left(0).top(0).w(200).h(32)
+      .child(Button.new("press").primary().label("Press me")
+        .accessibility_label("Run the primary action").absolute().left(0).top(0).w(200).h(32)
         .on_click((_event, cx) => { this.hits++; cx.notify(); }))
+      .child(Button.new("plain").label("Press me").absolute().left(0).top(40).w(200).h(32))
       .child(`hits: ${this.hits}`);
   }
 }
@@ -137,6 +167,19 @@ export default class App extends View {
     draw(&mut context);
     let before = context.update(|_, cx| view.read(cx).snapshot().unwrap().debug_tree());
     assert!(before.contains("hits: 0"), "{before}");
+    #[cfg(feature = "gpui-fast")]
+    {
+        let tree = context.update(|window, _| window.debug_a11y_tree_json().unwrap());
+        let tree: serde_json::Value = serde_json::from_str(&tree).unwrap();
+        let nodes = tree["nodes"].as_object().unwrap();
+        let mut labels = nodes
+            .values()
+            .filter(|node| node["aria"]["role"] == "Button")
+            .map(|node| node["aria"]["label"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        labels.sort_unstable();
+        assert_eq!(labels, ["Press me", "Run the primary action"]);
+    }
 
     context.simulate_click(point(px(10.), px(16.)), Modifiers::default());
     draw(&mut context);

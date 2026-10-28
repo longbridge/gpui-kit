@@ -237,7 +237,7 @@ export default class Probe extends View {
     .expect("entry module");
 
     cx.update(crate::init);
-    // `HOME` is a default, `CARGO_PKG_NAME` is granted, and `CARGO_MANIFEST_DIR`
+    // The home variables are defaults, `CARGO_PKG_NAME` is granted, and `CARGO_MANIFEST_DIR`
     // is set by cargo and neither, so it stays out.
     crate::set_capabilities(Capabilities::new().env_variables(["CARGO_PKG_NAME".to_owned()]));
     let data = directory.join("data");
@@ -255,6 +255,8 @@ export default class Probe extends View {
     let rendered = snapshot_text(&mut context, &view);
 
     let home = crate::runtime::home_dir().expect("a test machine has a home directory");
+    // The snapshot quotes text the way `Debug` does, so Windows backslashes come back escaped.
+    let quoted = |path: &std::path::Path| path.to_string_lossy().escape_debug().to_string();
     let fields: Vec<&str> = rendered
         .lines()
         .find(|line| line.contains("file://"))
@@ -267,15 +269,27 @@ export default class Probe extends View {
         fields[1].starts_with("file://") && fields[1].ends_with("/lib/helper.js"),
         "{rendered}"
     );
-    assert_eq!(fields[2], data.to_string_lossy(), "{rendered}");
+    assert_eq!(fields[2], quoted(&data), "{rendered}");
     let names: Vec<&str> = fields[3].split(',').collect();
-    assert!(names.contains(&"HOME"), "{rendered}");
+    // Both home variables are defaults, but only the ones the host sets are
+    // exported: a Windows runner may have `USERPROFILE` and no `HOME`.
+    let homes: Vec<&str> = ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_some())
+        .collect();
+    assert!(
+        !homes.is_empty(),
+        "the host sets neither HOME nor USERPROFILE"
+    );
+    for home in homes {
+        assert!(
+            names.iter().any(|name| name.eq_ignore_ascii_case(home)),
+            "{home} is a default and set on the host: {rendered}"
+        );
+    }
     assert!(names.contains(&"CARGO_PKG_NAME"), "{rendered}");
     assert!(!names.contains(&"CARGO_MANIFEST_DIR"), "{rendered}");
-    assert!(
-        fields[4].starts_with(&*home.to_string_lossy()),
-        "{rendered}"
-    );
+    assert!(fields[4].starts_with(&quoted(&home)), "{rendered}");
 
     crate::policy::update_default(|policy| policy.with_capabilities(Capabilities::new()));
     let _ = std::fs::remove_dir_all(&directory);

@@ -36,16 +36,18 @@ const LINE_START: &str = "home";
 
 struct Composer {
     text: Entity<TextareaState>,
+    height: Option<Pixels>,
     enters: Vec<(bool, bool, String)>,
     _subscription: Subscription,
 }
 
 impl Render for Composer {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .p_4()
-            .child(Textarea::new(&self.text).w_full())
+        div().size_full().p_4().child(
+            Textarea::new(&self.text)
+                .w_full()
+                .when_some(self.height, |input, height| input.h(height)),
+        )
     }
 }
 
@@ -69,6 +71,7 @@ fn composer(
             });
             Composer {
                 text,
+                height: None,
                 enters: Vec::new(),
                 _subscription: subscription,
             }
@@ -140,7 +143,7 @@ fn pointer_click(
 }
 
 fn assert_caret_visible(state: &TextareaState) {
-    // cursor_layout is in unscrolled coordinates; apply the viewport offset.
+    // Cached caret y excludes vertical scrolling (x already includes its scroll).
     let (caret, _) = state.cursor_layout().expect("laid-out caret");
     let viewport = state.input_bounds();
     let top = caret.top() + state.scroll_offset().y;
@@ -468,6 +471,337 @@ fn typing_reveals_caret_after_user_scrolls_away(cx: &mut TestAppContext) {
         assert_eq!(text.read(cx).cursor(), value.len() + 1);
         assert!(text.read(cx).scroll_offset().y < px(0.));
         assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn typing_keeps_an_interior_caret_visible_in_one_row_viewports(cx: &mut TestAppContext) {
+    let value = (0..20).map(|n| format!("line {n}\n")).collect::<String>();
+    let offset = value.find("line 8").unwrap();
+    for (auto_grow, surrounding) in [
+        (false, None),
+        (false, Some(0)),
+        (false, Some(50)),
+        (true, None),
+    ] {
+        let (handle, _, text) = composer(cx, |state| {
+            let state = if auto_grow {
+                state.auto_grow(1, 1)
+            } else {
+                state.rows(1)
+            };
+            state
+                .cursor_surrounding_lines(surrounding)
+                .default_value(value.clone())
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click(target(&text), cx);
+            text.update(cx, |state, cx| state.set_selected_range(offset..offset, cx));
+            window.render_frame(cx);
+            let (caret, line_height) = text.read(cx).cursor_layout().unwrap();
+            let viewport = text.read(cx).input_bounds();
+            assert!(viewport.size.height >= line_height);
+            assert!(viewport.size.height < line_height * 2.);
+            let centered =
+                viewport.top() + (viewport.size.height - caret.size.height) / 2. - caret.top();
+            text.update(cx, |state, cx| {
+                state.set_scroll_offset(point(px(0.), centered), cx);
+            });
+            window.render_frame(cx);
+            assert_caret_visible(text.read(cx));
+            for (i, character) in ["x", "y", "z"].into_iter().enumerate() {
+                window.input(character, cx);
+                assert_eq!(text.read(cx).cursor(), offset + i + 1);
+                assert_caret_visible(text.read(cx));
+            }
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
+fn horizontal_movement_does_not_scroll_a_fully_visible_row(cx: &mut TestAppContext) {
+    let value = (0..20).map(|n| format!("line {n}\n")).collect::<String>();
+    let offset = value.find("line 8").unwrap();
+    let (handle, _, text) = composer(cx, |state| state.rows(4).default_value(value));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(target(&text), cx);
+        text.update(cx, |state, cx| state.set_selected_range(offset..offset, cx));
+        window.render_frame(cx);
+        let (caret, line_height) = text.read(cx).cursor_layout().unwrap();
+        let row_top = caret.top() - (line_height - caret.size.height) / 2.;
+        let scroll_y = text.read(cx).input_bounds().top() - row_top;
+        text.update(cx, |state, cx| {
+            state.set_scroll_offset(point(px(0.), scroll_y), cx);
+        });
+        window.render_frame(cx);
+        assert_caret_visible(text.read(cx));
+        let before = text.read(cx).scroll_offset();
+        window.press("right", cx);
+        assert_eq!(text.read(cx).cursor(), offset + 1);
+        assert_eq!(text.read(cx).scroll_offset(), before);
+        assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn reflow_keeps_a_visible_caret_without_undoing_manual_scroll(cx: &mut TestAppContext) {
+    let value = "日本語 word ".repeat(80);
+    let (handle, _, text) = composer(cx, |state| state.rows(3).default_value(value.clone()));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(target(&text), cx);
+        window.press(END, cx);
+        assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+    for width in [240., 480.] {
+        cx.simulate_window_resize(handle.into(), size(px(width), px(480.)));
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(text.read(cx).value(), value);
+            assert_eq!(text.read(cx).selected_range(), value.len()..value.len());
+            assert_caret_visible(text.read(cx));
+        })
+        .unwrap();
+    }
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.scroll(target(&text), ScrollDelta::Lines(point(0., 100.)), cx);
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).scroll_offset().y, px(0.));
+    })
+    .unwrap();
+    cx.simulate_window_resize(handle.into(), size(px(320.), px(480.)));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).scroll_offset().y, px(0.));
+        assert_eq!(text.read(cx).cursor(), value.len());
+        window.input("X", cx);
+        assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn shrinking_a_host_sized_textarea_keeps_its_caret_visible(cx: &mut TestAppContext) {
+    let value = (0..20).map(|n| format!("line {n}\n")).collect::<String>();
+    let (handle, owner, text) = composer(cx, |state| state.rows(1).default_value(value.clone()));
+    cx.update_window(handle.into(), |_, window, cx| {
+        owner.update(cx, |view, cx| {
+            view.height = Some(px(160.));
+            cx.notify();
+        });
+        window.render_frame(cx);
+        window.click(target(&text), cx);
+        window.press(END, cx);
+        assert_caret_visible(text.read(cx));
+        let (_, line_height) = text.read(cx).cursor_layout().unwrap();
+        let padding = window.find(target(&text)).bounds().size.height
+            - text.read(cx).input_bounds().size.height;
+        owner.update(cx, |view, cx| {
+            view.height = Some(line_height + padding);
+            cx.notify();
+        });
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).value(), value);
+        assert_eq!(text.read(cx).selected_range(), value.len()..value.len());
+        assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn shrinking_preserves_trailing_wrap_affinity_outside_the_shaped_range(cx: &mut TestAppContext) {
+    let prefix = "prefix\n".repeat(6);
+    let mut value = format!("{prefix}{}\ntail", "x".repeat(1000));
+    let (handle, owner, text) = composer(cx, |state| state.rows(1).default_value(value.clone()));
+    cx.update_window(handle.into(), |_, window, cx| {
+        owner.update(cx, |view, cx| {
+            view.height = Some(px(240.));
+            cx.notify();
+        });
+        window.render_frame(cx);
+        window.click(target(&text), cx);
+        window.press(START, cx);
+        for _ in 0..6 {
+            window.press("down", cx);
+        }
+        // Measure a visual row without assuming the font's glyph width, then
+        // make two full rows. Up from logical End preserves trailing affinity.
+        window.press("down", cx);
+        let row_length = text.read(cx).cursor() - prefix.len();
+        value = format!("{prefix}{}\ntail", "x".repeat(row_length * 2));
+        text.update(cx, |state, cx| state.set_value(value.clone(), window, cx));
+        window.press(START, cx);
+        for _ in 0..6 {
+            window.press("down", cx);
+        }
+        let row_top = text.read(cx).cursor_layout().unwrap().0.top();
+        window.press(LINE_END, cx);
+        window.press("up", cx);
+        let selected = text.read(cx).selected_range();
+        let row_end = prefix.len() + row_length;
+        assert_eq!(selected, row_end..row_end);
+        assert_eq!(text.read(cx).cursor_layout().unwrap().0.top(), row_top);
+        text.update(cx, |state, cx| {
+            state.set_scroll_offset(point(px(0.), px(0.)), cx)
+        });
+        window.render_frame(cx);
+        assert_caret_visible(text.read(cx));
+        let (_, line_height) = text.read(cx).cursor_layout().unwrap();
+        let padding = window.find(target(&text)).bounds().size.height
+            - text.read(cx).input_bounds().size.height;
+        owner.update(cx, |view, cx| {
+            view.height = Some(line_height + padding);
+            cx.notify();
+        });
+        // The first narrow layout cannot shape logical line six. Check the
+        // subsequent frame too, once its actual trailing-affinity caret is shaped.
+        for _ in 0..2 {
+            window.render_frame(cx);
+            assert_caret_visible(text.read(cx));
+            assert_eq!(text.read(cx).selected_range(), selected);
+            assert_eq!(text.read(cx).value(), value);
+        }
+    })
+    .unwrap();
+}
+
+fn horizontally_scrolled_composer(
+    cx: &mut TestAppContext,
+) -> (
+    WindowHandle<gpui_kit::base::Root>,
+    Entity<Composer>,
+    Entity<TextareaState>,
+) {
+    let value = format!("{}\n", "word ".repeat(200)).repeat(20);
+    let (handle, owner, text) = composer(cx, |state| {
+        state.rows(1).soft_wrap(false).default_value(value)
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        owner.update(cx, |view, cx| {
+            view.height = Some(px(240.));
+            cx.notify();
+        });
+        window.render_frame(cx);
+        window.click(target(&text), cx);
+        window.press(START, cx);
+        for _ in 0..6 {
+            window.press("down", cx);
+        }
+        window.press(LINE_END, cx);
+        let x = text.read(cx).scroll_offset().x;
+        assert!(x < px(0.));
+        text.update(cx, |state, cx| {
+            state.set_scroll_offset(point(x, px(0.)), cx)
+        });
+        window.render_frame(cx);
+        assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+    (handle, owner, text)
+}
+
+#[gpui_kit::test]
+fn shrinking_preserves_horizontal_scroll_and_resize_respects_wheel_away(cx: &mut TestAppContext) {
+    let (handle, owner, text) = horizontally_scrolled_composer(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        let value = text.read(cx).value().to_string();
+        let selected = text.read(cx).selected_range();
+        let x = text.read(cx).scroll_offset().x;
+        let (_, line_height) = text.read(cx).cursor_layout().unwrap();
+        let padding = window.find(target(&text)).bounds().size.height
+            - text.read(cx).input_bounds().size.height;
+        for rows in [3., 1.] {
+            owner.update(cx, |view, cx| {
+                view.height = Some(line_height * rows + padding);
+                cx.notify();
+            });
+            // A continuous resize can deliver another size before the target
+            // line is shaped in the repaint requested by cursor-follow.
+            window.render_frame(cx);
+            assert_eq!(text.read(cx).scroll_offset().x, x);
+        }
+        // Cursor-follow schedules a repaint after moving the viewport; the
+        // target line's x is available once that newly visible line is shaped.
+        for _ in 0..2 {
+            window.render_frame(cx);
+            assert_caret_visible(text.read(cx));
+            assert_eq!(text.read(cx).scroll_offset().x, x);
+        }
+        let caret = text.read(cx).cursor_layout().unwrap().0;
+        let viewport = text.read(cx).input_bounds();
+        assert!(
+            caret.left() >= viewport.left() && caret.right() <= viewport.right(),
+            "caret {caret:?}, viewport {viewport:?}"
+        );
+        window.scroll(target(&text), ScrollDelta::Lines(point(1000., 0.)), cx);
+        window.render_frame(cx);
+        let scrolled = text.read(cx).scroll_offset();
+        assert_eq!(scrolled.x, px(0.));
+        assert!(
+            text.read(cx).cursor_layout().unwrap().0.left() > text.read(cx).input_bounds().right()
+        );
+        owner.update(cx, |view, cx| {
+            view.height = Some(line_height * 4. + padding);
+            cx.notify();
+        });
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).scroll_offset(), scrolled);
+        assert_eq!(text.read(cx).selected_range(), selected);
+        assert_eq!(text.read(cx).value(), value);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn a_wheel_packet_cancels_pending_resize_reveal_before_repaint(cx: &mut TestAppContext) {
+    let (handle, owner, text) = horizontally_scrolled_composer(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        let selected = text.read(cx).selected_range();
+        let (_, line_height) = text.read(cx).cursor_layout().unwrap();
+        let padding = window.find(target(&text)).bounds().size.height
+            - text.read(cx).input_bounds().size.height;
+        owner.update(cx, |view, cx| {
+            view.height = Some(line_height * 3. + padding);
+            cx.notify();
+        });
+        window.render_frame(cx);
+        let position = text.read(cx).input_bounds().center();
+        window.dispatch_event(
+            MouseMoveEvent {
+                position,
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.dispatch_event(
+            gpui_kit::ScrollEvent {
+                position,
+                delta: ScrollDelta::Lines(point(1000., 0.)),
+                touch_phase: gpui_kit::TouchPhase::Moved,
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+        // Deliberately do not paint between this wheel packet and the resize.
+        let scrolled = text.read(cx).scroll_offset();
+        assert_eq!(scrolled.x, px(0.));
+        owner.update(cx, |view, cx| {
+            view.height = Some(line_height + padding);
+            cx.notify();
+        });
+        for _ in 0..2 {
+            window.render_frame(cx);
+            assert_eq!(text.read(cx).scroll_offset(), scrolled);
+        }
+        assert_eq!(text.read(cx).selected_range(), selected);
+        assert!(
+            text.read(cx).cursor_layout().unwrap().0.left() > text.read(cx).input_bounds().right()
+        );
     })
     .unwrap();
 }
@@ -1134,6 +1468,132 @@ fn rows_set_the_minimum_height_of_a_plain_textarea(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+#[gpui_kit::test]
+fn plain_rows_one_reports_content_rows_without_growing(cx: &mut TestAppContext) {
+    let (handle, _, text) = composer(cx, |state| state.rows(1));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(target(&text), cx);
+        let height = window.find(target(&text)).bounds().size.height;
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 1);
+        window.input("one\ntwo\nthree", cx);
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 3);
+        assert_eq!(window.find(target(&text)).bounds().size.height, height);
+        window.press(END, cx);
+        assert!(text.read(cx).scroll_offset().y < px(0.));
+        assert_caret_visible(text.read(cx));
+        window.press("secondary-a", cx);
+        window.press("backspace", cx);
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 1);
+    })
+    .unwrap();
+}
+
+struct PreferredRows {
+    text: Entity<TextareaState>,
+}
+
+impl Render for PreferredRows {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let rows = self
+            .text
+            .read(cx)
+            .display_map()
+            .wrap_row_count()
+            .clamp(3, 12);
+        div().size_full().flex().flex_col().child(
+            div()
+                .id("preferred-rows")
+                .w_full()
+                .h(px(rows as f32 * 24. + 32.))
+                .min_h(px(0.))
+                .flex_shrink(1.)
+                .child(Textarea::new(&self.text).w_full().h(gpui_kit::relative(1.)))
+                .test_support(),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn cached_rows_support_host_preferred_height_shrink_and_internal_scroll(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, view) = common::open_window(cx, Some(size(px(480.), px(480.))), |window, cx| {
+        let text = cx.new(|cx| TextareaState::new(window, cx).rows(1));
+        cx.new(|_| PreferredRows { text })
+    });
+    let text = cx.update(|cx| view.read(cx).text.clone());
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 1);
+        assert_eq!(window.find("preferred-rows").bounds().size.height, px(104.));
+        for rows in [6, 20] {
+            let value = (0..rows).map(|_| "line").collect::<Vec<_>>().join("\n");
+            text.update(cx, |state, cx| state.set_value(value, window, cx));
+            window.render_frame(cx);
+            // The host consumes the cache on its next render, not by shaping
+            // another copy of the text during its own layout.
+            view.update(cx, |_, cx| cx.notify());
+            window.render_frame(cx);
+            assert_eq!(text.read(cx).display_map().wrap_row_count(), rows);
+            assert_eq!(
+                window.find("preferred-rows").bounds().size.height,
+                px(rows.clamp(3, 12) as f32 * 24. + 32.)
+            );
+        }
+    })
+    .unwrap();
+    cx.simulate_window_resize(handle.into(), size(px(480.), px(120.)));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("preferred-rows").bounds().size.height <= px(120.));
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 20);
+        window.click(target(&text), cx);
+        window.press(END, cx);
+        assert!(text.read(cx).scroll_offset().y < px(0.));
+        assert_caret_visible(text.read(cx));
+        window.press("secondary-a", cx);
+        window.press("backspace", cx);
+        view.update(cx, |_, cx| cx.notify());
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 1);
+        assert_eq!(window.find("preferred-rows").bounds().size.height, px(104.));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn cached_visual_rows_follow_unicode_wrapping_and_resize(cx: &mut TestAppContext) {
+    let value = "日本語 e\u{301} 👩‍👩‍👧‍👦 ".repeat(20);
+    let (handle, _, text) = composer(cx, |state| state.rows(1).default_value(value.clone()));
+    let initial = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.click(target(&text), cx);
+            window.press(END, cx);
+            let rows = text.read(cx).display_map().wrap_row_count();
+            assert!(rows > 1, "soft wraps count, not just newlines");
+            rows
+        })
+        .unwrap();
+    cx.simulate_window_resize(handle.into(), size(px(240.), px(480.)));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(text.read(cx).display_map().wrap_row_count() > initial);
+        assert_eq!(text.read(cx).value(), value);
+        assert_eq!(text.read(cx).cursor(), value.len());
+    })
+    .unwrap();
+    cx.simulate_window_resize(handle.into(), size(px(480.), px(480.)));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), initial);
+        text.update(cx, |state, cx| state.set_soft_wrap(false, window, cx));
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).display_map().wrap_row_count(), 1);
+        assert_eq!(text.read(cx).value(), value);
+        assert_eq!(text.read(cx).cursor(), value.len());
+    })
+    .unwrap();
+}
+
 /// A textarea partway down a page that scrolls.
 struct ScrollingPage {
     text: Entity<TextareaState>,
@@ -1192,7 +1652,7 @@ fn scroll_over(
         cx,
     );
     window.dispatch_event(
-        gpui_kit::ScrollWheelEvent {
+        gpui_kit::ScrollEvent {
             position,
             delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
             touch_phase: phase,
@@ -1291,7 +1751,7 @@ fn scrolling_vertically_over_a_single_line_input_scrolls_the_page(cx: &mut TestA
         // A trackpad swipe that is mostly vertical still drifts sideways,
         // here toward the start the text already sits at.
         window.dispatch_event(
-            gpui_kit::ScrollWheelEvent {
+            gpui_kit::ScrollEvent {
                 position,
                 delta: ScrollDelta::Pixels(point(px(2.), px(-40.))),
                 touch_phase: gpui_kit::TouchPhase::Moved,

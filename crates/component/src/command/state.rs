@@ -967,8 +967,9 @@ impl Render for CommandState {
                     // The rows carry their inset on the virtual list itself so
                     // that a mid-scroll clip edge sits flush against the
                     // surrounding dividers; only the empty slot needs the
-                    // container padding.
-                    .when(rows_count == 0, |this| this.p_1())
+                    // container padding, and only while it is shown, so a
+                    // loading list leaves no blank strip under the query.
+                    .when(rows_count == 0 && !self.loading, |this| this.p_1())
                     .on_prepaint({
                         let measure_state = command_state.clone();
                         move |bounds, window, cx| {

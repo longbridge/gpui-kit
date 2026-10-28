@@ -57,6 +57,17 @@ Switch::new("notifications")
     })
 ```
 
+### Without Label
+
+A switch without visible text has no accessible name, so screen readers can't tell it apart
+from other switches. Name it with `.accessibility_label(...)`. This doesn't add a visible label:
+
+```rust
+Switch::new("airplane-mode")
+    .accessibility_label("Airplane mode")
+    .checked(false)
+```
+
 ### Different Sizes
 
 ```rust
@@ -151,6 +162,7 @@ Switch::new("switch")
 | `checked(bool)`    | Set the checked/toggled state                               |
 | `label(text)`      | Set label text for the switch                               |
 | `label_side(side)` | Position label (Side::Left or Side::Right)                  |
+| `accessibility_label(text)` | Name announced by screen readers; set it when there is no visible label |
 | `disabled(bool)`   | Set disabled state                                          |
 | `tooltip(text)`    | Add tooltip text                                            |
 | `color(color)`     | Set background color when checked (default: `theme.primary`) |
