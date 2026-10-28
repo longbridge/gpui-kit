@@ -81,21 +81,20 @@ theme, sizing, borders, prefix/suffix slots, and clear button, use the styled
 ## Cursor blinking
 
 A focused input blinks its cursor every 500 ms and keeps it shown while the
-user types or moves it. Call `set_cursor_blink` after initialization to set the
+user types or moves it. Edit `Theme::cursor_blink` after initialization to set the
 application policy for every Input, Textarea, Editor and OTP input:
 
 ```rust
 use std::time::Duration;
-use gpui_kit::base::input::{CursorBlink, set_cursor_blink};
+use gpui_kit::{component::{Theme, input::CursorBlink}};
 
 gpui_kit::init(cx);
-set_cursor_blink(
-    CursorBlink::Blinking {
+Theme::update(cx, |theme| {
+    theme.cursor_blink = CursorBlink::Blinking {
         interval: Duration::from_millis(530),
         idle_timeout: Some(Duration::from_secs(5)),
-    },
-    cx,
-);
+    };
+});
 ```
 
 `interval` is the duration of each visible or hidden phase. A zero interval
@@ -106,12 +105,12 @@ last focus, edit or cursor movement, including the 300 ms pause after typing.
 Every blink repaints the input's view; an idle cursor with a timeout stops
 causing these repaints until the next activity or policy change.
 
-The same function updates existing cursors when an application preference
+The same theme update changes existing cursors when an application preference
 changes:
 
 ```rust
-set_cursor_blink(CursorBlink::Steady, cx);
-set_cursor_blink(CursorBlink::default(), cx);
+Theme::update(cx, |theme| theme.cursor_blink = CursorBlink::Steady);
+Theme::update(cx, |theme| theme.cursor_blink = CursorBlink::default());
 ```
 
 `Steady` immediately shows a focused cursor and cancels pending blink and pause
@@ -122,9 +121,9 @@ the last user activity. A shorter timeout can stop blinking immediately;
 extending or removing the timeout can resume an idle cursor without refocusing.
 
 `CursorBlink::default()` restores 500 ms blinking without an idle timeout.
-Base-only applications use the same API from `gpui_base::input`; styled
-applications can also import it from `gpui_kit::component::input`. Policy
-storage is private to Base, so no separate global installation is needed.
+Base-only applications set `gpui_base::Theme::global_mut(cx).cursor_blink`
+to the same policy. Component applications should use `Theme::update` so the
+policy is propagated to Base and existing cursors are notified.
 
 ## Runnable example
 

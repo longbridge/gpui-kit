@@ -1,4 +1,4 @@
-use gpui::{App, Context, Global, Pixels, Subscription, Task, px};
+use gpui::{App, Context, Pixels, Subscription, Task, px};
 use instant::Duration;
 use web_time::Instant;
 
@@ -25,31 +25,11 @@ impl Default for CursorBlink {
     }
 }
 
-#[derive(Default)]
-struct CursorBlinkPolicy(CursorBlink);
-
-impl Global for CursorBlinkPolicy {}
-
-pub(crate) fn init(cx: &mut App) {
-    if !cx.has_global::<CursorBlinkPolicy>() {
-        cx.set_global(CursorBlinkPolicy::default());
-    }
-}
-
-pub fn set_cursor_blink(policy: CursorBlink, cx: &mut App) {
-    let policy = match policy {
+fn cursor_blink(cx: &App) -> CursorBlink {
+    match crate::Theme::global(cx).cursor_blink {
         CursorBlink::Blinking { interval, .. } if interval.is_zero() => CursorBlink::Steady,
         policy => policy,
-    };
-    if policy != cursor_blink(cx) {
-        cx.set_global(CursorBlinkPolicy(policy));
     }
-}
-
-fn cursor_blink(cx: &App) -> CursorBlink {
-    cx.try_global::<CursorBlinkPolicy>()
-        .map(|policy| policy.0)
-        .unwrap_or_default()
 }
 
 pub(crate) struct BlinkCursor {
@@ -57,6 +37,7 @@ pub(crate) struct BlinkCursor {
     paused: bool,
     epoch: usize,
     last_activity: Option<Instant>,
+    policy: CursorBlink,
     _task: Task<()>,
     _policy_subscription: Subscription,
 }
@@ -68,8 +49,14 @@ impl BlinkCursor {
             paused: false,
             epoch: 0,
             last_activity: None,
+            policy: cursor_blink(cx),
             _task: Task::ready(()),
-            _policy_subscription: cx.observe_global::<CursorBlinkPolicy>(|this, cx| {
+            _policy_subscription: cx.observe_global::<crate::Theme>(|this, cx| {
+                let policy = cursor_blink(cx);
+                if policy == this.policy {
+                    return;
+                }
+                this.policy = policy;
                 if this.last_activity.is_some() {
                     this.epoch = this.epoch.wrapping_add(1);
                     this.set_visible(true, cx);
@@ -174,6 +161,10 @@ mod tests {
     use super::*;
     use gpui::{AppContext as _, Entity, TestAppContext};
     use std::{cell::Cell, rc::Rc};
+
+    fn set_cursor_blink(policy: CursorBlink, cx: &mut App) {
+        crate::Theme::global_mut(cx).cursor_blink = policy;
+    }
 
     fn advance(cx: &mut TestAppContext, duration: Duration) {
         cx.run_until_parked();
@@ -585,7 +576,7 @@ mod tests {
     #[gpui::test]
     fn initialization_preserves_an_application_policy(cx: &mut TestAppContext) {
         cx.update(|cx| set_cursor_blink(CursorBlink::Steady, cx));
-        cx.update(init);
+        cx.update(crate::init);
         let cursor = cx.new(BlinkCursor::new);
         cursor.update(cx, |cursor, cx| cursor.start(cx));
         assert_idle(&cursor, true, cx);

@@ -209,6 +209,9 @@ pub struct Theme {
     /// Semantic motion policy for styled components.
     #[serde(skip)]
     pub motion: MotionTokens,
+    /// Application-wide caret blink behavior.
+    #[serde(skip)]
+    pub cursor_blink: gpui_base::input::CursorBlink,
 }
 
 impl Default for Theme {
@@ -453,6 +456,7 @@ impl Theme {
                 active_handle: Some(self.drag_border),
             },
             plot: gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion)),
+            cursor_blink: self.cursor_blink,
         }
     }
 
@@ -785,6 +789,7 @@ impl From<&ThemeColor> for Theme {
             highlight_theme: HighlightTheme::default_light(),
             sheet: SheetSettings::default(),
             motion: MotionTokens::default(),
+            cursor_blink: gpui_base::input::CursorBlink::default(),
         }
     }
 }
@@ -1030,6 +1035,29 @@ mod base_theme_projection_tests {
                 gpui_base::ScrollbarMode::Always
             );
             assert_styled_projection(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn cursor_blink_survives_theme_updates_and_mode_changes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            Theme::update(cx, |theme| {
+                theme.cursor_blink = gpui_base::input::CursorBlink::Steady;
+            });
+            assert_eq!(
+                gpui_base::Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::Steady
+            );
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert_eq!(
+                Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::Steady
+            );
+            assert_eq!(
+                gpui_base::Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::Steady
+            );
         });
     }
 

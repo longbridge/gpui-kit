@@ -76,13 +76,12 @@ mod touch;
 mod undo_manager;
 
 pub(crate) fn init(cx: &mut App) {
-    blink_cursor::init(cx);
     state::init(cx);
 }
 
 pub use crate::number_input::{NumberInputEvent, NumberStep};
 pub use base::{InputBase, InputContextMenuCapabilities, InputStyles};
-pub use blink_cursor::{CursorBlink, set_cursor_blink};
+pub use blink_cursor::CursorBlink;
 pub use cursor::Selection;
 pub use decorations::{
     RangeDecoration, RangeDecorationCollection, RangeDecorationStyle, TextDecoration,

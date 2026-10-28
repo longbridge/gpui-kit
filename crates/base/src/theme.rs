@@ -20,6 +20,8 @@ pub struct Theme {
     pub scrollbar: ScrollbarTheme,
     pub resizable: ResizableTheme,
     pub plot: PlotTheme,
+    /// Application-wide caret blink behavior.
+    pub cursor_blink: crate::input::CursorBlink,
 }
 
 impl Global for Theme {}

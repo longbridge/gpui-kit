@@ -58,34 +58,33 @@ let password = cx.new(|cx| {
 
 ## 光标闪烁
 
-获得焦点的输入框中，文本光标每 500 ms 闪烁一次，用户输入或移动光标时保持显示。初始化后调用 `set_cursor_blink`，可为应用中所有 Input、Textarea、Editor 和 OTP 输入框设置光标策略：
+获得焦点的输入框中，文本光标每 500 ms 闪烁一次，用户输入或移动光标时保持显示。初始化后修改 `Theme::cursor_blink`，可为应用中所有 Input、Textarea、Editor 和 OTP 输入框设置光标策略：
 
 ```rust
 use std::time::Duration;
-use gpui_kit::base::input::{CursorBlink, set_cursor_blink};
+use gpui_kit::{component::{Theme, input::CursorBlink}};
 
 gpui_kit::init(cx);
-set_cursor_blink(
-    CursorBlink::Blinking {
+Theme::update(cx, |theme| {
+    theme.cursor_blink = CursorBlink::Blinking {
         interval: Duration::from_millis(530),
         idle_timeout: Some(Duration::from_secs(5)),
-    },
-    cx,
-);
+    };
+});
 ```
 
 `interval` 是每个显示或隐藏阶段的时长；设为零时等同于 `CursorBlink::Steady`。`idle_timeout: None` 表示获得焦点期间持续闪烁。设置超时（包括零）后，光标会停止闪烁并保持显示，不再保留计时器。超时从最近一次获得焦点、编辑或移动光标开始计算，包含输入后的 300 ms 暂停。每次闪烁都会重绘输入框所在的视图；空闲光标超时后不再触发这些重绘，直到用户再次操作或策略发生变化。
 
-应用偏好发生变化时，通过同一函数更新已有的光标：
+应用偏好发生变化时，通过同一主题更新方式更新已有光标：
 
 ```rust
-set_cursor_blink(CursorBlink::Steady, cx);
-set_cursor_blink(CursorBlink::default(), cx);
+Theme::update(cx, |theme| theme.cursor_blink = CursorBlink::Steady);
+Theme::update(cx, |theme| theme.cursor_blink = CursorBlink::default());
 ```
 
 `Steady` 会立即显示已获得焦点的光标，并取消待执行的闪烁和暂停任务。未获得焦点的光标保持隐藏，不会启动计时器。重复设置相同策略不会产生变化。切换闪烁策略时，光标从显示阶段开始，保留输入暂停的剩余时间，并仍从最近一次用户操作计算空闲超时。缩短超时可以立即停止闪烁；延长或取消超时可以让已停止的光标恢复闪烁，无需重新获得焦点。
 
-`CursorBlink::default()` 恢复每 500 ms 闪烁且无空闲超时的默认行为。仅使用 Base 的应用可从 `gpui_base::input` 导入同一 API；使用样式组件的应用也可从 `gpui_kit::component::input` 导入。策略存储由 Base 内部管理，无需单独安装全局对象。
+`CursorBlink::default()` 恢复每 500 ms 闪烁且无空闲超时的默认行为。仅使用 Base 的应用可设置 `gpui_base::Theme::global_mut(cx).cursor_blink`；使用 Component 的应用应通过 `Theme::update` 将策略同步到 Base 并通知已有光标。
 
 ## 可运行示例
 
