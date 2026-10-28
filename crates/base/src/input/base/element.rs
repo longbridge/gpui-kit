@@ -5379,7 +5379,7 @@ mod tests {
                     cx,
                 )
             });
-            let mut top = |window: &mut Window, cx: &mut App| {
+            let top = |window: &mut Window, cx: &mut App| {
                 window.draw(cx).clear(cx);
                 let state = editor.read(cx);
                 let snapshot = state.editor_scrollbar_snapshot.get().unwrap();
