@@ -143,7 +143,11 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
 }
 
 /// The global theme configuration.
+///
+/// Construct with [`Theme::default`] and assign fields; new fields may be
+/// added without a breaking change.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct Theme {
     pub colors: ThemeColor,
     /// Component-specific resolved tokens retained for legacy compatibility.
@@ -404,60 +408,60 @@ impl Theme {
     /// This theme projected onto the Base layer, which owns the scrollbar and
     /// resize handles and reads the semantic tokens.
     fn base_theme(&self) -> gpui_base::Theme {
-        gpui_base::Theme {
-            appearance: if self.mode.is_dark() {
-                gpui_base::ThemeAppearance::Dark
-            } else {
-                gpui_base::ThemeAppearance::Light
-            },
-            tokens: self.semantic_tokens(),
-            scrollbar: gpui_base::ScrollbarTheme::new()
-                .with_mode(self.scrollbar_mode)
-                .with_motion(scrollbar_motion(self.scrollbar_mode))
-                .with_styles(
-                    gpui_base::ScrollbarStyles::default()
-                        .track(|style| style.bg(self.scrollbar))
-                        .track_hover(|style| style.bg(self.scrollbar))
-                        .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
-                        .thumb(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb)
-                                .radius(self.radius)
-                                .when(gpui_base::is_mobile(), |style| {
-                                    style
-                                        .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
-                                        .inset(MOBILE_SCROLLBAR_THUMB_INSET)
-                                        .radius(RADIUS_FULL)
-                                })
-                        })
-                        .thumb_hover(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb_hover)
-                                .radius(self.radius)
-                                .when(gpui_base::is_mobile(), |style| {
-                                    style
-                                        .width(SCROLLBAR_THUMB_HOVER_WIDTH)
-                                        .inset(SCROLLBAR_THUMB_INSET)
-                                })
-                        })
-                        .thumb_active(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb_hover)
-                                .radius(self.radius)
-                                .when(gpui_base::is_mobile(), |style| {
-                                    style
-                                        .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
-                                        .inset(SCROLLBAR_THUMB_INSET)
-                                })
-                        }),
-                ),
-            resizable: gpui_base::ResizableTheme {
-                handle: Some(self.border),
-                active_handle: Some(self.drag_border),
-            },
-            plot: gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion)),
-            cursor_blink: self.cursor_blink,
-        }
+        let mut theme = gpui_base::Theme::default();
+        theme.appearance = if self.mode.is_dark() {
+            gpui_base::ThemeAppearance::Dark
+        } else {
+            gpui_base::ThemeAppearance::Light
+        };
+        theme.tokens = self.semantic_tokens();
+        theme.scrollbar = gpui_base::ScrollbarTheme::new()
+            .with_mode(self.scrollbar_mode)
+            .with_motion(scrollbar_motion(self.scrollbar_mode))
+            .with_styles(
+                gpui_base::ScrollbarStyles::default()
+                    .track(|style| style.bg(self.scrollbar))
+                    .track_hover(|style| style.bg(self.scrollbar))
+                    .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
+                    .thumb(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
+                                    .inset(MOBILE_SCROLLBAR_THUMB_INSET)
+                                    .radius(RADIUS_FULL)
+                            })
+                    })
+                    .thumb_hover(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb_hover)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(SCROLLBAR_THUMB_HOVER_WIDTH)
+                                    .inset(SCROLLBAR_THUMB_INSET)
+                            })
+                    })
+                    .thumb_active(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb_hover)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
+                                    .inset(SCROLLBAR_THUMB_INSET)
+                            })
+                    }),
+            );
+        theme.resizable = gpui_base::ResizableTheme {
+            handle: Some(self.border),
+            active_handle: Some(self.drag_border),
+        };
+        theme.plot = gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion));
+        theme.cursor_blink = self.cursor_blink;
+        theme
     }
 
     /// Push the current theme down to the Base layer.

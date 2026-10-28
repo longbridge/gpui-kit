@@ -262,6 +262,24 @@ Design-token records (`ColorTokens`, `RadiusTokens`, and the rest of
 converting them is tracked separately because every theme in `gpui-component`
 constructs them.
 
+Where `pub` fields are deliberate — themes, settings records, design tokens,
+serialized schemas — the struct must carry `#[non_exhaustive]` and implement
+`Default` or a constructor. Adding a field is then not a breaking change.
+Outside the defining crate, callers build the value from `Default::default()`
+and assign fields; a struct literal, including `..Default::default()`, does not
+compile there, so other workspace crates use the same form:
+
+```rust
+let mut theme = gpui_base::Theme::default();
+theme.tokens = tokens;
+theme.cursor_blink = cursor_blink;
+```
+
+Apply this to every new type and to any existing type whose fields a change
+adds or alters (`gpui_base::Theme` and `gpui_component::Theme` gained it with
+`cursor_blink`). Value types exempt above stay exempt, and remaining existing
+types migrate in their own changes. The Coding Guides state the same rule.
+
 ## Input, Textarea, and Editor Architecture
 
 Text editing is intentionally deeper than the semantic elements, but callers do

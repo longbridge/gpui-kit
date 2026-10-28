@@ -16,7 +16,10 @@ pub enum ThemeAppearance {
     Dark,
 }
 
+/// Construct with [`Theme::default`] and assign fields; new fields may be
+/// added without a breaking change.
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Theme {
     pub appearance: ThemeAppearance,
     pub tokens: SemanticThemeTokens,
