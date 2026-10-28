@@ -52,6 +52,12 @@ macro_rules! dispatch {
 }
 
 impl TextInputState {
+    pub(crate) fn set_gutter_style(&self, style: super::GutterStyle, cx: &mut App) {
+        if let Self::Editor(state) = self {
+            state.update(cx, |state, _| state.set_gutter_style(style));
+        }
+    }
+
     pub(crate) fn has_selection_focus(&self, window: &Window, cx: &App) -> bool {
         dispatch!(self, |state| state.read(cx).has_selection_focus(window, cx))
     }

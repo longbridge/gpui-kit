@@ -130,6 +130,7 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
+    gutter_style: super::GutterStyle,
     token_renderer: Option<gpui_base::input::InlineTokenRenderer>,
     token_click_listener: Option<gpui_base::input::InlineTokenClickListener>,
     token_hover_listener: Option<gpui_base::input::InlineTokenHoverListener>,
@@ -245,6 +246,7 @@ impl Input {
 
     fn with_state(state: TextInputState) -> Self {
         Self {
+            gutter_style: super::GutterStyle::default(),
             id: None,
             state,
             size: Size::default(),
@@ -271,6 +273,11 @@ impl Input {
             token_click_listener: None,
             token_hover_listener: None,
         }
+    }
+
+    pub(crate) fn apply_gutter_style(mut self, style: super::GutterStyle) -> Self {
+        self.gutter_style = style;
+        self
     }
 
     /// Set the developer-assigned identifier exposed to accessibility clients.
@@ -559,6 +566,9 @@ impl RenderOnce for Input {
         sync_focused_input_registry(&state, window, cx);
 
         state.ensure_highlighter_factory(crate::highlighter::input_highlighter_factory(), cx);
+        let mut gutter_style = cx.theme().get_editor_gutter_style().clone();
+        gutter_style.apply_overrides(&self.gutter_style);
+        state.set_gutter_style(gutter_style, cx);
         state.set_editor_style(
             gpui_base::input::InputEditorStyle {
                 foreground: cx.theme().foreground,

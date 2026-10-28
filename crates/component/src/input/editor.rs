@@ -5,7 +5,7 @@ use gpui::{
     Window, prelude::FluentBuilder as _, relative,
 };
 
-use super::{EditorState, Input};
+use super::{EditorState, GutterStyle, Input};
 use crate::native_menu::NativeMenu;
 use crate::{ActiveTheme as _, RoleOverride, Sizable, Size, StyledExt as _};
 
@@ -17,6 +17,7 @@ const EDITOR_LINE_HEIGHT: f32 = 1.5;
 #[derive(IntoElement)]
 pub struct Editor {
     state: Entity<EditorState>,
+    gutter_style: GutterStyle,
     style: StyleRefinement,
     size: Size,
     height: Option<DefiniteLength>,
@@ -40,6 +41,7 @@ impl Editor {
     pub fn new(state: &Entity<EditorState>) -> Self {
         Self {
             state: state.clone(),
+            gutter_style: GutterStyle::default(),
             style: StyleRefinement::default(),
             size: Size::default(),
             height: None,
@@ -53,6 +55,14 @@ impl Editor {
             context_menu_builder: None,
             paste_handler: None,
         }
+    }
+
+    /// Overrides specified line-number properties over the active theme.
+    ///
+    /// Omitting this on a later render restores the theme defaults.
+    pub fn apply_gutter_style(mut self, style: GutterStyle) -> Self {
+        self.gutter_style.apply_overrides(&style);
+        self
     }
 
     pub fn h(mut self, height: impl Into<DefiniteLength>) -> Self {
@@ -148,6 +158,7 @@ impl Styled for Editor {
 impl RenderOnce for Editor {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         Input::from_state(self.state.clone())
+            .apply_gutter_style(self.gutter_style)
             // Source code wants a monospace font at a code size, and rows that
             // follow that size. These come first so that a text style set on
             // this editor refines over them: `.text_sm()` and `.font_family()`
@@ -183,6 +194,117 @@ mod tests {
         AppContext as _, Context, InteractiveElement as _, ParentElement as _, Pixels, Render,
         TestAppContext, VisualTestContext, div, px,
     };
+
+    #[gpui::test]
+    fn test_editor_gutter_style_builder(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx));
+            let defaults = GutterStyle::default()
+                .with_gap(px(12.))
+                .with_line_number_color(gpui::rgb(0x808080).into())
+                .with_active_line_number_color(gpui::rgb(0xeeeeee).into())
+                .with_line_number_font_family("Number Font")
+                .with_line_number_font_size(px(12.));
+            let editor = Editor::new(&state)
+                .apply_gutter_style(defaults.clone())
+                .apply_gutter_style(GutterStyle::default().with_gap(px(0.)));
+            assert_eq!(editor.gutter_style, defaults.with_gap(px(0.)));
+            Harness { state, text_size: None }
+        });
+    }
+
+    struct GutterHarness {
+        state: Entity<EditorState>,
+        overrides: Option<GutterStyle>,
+    }
+
+    impl Render for GutterHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                Editor::new(&self.state)
+                    .font_family(".SystemUIFont")
+                    .text_size(px(16.))
+                    .when_some(self.overrides.clone(), |this, style| {
+                        this.apply_gutter_style(style)
+                    }),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn gutter_theme_changes_and_override_removal_reach_the_rendered_editor(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| GutterHarness {
+            state: cx.new(|cx| EditorState::new(window, cx).default_value("hello\nworld")),
+            overrides: None,
+        });
+        let state = view.read_with(cx, |view, _| view.state.clone());
+        let measure = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+                let state = state.read(cx);
+                let caret = state.prepaint_caret_geometry().expect("editor must prepaint");
+                (
+                    caret.cursor_bounds().left() - caret.input_bounds().left(),
+                    caret.line_height(),
+                    state.range_to_bounds(&(0..1)).unwrap().size.width,
+                )
+            })
+        };
+        let baseline = measure(cx);
+
+        cx.update(|_, cx| {
+            crate::Theme::update(cx, |theme| {
+                theme.set_editor_gutter_style(
+                    GutterStyle::default()
+                        .with_gap(px(18.))
+                        .with_line_number_font_family(".SystemUIFont")
+                        .with_line_number_font_size(px(16.)),
+                );
+            });
+        });
+        let themed = measure(cx);
+        assert_eq!(themed.0 - baseline.0, px(12.));
+        assert_eq!((themed.1, themed.2), (baseline.1, baseline.2));
+
+        view.update(cx, |view, cx| {
+            view.overrides = Some(GutterStyle::default().with_gap(px(0.)));
+            cx.notify();
+        });
+        let overridden = measure(cx);
+        assert_eq!(themed.0 - overridden.0, px(18.));
+
+        cx.update(|_, cx| {
+            crate::Theme::update(cx, |theme| {
+                theme.set_editor_gutter_style(
+                    theme.get_editor_gutter_style().clone()
+                        .with_gap(px(24.))
+                        .with_line_number_font_size(px(24.)),
+                );
+            });
+        });
+        let changed = measure(cx);
+        // The local zero gap must survive a theme change, while the unset
+        // font size must follow it; body metrics must remain independent.
+        assert!(changed.0 > overridden.0);
+        assert_eq!((changed.1, changed.2), (baseline.1, baseline.2));
+
+        view.update(cx, |view, cx| {
+            view.overrides = None;
+            cx.notify();
+        });
+        let restored = measure(cx);
+        assert_eq!(restored.0 - changed.0, px(24.));
+
+        cx.update(|_, cx| {
+            crate::Theme::update(cx, |theme| {
+                theme.set_editor_gutter_style(GutterStyle::default());
+            });
+        });
+        assert_eq!(measure(cx), baseline);
+    }
 
     struct Harness {
         state: Entity<EditorState>,
