@@ -325,8 +325,8 @@ The boundaries are:
   and the last row.
 - `with_row_style(...)` refines the full-width wrapper around each rendered row;
   the default wrapper includes `pb_8()` between rows, like a CSS gap. The
-  last row's own bottom padding owns the gap between the last row and
-  whatever sits below the transcript.
+  list padding wrapper after the last row owns the gap between it and
+  whatever sits below the transcript. Row padding remains independent of it.
 - `scrollbar(false)` hides the built-in vertical scrollbar; it does not disable
   scrolling or remove keyboard/wheel interaction.
 - `with_bottom_fade(color)` fades the transcript's bottom edge into the given

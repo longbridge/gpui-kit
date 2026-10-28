@@ -96,6 +96,7 @@ impl MessageScrollerState {
         }
 
         let neighbor = old_range.start.checked_sub(1);
+        let touches_start = old_range.start == 0;
         self.list_state.splice(old_range, count);
 
         // The default row wrapper pads every row except the last, so a row
@@ -106,6 +107,16 @@ impl MessageScrollerState {
             self.list_state.remeasure_items(last..last + 1);
             if let Some(neighbor) = neighbor.filter(|neighbor| *neighbor != last) {
                 self.list_state.remeasure_items(neighbor..neighbor + 1);
+            }
+        }
+
+        // A surviving former first row may have lost its list inset, or a
+        // surviving row may have become the first after a removal.
+        if touches_start {
+            for index in [0, count] {
+                if index < self.list_state.item_count() {
+                    self.list_state.remeasure_items(index..index + 1);
+                }
             }
         }
 
@@ -363,15 +374,6 @@ impl RenderOnce for MessageScroller {
         let list = list(list_state.clone(), move |index, window, cx| {
             div()
                 .w_full()
-                .min_w_0()
-                .px_3()
-                // Spacing between rows only, like a CSS gap: the last row's
-                // own bottom padding owns the gap after it.
-                .when(index + 1 < item_count, |this| this.pb_8())
-                // The list's own vertical padding, carried by the first and
-                // the last row. A custom padding replaces the default on the
-                // row that carries it; it must not reach the rows between
-                // them, or every message would carry the list's padding.
                 .when(index == 0, |this| match row_inset_top {
                     Some(top) => this.pt(top),
                     None => this.pt_2(),
@@ -380,10 +382,17 @@ impl RenderOnce for MessageScroller {
                     Some(bottom) => this.pb(bottom),
                     None => this.pb_2(),
                 })
-                .when_some(row_inset_left, |this, left| this.pl(left))
-                .when_some(row_inset_right, |this, right| this.pr(right))
-                .refine_style(&row_style)
-                .child(renderer(index, window, cx))
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .px_3()
+                        .when(index + 1 < item_count, |this| this.pb_8())
+                        .when_some(row_inset_left, |this, left| this.pl(left))
+                        .when_some(row_inset_right, |this, right| this.pr(right))
+                        .refine_style(&row_style)
+                        .child(renderer(index, window, cx)),
+                )
                 .into_any_element()
         })
         .size_full()
@@ -633,7 +642,8 @@ mod tests {
                 MessageScroller::new("messages", self.state.clone(), |_, _, _| div().h(px(40.)))
                     .scrollbar(false)
                     .jump_button(false)
-                    .with_list_style(self.list_style.clone()),
+                    .with_list_style(self.list_style.clone())
+                    .with_row_style(StyleRefinement::default().pt(px(6.)).pb(px(6.))),
             )
         }
     }
@@ -649,53 +659,35 @@ mod tests {
         let second = cx.new(|cx| MessageScrollerState::new(10, cx));
         let third = cx.new(|cx| MessageScrollerState::new(10, cx));
 
-        let (_, first_cx) = cx.add_window_view({
-            let state = first.clone();
-            move |_, _| PaddedScrollerHarness {
-                state,
-                list_style: StyleRefinement::default().pt(px(20.)).pb(px(40.)),
-            }
-        });
-        let (_, second_cx) = cx.add_window_view({
-            let state = second.clone();
-            move |_, _| PaddedScrollerHarness {
-                state,
-                list_style: StyleRefinement::default().pt(px(20.)).pb(px(20.)),
-            }
-        });
-        let (_, third_cx) = cx.add_window_view({
-            let state = third.clone();
-            move |_, _| PaddedScrollerHarness {
-                state,
-                list_style: StyleRefinement::default().pt(px(40.)).pb(px(20.)),
-            }
-        });
-
-        let draw = |context: &mut gpui::VisualTestContext| {
+        let extent = |cx: &mut gpui::TestAppContext,
+                      state: Entity<MessageScrollerState>,
+                      list_style: StyleRefinement| {
+            let (_, context) = cx.add_window_view({
+                let state = state.clone();
+                move |_, _| PaddedScrollerHarness { state, list_style }
+            });
             context.run_until_parked();
             context.update(|window, cx| {
                 _ = window.draw(cx);
-            });
-        };
-        draw(&mut first_cx);
-        draw(&mut second_cx);
-        draw(&mut third_cx);
-
-        let extent = |state: &Entity<MessageScrollerState>,
-                      context: &mut gpui::VisualTestContext| {
-            context.update(|_, cx| {
-                state
-                    .read(cx)
-                    .list_state
-                    .clone()
-                    .max_offset_for_scrollbar()
-                    .y
+                state.read(cx).list_state.max_offset_for_scrollbar().y
             })
         };
 
-        let first_extent = extent(&first, &mut first_cx);
-        let second_extent = extent(&second, &mut second_cx);
-        let third_extent = extent(&third, &mut third_cx);
+        let first_extent = extent(
+            cx,
+            first,
+            StyleRefinement::default().pt(px(20.)).pb(px(40.)),
+        );
+        let second_extent = extent(
+            cx,
+            second,
+            StyleRefinement::default().pt(px(20.)).pb(px(20.)),
+        );
+        let third_extent = extent(
+            cx,
+            third,
+            StyleRefinement::default().pt(px(40.)).pb(px(20.)),
+        );
 
         // The bottom inset rides on the last row only, so the content grows
         // by the difference between the two bottom insets, not once per row.
