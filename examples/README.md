@@ -11,6 +11,7 @@ not enable the gallery's test-support development dependency.
 | Editor | `cargo run -p example-editor` |
 | Editor and Markdown highlighted by syntect | `cargo run -p example-syntect` |
 | Brush | `cargo run -p example-brush` |
+| ChatGPT client (AI elements, Responses API) | `cargo run -p example-chatgpt` |
 | Dock | `cargo run -p example-dock` |
 | HTML | `cargo run -p example-html` |
 | Large text | `cargo run -p example-large-text` |

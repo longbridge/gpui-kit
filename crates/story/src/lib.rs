@@ -728,6 +728,7 @@ impl StoryState {
         match self.story_klass.to_string().as_str() {
             "AttachmentStory" => story!(AttachmentStory),
             "BreadcrumbStory" => story!(BreadcrumbStory),
+            "AiElementsStory" => story!(AiElementsStory),
             "BubbleStory" => story!(BubbleStory),
             "ButtonStory" => story!(ButtonStory),
             "CalendarStory" => story!(CalendarStory),

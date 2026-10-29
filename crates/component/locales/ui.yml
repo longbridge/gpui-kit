@@ -760,3 +760,191 @@ Diff:
     pt-BR: "Diff de %{count} arquivos"
     zh-CN: "%{count} 个文件的差异"
     zh-HK: "%{count} 個檔案的差異"
+Trace:
+  pending:
+    en: Pending
+    zh-CN: 等待中
+    zh-HK: 等待中
+  running:
+    en: Running
+    zh-CN: 运行中
+    zh-HK: 執行中
+  completed:
+    en: Completed
+    zh-CN: 已完成
+    zh-HK: 已完成
+  failed:
+    en: Failed
+    zh-CN: 失败
+    zh-HK: 失敗
+  skipped:
+    en: Skipped
+    zh-CN: 已跳过
+    zh-HK: 已略過
+Reasoning:
+  thinking:
+    en: Thinking…
+    zh-CN: 思考中…
+    zh-HK: 思考中…
+  thought_for:
+    en: Thought for %{seconds} seconds
+    zh-CN: 思考了 %{seconds} 秒
+    zh-HK: 思考了 %{seconds} 秒
+  thought_briefly:
+    en: Thought for a moment
+    zh-CN: 稍作思考
+    zh-HK: 稍作思考
+  reasoning:
+    en: Reasoning
+    zh-CN: 推理过程
+    zh-HK: 推理過程
+ChainOfThought:
+  title:
+    en: Chain of thought
+    zh-CN: 思维链
+    zh-HK: 思維鏈
+Tool:
+  input:
+    en: Input
+    zh-CN: 输入
+    zh-HK: 輸入
+  output:
+    en: Output
+    zh-CN: 输出
+    zh-HK: 輸出
+  error:
+    en: Error
+    zh-CN: 错误
+    zh-HK: 錯誤
+Confirmation:
+  approve:
+    en: Approve
+    zh-CN: 批准
+    zh-HK: 批准
+  deny:
+    en: Deny
+    zh-CN: 拒绝
+    zh-HK: 拒絕
+  approved:
+    en: Approved
+    zh-CN: 已批准
+    zh-HK: 已批准
+  denied:
+    en: Denied
+    zh-CN: 已拒绝
+    zh-HK: 已拒絕
+ContextUsage:
+  summary:
+    en: "%{used} of %{limit} tokens"
+    zh-CN: "%{used} / %{limit} tokens"
+    zh-HK: "%{used} / %{limit} tokens"
+  input:
+    en: Input
+    zh-CN: 输入
+    zh-HK: 輸入
+  output:
+    en: Output
+    zh-CN: 输出
+    zh-HK: 輸出
+  reasoning:
+    en: Reasoning
+    zh-CN: 推理
+    zh-HK: 推理
+  cached:
+    en: Cached
+    zh-CN: 缓存命中
+    zh-HK: 快取命中
+ModelSelector:
+  model:
+    en: Model
+    zh-CN: 模型
+    zh-HK: 模型
+  effort:
+    en: Reasoning effort
+    zh-CN: 推理强度
+    zh-HK: 推理強度
+Plan:
+  title:
+    en: Plan
+    zh-CN: 计划
+    zh-HK: 計劃
+  progress:
+    en: "%{completed} of %{total}"
+    zh-CN: "%{completed} / %{total}"
+    zh-HK: "%{completed} / %{total}"
+PromptInput:
+  send:
+    en: Send
+    zh-CN: 发送
+    zh-HK: 傳送
+  stop:
+    en: Stop
+    zh-CN: 停止
+    zh-HK: 停止
+Queue:
+  remaining:
+    en: Remaining · %{count}
+    zh-CN: 待办 · %{count}
+    zh-HK: 待辦 · %{count}
+  done:
+    en: Done · %{count}
+    zh-CN: 已完成 · %{count}
+    zh-HK: 已完成 · %{count}
+Sources:
+  used:
+    en: Used %{count} sources
+    zh-CN: 引用了 %{count} 个来源
+    zh-HK: 引用了 %{count} 個來源
+StackTrace:
+  frames:
+    en: "%{count} frames"
+    zh-CN: "%{count} 个栈帧"
+    zh-HK: "%{count} 個堆疊框"
+Subagent:
+  result:
+    en: Result
+    zh-CN: 结果
+    zh-HK: 結果
+Terminal:
+  copy_output:
+    en: Copy output
+    zh-CN: 复制输出
+    zh-HK: 複製輸出
+  exit_code:
+    en: Exit code %{code}
+    zh-CN: 退出码 %{code}
+    zh-HK: 結束代碼 %{code}
+  no_output:
+    en: No output
+    zh-CN: 无输出
+    zh-HK: 無輸出
+  earlier_lines:
+    en: "… %{count} earlier lines"
+    zh-CN: "… 前面还有 %{count} 行"
+    zh-HK: "… 前面還有 %{count} 行"
+TestResults:
+  title:
+    en: Tests
+    zh-CN: 测试
+    zh-HK: 測試
+  passed:
+    en: "%{count} passed"
+    zh-CN: "%{count} 个通过"
+    zh-HK: "%{count} 個通過"
+  failed:
+    en: "%{count} failed"
+    zh-CN: "%{count} 个失败"
+    zh-HK: "%{count} 個失敗"
+  skipped:
+    en: "%{count} skipped"
+    zh-CN: "%{count} 个跳过"
+    zh-HK: "%{count} 個略過"
+Checkpoint:
+  label:
+    en: Checkpoint
+    zh-CN: 检查点
+    zh-HK: 檢查點
+  restore:
+    en: Restore checkpoint
+    zh-CN: 恢复到此处
+    zh-HK: 還原到此處

@@ -2,6 +2,7 @@ use gpui_kit::component::dock::PanelControl;
 use gpui_kit::{AnyView, App, AppContext as _, Entity, Hsla, Pixels, Render, Window, px};
 
 mod accordion_story;
+mod ai_elements_story;
 mod alert_dialog_story;
 mod alert_story;
 mod attachment_story;
@@ -85,6 +86,7 @@ mod virtual_list_story;
 mod welcome_story;
 
 pub use accordion_story::AccordionStory;
+pub use ai_elements_story::AiElementsStory;
 pub use alert_dialog_story::AlertDialogStory;
 pub use alert_story::AlertStory;
 pub use attachment_story::AttachmentStory;

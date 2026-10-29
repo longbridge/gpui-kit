@@ -3,6 +3,7 @@
 export const coveredBy = [
   { route: "introduction", registrations: ["Link", "TitleBar"] },
   { route: "accordion", registrations: ["Accordion"] },
+  { route: "ai-elements", registrations: [] },
   { route: "alert", registrations: ["Alert"] },
   { route: "alert-dialog", registrations: ["AlertDialog"] },
   { route: "attachment", registrations: ["Attachment"] },

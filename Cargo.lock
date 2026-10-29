@@ -2847,6 +2847,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-chatgpt"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "dirs 6.0.0",
+ "gpui-kit",
+ "gpui-pre-reqwest",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "smol",
+]
+
+[[package]]
 name = "example-dock"
 version = "0.8.1"
 dependencies = [
