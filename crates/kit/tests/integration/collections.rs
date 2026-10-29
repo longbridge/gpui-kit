@@ -230,7 +230,8 @@ fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppCo
     .unwrap();
 }
 
-/// `Rows`, with each header name in an element a test can measure.
+/// `Rows`, with each header name drawn as `TableDelegate::render_th` draws it
+/// by default, in an element a test can measure.
 struct MeasuredHeaders;
 impl TableDelegate for MeasuredHeaders {
     fn columns_count(&self, cx: &App) -> usize {
@@ -251,6 +252,7 @@ impl TableDelegate for MeasuredHeaders {
         div()
             .id(("header-name", col))
             .test_support()
+            .size_full()
             .child(self.column(col, cx).name)
     }
     fn render_td(
@@ -274,8 +276,8 @@ impl Render for ShortHeader {
     }
 }
 
-/// A header shorter than a row has no room for a row's padding, so its names
-/// sit inside it rather than overflowing its bottom edge.
+/// A header given its own height has no room for a row's padding above and
+/// below its names, so a name has the header's whole height.
 #[gpui_kit::test]
 fn a_short_header_keeps_its_names_inside_it(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -288,9 +290,10 @@ fn a_short_header_keeps_its_names_inside_it(cx: &mut TestAppContext) {
         window.render_frame(cx);
         let header = window.find(("col-header", 0usize)).bounds();
         let name = window.find(("header-name", 0usize)).bounds();
-        assert!(
-            name.top() >= header.top() && name.bottom() <= header.bottom(),
-            "the name {name:?} overflows its header {header:?}"
+        assert_eq!(
+            (name.top(), name.bottom()),
+            (header.top(), header.bottom()),
+            "the name {name:?} doesn't fill its header {header:?}"
         );
     })
     .unwrap();
