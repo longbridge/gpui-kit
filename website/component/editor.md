@@ -521,8 +521,8 @@ Individual properties override the theme; unspecified theme properties use the
 existing editor defaults: a 6px gap, the editor's muted/normal foreground for
 normal/current line numbers, and the body font and size. Explicit transparent
 colors are preserved. The gap separates the number/folding lane from the body.
-Line-number typography controls both measurement and painting, including for
-proportional fonts, without changing body typography or row height.
+Line-number typography controls both measurement and painting without changing
+body typography or row height.
 
 `Theme::get_editor_gutter_style()` returns the configured theme properties.
 These settings are runtime configuration and are not saved in theme JSON.

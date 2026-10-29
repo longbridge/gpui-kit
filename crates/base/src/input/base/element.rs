@@ -70,6 +70,7 @@ fn line_number_len(total_lines: usize) -> usize {
 fn displayed_line_number(number: usize) -> usize {
     number.min(MAX_DISPLAYED_LINE_NUMBER)
 }
+
 const FOLD_CHEVRON_RIGHT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
 const FOLD_CHEVRON_DOWN_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 
@@ -1434,20 +1435,12 @@ impl<M: InputModeKind> TextElement<M> {
             .unwrap_or(LINE_NUMBER_RIGHT_MARGIN);
 
         let mut line_number_width = if state.mode.line_number() {
-            // A proportional number font can have wider digits than '+'. Keep
-            // the existing minimum column, but measure every digit with the
-            // same typography used to paint so numbers cannot enter the body.
-            let width = "+0123456789"
-                .chars()
-                .map(|digit| {
-                    window.text_system().shape_line(
-                        digit.to_string().repeat(line_number_len).into(),
-                        font_size,
-                        &[style.to_run(line_number_len)],
-                        None,
-                    ).width
-                })
-                .fold(px(0.), Pixels::max);
+            let width = window.text_system().shape_line(
+                "+".repeat(line_number_len).into(),
+                font_size,
+                &[style.to_run(line_number_len)],
+                None,
+            ).width;
 
             width + gap
         } else if state.is_code_editor() {
@@ -3067,8 +3060,13 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let gutter_style = state.extras.get_gutter_style().cloned().unwrap_or_default();
         let gutter_text_style = gutter_style.resolve_text_style(&text_style);
         let gutter_font_size = gutter_text_style.font_size.to_pixels(window.rem_size());
-        let (line_number_width, line_number_len) =
-            Self::layout_line_numbers(&state, &text, gutter_font_size, &gutter_text_style, window);
+        let (line_number_width, line_number_len) = Self::layout_line_numbers(
+            &state,
+            &text,
+            gutter_font_size,
+            &gutter_text_style,
+            window,
+        );
         let line_number_right = line_number_width - gutter_style.resolve_gap()
             - if state.mode.is_folding() { FOLD_ICON_HITBOX_WIDTH } else { px(0.) };
 
@@ -4904,6 +4902,18 @@ mod tests {
     fn gutter_typography_updates_wrapping_scrollbars_and_pointer_coordinates(cx: &mut TestAppContext) {
         use crate::input::GutterStyle;
 
+        let assert_widths_match = |actual: Pixels, expected: Pixels| {
+            // Pixels stores f32: adding the gap/fold lane and subtracting them
+            // again can round even when the measured font width is unchanged.
+            // Allow roundoff from those four operations, not a visual-pixel gap.
+            let tolerance = actual.abs().max(expected.abs()).max(px(1.))
+                * (4. * f32::EPSILON);
+            assert!(
+                (actual - expected).abs() <= tolerance,
+                "{actual:?} != {expected:?} (roundoff tolerance: {tolerance:?})",
+            );
+        };
+
         let (editor, window) = decoration_editor(cx, &"hello world ".repeat(40), true);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         let (baseline_width, baseline_wrap, body_height, body_glyph_width) = cx.update(|window, cx| {
@@ -4919,7 +4929,7 @@ mod tests {
             )
         });
 
-        let mut previous = None;
+        let mut previous: Option<(Pixels, Pixels, Pixels, Bounds<Pixels>)> = None;
         for gap in [px(0.), px(12.), px(24.), px(0.)] {
             let (column_width, wrap_width, scrollbar_bounds, click_position) = cx.update(|window, cx| {
                 editor.update(cx, |state, cx| {
@@ -4943,9 +4953,9 @@ mod tests {
                 let mut number_style = TextStyle::default();
                 number_style.font_family = ".SystemUIFont".into();
                 let number = window.text_system().shape_line(
-                    "989".into(), px(32.), &[number_style.to_run(3)], None,
+                    "+++".into(), px(32.), &[number_style.to_run(3)], None,
                 );
-                assert!(column_width >= number.width);
+                assert_widths_match(column_width, number.width);
 
                 let caret = state.prepaint_caret_geometry().unwrap().cursor_bounds();
                 (
@@ -4959,9 +4969,12 @@ mod tests {
             if let Some((previous_gap, previous_column, previous_wrap, previous_scrollbar)) = previous {
                 // A new gap changes wrapping, but the number/folding lane and
                 // scrollbar origin must not drift along with the blank space.
-                assert_eq!(column_width, previous_column);
-                assert_eq!(wrap_width + gap, previous_wrap + previous_gap);
-                assert_eq!(scrollbar_bounds, previous_scrollbar);
+                assert_widths_match(column_width, previous_column);
+                assert_widths_match(wrap_width + gap, previous_wrap + previous_gap);
+                assert_widths_match(scrollbar_bounds.origin.x, previous_scrollbar.origin.x);
+                assert_widths_match(scrollbar_bounds.size.width, previous_scrollbar.size.width);
+                assert_eq!(scrollbar_bounds.origin.y, previous_scrollbar.origin.y);
+                assert_eq!(scrollbar_bounds.size.height, previous_scrollbar.size.height);
             }
             previous = Some((gap, column_width, wrap_width, scrollbar_bounds));
 
