@@ -2775,8 +2775,6 @@ pub(super) struct PrepaintState {
     range_decoration_fills: Vec<(Path<Pixels>, Hsla)>,
     range_decoration_frames: Vec<(Path<Pixels>, Hsla)>,
     gutter_decorations: Vec<PaintQuad>,
-    /// How far the gutter decoration strip pushes the line numbers right.
-    line_number_offset: Pixels,
     hover_definition_hitbox: Option<Hitbox>,
     indent_guides_path: Option<Path<Pixels>>,
     /// The whole input, for deciding whether a long press started in it.
@@ -3515,8 +3513,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 state,
             )));
         let fold_icon_layout =
-<<<<<<< HEAD
-            self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
+            self.layout_fold_icons(original_x, &bounds, &last_layout, line_number_right, window, cx);
         let ghost_rows = current_row.filter(|_| !ghost_lines.is_empty()).map(|row| {
             let display_map = &self.state.read(cx).display_map;
             let rows = display_map
@@ -3532,15 +3529,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
             ghost_rows,
             cx,
         );
-        let line_number_offset = self
-            .state
-            .read(cx)
-            .extras
-            .gutter_decorations_width()
-            .map_or(px(0.), |width| width + GUTTER_DECORATION_GAP);
-=======
-            self.layout_fold_icons(original_x, &bounds, &last_layout, line_number_right, window, cx);
->>>>>>> b46d91c4 (feat: gutter style)
         let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
         self.request_reveal(
             input_bounds,
@@ -3571,7 +3559,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
             range_decoration_fills,
             range_decoration_frames,
             gutter_decorations,
-            line_number_offset,
             indent_guides_path,
             fold_icon_layout,
             ghost_first_line,
@@ -3862,7 +3849,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     }
                 }
 
-                let p = point(p.x + prepaint.line_number_offset, p.y);
                 for line in lines {
                     let number_origin = point(
                         p.x + prepaint.line_number_right - line.width,
