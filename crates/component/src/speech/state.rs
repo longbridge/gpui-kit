@@ -1,10 +1,10 @@
 use std::{cell::OnceCell, rc::Rc, time::Duration};
 
-use gpui::{App, Context, EventEmitter, SharedString, Subscription, Task, WeakEntity};
+use gpui::{App, Context, EventEmitter, Pixels, SharedString, Subscription, Task, WeakEntity};
 
 use super::{
     AudioInput, AudioSink, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink,
-    level::LevelMeter,
+    level::LevelMeter, surface::LiquidSurface,
 };
 
 /// Default time [`SpeechState::stop`] waits for the final result.
@@ -84,6 +84,7 @@ pub struct SpeechState {
     committed: String,
     hypothesis: SharedString,
     meter: LevelMeter,
+    surface: LiquidSurface,
 }
 
 impl EventEmitter<SpeechEvent> for SpeechState {}
@@ -103,6 +104,7 @@ impl SpeechState {
             committed: String::new(),
             hypothesis: SharedString::default(),
             meter: LevelMeter::new(),
+            surface: LiquidSurface::new(),
         }
     }
 
@@ -178,6 +180,20 @@ impl SpeechState {
         self.meter.lead_at(now)
     }
 
+    /// Advance the water surface that a liquid waveform draws to `now`,
+    /// `width` wide. The surface is simulated rather than derived from the
+    /// levels, so it lives here, with the levels that drive it, and the
+    /// waveform advances it once per frame; nothing else reads it, so this
+    /// does not notify.
+    pub(super) fn advance_surface(&mut self, now: instant::Instant, width: Pixels) {
+        self.surface.advance(now, width.as_f32(), &self.meter);
+    }
+
+    /// The water surface's heights; see `LiquidSurface::heights`.
+    pub(super) fn surface_heights(&self) -> &[f32] {
+        self.surface.heights()
+    }
+
     /// Start a session. Does nothing while one is running.
     ///
     /// When the recognizer or the input fails to start, emits
@@ -221,6 +237,7 @@ impl SpeechState {
         self.committed.clear();
         self.hypothesis = SharedString::default();
         self.meter.reset(format.sample_rate(), format.channels());
+        self.surface = LiquidSurface::new();
         self.session = Some(Session {
             id,
             capture: Some(capture),
@@ -345,6 +362,7 @@ impl SpeechState {
         }
         self.status = SpeechStatus::Idle;
         self.meter = LevelMeter::new();
+        self.surface = LiquidSurface::new();
         cx.emit(event);
         cx.notify();
     }

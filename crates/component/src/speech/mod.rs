@@ -14,6 +14,7 @@ mod button;
 mod level;
 mod recognizer;
 mod state;
+mod surface;
 mod waveform;
 
 #[cfg(all(feature = "speech", not(target_family = "wasm")))]

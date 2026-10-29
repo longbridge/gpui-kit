@@ -1,19 +1,54 @@
 use gpui::{
-    App, Bounds, ContentMask, Entity, IntoElement, ParentElement as _, Path, PathBuilder, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, canvas, div, point, px, size,
+    AnyElement, App, Bounds, ContentMask, Entity, Hsla, IntoElement, ParentElement as _, Path,
+    PathBuilder, Pixels, Point, RenderOnce, StyleRefinement, Styled, Window, canvas, div,
+    linear_color_stop, linear_gradient, point, px, size,
 };
 
 use crate::{ActiveTheme as _, Sizable, Size, StyledExt as _};
 
+use std::f32::consts::PI;
+
 use instant::Instant;
 
-use super::SpeechState;
+use super::{
+    SpeechState,
+    surface::{edge_taper, still_heights},
+};
 
 /// The width of a waveform the caller does not size.
 const DEFAULT_WIDTH: Pixels = px(96.);
 
 /// The space between bars, relative to their width.
 const GAP_RATIO: f32 = 2.5;
+
+/// How far a liquid surface's crests reach from the midline, relative to the
+/// height, leaving room for the line's own width.
+const CREST_RATIO: f32 = 0.42;
+
+/// How steeply a liquid surface's heights approach its crest: higher waves
+/// flatten out instead of being cut off at the edge of the waveform.
+const CREST_SOFTNESS: f32 = 1.4;
+
+/// How wide a liquid surface's line is at its ends, relative to its middle.
+const LINE_TAPER: f32 = 0.25;
+
+/// How many points a liquid surface without heights is drawn with, so that
+/// even a flat line tapers smoothly toward its ends.
+const MIN_SURFACE_POINTS: usize = 32;
+
+/// How opaque the water under a liquid surface is at its crest; it fades to
+/// clear at the bottom.
+const WATER_OPACITY: f32 = 0.16;
+
+/// How a [`SpeechWaveform`] draws the input.
+#[derive(Clone, Copy, Default)]
+enum Appearance {
+    /// A bar per level, scrolling toward the leading edge.
+    #[default]
+    Bars,
+    /// A water surface that the voice sets in motion.
+    Liquid,
+}
 
 /// A live waveform of a [`SpeechState`]'s input levels.
 ///
@@ -24,12 +59,15 @@ const GAP_RATIO: f32 = 2.5;
 /// width. Before any audio, nothing is drawn. With reduced motion the bars
 /// still show each level but do not scroll between them.
 ///
+/// [`Self::liquid`] draws a water surface instead.
+///
 /// Size the waveform like any element, e.g. `.w_full()` to span a row; it is
 /// 96 px wide by default, and its height follows [`Sizable`].
 #[derive(IntoElement)]
 pub struct SpeechWaveform {
     state: Entity<SpeechState>,
     size: Size,
+    appearance: Appearance,
     style: StyleRefinement,
 }
 
@@ -39,8 +77,27 @@ impl SpeechWaveform {
         Self {
             state: state.clone(),
             size: Size::default(),
+            appearance: Appearance::default(),
             style: StyleRefinement::default(),
         }
+    }
+
+    /// Draw the input as a water surface rather than bars.
+    ///
+    /// While there is sound, the middle of the surface rises and falls with
+    /// the input level and sends waves toward both edges, and each syllable
+    /// drops onto the surface at a varying place; the waves travel, overlap
+    /// and die away, and in silence the surface settles to a flat line. The
+    /// line is shaded with the water beneath it. The motion is simulated in
+    /// the [`SpeechState`], so every liquid waveform of one state shows the
+    /// same surface, and it starts from rest with each session. With reduced
+    /// motion the surface holds a ripple in place that grows with the level.
+    ///
+    /// Waves need room to travel: use it for a waveform that spans a row, not
+    /// a compact one beside a button.
+    pub fn liquid(mut self) -> Self {
+        self.appearance = Appearance::Liquid;
+        self
     }
 
     fn height(&self) -> Pixels {
@@ -70,22 +127,9 @@ impl Styled for SpeechWaveform {
 impl RenderOnce for SpeechWaveform {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let height = self.height();
-        // Bars thicken with the waveform so a tall one does not read as hairlines,
-        // and stand apart so a run of silence reads as a row of dots.
-        let bar = (height * 0.125).round().clamp(px(2.), px(4.));
-        let gap = (bar * GAP_RATIO).round();
         let state = self.state.read(cx);
         let capturing = state.status().is_capturing();
-        let levels: Vec<f32> = state.levels().collect();
         let animate = capturing && !cx.reduce_motion();
-        // The bars follow an even clock rather than the arrival of each level,
-        // which comes in uneven bursts: the newest bar slides in from just past
-        // the trailing edge, so the waveform scrolls without stepping or
-        // stalling. Without animation the newest bar sits at the edge.
-        let scroll = state
-            .level_lead_at(Instant::now())
-            .filter(|_| animate)
-            .map_or(0., |lead| -lead);
         if animate {
             window.request_animation_frame();
         }
@@ -94,32 +138,188 @@ impl RenderOnce for SpeechWaveform {
         } else {
             cx.theme().muted_foreground
         };
+        let content = match self.appearance {
+            Appearance::Bars => bars(state, height, animate, color),
+            Appearance::Liquid => liquid(&self.state, height, animate, color, cx),
+        };
 
         div()
             .h(height)
             .w(DEFAULT_WIDTH)
             .flex_shrink_0()
             .refine_style(&self.style)
-            .child(
-                canvas(
-                    |_, _, _| {},
-                    move |bounds, _, window, _| {
-                        // A bar sliding in is cut at the trailing edge, not drawn past it.
-                        // Bars are anti-aliased paths, not quads: quads snap to whole
-                        // device pixels, so a bar moving a fraction of a pixel per
-                        // frame would step instead of glide.
-                        window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                            for rect in bar_rects(bounds, &levels, scroll, bar, gap) {
-                                if let Some(path) = capsule(rect) {
-                                    window.paint_path(path, color);
-                                }
-                            }
-                        });
-                    },
-                )
-                .size_full(),
-            )
+            .child(content)
     }
+}
+
+/// The bars of `state`'s levels, scrolling while `animate`.
+fn bars(state: &SpeechState, height: Pixels, animate: bool, color: Hsla) -> AnyElement {
+    // Bars thicken with the waveform so a tall one does not read as hairlines,
+    // and stand apart so a run of silence reads as a row of dots.
+    let bar = (height * 0.125).round().clamp(px(2.), px(4.));
+    let gap = (bar * GAP_RATIO).round();
+    let levels: Vec<f32> = state.levels().collect();
+    // The bars follow an even clock rather than the arrival of each level,
+    // which comes in uneven bursts: the newest bar slides in from just past
+    // the trailing edge, so the waveform scrolls without stepping or
+    // stalling. Without animation the newest bar sits at the edge.
+    let scroll = state
+        .level_lead_at(Instant::now())
+        .filter(|_| animate)
+        .map_or(0., |lead| -lead);
+
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            // A bar sliding in is cut at the trailing edge, not drawn past it.
+            // Bars are anti-aliased paths, not quads: quads snap to whole
+            // device pixels, so a bar moving a fraction of a pixel per
+            // frame would step instead of glide.
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                for rect in bar_rects(bounds, &levels, scroll, bar, gap) {
+                    if let Some(path) = capsule(rect) {
+                        window.paint_path(path, color);
+                    }
+                }
+            });
+        },
+    )
+    .size_full()
+    .into_any_element()
+}
+
+/// The water surface of `state`, advanced to this frame while `animate`.
+fn liquid(
+    state: &Entity<SpeechState>,
+    height: Pixels,
+    animate: bool,
+    color: Hsla,
+    cx: &App,
+) -> AnyElement {
+    let still = cx
+        .reduce_motion()
+        .then(|| still_heights(state.read(cx).levels().last().unwrap_or(0.)));
+    let state = state.clone();
+    // The line at its thickest, in the middle.
+    let line = (height * (1. / 10.)).max(px(2.));
+
+    canvas(
+        // The surface is advanced here, where the width is known; it stays as
+        // it was while nothing is captured.
+        move |bounds, _, cx| {
+            still.unwrap_or_else(|| {
+                state.update(cx, |state, _| {
+                    if animate {
+                        state.advance_surface(Instant::now(), bounds.size.width);
+                    }
+                    state.surface_heights().to_vec()
+                })
+            })
+        },
+        move |bounds, heights, window, _| {
+            let points = surface_points(bounds, &heights);
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                let mut water = PathBuilder::fill();
+                trace(&mut water, &points);
+                water.line_to(bounds.bottom_right());
+                water.line_to(bounds.bottom_left());
+                water.close();
+                if let Ok(water) = water.build() {
+                    window.paint_path(
+                        water,
+                        linear_gradient(
+                            180.,
+                            linear_color_stop(color.opacity(WATER_OPACITY), 0.),
+                            linear_color_stop(color.opacity(0.), 1.),
+                        ),
+                    );
+                }
+                // A ribbon rather than a stroke, so the line can swell toward
+                // the middle and thin out at the edges.
+                let (top, bottom) = ribbon(&points, line);
+                let mut surface = PathBuilder::fill();
+                trace(&mut surface, &top);
+                if let Some(end) = bottom.last() {
+                    surface.line_to(*end);
+                }
+                follow(
+                    &mut surface,
+                    &bottom.iter().rev().copied().collect::<Vec<_>>(),
+                );
+                surface.close();
+                if let Ok(surface) = surface.build() {
+                    window.paint_path(surface, color);
+                }
+            });
+        },
+    )
+    .size_full()
+    .into_any_element()
+}
+
+/// The points of a surface with `heights` across `bounds`: evenly spaced from
+/// edge to edge, around the midline, flat when there are no heights.
+fn surface_points(bounds: Bounds<Pixels>, heights: &[f32]) -> Vec<Point<Pixels>> {
+    let middle = bounds.center().y;
+    let crest = bounds.size.height * CREST_RATIO;
+    let count = if heights.is_empty() {
+        MIN_SURFACE_POINTS
+    } else {
+        heights.len().max(2)
+    };
+    (0..count)
+        .map(|ix| {
+            let t = ix as f32 / (count - 1) as f32;
+            let height = heights.get(ix).copied().unwrap_or(0.);
+            let rise = (height * CREST_SOFTNESS).tanh() * edge_taper(t);
+            point(bounds.left() + bounds.size.width * t, middle + crest * rise)
+        })
+        .collect()
+}
+
+/// Trace a smooth curve through `points`, passing through each midpoint
+/// between them.
+fn trace(path: &mut PathBuilder, points: &[Point<Pixels>]) {
+    let Some(first) = points.first() else {
+        return;
+    };
+    path.move_to(*first);
+    follow(path, points);
+}
+
+/// Continue `path`, which is at the first of `points`, along a smooth curve
+/// through the rest, passing through each midpoint between them.
+fn follow(path: &mut PathBuilder, points: &[Point<Pixels>]) {
+    let Some(last) = points.last() else {
+        return;
+    };
+    for pair in points[1..].windows(2) {
+        let middle = point((pair[0].x + pair[1].x) / 2., (pair[0].y + pair[1].y) / 2.);
+        path.curve_to(middle, pair[0]);
+    }
+    path.line_to(*last);
+}
+
+/// The two edges of a line through `points` that is `width` wide in the
+/// middle and narrows smoothly to [`LINE_TAPER`] of that at the ends: each
+/// point moved half the local width to either side, across the line rather
+/// than straight up and down, so steep waves keep their weight.
+fn ribbon(points: &[Point<Pixels>], width: Pixels) -> (Vec<Point<Pixels>>, Vec<Point<Pixels>>) {
+    let last = points.len().saturating_sub(1).max(1);
+    points
+        .iter()
+        .enumerate()
+        .map(|(ix, at)| {
+            let before = points[ix.saturating_sub(1)];
+            let after = points[(ix + 1).min(points.len() - 1)];
+            let (dx, dy) = ((after.x - before.x).as_f32(), (after.y - before.y).as_f32());
+            let length = dx.hypot(dy).max(f32::EPSILON);
+            let swell = (PI * ix as f32 / last as f32).sin().max(0.);
+            let half = width * (LINE_TAPER + (1. - LINE_TAPER) * swell) / 2.;
+            let offset = point(half * (-dy / length), half * (dx / length));
+            (*at - offset, *at + offset)
+        })
+        .unzip()
 }
 
 /// A capsule filling `rect`: round caps on its short ends, a dot when square.
@@ -209,6 +409,58 @@ mod tests {
     #[test]
     fn nothing_is_drawn_before_any_audio() {
         assert!(bar_rects(bounds(96., 20.), &[], 0., px(2.), px(5.)).is_empty());
+    }
+
+    #[test]
+    fn a_surface_at_rest_is_a_flat_line_across_the_midline() {
+        let bounds = bounds(96., 20.);
+        let points = surface_points(bounds, &[]);
+        assert_eq!(points.len(), MIN_SURFACE_POINTS);
+        assert_eq!(points[0], point(bounds.left(), px(30.)));
+        assert_eq!(
+            points[MIN_SURFACE_POINTS - 1],
+            point(bounds.right(), px(30.))
+        );
+        assert!(points.iter().all(|point| point.y == px(30.)));
+    }
+
+    #[test]
+    fn a_surface_line_swells_in_the_middle_and_thins_at_the_ends() {
+        let bounds = bounds(96., 20.);
+        let points = surface_points(bounds, &[]);
+        let (top, bottom) = ribbon(&points, px(4.));
+        let width = |ix: usize| bottom[ix].y - top[ix].y;
+        let middle = points.len() / 2;
+        assert!((width(0) - px(1.)).abs() < px(0.01));
+        assert!((width(points.len() - 1) - px(1.)).abs() < px(0.01));
+        assert!(width(middle) > px(3.9));
+        assert!(width(4) > width(0) && width(middle) > width(4));
+    }
+
+    #[test]
+    fn a_surface_line_keeps_its_width_across_a_steep_wave() {
+        let points = [
+            point(px(0.), px(0.)),
+            point(px(1.), px(1.)),
+            point(px(2.), px(2.)),
+        ];
+        let (top, bottom) = ribbon(&points, px(4.));
+        let across = bottom[1] - top[1];
+        let length = across.x.as_f32().hypot(across.y.as_f32());
+        assert!((length - 4.).abs() < 0.01, "{length}");
+    }
+
+    #[test]
+    fn a_surface_meets_the_edges_at_rest_and_keeps_its_crests_inside() {
+        let bounds = bounds(96., 20.);
+        let points = surface_points(bounds, &[5., -5., 5., -5., 5.]);
+        assert_eq!(points.len(), 5);
+        assert_eq!(points[0].y, px(30.));
+        assert!((points[4].y - px(30.)).abs() < px(0.1));
+        for point in &points {
+            assert!((point.y - px(30.)).abs() <= px(20. * CREST_RATIO));
+        }
+        assert!(points[1].y < px(30.) && points[2].y > px(30.));
     }
 
     #[test]

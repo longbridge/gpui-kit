@@ -189,6 +189,9 @@ impl Dictation {
                         ),
                 ),
             )
+            .when(status.is_capturing(), |this| {
+                this.child(SpeechWaveform::new(&self.speech).liquid().w_full().large())
+            })
             .when(status.is_active(), |this| {
                 this.child(
                     div()
