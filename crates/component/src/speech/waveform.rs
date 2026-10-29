@@ -89,8 +89,8 @@ impl SpeechWaveform {
     /// drops onto the surface at a varying place; the waves travel, overlap
     /// and die away, and in silence the surface settles to a flat line. The
     /// line is shaded with the water beneath it. The motion is simulated in
-    /// the [`SpeechState`], so every liquid waveform of one state shows the
-    /// same surface, and it starts from rest with each session. With reduced
+    /// the [`SpeechState`], so liquid waveforms of one state and width show
+    /// the same surface, and it starts from rest with each session. With reduced
     /// motion the surface holds a ripple in place that grows with the level.
     ///
     /// Waves need room to travel: use it for a waveform that spans a row, not
@@ -212,7 +212,7 @@ fn liquid(
                     if animate {
                         state.advance_surface(Instant::now(), bounds.size.width);
                     }
-                    state.surface_heights().to_vec()
+                    state.surface_heights(bounds.size.width).to_vec()
                 })
             })
         },

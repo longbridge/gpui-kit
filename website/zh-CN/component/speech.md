@@ -79,6 +79,16 @@ Input::new(&self.input).suffix(
 
 把订阅保存在拥有该输入框的视图上，例如放进它的 `_subscriptions` 列表。
 
+横跨整行的波形，例如用户语音输入时显示在对话输入框下方的那种，可以用 `.liquid()` 把音量画成一片水面，而不是竖条。说话声让水面中间起伏，波纹向两边扩散；静音时水面归平，开启减弱动态效果时显示一个静止的波纹。波纹需要足够的宽度才能扩散开，所以按钮旁边那种紧凑的波形仍然用竖条。
+
+```rust
+v_flex()
+    .child(Input::new(&self.input))
+    .when(capturing, |this| {
+        this.child(SpeechWaveform::new(&self.speech).liquid().w_full().large())
+    })
+```
+
 ### 事件
 
 | 事件 | 触发时机 |

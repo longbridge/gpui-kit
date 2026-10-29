@@ -4,7 +4,7 @@ use gpui::{App, Context, EventEmitter, Pixels, SharedString, Subscription, Task,
 
 use super::{
     AudioInput, AudioSink, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink,
-    level::LevelMeter, surface::LiquidSurface,
+    level::LevelMeter, surface::LiquidSurfaces,
 };
 
 /// Default time [`SpeechState::stop`] waits for the final result.
@@ -84,7 +84,7 @@ pub struct SpeechState {
     committed: String,
     hypothesis: SharedString,
     meter: LevelMeter,
-    surface: LiquidSurface,
+    surfaces: LiquidSurfaces,
 }
 
 impl EventEmitter<SpeechEvent> for SpeechState {}
@@ -104,7 +104,7 @@ impl SpeechState {
             committed: String::new(),
             hypothesis: SharedString::default(),
             meter: LevelMeter::new(),
-            surface: LiquidSurface::new(),
+            surfaces: LiquidSurfaces::default(),
         }
     }
 
@@ -180,18 +180,18 @@ impl SpeechState {
         self.meter.lead_at(now)
     }
 
-    /// Advance the water surface that a liquid waveform draws to `now`,
-    /// `width` wide. The surface is simulated rather than derived from the
-    /// levels, so it lives here, with the levels that drive it, and the
-    /// waveform advances it once per frame; nothing else reads it, so this
-    /// does not notify.
+    /// Advance the water surface that a liquid waveform `width` wide draws to
+    /// `now`. The surface is simulated rather than derived from the levels, so
+    /// it lives here, with the levels that drive it, and the waveform advances
+    /// it once per frame; nothing else reads it, so this does not notify.
     pub(super) fn advance_surface(&mut self, now: instant::Instant, width: Pixels) {
-        self.surface.advance(now, width.as_f32(), &self.meter);
+        self.surfaces.advance(now, width.as_f32(), &self.meter);
     }
 
-    /// The water surface's heights; see `LiquidSurface::heights`.
-    pub(super) fn surface_heights(&self) -> &[f32] {
-        self.surface.heights()
+    /// The heights of the water surface `width` wide; see
+    /// `LiquidSurface::heights`.
+    pub(super) fn surface_heights(&self, width: Pixels) -> &[f32] {
+        self.surfaces.heights(width.as_f32())
     }
 
     /// Start a session. Does nothing while one is running.
@@ -237,7 +237,7 @@ impl SpeechState {
         self.committed.clear();
         self.hypothesis = SharedString::default();
         self.meter.reset(format.sample_rate(), format.channels());
-        self.surface = LiquidSurface::new();
+        self.surfaces = LiquidSurfaces::default();
         self.session = Some(Session {
             id,
             capture: Some(capture),
@@ -362,7 +362,7 @@ impl SpeechState {
         }
         self.status = SpeechStatus::Idle;
         self.meter = LevelMeter::new();
-        self.surface = LiquidSurface::new();
+        self.surfaces = LiquidSurfaces::default();
         cx.emit(event);
         cx.notify();
     }

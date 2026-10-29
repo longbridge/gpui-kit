@@ -62,6 +62,58 @@ const DROP_STRENGTH: f32 = 9.;
 /// How many points on each side of where a drop lands it strikes.
 const DROP_REACH: isize = 4;
 
+/// How long a surface that no waveform draws any more is kept, in seconds:
+/// the widths a live resize passes through are not drawn again.
+const STALE_AFTER: f32 = 0.5;
+
+/// How many points a surface `width` pixels wide has.
+fn node_count(width: f32) -> usize {
+    ((width / NODE_SPACING) as usize).max(MIN_NODES)
+}
+
+/// The water surfaces of one speech state, one for each width a liquid
+/// waveform draws, so that waveforms of different widths do not restart each
+/// other. Waveforms of the same width share a surface.
+#[derive(Default)]
+pub(super) struct LiquidSurfaces(Vec<LiquidSurface>);
+
+impl LiquidSurfaces {
+    /// Advance the surface `width` pixels wide to `now`, starting one from rest
+    /// for a width not drawn before, and drop the surfaces no longer drawn.
+    pub(super) fn advance(&mut self, now: Instant, width: f32, meter: &LevelMeter) {
+        let nodes = node_count(width);
+        self.0.retain(|surface| {
+            surface.heights.len() == nodes
+                || surface
+                    .advanced
+                    .and_then(|advanced| now.checked_duration_since(advanced))
+                    .is_none_or(|idle| idle.as_secs_f32() < STALE_AFTER)
+        });
+        let ix = match self
+            .0
+            .iter()
+            .position(|surface| surface.heights.len() == nodes)
+        {
+            Some(ix) => ix,
+            None => {
+                self.0.push(LiquidSurface::new());
+                self.0.len() - 1
+            }
+        };
+        self.0[ix].advance(now, width, meter);
+    }
+
+    /// The heights of the surface `width` pixels wide; empty before it is
+    /// first advanced.
+    pub(super) fn heights(&self, width: f32) -> &[f32] {
+        let nodes = node_count(width);
+        self.0
+            .iter()
+            .find(|surface| surface.heights.len() == nodes)
+            .map_or(&[], |surface| surface.heights())
+    }
+}
+
 /// A one-dimensional water surface driven by speech, behind
 /// [`SpeechWaveform::liquid`](super::SpeechWaveform::liquid).
 ///
@@ -115,7 +167,7 @@ impl LiquidSurface {
     /// Advance the surface to `now`, `width` pixels wide, driven by `meter`'s
     /// levels. A change of width starts over from rest.
     pub(super) fn advance(&mut self, now: Instant, width: f32, meter: &LevelMeter) {
-        let nodes = ((width / NODE_SPACING) as usize).max(MIN_NODES);
+        let nodes = node_count(width);
         if self.heights.len() != nodes {
             self.heights = vec![0.; nodes];
             self.velocities = vec![0.; nodes];
@@ -319,6 +371,37 @@ mod tests {
         surface.advance(now, 600., &meter);
         assert_eq!(surface.heights().len(), 200);
         assert!(surface.heights().iter().all(|height| *height == 0.));
+    }
+
+    #[test]
+    fn waveforms_of_different_widths_keep_their_own_surfaces() {
+        let meter = loud_meter(4);
+        let mut surfaces = LiquidSurfaces::default();
+        let (mut narrow, mut wide) = (LiquidSurface::new(), LiquidSurface::new());
+        let mut now = Instant::now();
+        for _ in 0..60 {
+            now += Duration::from_secs_f32(1. / 60.);
+            surfaces.advance(now, 300., &meter);
+            surfaces.advance(now, 600., &meter);
+            narrow.advance(now, 300., &meter);
+            wide.advance(now, 600., &meter);
+        }
+        assert_eq!(surfaces.heights(300.), narrow.heights());
+        assert_eq!(surfaces.heights(600.), wide.heights());
+        assert!(wide.heights()[80].abs() > 0.01, "the waves travel");
+    }
+
+    #[test]
+    fn a_width_no_longer_drawn_is_dropped() {
+        let meter = loud_meter(4);
+        let mut surfaces = LiquidSurfaces::default();
+        let now = Instant::now();
+        surfaces.advance(now, 300., &meter);
+        surfaces.advance(now + Duration::from_secs_f32(0.1), 600., &meter);
+        assert!(!surfaces.heights(300.).is_empty());
+        surfaces.advance(now + Duration::from_secs(1), 600., &meter);
+        assert!(surfaces.heights(300.).is_empty());
+        assert_eq!(surfaces.heights(600.).len(), 200);
     }
 
     #[test]

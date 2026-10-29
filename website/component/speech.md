@@ -93,6 +93,21 @@ Input::new(&self.input).suffix(
 Keep the subscription on the view that owns the input, for example in its
 `_subscriptions` list.
 
+A waveform that spans a row, such as one under a chat composer while the user
+dictates, can draw the input as a water surface instead of bars with
+`.liquid()`. The voice sets the middle of the surface in motion and the waves
+travel toward both edges; in silence it settles flat, and with reduced motion
+it holds a still ripple. Waves need room to travel, so keep the bars for a
+compact waveform beside the button.
+
+```rust
+v_flex()
+    .child(Input::new(&self.input))
+    .when(capturing, |this| {
+        this.child(SpeechWaveform::new(&self.speech).liquid().w_full().large())
+    })
+```
+
 ### Events
 
 | Event | When |
