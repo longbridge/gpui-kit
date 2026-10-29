@@ -23,9 +23,6 @@ use rust_i18n::t;
 
 use super::*;
 
-/// How far behind the pointer a resize drag trails the column edge.
-const HANDLE_SIZE: Pixels = px(2.);
-
 /// Grab room on each side of a resize handle's hairline, so the divider can be
 /// caught without pixel-hunting. Both halves of the band are this wide, so
 /// widening the grab area stays symmetric about the boundary. `resizable`'s
@@ -146,6 +143,14 @@ impl TableVisibleRange {
     pub fn cols(&self) -> &Range<usize> {
         &self.cols
     }
+}
+
+/// Where a column resize started: the pointer's x at the press on the
+/// resize handle, and the column's width then.
+#[derive(Clone, Copy)]
+struct ResizeOrigin {
+    x: Pixels,
+    width: Pixels,
 }
 
 /// The state for [`DataTable`].
@@ -277,6 +282,8 @@ pub struct TableState<D: TableDelegate> {
 
     /// The column index that is being resized.
     resizing_col: Option<usize>,
+    /// Where the press on a resize handle was, and the column's width then.
+    resize_origin: Option<ResizeOrigin>,
     /// The column a double-click on its resize handle just fitted.
     ///
     /// The double-click's second press also starts a drag on the handle, which
@@ -317,6 +324,7 @@ where
             selected_col: None,
             selected_cell: None,
             resizing_col: None,
+            resize_origin: None,
             fitted_col: None,
             col_drag_gap: None,
             bounds: Bounds::default(),
@@ -1710,9 +1718,17 @@ where
                                 .expect("BUG: invalid col index")
                                 .clone();
 
+                            // The width at the press, plus how far the pointer
+                            // has moved since. The column's left edge isn't a
+                            // fixed point: it moves when the table scrolls,
+                            // and the scroll offset clamps as the columns
+                            // narrow.
+                            let Some(origin) = view.resize_origin else {
+                                return;
+                            };
                             view.resize_cols(
                                 ix,
-                                e.event.position.x - HANDLE_SIZE - col_group.bounds.left(),
+                                origin.width + (e.event.position.x - origin.x),
                                 window,
                                 cx,
                             );
@@ -1731,7 +1747,14 @@ where
                 MouseButton::Left,
                 cx.listener(
                     move |view, e: &MouseDownEvent, window, cx| match e.click_count {
-                        1 => view.fitted_col = None,
+                        1 => {
+                            view.fitted_col = None;
+                            view.resize_origin =
+                                view.col_groups.get(ix).map(|col_group| ResizeOrigin {
+                                    x: e.position.x,
+                                    width: col_group.width,
+                                });
+                        }
                         2 if view.fit_col(ix, window, cx) => view.fitted_col = Some(ix),
                         _ => {}
                     },
@@ -1740,6 +1763,7 @@ where
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|view, _, _, cx| {
+                    view.resize_origin = None;
                     if view.resizing_col.is_none() {
                         return;
                     }
