@@ -2694,15 +2694,6 @@ where
         let inner_table = v_flex()
             .id("table-inner")
             .test_support()
-            // A table that selects rows or cells is a grid. The counts cover
-            // every row, not just the rendered ones, plus the header row.
-            .role(if self.row_selectable || self.cell_selectable {
-                gpui::Role::Grid
-            } else {
-                gpui::Role::Table
-            })
-            .aria_row_count(rows_count + 1)
-            .aria_column_count(columns_count)
             .size_full()
             .overflow_hidden()
             .child(self.render_table_header(left_columns_count, window, cx))

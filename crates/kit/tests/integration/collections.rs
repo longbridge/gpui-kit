@@ -214,10 +214,7 @@ fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppCo
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert_eq!(
-            window.find("table-inner").role(),
-            Some(gpui_kit::Role::Grid)
-        );
+        assert_eq!(window.find("table").role(), Some(gpui_kit::Role::Grid));
         for (ix, name) in ["Name", "Status"].into_iter().enumerate() {
             let header = window.find(("col-header", ix));
             assert_eq!(header.role(), Some(gpui_kit::Role::ColumnHeader));
@@ -228,6 +225,41 @@ fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppCo
         assert_eq!(cell.label(), Some("3:1"));
     })
     .unwrap();
+}
+
+/// The grid is the element that holds the keyboard focus, so a screen reader
+/// is told the grid has the focus, not the window, and follows the arrows.
+#[gpui_kit::test]
+fn a_focused_table_is_its_named_grid(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| NamedRecords {
+                table: cx.new(|cx| TableState::new(LabelledRows, window, cx)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        let focus = content.read(cx).table.focus_handle(cx);
+        window.focus(&focus, cx);
+        window.render_frame(cx);
+        let table = window.find("table");
+        assert_eq!(table.role(), Some(gpui_kit::Role::Grid));
+        assert_eq!(table.label(), Some("Records"));
+        assert_eq!(table.focused(), Some(true));
+        assert_eq!(window.find("table-inner").role(), None);
+    })
+    .unwrap();
+}
+
+struct NamedRecords {
+    table: Entity<TableState<LabelledRows>>,
+}
+impl Render for NamedRecords {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(DataTable::new(&self.table).accessibility_label("Records"))
+    }
 }
 
 /// In cell selection mode each cell is a grid cell that reports whether it is
