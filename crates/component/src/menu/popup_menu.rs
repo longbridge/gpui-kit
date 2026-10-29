@@ -1296,7 +1296,8 @@ impl PopupMenu {
 
                 cx.notify();
             }))
-            .when_some(item.a11y_label(), |this, label| this.aria_label(label));
+            .when_some(item.a11y_label(), |this, label| this.aria_label(label))
+            .checked(item.is_checked());
 
         match item {
             PopupMenuItem::Separator => this
