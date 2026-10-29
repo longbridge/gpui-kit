@@ -5,7 +5,7 @@ use gpui_kit::component::{
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     text::{TextView, TextViewState},
 };
-use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
+use gpui_kit::test::{ClickOptions, TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
     InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, LongPressEvent, MouseButton, MouseDownEvent,
@@ -733,8 +733,8 @@ fn hovering_away_from_a_keyboard_entered_submenu_refocuses_its_parent(cx: &mut T
         window.render_frame(cx);
         window.press("down", cx);
         window.press("down", cx);
-        // There is no room on the right, so the submenu opens to the left.
-        window.press("left", cx);
+        // There is room on the right, so the submenu opens there.
+        window.press("right", cx);
         window.render_frame(cx);
         assert_eq!(
             window.within("submenu").find("popup-menu").focused(),
@@ -1049,4 +1049,111 @@ fn nested_context_menu_uses_the_innermost_right_click_target(cx: &mut TestAppCon
         assert_eq!(outer_chosen.get(), 1);
     })
     .unwrap();
+}
+
+/// A context menu over the whole window, with one submenu.
+struct WindowMenu;
+impl Render for WindowMenu {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("window-menu")
+            .test_support()
+            .size_full()
+            .context_menu(|menu, window, cx| {
+                menu.submenu("More", window, cx, |menu, _, _| {
+                    menu.menu("Save copy", Box::new(Save))
+                })
+            })
+    }
+}
+
+/// Opens [`WindowMenu`]'s menu at the window's `x` and its submenu, and
+/// gives back the submenu item's bounds and the submenu's.
+async fn open_submenu_at(
+    x: f32,
+    cx: &mut TestAppContext,
+) -> (gpui_kit::Bounds<Pixels>, gpui_kit::Bounds<Pixels>) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
+        cx.new(|_| WindowMenu)
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let options = ClickOptions::new()
+            .with_offset(point(px(x), px(40.)))
+            .with_button(MouseButton::Right);
+        window.click_with_options("window-menu", options, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    // The pointer rests on the first item, which opens its submenu; the
+    // parent is the menu that isn't inside another.
+    let parent_menu = |window: &mut Window| {
+        window
+            .find_all("popup-menu")
+            .into_iter()
+            .min_by_key(|menu| menu.path().len())
+            .expect("the menu")
+            .bounds()
+    };
+    let item = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let parent = parent_menu(window);
+            let item = window
+                .find_all(0usize)
+                .into_iter()
+                .map(|item| item.bounds())
+                .find(|bounds| parent.contains(&bounds.center()))
+                .expect("the submenu's item");
+            if window.try_find("submenu").is_none() {
+                window.dispatch_event(
+                    MouseMoveEvent {
+                        position: item.center(),
+                        pressed_button: None,
+                        modifiers: Default::default(),
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            }
+            item
+        })
+        .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("submenu").is_some()
+    })
+    .await;
+    let submenu = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.find("submenu").bounds()
+        })
+        .unwrap();
+    (item, submenu)
+}
+
+/// A submenu with room on the right opens there, though its menu is within
+/// the 500 px cap on a menu's width of the window's right edge.
+#[gpui_kit::test]
+async fn a_submenu_with_room_opens_on_the_right(cx: &mut TestAppContext) {
+    let (item, submenu) = open_submenu_at(400., cx).await;
+    assert!(
+        item.left() + px(500.) > px(800.) && item.right() + submenu.size.width < px(800.),
+        "the menu {item:?} is within 500 px of the right edge, with room after it"
+    );
+    assert!(
+        submenu.center().x > item.right(),
+        "the submenu {submenu:?} opens right of {item:?}"
+    );
+}
+
+/// A submenu without room on the right opens on the left.
+#[gpui_kit::test]
+async fn a_submenu_by_the_window_s_edge_opens_on_the_left(cx: &mut TestAppContext) {
+    let (item, submenu) = open_submenu_at(790., cx).await;
+    assert!(
+        submenu.center().x < item.left(),
+        "the submenu {submenu:?} opens left of {item:?}"
+    );
 }

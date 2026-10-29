@@ -1220,10 +1220,20 @@ impl PopupMenu {
     }
 
     /// Calculate the anchor corner and left offset for child submenu
-    fn update_submenu_menu_anchor(&mut self, window: &Window) {
+    fn update_submenu_menu_anchor(&mut self, window: &Window, cx: &App) {
         let bounds = self.bounds;
-        let max_width = self.max_width();
-        let (anchor, left) = if max_width + bounds.origin.x > window.bounds().size.width {
+        // Open the submenu on the left only when, placed at this menu's right
+        // edge, it would run past the window's. Its width is the one it was
+        // last drawn at, or this menu's own until it has been drawn.
+        let submenu_width = self
+            .selected_index
+            .and_then(|ix| match self.menu_items.get(ix) {
+                Some(PopupMenuItem::Submenu { menu, .. }) => Some(menu.read(cx).bounds.size.width),
+                _ => None,
+            })
+            .filter(|width| *width > Pixels::ZERO)
+            .unwrap_or(bounds.size.width);
+        let (anchor, left) = if bounds.right() + submenu_width > window.viewport_size().width {
             (Anchor::TopRight, -px(16.))
         } else {
             (Anchor::TopLeft, bounds.size.width - px(8.))
@@ -1480,7 +1490,7 @@ struct RenderOptions {
 
 impl Render for PopupMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.update_submenu_menu_anchor(window);
+        self.update_submenu_menu_anchor(window, cx);
 
         // Submenus attached via the public `item()` + `PopupMenuItem::submenu()`
         // path (from contexts that only have the menu value, e.g. a table
