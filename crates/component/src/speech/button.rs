@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::{
     App, ElementId, Entity, IntoElement, ParentElement as _, RenderOnce, StyleRefinement, Styled,
     Window, div, prelude::FluentBuilder as _, px,
@@ -15,8 +17,9 @@ use super::{SpeechIndicator, SpeechState, SpeechStatus};
 ///
 /// Shows a microphone at rest and, pressed, a [`SpeechIndicator`] while
 /// capturing: bars that move with the voice, turning into a stop glyph under
-/// the pointer. A click toggles the session. While the final result is pending
-/// it shows a spinner and ignores clicks.
+/// the pointer or while the button has keyboard focus. A click toggles the
+/// session. While the final result is pending it shows a spinner and ignores
+/// clicks.
 ///
 /// Renders nothing when the state has no recognizer on this platform, unless
 /// [`Self::show_when_unsupported`] is set, and renders disabled while the
@@ -75,7 +78,20 @@ impl Disableable for SpeechButton {
 }
 
 impl RenderOnce for SpeechButton {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Kept here rather than in the Button so that keyboard focus can show
+        // the stop glyph, which the indicator otherwise reveals only under
+        // the pointer.
+        let focus_handle = window
+            .use_keyed_state(
+                ElementId::NamedChild(Arc::new(self.id.clone()), "focus".into()),
+                cx,
+                |_, cx| cx.focus_handle(),
+            )
+            .read(cx)
+            .clone();
+        let keyboard_focused = focus_handle.is_focused(window) && window.last_input_was_keyboard();
+
         let state = self.state.read(cx);
         let status = state.status();
         let supported = state.has_recognizer();
@@ -99,8 +115,9 @@ impl RenderOnce for SpeechButton {
         Button::new(self.id)
             .ghost()
             .with_size(self.size)
+            .track_focus(&focus_handle)
             .map(|this| {
-                if capturing {
+                if capturing && !keyboard_focused {
                     // With a child instead of an icon the button sizes to its
                     // content, so give it the icon button's square and let the
                     // indicator fill it.
@@ -114,7 +131,7 @@ impl RenderOnce for SpeechButton {
                         .p_0()
                         .child(SpeechIndicator::new(&self.state).with_size(icon))
                 } else {
-                    this.icon(if stopping {
+                    this.icon(if capturing || stopping {
                         IconName::Square
                     } else {
                         IconName::Mic

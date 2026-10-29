@@ -159,7 +159,10 @@ let speech = cx.new(|cx| SpeechState::new(cx).stop_timeout(Duration::from_secs(5
 ### Button states
 
 `SpeechButton` is a ghost icon `Button` with a localized tooltip and accessible
-name: a microphone at rest, and a pressed stop glyph while capturing.
+name: a microphone at rest and, while capturing, a pressed button with bars
+that move with the voice. The bars turn into a stop glyph under the pointer and
+while the button has keyboard focus, so the action stays visible. In silence
+they shrink to dots, and with reduced motion they hold still.
 
 - When the state has no recognizer or no input on this platform
   (`has_recognizer()` is `false`), the button renders **nothing**, so an
@@ -176,6 +179,22 @@ SpeechButton::new(&speech)
     .small()
     .show_when_unsupported(true)
     .disabled(readonly)
+```
+
+For a stop button of your own, such as another variant or one with a label,
+make `SpeechIndicator` the button's only child and remove the button's padding.
+Size the indicator like the icon it replaces, give the button an accessible
+label that says it stops, and show the stop glyph in place of the indicator
+while the button has keyboard focus.
+
+```rust
+Button::new("stop-dictation")
+    .ghost()
+    .size(px(32.))
+    .p_0()
+    .selected(true)
+    .accessibility_label("Stop dictation")
+    .child(SpeechIndicator::new(&speech))
 ```
 
 ## Choose a recognizer

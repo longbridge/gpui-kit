@@ -52,8 +52,10 @@ const HEIGHT_RATIO: f32 = 0.46;
 /// [`SpeechButton`](super::SpeechButton) shows it while capturing. A caller
 /// with its own stop button makes it the button's only child and removes the
 /// button's padding, so the indicator fills it; the button stays responsible
-/// for its accessible label, which should say that it stops. Size it like the
-/// icon it replaces: the stop glyph takes that size.
+/// for its accessible label, which should say that it stops. Keyboard focus
+/// has no pointer to reveal the stop glyph, so while the button has it, show
+/// the glyph in place of the indicator, as `SpeechButton` does. Size it like
+/// the icon it replaces: the stop glyph takes that size.
 #[derive(IntoElement)]
 pub struct SpeechIndicator {
     state: Entity<SpeechState>,
