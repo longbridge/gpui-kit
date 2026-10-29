@@ -110,15 +110,25 @@ pub(super) fn create(
             brand.name()
         );
     }
-    let root = crate::resolve_app_root(directory, ENTRY)?;
-    if !root.join(MANIFEST_FILE).is_file() {
+    let directory = if directory.is_file() {
+        directory.parent().unwrap_or(directory)
+    } else {
+        directory
+    };
+    let manifest = directory
+        .join(MANIFEST_FILE)
+        .is_file()
+        .then(|| PluginManifest::read(directory))
+        .transpose()?;
+    let entry = manifest.as_ref().map_or(ENTRY, PluginManifest::entry);
+    let root = crate::resolve_app_root(directory, entry)?;
+    let Some(manifest) = manifest else {
         bail!(
             "{} has no {MANIFEST_FILE}. A bundle needs one: its `id` keeps the user's data \
              when the application is moved or updated, and its `name` and `version` name the bundle.",
             root.display()
         );
-    }
-    let manifest = PluginManifest::read(&root)?;
+    };
 
     let platform = options.platform.unwrap_or_else(Platform::host);
     if options.download_url.is_some() && platform != Platform::Linux {
@@ -1093,6 +1103,83 @@ mod tests {
             r#"{{ "id": "{id}", "name": "{name}", "version": "1.2.3-beta.1", "entry": "main.js" }}"#
         ))
         .expect("manifest")
+    }
+
+    fn bundle_entry(entry: &str) {
+        let directory = std::env::temp_dir().join(format!(
+            "gpui-shell-bundle-entry-{}-{}",
+            entry.replace('/', "-"),
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        let app = directory.join("app");
+        fs::create_dir_all(app.join(entry).parent().expect("entry parent")).expect("app");
+        fs::write(app.join(entry), "export {};").expect("entry");
+        let source = format!(
+            r#"{{ "id": "com.example.bundle", "name": "Bundle Test", "version": "1.0.0", "entry": "{entry}" }}"#
+        );
+        fs::write(app.join(MANIFEST_FILE), &source).expect("manifest");
+        let out = directory.join("out");
+        let options = BundleOptions {
+            platform: Some(Platform::MacOS),
+            out: Some(out.clone()),
+            ..Default::default()
+        };
+        create(&app, &options, HostBrand::gpui_shell()).expect("bundle");
+        let packaged = out.join("Bundle Test.app/Contents/Resources/app");
+        assert_eq!(
+            fs::read_to_string(packaged.join(entry)).unwrap(),
+            "export {};"
+        );
+        assert_eq!(
+            fs::read_to_string(packaged.join(MANIFEST_FILE)).unwrap(),
+            source
+        );
+
+        if entry == ENTRY {
+            create(&app.join(entry), &options, HostBrand::gpui_shell())
+                .expect("bundle from entry file");
+        }
+
+        // An existing main.js must not mask a missing declared entry.
+        fs::remove_file(app.join(entry)).expect("remove entry");
+        if entry != ENTRY {
+            fs::write(app.join(ENTRY), "export {};").expect("default entry");
+        }
+        let error = create(&app, &options, HostBrand::gpui_shell()).unwrap_err();
+        assert!(error.to_string().contains(&format!("no `{entry}`")));
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn bundles_the_manifest_entry_without_main_js() {
+        bundle_entry("src/main.js");
+    }
+
+    #[test]
+    fn bundles_the_default_main_js_entry() {
+        bundle_entry(ENTRY);
+    }
+
+    #[test]
+    fn bundle_requires_a_valid_manifest() {
+        let app =
+            std::env::temp_dir().join(format!("gpui-shell-bundle-manifest-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&app);
+        fs::create_dir_all(&app).expect("app");
+        fs::write(app.join(ENTRY), "export {};").expect("entry");
+        let options = BundleOptions {
+            platform: Some(Platform::MacOS),
+            out: Some(app.join("out")),
+            ..Default::default()
+        };
+        let error = create(&app, &options, HostBrand::gpui_shell()).unwrap_err();
+        assert!(error.to_string().contains("has no gpui-shell.json"));
+        fs::write(app.join(MANIFEST_FILE), "{}").expect("invalid manifest");
+        let error = create(&app, &options, HostBrand::gpui_shell()).unwrap_err();
+        assert!(error.to_string().contains("id"));
+        assert!(!app.join("out").exists());
+        let _ = fs::remove_dir_all(&app);
     }
 
     #[test]
