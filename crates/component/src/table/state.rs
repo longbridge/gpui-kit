@@ -1859,6 +1859,14 @@ where
             .h_full()
             .child(
                 self.render_cell(None, col_ix, window, cx)
+                    // A header given its own height may be shorter than a
+                    // row, with no room for a row's padding above and below
+                    // the name, so the name centres in it instead. A column's
+                    // own paddings still apply.
+                    .when(
+                        self.options.header_row_height.is_some() && paddings.is_none(),
+                        |this| this.py_0(),
+                    )
                     .id(("col-header", col_ix))
                     .role(gpui::Role::ColumnHeader)
                     .aria_label(name.clone())

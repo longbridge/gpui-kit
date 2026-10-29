@@ -230,6 +230,75 @@ fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppCo
     .unwrap();
 }
 
+/// `Rows`, with each header name drawn as `TableDelegate::render_th` draws it
+/// by default, in an element a test can measure.
+struct MeasuredHeaders;
+impl TableDelegate for MeasuredHeaders {
+    fn columns_count(&self, cx: &App) -> usize {
+        Rows.columns_count(cx)
+    }
+    fn rows_count(&self, cx: &App) -> usize {
+        Rows.rows_count(cx)
+    }
+    fn column(&self, ix: usize, cx: &App) -> Column {
+        Rows.column(ix, cx)
+    }
+    fn render_th(
+        &mut self,
+        col: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div()
+            .id(("header-name", col))
+            .test_support()
+            .size_full()
+            .child(self.column(col, cx).name)
+    }
+    fn render_td(
+        &mut self,
+        row: usize,
+        col: usize,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div().child(format!("{row}:{col}"))
+    }
+}
+struct ShortHeader {
+    table: Entity<TableState<MeasuredHeaders>>,
+}
+impl Render for ShortHeader {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(DataTable::new(&self.table).header_row_height(px(22.)))
+    }
+}
+
+/// A header given its own height has no room for a row's padding above and
+/// below its names, so a name has the header's whole height.
+#[gpui_kit::test]
+fn a_short_header_keeps_its_names_inside_it(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| ShortHeader {
+            table: cx.new(|cx| TableState::new(MeasuredHeaders, window, cx)),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let header = window.find(("col-header", 0usize)).bounds();
+        let name = window.find(("header-name", 0usize)).bounds();
+        assert_eq!(
+            (name.top(), name.bottom()),
+            (header.top(), header.bottom()),
+            "the name {name:?} doesn't fill its header {header:?}"
+        );
+    })
+    .unwrap();
+}
+
 /// In cell selection mode each cell is a grid cell that reports whether it is
 /// selected, which is how a screen reader learns the selection.
 #[gpui_kit::test]
