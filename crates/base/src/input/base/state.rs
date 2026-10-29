@@ -2801,12 +2801,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Check if mouse is within bounds
-        let within_bounds = self
-            .last_bounds
-            .as_ref()
-            .map(|bounds| bounds.contains(&event.position))
-            .unwrap_or(false);
+        // `last_bounds` is moved by the scroll offset; `input_bounds` is the visible area.
+        let within_bounds = self.input_bounds.contains(&event.position);
 
         if !within_bounds {
             // Clear hover when mouse leaves the input
@@ -6611,6 +6607,63 @@ mod tests {
             })
             .unwrap();
         assert_eq!(notifications.get(), 1, "an unchanged input must stay quiet");
+    }
+
+    /// Hover must reach the whole visible editor after scrolling, not only
+    /// the part that overlaps the unscrolled text bounds.
+    #[gpui::test]
+    fn test_hover_reaches_bottom_of_scrolled_editor(cx: &mut TestAppContext) {
+        use crate::input::{Diagnostic, Position};
+        struct Frame(Entity<crate::input::EditorState>);
+        impl Render for Frame {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                crate::input::InputBase::new("frame")
+                    .h(px(100.))
+                    .child(crate::input::Editor::new(&self.0))
+            }
+        }
+
+        cx.update(crate::init);
+        let text = (0..100).map(|i| format!("line {i}\n")).collect::<String>();
+        let mut input = None;
+        let window = cx.open_window(size(px(400.), px(100.)), |window, cx| {
+            let state = cx.new(|cx| crate::input::EditorState::new(window, cx).default_value(text));
+            input = Some(state.clone());
+            Frame(state)
+        });
+        let input = input.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        input.update(&mut cx, |state, _| {
+            state.diagnostics_mut().unwrap().push(Diagnostic::new(
+                Position::new(0, 0)..Position::new(100, 0),
+                "everywhere",
+            ));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.on_scroll_wheel(
+                    &ScrollEvent {
+                        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-400.))),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+            })
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let bounds = input.read_with(&cx, |state, _| state.input_bounds);
+        cx.simulate_mouse_move(
+            point(bounds.center().x, bounds.bottom() - px(5.)),
+            None,
+            gpui::Modifiers::default(),
+        );
+        assert!(
+            input.read_with(&cx, |state, _| state.diagnostic_popover().is_some()),
+            "no hover at the bottom of a scrolled editor, bounds {bounds:?}"
+        );
     }
 
     #[gpui::test]
