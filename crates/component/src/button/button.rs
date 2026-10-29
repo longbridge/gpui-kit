@@ -403,6 +403,14 @@ impl Button {
         self
     }
 
+    /// Set the size of the icon, in place of the one the button's size gives
+    /// it, such as a larger icon in a small toolbar button. The button keeps
+    /// its own size and padding.
+    pub fn icon_size(mut self, size: impl Into<Size>) -> Self {
+        self.icon_size = Some(size.into());
+        self
+    }
+
     /// Set the tooltip of the button.
     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
         self.tooltip = Some((tooltip.into(), None));

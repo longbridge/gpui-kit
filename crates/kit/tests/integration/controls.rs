@@ -1,6 +1,7 @@
 use crate::common;
 use gpui_kit::component::{
-    Disableable, IndexPath,
+    Disableable, IconName, IndexPath, Sizable, Size,
+    button::Button,
     checkbox::Checkbox,
     radio::{Radio, RadioGroup},
     select::{SearchableVec, Select, SelectEvent, SelectState},
@@ -603,6 +604,41 @@ fn value_settings_are_named_after_their_titles(cx: &mut TestAppContext) {
             window.find_by_label("User name").role(),
             Some(Role::TextInput)
         );
+    })
+    .unwrap();
+}
+
+struct IconSizes;
+impl Render for IconSizes {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let button = |id: &'static str, icon_size: f32| {
+            Button::new(id)
+                .small()
+                .icon(IconName::Search)
+                .icon_size(Size::Size(px(icon_size)))
+                .label("Find")
+        };
+        div()
+            .flex()
+            .gap_4()
+            .child(button("small-icon", 14.))
+            .child(button("large-icon", 24.))
+    }
+}
+
+/// A button's icon takes the size it's given, and the button grows by the
+/// difference, keeping its own padding and gap.
+#[gpui_kit::test]
+fn a_button_s_icon_takes_the_size_it_is_given(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(200.))), |_, cx| {
+        cx.new(|_| IconSizes)
+    });
+    cx.update_window(handle.into(), |_, window, _| {
+        let small = window.find("small-icon").bounds();
+        let large = window.find("large-icon").bounds();
+        assert_eq!(large.size.width - small.size.width, px(10.));
+        assert_eq!(large.size.height, small.size.height);
     })
     .unwrap();
 }
