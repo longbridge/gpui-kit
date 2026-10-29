@@ -151,6 +151,80 @@ async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut
 }
 
 #[gpui_kit::test]
+async fn notifications_stay_interactive_above_dialogs(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        cx.set_reduce_motion(true);
+    });
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
+        cx.new(|cx| Workspace {
+            saved: cx.new(|cx| InputState::new(window, cx)),
+            draft: cx.new(|cx| InputState::new(window, cx)),
+        })
+    });
+    for count in 1..=2 {
+        let closed = std::rc::Rc::new(std::cell::Cell::new(false));
+        cx.update_window(handle.into(), |_, window, cx| {
+            let input = cx.new(|cx| InputState::new(window, cx));
+            window.open_dialog(cx, move |dialog, _, _| {
+                dialog
+                    .title("Edit profile")
+                    .child(Input::new(&input).id("draft"))
+            });
+        })
+        .unwrap();
+        cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+            window.find_all("dialog").len() == count
+        })
+        .await;
+        let focus = cx
+            .update_window(handle.into(), |_, window, cx| {
+                let focus = window.focused(cx).expect("dialog focus");
+                let closed = closed.clone();
+                window.push_notification(
+                    Notification::new()
+                        .message("Profile updated")
+                        .autohide(false)
+                        .on_close(move |_, _| closed.set(true)),
+                    cx,
+                );
+                focus
+            })
+            .unwrap();
+        cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+            window.try_find("notification").is_some()
+        })
+        .await;
+        // Toast entrance uses wall-clock Animation, independently of the test clock.
+        std::thread::sleep(Duration::from_millis(410));
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(focus.is_focused(window), "notification took dialog focus");
+            assert!(window.find("notification").visible());
+            assert_eq!(window.find_all("dialog").len(), count);
+            window.hover("notification", cx);
+            assert!(window.within("notification").find("close").visible());
+            // This must reach the actual dismiss button through the modal backdrop.
+            window.within("notification").click("close", cx);
+        })
+        .unwrap();
+        cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+            window.try_find("notification").is_none()
+        })
+        .await;
+        assert!(closed.get(), "notification dismiss callback did not run");
+        cx.update_window(handle.into(), |_, window, _| {
+            assert!(
+                focus.is_focused(window),
+                "dismissing notification changed focus"
+            );
+            assert_eq!(window.find_all("dialog").len(), count);
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
 async fn find_all_counts_stacked_notifications(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
