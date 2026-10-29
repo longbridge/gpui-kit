@@ -725,12 +725,22 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
                 retained += usize::from(keep);
                 keep
             });
-            // Anchor transforms are monotone. Preserve start ordering and remap
-            // removed entries rather than sorting on every keystroke: O(n).
+            // Remap removed entries and restore start ordering when empty and
+            // non-empty ranges at the same offset move with different affinity.
             entry.index.indices.retain_mut(|ix| {
                 *ix = remap[*ix];
                 *ix != usize::MAX
             });
+            if !entry
+                .index
+                .indices
+                .is_sorted_by_key(|&ix| (entry.decorations[ix].range().start, ix))
+            {
+                entry
+                    .index
+                    .indices
+                    .sort_unstable_by_key(|&ix| (entry.decorations[ix].range().start, ix));
+            }
             entry.index.max_ends.resize(retained, 0);
             entry.index.build(&entry.decorations, 0..retained);
         }
@@ -1091,6 +1101,23 @@ mod tests {
         assert_eq!(ranges(4..13), vec![4..4, 8..13]);
         assert_eq!(ranges(13..21), vec![13..13, 20..20]);
         assert_eq!(ranges(5..8), Vec::<Range<usize>>::new());
+    }
+
+    #[test]
+    fn gutter_query_keeps_index_order_after_inserting_at_mixed_ranges() {
+        let mut collections = DecorationCollections::<GutterDecoration>::default();
+        collections.create(vec![
+            GutterDecoration::new(4..8),
+            GutterDecoration::new(4..8),
+            GutterDecoration::new(4..4),
+        ]);
+        collections.adjust_for_edit(&(4..4), 1);
+        let ranges: Vec<_> = collections
+            .intersecting(&[4..5])
+            .into_iter()
+            .map(|decoration| decoration.range().clone())
+            .collect();
+        assert_eq!(ranges, vec![4..4]);
     }
 
     #[test]
