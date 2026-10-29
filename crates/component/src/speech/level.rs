@@ -152,6 +152,11 @@ impl LevelMeter {
     pub(super) fn levels(&self) -> impl ExactSizeIterator<Item = f32> + '_ {
         self.levels.iter().copied()
     }
+
+    /// Levels recorded since the reset, including those dropped from history.
+    pub(super) fn recorded(&self) -> u64 {
+        self.recorded
+    }
 }
 
 /// `later - earlier` in seconds, negative when `later` is earlier.

@@ -123,7 +123,7 @@ impl RenderOnce for SpeechWaveform {
 }
 
 /// A capsule filling `rect`: round caps on its short ends, a dot when square.
-fn capsule(rect: Bounds<Pixels>) -> Option<Path<Pixels>> {
+pub(super) fn capsule(rect: Bounds<Pixels>) -> Option<Path<Pixels>> {
     let radius = rect.size.width.min(rect.size.height) / 2.;
     let radii = point(radius, radius);
     let (left, right) = (rect.left(), rect.right());

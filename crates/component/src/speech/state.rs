@@ -172,6 +172,13 @@ impl SpeechState {
         self.meter.levels()
     }
 
+    /// Levels recorded this session, including those dropped from
+    /// [`Self::levels`]: with [`Self::level_lead_at`], a clock that advances
+    /// with the audio.
+    pub(super) fn levels_recorded(&self) -> u64 {
+        self.meter.recorded()
+    }
+
     /// How far past the waveform's trailing edge the newest level sits at
     /// `now`, in levels; see `LevelMeter::lead_at`.
     pub(super) fn level_lead_at(&self, now: instant::Instant) -> Option<f32> {

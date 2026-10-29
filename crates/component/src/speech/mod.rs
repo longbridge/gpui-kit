@@ -1,7 +1,7 @@
 //! Speech input: capture audio, recognize it and hand the text to the caller.
 //!
-//! [`SpeechState`] owns a session and [`SpeechButton`] and [`SpeechWaveform`]
-//! render it. Recognition and audio capture are both replaceable:
+//! [`SpeechState`] owns a session and [`SpeechButton`], [`SpeechIndicator`] and
+//! [`SpeechWaveform`] render it. Recognition and audio capture are both replaceable:
 //! implement [`SpeechRecognizer`] to use any speech service and [`AudioInput`]
 //! to feed audio from anywhere.
 //!
@@ -11,6 +11,7 @@
 //! only with an application recognizer.
 
 mod button;
+mod indicator;
 mod level;
 mod recognizer;
 mod state;
@@ -24,6 +25,7 @@ mod system;
 use std::rc::Rc;
 
 pub use button::SpeechButton;
+pub use indicator::SpeechIndicator;
 #[cfg(all(feature = "speech", not(target_family = "wasm")))]
 pub use microphone::Microphone;
 pub use recognizer::{
