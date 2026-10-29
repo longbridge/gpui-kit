@@ -104,6 +104,40 @@ async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestA
     .await;
 }
 
+struct Placement;
+impl Render for Placement {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(
+                Button::new("placement")
+                    .label("Placement")
+                    .dropdown_menu(|menu, _, _| {
+                        menu.menu_with_check("Left", true, Box::new(Save))
+                            .menu_with_check("Right", false, Box::new(Save))
+                    }),
+            )
+    }
+}
+
+/// The check a menu draws beside an item is its state for assistive
+/// technology too, so a screen reader can say which option is chosen.
+#[gpui_kit::test]
+fn a_checked_menu_item_reports_its_check(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |_, cx| {
+        cx.new(|_| Placement)
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("placement", cx);
+        let menu = window.within("popup-menu");
+        assert_eq!(menu.find(0usize).checked(), Some(true));
+        assert_eq!(menu.find(1usize).checked(), None);
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn activating_a_submenu_enters_it_without_dismissing_its_parent(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
