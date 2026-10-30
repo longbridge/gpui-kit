@@ -2629,6 +2629,10 @@ impl WindowSelectionState {
         let Some(anchor) = self.anchor.as_ref().and_then(SelectionEndpoint::entity_id) else {
             return false;
         };
+        // Reject external selections at participation so painting and copying both exclude them.
+        if registration.registration.prevent_selection_from_outside && id != anchor {
+            return false;
+        }
         let Some(cursor) = self.cursor.as_ref().and_then(SelectionEndpoint::entity_id) else {
             return false;
         };
@@ -4221,6 +4225,29 @@ mod tests {
 
             selection_state.end(cx);
             assert!(!selection_state.is_selecting());
+        });
+    }
+
+    #[gpui::test]
+    fn prevent_selection_from_outside_excludes_participant_from_full_selection(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let mut selection_state = WindowSelectionState::default();
+            let first = FakeParticipant::new("first", cx);
+            let second = FakeParticipant::new("second", cx);
+            first.register(&mut selection_state, 0., TextSelectionScopeId::default(), 0, cx);
+            second.register(&mut selection_state, 20., TextSelectionScopeId::default(), 1, cx);
+            let first_registration = selection_state.participants.get_mut()
+                .get_mut(&first.selection.entity_id()).unwrap();
+            Rc::get_mut(&mut first_registration.registration).unwrap()
+                .prevent_selection_from_outside = true;
+
+            // A range covering every participant must still exclude the opted-out one.
+            selection_state.begin(point(px(99.), px(29.)), false, cx);
+            selection_state.update(point(px(0.), px(0.)), cx);
+            selection_state.end(cx);
+            assert!(first.selection.snapshot(cx).is_none());
+            assert!(second.selection.snapshot(cx).is_some());
+            assert_eq!(selection_state.selected_text(cx), "second");
         });
     }
 
