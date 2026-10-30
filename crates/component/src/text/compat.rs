@@ -185,6 +185,15 @@ impl TextView {
         self.inner = self.inner.on_link_click(f);
         self
     }
+    /// Decides which links are drawn as links. A link the filter rejects is
+    /// drawn like the text around it and is not clickable.
+    pub fn link_filter<F>(mut self, filter: F) -> Self
+    where
+        F: Fn(&SharedString) -> bool + Send + Sync + 'static,
+    {
+        self.inner = self.inner.link_filter(filter);
+        self
+    }
     /// Scrolls a container that ignores scroll requests to the line of
     /// `TextViewState::reveal_range`, with the line's window bounds.
     pub fn on_reveal<F>(mut self, f: F) -> Self
