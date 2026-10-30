@@ -304,6 +304,29 @@ Dialog:
     zh-HK: 取消
     zh-TW: 取消
     it: Annulla
+  close:
+    en: Close
+    pt-BR: "Fechar"
+    zh-CN: 关闭
+    zh-HK: 關閉
+    zh-TW: 關閉
+    it: Chiudi
+Sheet:
+  close:
+    en: Close
+    pt-BR: "Fechar"
+    zh-CN: 关闭
+    zh-HK: 關閉
+    zh-TW: 關閉
+    it: Chiudi
+Notification:
+  close:
+    en: Close
+    pt-BR: "Fechar"
+    zh-CN: 关闭
+    zh-HK: 關閉
+    zh-TW: 關閉
+    it: Chiudi
 Command:
   placeholder:
     en: Type a command or search...
