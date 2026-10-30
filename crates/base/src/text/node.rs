@@ -2728,7 +2728,7 @@ impl PartialEq for NodeContext {
 fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHighlight {
     let mut highlight = HighlightStyle::default();
     if mark.bold {
-        highlight.font_weight = Some(FontWeight::BOLD);
+        highlight.font_weight = Some(node_cx.style.strong_weight());
     }
     if mark.italic {
         highlight.font_style = Some(FontStyle::Italic);
@@ -4616,6 +4616,37 @@ mod tests {
         }
         assert_eq!(paragraph.selected_text(), "文 x² Eng");
         assert_eq!(paragraph.selected_source(), "文 **$x^2$** Eng");
+    }
+
+    #[test]
+    fn strong_text_takes_the_styles_weight() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let bold = TextMark::default().bold();
+            let default_cx = NodeContext::default();
+            assert_eq!(
+                mark_highlight(&bold, &default_cx, cx).style.font_weight,
+                Some(FontWeight::BOLD)
+            );
+            let semibold_cx = NodeContext {
+                style: Arc::new(TextViewStyle::default().with_strong_weight(FontWeight::SEMIBOLD)),
+                ..Default::default()
+            };
+            assert_eq!(
+                mark_highlight(&bold, &semibold_cx, cx).style.font_weight,
+                Some(FontWeight::SEMIBOLD)
+            );
+            assert_eq!(
+                mark_highlight(&TextMark::default(), &semibold_cx, cx)
+                    .style
+                    .font_weight,
+                None,
+                "only strong text takes the weight"
+            );
+        });
     }
 
     #[test]
