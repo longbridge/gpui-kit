@@ -149,6 +149,8 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[non_exhaustive]
 pub struct Theme {
+    #[serde(skip)]
+    pub(crate) editor_gutter_style: crate::input::GutterStyle,
     pub colors: ThemeColor,
     /// Component-specific resolved tokens retained for legacy compatibility.
     ///
@@ -241,6 +243,16 @@ impl DerefMut for Theme {
 impl Global for Theme {}
 
 impl Theme {
+    /// Sets defaults for styled editors. Use `Theme::update` to refresh windows.
+    pub fn set_editor_gutter_style(&mut self, style: crate::input::GutterStyle) {
+        self.editor_gutter_style = style;
+    }
+
+    /// Returns the optional line-number defaults, before per-editor overrides.
+    pub fn get_editor_gutter_style(&self) -> &crate::input::GutterStyle {
+        &self.editor_gutter_style
+    }
+
     /// Returns the global theme reference
     #[inline(always)]
     pub fn global(cx: &App) -> &Theme {
@@ -771,6 +783,7 @@ mod semantic_token_tests {
 impl From<&ThemeColor> for Theme {
     fn from(colors: &ThemeColor) -> Self {
         Theme {
+            editor_gutter_style: crate::input::GutterStyle::default(),
             mode: ThemeMode::default(),
             transparent: Hsla::transparent_black(),
             font_family: ".SystemUIFont".into(),

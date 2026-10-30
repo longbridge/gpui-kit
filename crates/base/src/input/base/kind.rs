@@ -78,6 +78,11 @@ impl MultiLineMode for EditorMode {}
 /// during an edit. Adding a field an editor renders belongs here and leaves
 /// the engine's callbacks alone.
 pub trait InputExtras: Default + 'static {
+    /// Line-number presentation exists only on the code-editor mode.
+    fn get_gutter_style(&self) -> Option<&crate::input::GutterStyle> {
+        None
+    }
+
     /// Decoration ranges to paint, innermost collection first.
     fn decoration_layers(&self) -> Vec<&[TextDecoration]> {
         Vec::new()
@@ -374,6 +379,7 @@ impl InputModeKind for TextareaMode {
 
 /// What a code editor adds on top of multi-line text: language features.
 pub struct EditorExtras {
+    pub(crate) gutter_style: crate::input::GutterStyle,
     pub(crate) lsp: Lsp,
     pub(crate) decorations: DecorationCollections,
     pub(crate) range_decorations: DecorationCollections<RangeDecoration>,
@@ -390,6 +396,7 @@ pub struct EditorExtras {
 impl Default for EditorExtras {
     fn default() -> Self {
         Self {
+            gutter_style: crate::input::GutterStyle::default(),
             lsp: Lsp::default(),
             decorations: DecorationCollections::default(),
             range_decorations: DecorationCollections::default(),
