@@ -158,6 +158,7 @@ pub struct TextView {
     text_view_style: Option<TextViewStyle>,
     inline_code_style: Option<StyleRefinement>,
     list_style: Option<StyleRefinement>,
+    strong_weight: Option<gpui::FontWeight>,
     blockquote_style: Option<StyleRefinement>,
     style: StyleRefinement,
     selectable: bool,
@@ -208,6 +209,7 @@ impl TextView {
             text_view_style: None,
             inline_code_style: None,
             list_style: None,
+            strong_weight: None,
             blockquote_style: None,
             style: StyleRefinement::default(),
             selectable: true,
@@ -234,6 +236,7 @@ impl TextView {
             text_view_style: None,
             inline_code_style: None,
             list_style: None,
+            strong_weight: None,
             blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
@@ -261,6 +264,7 @@ impl TextView {
             text_view_style: None,
             inline_code_style: None,
             list_style: None,
+            strong_weight: None,
             blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
@@ -313,6 +317,13 @@ impl TextView {
     /// Unspecified properties are inherited.
     pub fn blockquote_style(mut self, style: StyleRefinement) -> Self {
         self.blockquote_style = Some(style);
+        self
+    }
+
+    /// Sets the weight of strong text (`**bold**`) over the resolved style.
+    /// See [`TextViewStyle::with_strong_weight`].
+    pub fn strong_weight(mut self, weight: gpui::FontWeight) -> Self {
+        self.strong_weight = Some(weight);
         self
     }
 
@@ -716,8 +727,14 @@ impl Element for TextView {
             text_view_style = &inline_style;
         }
         let block_style;
-        if self.list_style.is_some() || self.blockquote_style.is_some() {
+        if self.list_style.is_some()
+            || self.blockquote_style.is_some()
+            || self.strong_weight.is_some()
+        {
             let mut style = text_view_style.clone();
+            if let Some(weight) = self.strong_weight {
+                style = style.with_strong_weight(weight);
+            }
             if let Some(refinement) = &self.list_style {
                 let mut marker = style.list_style().clone();
                 marker.refine(refinement);
@@ -1734,6 +1751,28 @@ mod tests {
             let quote = style.blockquote_style();
             assert_eq!(quote.border_color, Some(gpui::blue()));
             assert_eq!(quote.border_widths.left, Some(px(4.).into()));
+        });
+    }
+
+    #[gpui::test]
+    fn a_view_strong_weight_overrides_the_resolved_style(cx: &mut TestAppContext) {
+        struct Semibold(Entity<TextViewState>);
+        impl Render for Semibold {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                TextView::new(&self.0)
+                    .strong_weight(gpui::FontWeight::SEMIBOLD)
+                    .into_any_element()
+            }
+        }
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| {
+            Semibold(cx.new(|cx| TextViewState::markdown("**bold**", cx)))
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        root.read_with(cx, |root, cx| {
+            let style = &root.0.read(cx).text_view_style;
+            assert_eq!(style.strong_weight(), gpui::FontWeight::SEMIBOLD);
         });
     }
 

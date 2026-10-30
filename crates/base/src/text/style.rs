@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gpui::{HighlightStyle, Hsla, Rems, StyleRefinement, rems};
+use gpui::{FontWeight, HighlightStyle, Hsla, Rems, StyleRefinement, rems};
 
 use crate::ColorTokens;
 
@@ -19,6 +19,7 @@ pub struct TextViewStyle {
     code_background: Hsla,
     border: Hsla,
     paragraph_gap: Rems,
+    strong_weight: FontWeight,
     heading: Arc<dyn Fn(u8) -> StyleRefinement + Send + Sync + 'static>,
     code_block: StyleRefinement,
     table: StyleRefinement,
@@ -41,6 +42,7 @@ pub struct TextViewStyle {
 impl PartialEq for TextViewStyle {
     fn eq(&self, other: &Self) -> bool {
         self.paragraph_gap == other.paragraph_gap
+            && self.strong_weight == other.strong_weight
             && self.foreground == other.foreground
             && self.muted_foreground == other.muted_foreground
             && self.link == other.link
@@ -91,6 +93,7 @@ impl TextViewStyle {
             code_background: colors.accent,
             border: colors.border,
             paragraph_gap: rems(0.75),
+            strong_weight: FontWeight::BOLD,
             heading: Arc::new(|_| StyleRefinement::default()),
             code_block: StyleRefinement::default(),
             table: StyleRefinement::default(),
@@ -123,6 +126,16 @@ impl TextViewStyle {
     /// Sets the link text color.
     pub fn with_link(mut self, color: Hsla) -> Self {
         self.link = color;
+        self
+    }
+
+    /// Sets the weight of strong text (`**bold**`), [`FontWeight::BOLD`] by
+    /// default.
+    ///
+    /// Some interfaces draw strong text lighter, such as semibold, so that
+    /// emphasis reads without darkening a long line.
+    pub fn with_strong_weight(mut self, weight: FontWeight) -> Self {
+        self.strong_weight = weight;
         self
     }
 
@@ -273,6 +286,11 @@ impl TextViewStyle {
     /// The link text color.
     pub fn link(&self) -> Hsla {
         self.link
+    }
+
+    /// The weight of strong text.
+    pub fn strong_weight(&self) -> FontWeight {
+        self.strong_weight
     }
 
     /// The background painted behind selected text.
