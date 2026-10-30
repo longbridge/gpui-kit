@@ -222,6 +222,7 @@ pub struct TextSelectionRegistration {
     document_order: u64,
     paint_order: bool,
     text_bounds: Vec<Bounds<Pixels>>,
+    prevent_selection_from_outside: bool,
     self_scroll: bool,
     selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
     rendered: Option<WeakEntity<RenderedMarker>>,
@@ -238,6 +239,7 @@ impl TextSelectionRegistration {
             document_order: 0,
             paint_order: false,
             text_bounds: Vec::new(),
+            prevent_selection_from_outside: false,
             self_scroll: false,
             selection_edges: None,
             rendered: None,
@@ -316,6 +318,12 @@ impl TextSelectionRegistration {
     /// Sets the glyph-bearing bounds used to reject blank-only gestures.
     pub fn with_text_bounds(mut self, text_bounds: Vec<Bounds<Pixels>>) -> Self {
         self.text_bounds = text_bounds;
+        self
+    }
+
+    /// Defaults to false so external gesture starts remain available unless explicitly disabled.
+    pub fn prevent_selection_from_outside(mut self, prevent: bool) -> Self {
+        self.prevent_selection_from_outside = prevent;
         self
     }
 
@@ -2411,6 +2419,15 @@ impl WindowSelectionState {
             self.clear(cx);
         }
         let endpoint = self.endpoint(position, window.as_deref(), cx);
+        // Keep external starts available by default to preserve window-wide selection.
+        if !endpoint.inside && endpoint.entity_id().is_some_and(|id| {
+            self.participants.borrow().get(&id).is_some_and(|participant| {
+                participant.registration.prevent_selection_from_outside
+            })
+        }) {
+            self.pending_extension_anchor = None;
+            return;
+        }
         let focus_participant = endpoint
             .inside
             .then(|| endpoint.participant.clone())

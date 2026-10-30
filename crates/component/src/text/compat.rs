@@ -108,6 +108,11 @@ impl TextView {
         self.inner = self.inner.selectable(value);
         self
     }
+    /// Prevents selection gestures from starting outside this view, default is false.
+    pub fn prevent_selection_from_outside(mut self, prevent: bool) -> Self {
+        self.inner = self.inner.prevent_selection_from_outside(prevent);
+        self
+    }
     /// Refines inline code typography, background, border, radius, and padding
     /// over the resolved theme or explicit style. Other layout properties are
     /// ignored. Unspecified properties are inherited.
