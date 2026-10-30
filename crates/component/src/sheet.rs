@@ -7,6 +7,7 @@ use gpui::{
     RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{ElementExt as _, Sheet as BaseSheet, TextSelectionScopeId, actions::Cancel};
+use rust_i18n::t;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -210,6 +211,7 @@ impl RenderOnce for Sheet {
                             .small()
                             .ghost()
                             .icon(IconName::Close)
+                            .accessibility_label(t!("Sheet.close"))
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(Cancel), cx);
                             }),

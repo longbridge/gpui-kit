@@ -857,6 +857,7 @@ impl RenderOnce for Dialog {
                                                         .small()
                                                         .ghost()
                                                         .icon(IconName::Close)
+                                                        .accessibility_label(t!("Dialog.close"))
                                                 })
                                         }))
                                         .when(closing, |surface| {

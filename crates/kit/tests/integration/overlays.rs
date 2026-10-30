@@ -177,6 +177,66 @@ async fn find_all_counts_stacked_notifications(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+async fn icon_only_close_buttons_are_named(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
+        let view = cx.new(|cx| Workspace {
+            saved: cx.new(|cx| InputState::new(window, cx)),
+            draft: cx.new(|cx| InputState::new(window, cx)),
+        });
+        view
+    });
+    fn named_close(window: &mut Window, overlay: &'static str) {
+        let close = window.within(overlay).find("close");
+        assert_eq!(close.role(), Some(gpui_kit::Role::Button), "{overlay}");
+        assert_eq!(close.label(), Some("Close"), "{overlay}");
+    }
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("edit", cx);
+    })
+    .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("dialog").is_some()
+    })
+    .await;
+    cx.update_window(handle.into(), |_, window, cx| {
+        named_close(window, "dialog");
+        window.press("escape", cx);
+    })
+    .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("dialog").is_none()
+    })
+    .await;
+    cx.update_window(handle.into(), |_, window, cx| window.click("inspect", cx))
+        .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("sheet-content").is_some()
+    })
+    .await;
+    cx.update_window(handle.into(), |_, window, cx| {
+        named_close(window, "sheet");
+        window.press("escape", cx);
+    })
+    .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("sheet").is_none()
+    })
+    .await;
+    cx.update_window(handle.into(), |_, window, cx| window.click("notify", cx))
+        .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("notification").is_some()
+    })
+    .await;
+    cx.update_window(handle.into(), |_, window, _| {
+        named_close(window, "notification")
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 async fn escape_dismisses_dialog_and_sheet_and_restores_focus(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
