@@ -161,6 +161,7 @@ pub struct TextView {
     blockquote_style: Option<StyleRefinement>,
     style: StyleRefinement,
     selectable: bool,
+    prevent_selection_from_outside: bool,
     selection_format: SelectionFormat,
     scrollable: bool,
     max_lines: Option<usize>,
@@ -211,6 +212,7 @@ impl TextView {
             blockquote_style: None,
             style: StyleRefinement::default(),
             selectable: true,
+            prevent_selection_from_outside: false,
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
@@ -238,6 +240,7 @@ impl TextView {
             style: StyleRefinement::default(),
             state: None,
             selectable: true,
+            prevent_selection_from_outside: false,
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
@@ -265,6 +268,7 @@ impl TextView {
             style: StyleRefinement::default(),
             state: None,
             selectable: true,
+            prevent_selection_from_outside: false,
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
@@ -325,6 +329,12 @@ impl TextView {
     /// Set whether the text view is selectable, default is true.
     pub fn selectable(mut self, selectable: bool) -> Self {
         self.selectable = selectable;
+        self
+    }
+
+    /// Prevents selection gestures from starting outside this view, default is false.
+    pub fn prevent_selection_from_outside(mut self, prevent: bool) -> Self {
+        self.prevent_selection_from_outside = prevent;
         self
     }
 
@@ -964,6 +974,7 @@ impl Element for TextView {
                 content_bounds,
                 scroll_offset,
                 self_scroll,
+                self.prevent_selection_from_outside,
                 window,
                 cx,
             );

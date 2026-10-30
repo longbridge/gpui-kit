@@ -222,6 +222,7 @@ pub struct TextSelectionRegistration {
     document_order: u64,
     paint_order: bool,
     text_bounds: Vec<Bounds<Pixels>>,
+    prevent_selection_from_outside: bool,
     self_scroll: bool,
     selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
     rendered: Option<WeakEntity<RenderedMarker>>,
@@ -238,6 +239,7 @@ impl TextSelectionRegistration {
             document_order: 0,
             paint_order: false,
             text_bounds: Vec::new(),
+            prevent_selection_from_outside: false,
             self_scroll: false,
             selection_edges: None,
             rendered: None,
@@ -316,6 +318,12 @@ impl TextSelectionRegistration {
     /// Sets the glyph-bearing bounds used to reject blank-only gestures.
     pub fn with_text_bounds(mut self, text_bounds: Vec<Bounds<Pixels>>) -> Self {
         self.text_bounds = text_bounds;
+        self
+    }
+
+    /// Defaults to false so external gesture starts remain available unless explicitly disabled.
+    pub fn prevent_selection_from_outside(mut self, prevent: bool) -> Self {
+        self.prevent_selection_from_outside = prevent;
         self
     }
 
@@ -2411,6 +2419,15 @@ impl WindowSelectionState {
             self.clear(cx);
         }
         let endpoint = self.endpoint(position, window.as_deref(), cx);
+        // Keep external starts available by default to preserve window-wide selection.
+        if !endpoint.inside && endpoint.entity_id().is_some_and(|id| {
+            self.participants.borrow().get(&id).is_some_and(|participant| {
+                participant.registration.prevent_selection_from_outside
+            })
+        }) {
+            self.pending_extension_anchor = None;
+            return;
+        }
         let focus_participant = endpoint
             .inside
             .then(|| endpoint.participant.clone())
@@ -2612,6 +2629,10 @@ impl WindowSelectionState {
         let Some(anchor) = self.anchor.as_ref().and_then(SelectionEndpoint::entity_id) else {
             return false;
         };
+        // Reject external selections at participation so painting and copying both exclude them.
+        if registration.registration.prevent_selection_from_outside && id != anchor {
+            return false;
+        }
         let Some(cursor) = self.cursor.as_ref().and_then(SelectionEndpoint::entity_id) else {
             return false;
         };
@@ -4204,6 +4225,29 @@ mod tests {
 
             selection_state.end(cx);
             assert!(!selection_state.is_selecting());
+        });
+    }
+
+    #[gpui::test]
+    fn prevent_selection_from_outside_excludes_participant_from_full_selection(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let mut selection_state = WindowSelectionState::default();
+            let first = FakeParticipant::new("first", cx);
+            let second = FakeParticipant::new("second", cx);
+            first.register(&mut selection_state, 0., TextSelectionScopeId::default(), 0, cx);
+            second.register(&mut selection_state, 20., TextSelectionScopeId::default(), 1, cx);
+            let first_registration = selection_state.participants.get_mut()
+                .get_mut(&first.selection.entity_id()).unwrap();
+            Rc::get_mut(&mut first_registration.registration).unwrap()
+                .prevent_selection_from_outside = true;
+
+            // A range covering every participant must still exclude the opted-out one.
+            selection_state.begin(point(px(99.), px(29.)), false, cx);
+            selection_state.update(point(px(0.), px(0.)), cx);
+            selection_state.end(cx);
+            assert!(first.selection.snapshot(cx).is_none());
+            assert!(second.selection.snapshot(cx).is_some());
+            assert_eq!(selection_state.selected_text(cx), "second");
         });
     }
 

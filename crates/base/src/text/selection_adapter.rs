@@ -347,6 +347,7 @@ impl TextViewSelectionAdapter {
         bounds: Bounds<Pixels>,
         scroll_offset: Point<Pixels>,
         self_scroll: bool,
+        prevent_selection_from_outside: bool,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -356,6 +357,7 @@ impl TextViewSelectionAdapter {
             .with_scroll_offset(scroll_offset)
             .in_paint_order()
             .with_text_bounds(frame.text_bounds.clone())
+            .prevent_selection_from_outside(prevent_selection_from_outside)
             .with_self_scroll(self_scroll)
             .with_rendered_element(&self.selection, window, cx);
         let registration = match frame.selection_edges {
