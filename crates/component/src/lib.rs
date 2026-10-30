@@ -27,6 +27,7 @@ pub(crate) mod actions {
 }
 
 pub mod accordion;
+pub mod ai;
 pub mod alert;
 pub mod attachment;
 pub mod avatar;

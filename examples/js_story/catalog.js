@@ -31,6 +31,7 @@ const byRustStory = [
 const RUST_STORY_ORDER = [
   "WelcomeStory",
   "AccordionStory",
+  "AiElementsStory",
   "AlertStory",
   "AlertDialogStory",
   "AttachmentStory",

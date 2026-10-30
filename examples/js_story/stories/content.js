@@ -2,6 +2,16 @@ import { pendingStory } from "./story.js";
 
 export const stories = [
   pendingStory({
+    id: "ai-elements",
+    title: "AI Elements",
+    group: "Content",
+    rustStory: "AiElementsStory",
+    description: "Reasoning, tool calls, plans, sources and the prompt composer.",
+    states: ["streaming", "running", "completed", "failed"],
+    availability: "infrastructure",
+    api: "Reasoning",
+  }),
+  pendingStory({
     id: "attachment",
     title: "Attachment",
     group: "Content",

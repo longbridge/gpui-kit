@@ -30,6 +30,12 @@
     },
     {
       "source": "ui",
+      "name": "ai",
+      "classification": "infrastructure",
+      "explanation": "AI elements are controlled compositions over Message, Collapsible and Button whose open states and streaming text come from a Rust model; they are not registered with the frozen catalog yet."
+    },
+    {
+      "source": "ui",
       "name": "alert",
       "classification": "component",
       "registration": {
@@ -1214,6 +1220,12 @@
           }
         ]
       }
+    },
+    {
+      "source": "story",
+      "name": "ai_elements",
+      "classification": "infrastructure",
+      "explanation": "The AI Elements story renders the Rust `ai` module, which is not registered with the catalog yet."
     },
     {
       "source": "story",
