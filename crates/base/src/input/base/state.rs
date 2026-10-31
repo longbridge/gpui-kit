@@ -40,7 +40,7 @@ use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::{
-    InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    InputEdit, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
@@ -128,6 +128,10 @@ actions!(
     ]
 );
 
+/// An event emitted by an input.
+///
+/// While [`InputEvent::Change`] is delivered, the edits that produced it are
+/// available from [`InputBaseState::last_input_edits`].
 #[derive(Clone)]
 pub enum InputEvent {
     Change,
@@ -476,6 +480,10 @@ pub struct InputBaseState<M: InputModeKind> {
     /// containers to reveal it in, while focused. `None` while unfocused.
     pub(super) revealed_viewport: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<CursorSelection>,
+    /// The edits that produced the most recent [`InputEvent::Change`].
+    ///
+    /// See [`Self::last_input_edits`].
+    pub(super) last_input_edits: Vec<(InputEdit, Rope)>,
     pub(super) selecting: bool,
     /// Anchor point of an in-progress columnar (block) selection.
     pub(super) column_select_start: Option<ColumnarPoint>,
@@ -996,6 +1004,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_bounds: None,
             revealed_viewport: None,
             last_selected_range: None,
+            last_input_edits: Vec::new(),
             column_select_start: None,
             last_cursor: None,
             scroll_handle: ScrollHandle::new(),
@@ -1625,6 +1634,19 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// nothing. See [`Self::value`] when an owned string is wanted.
     pub fn text(&self) -> &Rope {
         &self.text
+    }
+
+    /// The edits that produced the most recent [`InputEvent::Change`].
+    ///
+    /// Entries are in application order. The [`Rope`] in each entry is the
+    /// document text immediately after that edit. For the first entry, the text
+    /// before the edit is the state before the change; for later entries it is
+    /// the text after the previous entry.
+    ///
+    /// The slice is empty when the most recent text replacement emitted no
+    /// [`InputEvent::Change`] (for example `set_value`).
+    pub fn last_input_edits(&self) -> &[(InputEdit, Rope)] {
+        &self.last_input_edits
     }
 
     /// Return the (0-based) [`Position`] of the cursor.
@@ -3358,6 +3380,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let emit_events = self.emit_events;
         if token_aware {
             self.emit_events = false;
+            self.last_input_edits.clear();
         }
         self.replaying_history = token_aware;
         self.undo_manager.set_ignoring(true);
@@ -3382,8 +3405,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.undo_manager.set_ignoring(false);
         self.replaying_history = false;
         self.emit_events = emit_events;
-        if token_aware && emit_events {
-            cx.emit(InputEvent::Change);
+        if token_aware {
+            if emit_events {
+                cx.emit(InputEvent::Change);
+            } else {
+                self.last_input_edits.clear();
+            }
         }
         cx.notify();
     }
@@ -4262,6 +4289,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Several edits reach the highlighter as one batch, so it reparses
         // once for the change instead of once per edit.
         let mut highlighter_edits = Vec::new();
+        // Token-aware history replay applies several replacements but emits one
+        // `Change` at the end, so its edits accumulate instead of being
+        // discarded with each silent replacement.
+        let accumulate_replay_edits = self.replaying_history && !self.emit_events;
+        if !accumulate_replay_edits {
+            self.last_input_edits.clear();
+        }
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
             self.mode.adjust_auto_closed_pair(range, new_text.len());
@@ -4283,10 +4317,13 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.display_map
                 .on_text_changed(&self.text, range, &Rope::from(*new_text), cx);
 
+            let edit = super::mode::replacement_input_edit(&old_text, &self.text, range, new_text);
+            if self.emit_events || self.replaying_history {
+                self.last_input_edits.push((edit, self.text.clone()));
+            }
+
             if group {
                 if self.is_code_editor() {
-                    let edit =
-                        super::mode::replacement_input_edit(&old_text, &self.text, range, new_text);
                     highlighter_edits.push((edit, self.text.clone()));
                 }
             } else {
@@ -4297,6 +4334,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                         new_text: &self.text,
                         change_text: new_text,
                         force: true,
+                        input_edit: Some(edit),
                     },
                     window,
                     cx,
@@ -4640,6 +4678,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         // Single-line path
         let old_text = self.text.clone();
+        // Token-aware history replay applies several replacements but emits one
+        // `Change` at the end, so its edits accumulate instead of being
+        // discarded with each silent replacement.
+        let accumulate_replay_edits = self.replaying_history && !self.emit_events;
+        if !accumulate_replay_edits {
+            self.last_input_edits.clear();
+        }
         self.mode.adjust_auto_closed_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
@@ -4713,6 +4758,11 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         self.display_map
             .on_text_changed(&self.text, &range, &Rope::from(new_text), cx);
 
+        let edit = super::mode::replacement_input_edit(&old_text, &self.text, &range, new_text);
+        if self.emit_events || self.replaying_history {
+            self.last_input_edits.push((edit, self.text.clone()));
+        }
+
         self.mode.update_highlighter::<M>(
             super::mode::HighlighterUpdate {
                 selected_range: &range,
@@ -4720,6 +4770,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 new_text: &self.text,
                 change_text: &new_text,
                 force: true,
+                input_edit: Some(edit),
             },
             window,
             cx,
@@ -4802,6 +4853,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         let auto_closed_pairs_before = self.mode.auto_closed_pairs().clone();
         let old_text = self.text.clone();
+        // Marked text does not emit `InputEvent::Change`, so no edit belongs to
+        // the most recent change after it.
+        self.last_input_edits.clear();
         self.mode.adjust_auto_closed_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
@@ -4838,6 +4892,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 new_text: &self.text,
                 change_text: &new_text,
                 force: true,
+                input_edit: None,
             },
             window,
             cx,
@@ -4999,6 +5054,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                     new_text: &self.text,
                     change_text: "",
                     force: false,
+                    input_edit: None,
                 },
                 window,
                 cx,
@@ -8742,6 +8798,188 @@ mod tests {
             *updates.borrow(),
             vec![vec!["aaa bbb Y".to_string(), "X bbb Y".to_string()]]
         );
+    }
+
+    /// One keypress records a single edit with the text right after it.
+    #[gpui::test]
+    fn test_last_input_edits_single_insert(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("hello world"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(5..5, " big".to_string())], window, cx);
+
+                let edits = state.last_input_edits();
+                assert_eq!(edits.len(), 1);
+                let (edit, text_after) = &edits[0];
+                assert_eq!(edit.start_byte, 5);
+                assert_eq!(edit.old_end_byte, 5);
+                assert_eq!(edit.new_end_byte, 9);
+                assert_eq!(edit.start_position, crate::input::Point::new(0, 5));
+                assert_eq!(edit.old_end_position, crate::input::Point::new(0, 5));
+                assert_eq!(edit.new_end_position, crate::input::Point::new(0, 9));
+                assert_eq!(text_after.to_string(), "hello big world");
+            });
+        });
+    }
+
+    /// Deletion and a multi-line paste each describe their whole replacement.
+    #[gpui::test]
+    fn test_last_input_edits_delete_and_paste(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("hello world"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(5..11, String::new())], window, cx);
+                assert_eq!(state.value(), "hello");
+
+                let edits = state.last_input_edits();
+                assert_eq!(edits.len(), 1);
+                let (edit, text_after) = &edits[0];
+                assert_eq!(edit.start_byte, 5);
+                assert_eq!(edit.old_end_byte, 11);
+                assert_eq!(edit.new_end_byte, 5);
+                assert_eq!(text_after.to_string(), "hello");
+
+                state.replace_text_in_ranges(&[(5..5, "\nnext".to_string())], window, cx);
+                assert_eq!(state.value(), "hello\nnext");
+
+                let edits = state.last_input_edits();
+                assert_eq!(edits.len(), 1);
+                let (edit, text_after) = &edits[0];
+                assert_eq!(edit.start_byte, 5);
+                assert_eq!(edit.old_end_byte, 5);
+                assert_eq!(edit.new_end_byte, 10);
+                assert_eq!(edit.start_position, crate::input::Point::new(0, 5));
+                assert_eq!(edit.old_end_position, crate::input::Point::new(0, 5));
+                assert_eq!(edit.new_end_position, crate::input::Point::new(1, 4));
+                assert_eq!(text_after.to_string(), "hello\nnext");
+            });
+        });
+    }
+
+    /// A grouped change records every applied edit in application order.
+    #[gpui::test]
+    fn test_last_input_edits_grouped_change(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("aaa bbb ccc"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(
+                    &[(0..3, "X".to_string()), (8..11, "Y".to_string())],
+                    window,
+                    cx,
+                );
+                assert_eq!(state.value(), "X bbb Y");
+
+                let edits = state.last_input_edits();
+                assert_eq!(edits.len(), 2);
+                // The higher offset is applied first, before the lower one.
+                assert_eq!(edits[0].0.start_byte, 8);
+                assert_eq!(edits[0].0.old_end_byte, 11);
+                assert_eq!(edits[0].0.new_end_byte, 9);
+                assert_eq!(edits[0].0.start_position, crate::input::Point::new(0, 8));
+                assert_eq!(edits[0].0.old_end_position, crate::input::Point::new(0, 11));
+                assert_eq!(edits[0].0.new_end_position, crate::input::Point::new(0, 9));
+                assert_eq!(edits[0].1.to_string(), "aaa bbb Y");
+
+                assert_eq!(edits[1].0.start_byte, 0);
+                assert_eq!(edits[1].0.old_end_byte, 3);
+                assert_eq!(edits[1].0.new_end_byte, 1);
+                assert_eq!(edits[1].0.start_position, crate::input::Point::new(0, 0));
+                assert_eq!(edits[1].0.old_end_position, crate::input::Point::new(0, 3));
+                assert_eq!(edits[1].0.new_end_position, crate::input::Point::new(0, 1));
+                assert_eq!(edits[1].1.to_string(), "X bbb Y");
+            });
+        });
+    }
+
+    /// Edits are recorded even when no highlighter can be installed.
+    #[gpui::test]
+    fn test_last_input_edits_without_a_highlighter(cx: &mut TestAppContext) {
+        let input_view = InputView::new(cx);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("fn main() {}", window, cx);
+                let no_highlighter: InputHighlighterFactory = Rc::new(|_: &str| None);
+                state.set_highlighter_factory(no_highlighter, cx);
+                assert!(state.last_input_edits().is_empty());
+
+                state.replace_text_in_ranges(&[(12..12, "\n".to_string())], window, cx);
+                assert_eq!(state.value(), "fn main() {}\n");
+
+                let edits = state.last_input_edits();
+                assert_eq!(edits.len(), 1);
+                let (edit, text_after) = &edits[0];
+                assert_eq!(edit.start_byte, 12);
+                assert_eq!(edit.old_end_byte, 12);
+                assert_eq!(edit.new_end_byte, 13);
+                assert_eq!(edit.start_position, crate::input::Point::new(0, 12));
+                assert_eq!(edit.old_end_position, crate::input::Point::new(0, 12));
+                assert_eq!(edit.new_end_position, crate::input::Point::new(1, 0));
+                assert_eq!(text_after.to_string(), "fn main() {}\n");
+            });
+        });
+    }
+
+    /// `set_value` is silent and leaves no edits behind for the next change.
+    #[gpui::test]
+    fn test_last_input_edits_cleared_by_set_value(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("hello"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(5..5, "!".to_string())], window, cx);
+                assert_eq!(state.last_input_edits().len(), 1);
+
+                state.set_value("replaced", window, cx);
+                assert!(state.last_input_edits().is_empty());
+
+                state.replace_text_in_ranges(&[(8..8, "?".to_string())], window, cx);
+                let edits = state.last_input_edits();
+                assert_eq!(edits.len(), 1);
+                assert_eq!(edits[0].1.to_string(), "replaced?");
+            });
+        });
+    }
+
+    /// The edits are already populated when the change reaches subscribers.
+    #[gpui::test]
+    fn test_last_input_edits_ready_during_change(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("hello"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        let observed = Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
+        let seen = observed.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.subscribe(&input, move |state, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let edits = state.read(cx).last_input_edits();
+                    seen.borrow_mut()
+                        .push(edits.iter().map(|(_, text)| text.to_string()).collect());
+                }
+            })
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(5..5, " world".to_string())], window, cx);
+            });
+        });
+
+        assert_eq!(*observed.borrow(), vec![vec!["hello world".to_string()]]);
     }
 
     /// An IME composition (marking then commit) undoes as a single unit.
