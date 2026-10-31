@@ -1,0 +1,15 @@
+[package]
+name = "example-wrap-bench"
+description = "Times loading a large document into a soft-wrapped editor, up to its first painted frame."
+version = "0.8.1"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]

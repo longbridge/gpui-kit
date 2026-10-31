@@ -29,7 +29,7 @@ use super::{
     cursor::{CursorSelection, Selections},
     element::{
         EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, OverviewRulerRows, TextElement,
-        clamp_horizontal_scroll_offset,
+        clamp_horizontal_scroll_offset, line_number_digits_width, line_number_len,
     },
     kind::InputModeKind,
     mask_pattern::normalize_number_input,
@@ -1329,7 +1329,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let text: SharedString = text.into();
         self.with_edits_allowed(|this| {
             this.undo_manager.set_pending_intent(EditIntent::Atomic);
-            let range = 0..this.text.chars().map(|c| c.len_utf16()).sum();
+            let range = 0..this.text.len_utf16();
             this.replace_text_in_range_silent(Some(range), &text, window, cx);
             this.reset_highlighter(cx);
         });
@@ -4280,6 +4280,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             // Incremental, single-range updates must run per edit.
             self.display_map
                 .adjust_folds_for_edit(&old_text, range, new_text);
+            if *range == (0..old_text.len()) {
+                self.adopt_gutter_wrap_width(&old_text, window);
+            }
             self.display_map
                 .on_text_changed(&self.text, range, &Rope::from(*new_text), cx);
 
@@ -4396,6 +4399,26 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Update fold candidates from tree-sitter syntax tree (full extraction).
     /// Used only on initial load or language changes.
+    /// Replacing the whole text can change how many digits the line-number gutter shows, and so
+    /// the wrap width the next layout picks. Adopting that width before the new text is wrapped
+    /// saves wrapping all of it again at that layout.
+    fn adopt_gutter_wrap_width(&mut self, old_text: &Rope, window: &mut Window) {
+        let Some(wrap_width) = self.display_map.wrap_width() else {
+            return;
+        };
+        let old_digits = line_number_len(old_text.lines_len());
+        let new_digits = line_number_len(self.text.lines_len());
+        if !self.mode.line_number() || old_digits == new_digits {
+            return;
+        }
+        let (font, font_size) = self.display_map.font();
+        let font = font.clone();
+        let old_width = line_number_digits_width(old_digits, font.clone(), font_size, window);
+        let new_width = line_number_digits_width(new_digits, font, font_size, window);
+        self.display_map
+            .prepare_wrap_width(wrap_width - (new_width - old_width));
+    }
+
     fn update_fold_candidates(&mut self) {
         if !self.mode.is_folding() {
             return;
@@ -6611,6 +6634,55 @@ mod tests {
             })
             .unwrap();
         assert_eq!(notifications.get(), 1, "an unchanged input must stay quiet");
+    }
+
+    /// Replacing the text with one whose line numbers need another digit narrows the wrap width
+    /// by that digit up front, so the next layout does not wrap the new text a second time.
+    #[gpui::test]
+    fn replacing_the_text_wraps_at_the_width_its_line_numbers_leave(cx: &mut TestAppContext) {
+        struct Panel(Entity<crate::input::EditorState>);
+        impl Render for Panel {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().child(self.0.clone())
+            }
+        }
+        cx.update(crate::init);
+        let mut input = None;
+        let window = cx.open_window(size(px(400.), px(300.)), |window, cx| {
+            let state = cx.new(|cx| {
+                crate::input::EditorState::new(window, cx)
+                    .line_number(true)
+                    .soft_wrap(true)
+            });
+            input = Some(state.clone());
+            Panel(state)
+        });
+        cx.run_until_parked();
+        let input = input.unwrap();
+        let wrap_width = |cx: &mut TestAppContext| {
+            input.read_with(cx, |state, _| state.display_map.wrap_width())
+        };
+        let three_digits = wrap_width(cx).expect("a soft wrapped editor has a wrap width");
+
+        let predicted = window
+            .update(cx, |_, window, cx| {
+                input.update(cx, |state, cx| {
+                    state.set_value("line\n".repeat(1_000), window, cx);
+                    state.display_map.wrap_width()
+                })
+            })
+            .unwrap()
+            .unwrap();
+        assert!(
+            predicted < three_digits,
+            "a fourth digit must narrow the text"
+        );
+        cx.run_until_parked();
+        assert_eq!(
+            wrap_width(cx),
+            Some(predicted),
+            "the layout must keep the width the text was wrapped at"
+        );
     }
 
     #[gpui::test]

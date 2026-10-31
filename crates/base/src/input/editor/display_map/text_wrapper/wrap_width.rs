@@ -71,6 +71,14 @@ pub(super) struct MeasuredWrap {
 }
 
 impl MeasuredWrap {
+    /// A line kept on one row, whose fit holds over `valid_widths`.
+    pub(super) fn unbroken(valid_widths: WidthRange) -> Self {
+        Self {
+            boundaries: Vec::new(),
+            valid_widths,
+        }
+    }
+
     /// Preserve a result for which no measured reuse interval is available.
     pub(super) fn uncached(boundaries: Vec<Boundary>) -> Self {
         Self {
