@@ -359,3 +359,71 @@ mod tests {
         });
     }
 }
+
+#[cfg(all(test, feature = "test-support"))]
+mod interaction_tests {
+    use super::*;
+    use gpui::{Context, Render, TestAppContext, VisualTestContext};
+    use gpui_base::test_support::{ElementSnapshot, find};
+
+    struct Probe {
+        state: Entity<InputState>,
+        hide_stepper: bool,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(NumberInput::new(&self.state).hide_stepper(self.hide_stepper))
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn button(cx: &mut VisualTestContext, id: &'static str) -> ElementSnapshot {
+        cx.update(|window, _| {
+            find(window, &[], &id.into()).unwrap_or_else(|| panic!("missing stepper button {id}"))
+        })
+    }
+
+    #[gpui::test]
+    fn hide_stepper_changes_button_visibility(cx: &mut TestAppContext) {
+        use gpui::AppContext as _;
+
+        cx.update(crate::init);
+        let (probe, mut cx) = cx.add_window_view(|window, cx| Probe {
+            state: cx.new(|cx| InputState::new(window, cx).default_value("3")),
+            hide_stepper: false,
+        });
+        let state = probe.read_with(cx, |probe, _| probe.state.clone());
+        draw(&mut cx);
+
+        for id in ["decrement", "increment"] {
+            assert!(button(&mut cx, id).visible(), "{id} should be visible");
+        }
+
+        probe.update(cx, |probe, cx| {
+            probe.hide_stepper = true;
+            cx.notify();
+        });
+        draw(&mut cx);
+
+        for id in ["decrement", "increment"] {
+            assert!(!button(&mut cx, id).visible(), "{id} should be hidden");
+        }
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.simulate_keystrokes("up");
+        draw(&mut cx);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value().to_string()),
+            "4"
+        );
+    }
+}
