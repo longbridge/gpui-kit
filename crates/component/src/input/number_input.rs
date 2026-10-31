@@ -28,6 +28,7 @@ pub struct NumberInput {
     focus_ring_enabled: bool,
     disabled: bool,
     accessibility_label: Option<SharedString>,
+    hide_stepper: Option<bool>,
     style: StyleRefinement,
 }
 
@@ -44,6 +45,7 @@ impl NumberInput {
             focus_ring_enabled: true,
             disabled: false,
             accessibility_label: None,
+            hide_stepper: None,
             style: StyleRefinement::default(),
         }
     }
@@ -79,6 +81,15 @@ impl NumberInput {
     /// label. This does not change what is displayed.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
+        self
+    }
+
+    /// Set whether the increment and decrement buttons are hidden.
+    ///
+    /// The buttons are shown by default. Up and Down keys continue to step
+    /// the value when the buttons are hidden.
+    pub fn hide_stepper(mut self, hide_stepper: bool) -> Self {
+        self.hide_stepper = Some(hide_stepper);
         self
     }
 }
@@ -141,6 +152,7 @@ impl RenderOnce for NumberInput {
         } else {
             cx.theme().radius
         };
+        let hide_stepper = self.hide_stepper.unwrap_or(false);
         let base_state = self.state.clone();
         let content = BaseNumberInput::new(&base_state)
             .disabled(self.disabled)
@@ -168,6 +180,7 @@ impl RenderOnce for NumberInput {
                     .rounded_tl(button_radius)
                     .rounded_bl(button_radius)
                     .child(Icon::new(IconName::Minus).with_size(button_size))
+                    .when(hide_stepper, |this| this.hidden())
             })
             .input(
                 Input::new(&self.state)
@@ -198,6 +211,7 @@ impl RenderOnce for NumberInput {
                     .rounded_tr(button_radius)
                     .rounded_br(button_radius)
                     .child(Icon::new(IconName::Plus).with_size(button_size))
+                    .when(hide_stepper, |this| this.hidden())
             });
 
         // The visual frame wraps the complete spinbutton. BaseNumberInput routes
@@ -227,7 +241,7 @@ impl RenderOnce for NumberInput {
 
 #[cfg(test)]
 mod tests {
-    use super::StepAction;
+    use super::{InputState, NumberInput, StepAction};
     use gpui_base::step_value;
 
     // `test_number_step` lives in `state::tests` because `NumberStep::value`
@@ -321,5 +335,27 @@ mod tests {
             step_value("1000", StepAction::Increment, 1., None, Some(100.)),
             None
         );
+    }
+
+    #[gpui::test]
+    fn test_number_input_hide_stepper(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+
+        cx.update(crate::init);
+        cx.add_window(|window, cx| {
+            let state = cx.new(|cx| InputState::new(window, cx));
+
+            assert_eq!(NumberInput::new(&state).hide_stepper, None);
+            assert_eq!(
+                NumberInput::new(&state).hide_stepper(true).hide_stepper,
+                Some(true)
+            );
+            assert_eq!(
+                NumberInput::new(&state).hide_stepper(false).hide_stepper,
+                Some(false)
+            );
+
+            gpui::Empty
+        });
     }
 }
