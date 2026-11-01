@@ -1745,20 +1745,17 @@ where
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(
-                    move |view, e: &MouseDownEvent, window, cx| match e.click_count {
-                        1 => {
-                            view.fitted_col = None;
-                            view.resize_origin =
-                                view.col_groups.get(ix).map(|col_group| ResizeOrigin {
-                                    x: e.position.x,
-                                    width: col_group.width,
-                                });
-                        }
-                        2 if view.fit_col(ix, window, cx) => view.fitted_col = Some(ix),
-                        _ => {}
-                    },
-                ),
+                cx.listener(move |view, e: &MouseDownEvent, window, cx| {
+                    view.resize_origin = view.col_groups.get(ix).map(|col_group| ResizeOrigin {
+                        x: e.position.x,
+                        width: col_group.width,
+                    });
+                    if e.click_count == 1 {
+                        view.fitted_col = None;
+                    } else if e.click_count == 2 && view.fit_col(ix, window, cx) {
+                        view.fitted_col = Some(ix);
+                    }
+                }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,

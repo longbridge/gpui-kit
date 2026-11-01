@@ -358,6 +358,78 @@ fn resizing_a_column_in_a_scrolled_table_follows_the_pointer(cx: &mut TestAppCon
     .unwrap();
 }
 
+/// A second press can begin a resize when the delegate cannot fit the column.
+#[gpui_kit::test]
+fn dragging_after_an_unavailable_column_fit_resizes(cx: &mut TestAppContext) {
+    use gpui_kit::InputEvent as _;
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| WideRecords {
+                table: cx.new(|cx| TableState::new(WideRows, window, cx)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let table = content.read(cx).table.clone();
+        let header = window.find(("col-header", 0usize)).bounds();
+        let start = point(header.right() - px(1.), header.center().y);
+        let mouse_move = |position, pressed_button| gpui_kit::MouseMoveEvent {
+            position,
+            pressed_button,
+            modifiers: Default::default(),
+        };
+        window.dispatch_event(mouse_move(start, None).to_platform_input(), cx);
+        window.render_frame(cx);
+        for click_count in 1..=2 {
+            window.dispatch_event(
+                gpui_kit::MouseDownEvent {
+                    button: gpui_kit::MouseButton::Left,
+                    position: start,
+                    modifiers: Default::default(),
+                    click_count,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            if click_count == 1 {
+                window.dispatch_event(
+                    gpui_kit::MouseUpEvent {
+                        button: gpui_kit::MouseButton::Left,
+                        position: start,
+                        modifiers: Default::default(),
+                        click_count,
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            }
+        }
+        let end = start + point(px(40.), px(0.));
+        for step in 1..=4 {
+            let position = start + point(px(10. * step as f32), px(0.));
+            window.dispatch_event(
+                mouse_move(position, Some(gpui_kit::MouseButton::Left)).to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+        window.dispatch_event(
+            gpui_kit::MouseUpEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: end,
+                modifiers: Default::default(),
+                click_count: 2,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        assert_eq!(table.read(cx).col_width(0), Some(px(340.)));
+    })
+    .unwrap();
+}
+
 /// In cell selection mode each cell is a grid cell that reports whether it is
 /// selected, which is how a screen reader learns the selection.
 #[gpui_kit::test]
