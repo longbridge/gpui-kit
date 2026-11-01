@@ -56,6 +56,8 @@ pub(crate) struct ActiveSheet {
 pub(crate) struct ActiveDialog {
     /// Stable for the dialog's lifetime, independently of its stack position.
     id: usize,
+    /// Visual depth at opening, retained through exit independently of list position.
+    stack_ix: usize,
     focus_handle: FocusHandle,
     /// The previous focused handle before opening the Dialog.
     previous_focused_handle: Option<WeakFocusHandle>,
@@ -73,6 +75,7 @@ pub(crate) struct ActiveDialog {
 impl ActiveDialog {
     pub(crate) fn new(
         id: usize,
+        stack_ix: usize,
         focus_handle: FocusHandle,
         previous_focused_handle: Option<WeakFocusHandle>,
         selection_scope: TextSelectionScopeId,
@@ -80,6 +83,7 @@ impl ActiveDialog {
     ) -> Self {
         Self {
             id,
+            stack_ix,
             focus_handle,
             previous_focused_handle,
             selection_scope,
@@ -257,6 +261,7 @@ impl WindowState {
             dialog.selection_scope = active_dialog.selection_scope;
 
             dialog.layer_ix = index;
+            dialog.stack_ix = active_dialog.stack_ix;
             dialog.id = active_dialog.id;
 
             // Refreshed every frame so closing decides in one step whether an
@@ -394,8 +399,14 @@ impl WindowState {
         let id = self.next_dialog_id;
         self.next_dialog_id += 1;
         let selection_scope = self.allocate_text_selection_scope();
+        let stack_ix = self
+            .active_dialogs
+            .iter()
+            .filter(|dialog| !dialog.closing)
+            .count();
         self.active_dialogs.push(ActiveDialog::new(
             id,
+            stack_ix,
             focus_handle,
             previous_focused_handle,
             selection_scope,

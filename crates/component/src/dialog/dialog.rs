@@ -327,6 +327,7 @@ pub struct Dialog {
     /// This will be change when open the dialog, the focus handle is create when open the dialog.
     pub(crate) focus_handle: FocusHandle,
     pub(crate) layer_ix: usize,
+    pub(crate) stack_ix: usize,
     pub(crate) selection_scope: TextSelectionScopeId,
     pub(crate) motion: Option<DialogMotion>,
     pub(crate) id: usize,
@@ -374,6 +375,7 @@ impl Dialog {
             props: DialogProps::default(),
             children: Vec::new(),
             layer_ix: 0,
+            stack_ix: 0,
             selection_scope: TextSelectionScopeId::default(),
             button_props: DialogButtonProps::default(),
             motion: None,
@@ -665,7 +667,7 @@ impl RenderOnce for Dialog {
         // viewport by default); an overflowing one is snapped up to this edge
         // margin so that the preferred offset does not waste usable height.
         let margin = cx.theme().spacing_tokens().lg;
-        let layer_offset = px(layer_ix as f32 * 16.);
+        let layer_offset = px(self.stack_ix as f32 * 16.);
         let (anchor, y) = if self.props.centered {
             (Anchor::LeftCenter, view_size.height / 2.)
         } else {
@@ -1004,7 +1006,7 @@ pub(crate) mod tests {
     }
 
     fn surface(cx: &mut VisualTestContext, layer_ix: usize) -> Bounds<Pixels> {
-        let selector = ["dialog-0", "dialog-1"][layer_ix];
+        let selector = ["dialog-0", "dialog-1", "dialog-2"][layer_ix];
         cx.debug_bounds(selector)
             .unwrap_or_else(|| panic!("dialog layer {layer_ix} was not painted"))
     }
@@ -1246,7 +1248,7 @@ pub(crate) mod tests {
         cx.background_executor
             .advance_clock(*ANIMATION_DURATION + Duration::from_millis(1));
         frame(cx);
-        // The old dialog is gone and the new one moves up to its layer.
+        // The old dialog is gone and the new one keeps its position.
         frame(cx);
         cx.update(|window, cx| {
             let state = WindowState::read(window, cx);
@@ -1257,6 +1259,99 @@ pub(crate) mod tests {
         });
         assert_eq!(surface(cx, 0).top(), px(80.));
         assert!(cx.debug_bounds("dialog-1").is_none());
+    }
+
+    /// Replacing a dialog in one update must not count its retained exit as
+    /// an open layer, including when another dialog remains underneath.
+    #[gpui::test]
+    fn replacing_a_dialog_keeps_its_position_during_the_previous_exit(cx: &mut TestAppContext) {
+        for lower_dialogs in 0..=1 {
+            let cx = window(cx, size(px(1000.), px(800.)));
+            cx.update(|_, cx| cx.set_reduce_motion(false));
+            if lower_dialogs == 1 {
+                open(cx, |dialog, _, _| {
+                    dialog.title("Underlying").entrance(DialogEntrance::None)
+                });
+            }
+            open(cx, |dialog, _, _| {
+                dialog.title("Previous").entrance(DialogEntrance::Fade)
+            });
+            cx.background_executor.advance_clock(*ANIMATION_DURATION);
+            frame(cx);
+            let expected_top = surface(cx, lower_dialogs).top();
+            assert_eq!(expected_top, px(80. + lower_dialogs as f32 * 16.));
+
+            cx.update(|window, cx| {
+                window.close_dialog(cx);
+                window.open_dialog(cx, |dialog, _, _| {
+                    dialog.title("Replacement").entrance(DialogEntrance::Fade)
+                });
+            });
+            frame(cx);
+            cx.update(|window, cx| {
+                let state = WindowState::read(window, cx);
+                assert_eq!(state.active_dialogs.len(), lower_dialogs + 2);
+                assert!(state.active_dialogs[lower_dialogs].closing);
+                assert!(
+                    state.active_dialogs[lower_dialogs + 1]
+                        .focus_handle()
+                        .is_focused(window)
+                );
+            });
+            assert_eq!(surface(cx, lower_dialogs + 1).top(), expected_top);
+
+            cx.background_executor
+                .advance_clock(*ANIMATION_DURATION + Duration::from_millis(1));
+            frame(cx);
+            frame(cx);
+            assert_eq!(surface(cx, lower_dialogs).top(), expected_top);
+            cx.update(|window, cx| {
+                assert_eq!(
+                    WindowState::read(window, cx).active_dialogs.len(),
+                    lower_dialogs + 1
+                );
+            });
+            cx.simulate_keystrokes("escape");
+            cx.update(|window, cx| {
+                let state = WindowState::read(window, cx);
+                assert!(state.active_dialogs[lower_dialogs].closing);
+                assert_eq!(
+                    state
+                        .active_dialogs
+                        .iter()
+                        .filter(|dialog| !dialog.closing)
+                        .count(),
+                    lower_dialogs
+                );
+            });
+
+            // A new replacement must also own Escape while an older surface
+            // is retained. Its visual depth differs from its backing index.
+            open(cx, |dialog, _, _| {
+                dialog
+                    .title("Next replacement")
+                    .entrance(DialogEntrance::Fade)
+            });
+            assert_eq!(surface(cx, lower_dialogs + 1).top(), expected_top);
+            cx.background_executor
+                .advance_clock(Duration::from_millis(30));
+            frame(cx);
+            cx.simulate_keystrokes("escape");
+            cx.update(|window, cx| {
+                let state = WindowState::read(window, cx);
+                assert!(state.active_dialogs[lower_dialogs + 1].closing);
+                assert_eq!(
+                    state
+                        .active_dialogs
+                        .iter()
+                        .filter(|dialog| !dialog.closing)
+                        .count(),
+                    lower_dialogs
+                );
+            });
+            frame(cx);
+            assert_eq!(surface(cx, lower_dialogs + 1).top(), expected_top);
+        }
     }
 
     /// Closing the top of a stack only removes that dialog: the one below stays
