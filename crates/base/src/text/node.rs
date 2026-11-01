@@ -1590,6 +1590,7 @@ impl std::fmt::Debug for ParagraphRenderCache {
 struct ParagraphRender {
     style: Arc<TextViewStyle>,
     mono_font: SharedString,
+    background: Hsla,
     text: SharedString,
     highlights: Vec<(Range<usize>, InlineHighlight)>,
     /// Links as written, before reference resolution.
@@ -1627,10 +1628,12 @@ impl Paragraph {
         Vec<(Range<usize>, LinkMark)>,
     ) {
         let mono_font = cx.theme().tokens.typography.mono.clone();
+        let background = cx.theme().tokens.colors.background;
         if let Ok(cache) = self.render_cache.0.lock()
             && let Some(cached) = cache.as_ref()
             && (Arc::ptr_eq(&cached.style, &node_cx.style) || *cached.style == *node_cx.style)
             && cached.mono_font == mono_font
+            && cached.background == background
         {
             return (
                 cached.text.clone(),
@@ -1665,6 +1668,7 @@ impl Paragraph {
             *cache = Some(Arc::new(ParagraphRender {
                 style: node_cx.style.clone(),
                 mono_font,
+                background,
                 text: text.clone(),
                 highlights: highlights.clone(),
                 links: links.clone(),
@@ -2723,6 +2727,27 @@ impl PartialEq for NodeContext {
     }
 }
 
+/// The text color with more contrast against a highlight composited over the
+/// theme background (WCAG relative luminance).
+fn mark_text_color(highlight: Hsla, background: Hsla) -> Hsla {
+    fn channel(value: f32) -> f32 {
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    let rgb = background.to_rgb().blend(highlight.to_rgb());
+    let luminance = 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+    // Contrast with black is (L + 0.05) / 0.05 and with white 1.05 / (L + 0.05);
+    // they are equal where (L + 0.05)^2 = 0.0525.
+    if (luminance + 0.05) * (luminance + 0.05) > 0.0525 {
+        gpui::black()
+    } else {
+        gpui::white()
+    }
+}
+
 /// The highlight a text mark renders with. The link decoration is applied by
 /// the caller, which also has to record the link range.
 fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHighlight {
@@ -2767,6 +2792,14 @@ fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHig
     }
     if let Some(color) = mark.highlight {
         highlight.background_color = Some(color);
+        // Set the text color with the background, as the HTML standard's
+        // `mark { background: yellow; color: black }` does, so a light
+        // highlight stays readable in a dark theme.
+        // A transparent mark leaves the underlying surface unchanged. Keep
+        // its inherited foreground, including on custom-colored surfaces.
+        if color.a > 0.0 {
+            highlight.color = Some(mark_text_color(color, cx.theme().tokens.colors.background));
+        }
     }
     InlineHighlight {
         style: highlight,
@@ -4616,6 +4649,74 @@ mod tests {
         }
         assert_eq!(paragraph.selected_text(), "文 x² Eng");
         assert_eq!(paragraph.selected_source(), "文 **$x^2$** Eng");
+    }
+
+    #[test]
+    fn mark_sets_a_readable_text_color_with_its_background() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let node_cx = NodeContext::default();
+
+            // The default `<mark>` yellow needs dark text, whatever the theme's
+            // text color is (light in a dark theme).
+            let yellow: Hsla = gpui::rgb(0xfef08a).into();
+            let style = mark_highlight(&TextMark::default().highlight(yellow), &node_cx, cx).style;
+            assert_eq!(style.background_color, Some(yellow));
+            assert_eq!(style.color, Some(gpui::black()));
+
+            // A dark custom highlight gets light text instead.
+            let navy: Hsla = gpui::rgb(0x1e3a8a).into();
+            let style = mark_highlight(&TextMark::default().highlight(navy), &node_cx, cx).style;
+            assert_eq!(style.color, Some(gpui::white()));
+
+            // A translucent mark is composited with the theme surface before
+            // choosing the text color. Fully transparent marks keep inherited ink.
+            let translucent_black: Hsla = gpui::rgba(0x00000080).into();
+            let translucent_white: Hsla = gpui::rgba(0xffffff4d).into();
+            assert_eq!(
+                mark_text_color(translucent_black, gpui::white()),
+                gpui::black()
+            );
+            assert_eq!(
+                mark_text_color(translucent_white, gpui::black()),
+                gpui::white()
+            );
+            let transparent: Hsla = gpui::rgba(0x00000000).into();
+            let style =
+                mark_highlight(&TextMark::default().highlight(transparent), &node_cx, cx).style;
+            assert_eq!(style.color, None);
+
+            // Text that is not marked keeps the inherited color.
+            let style = mark_highlight(&TextMark::default().bold(), &node_cx, cx).style;
+            assert_eq!(style.color, None);
+        });
+    }
+
+    #[test]
+    fn translucent_mark_cache_tracks_theme_background() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let paragraph = Paragraph {
+                children: vec![InlineNode::new("mark").marks(vec![(
+                    0..4,
+                    TextMark::default().highlight(gpui::rgba(0x00000033).into()),
+                )])],
+                ..Default::default()
+            };
+            let context = NodeContext::default();
+            crate::Theme::global_mut(cx).tokens.colors.background = gpui::white();
+            let (_, light, _) = paragraph.plain_render(&context, cx);
+            assert_eq!(light[0].1.style.color, Some(gpui::black()));
+            crate::Theme::global_mut(cx).tokens.colors.background = gpui::black();
+            let (_, dark, _) = paragraph.plain_render(&context, cx);
+            assert_eq!(dark[0].1.style.color, Some(gpui::white()));
+        });
     }
 
     #[test]

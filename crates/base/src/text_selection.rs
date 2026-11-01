@@ -1001,6 +1001,16 @@ impl TextSelectionHandle {
         self.0.read(cx).update_runs(runs)
     }
 
+    /// The projected text this participant adds to the window's selected
+    /// text, or `None` when it adds none or copies through its own callback.
+    pub(crate) fn projected_copy_text(&self, cx: &App) -> Option<String> {
+        self.0
+            .read(cx)
+            .copy_item(0)
+            .filter(|item| item.callback.is_none())
+            .map(|item| item.fallback)
+    }
+
     // Rich text renders its own selection; retain geometry only for word hit testing.
     pub(crate) fn set_hit_test_runs(&self, runs: &[TextSelectionRun], cx: &mut App) {
         *self.0.read(cx).runs.borrow_mut() = runs.to_vec();

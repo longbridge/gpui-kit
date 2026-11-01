@@ -20,9 +20,9 @@ whole source file for reference, or a working file with merge conflicts.
 ```rust
 use gpui_kit::*;
 use gpui_kit::component::diff::{
-    Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffFile, DiffHoverHighlight,
-    DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode,
-    DiffParseOptions, DiffSide, DiffState,
+    Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffDecoration, DiffFile,
+    DiffGutterMarker, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition,
+    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffState,
 };
 ```
 
@@ -433,6 +433,51 @@ Diff::new(&self.diff).on_add_annotation(cx.listener(|this, range: &DiffLineRange
     this.start_comment(range.clone(), cx);
 }))
 ```
+
+## Decorations and gutter markers
+
+Diagnostics, references and comments can mark source in place, without
+inserting content or changing the selection:
+
+```rust
+let path = "src/retry.rs";
+Diff::new(&self.diff)
+    .decorations([DiffDecoration::new(DiffLineRange::new(path, DiffSide::Modified, 10, 12))
+        .with_background(cx.theme().warning.opacity(0.2))])
+    .gutter_markers([DiffGutterMarker::new(
+        "overflow",
+        DiffLinePosition::new(path, DiffSide::Modified, 10),
+    )
+    .with_label("Possible overflow")])
+    .render_gutter_marker(|marker, _, _| {
+        let id = marker.id().clone();
+        Button::new(id.clone())
+            .ghost()
+            .xsmall()
+            .icon(IconName::TriangleAlert)
+            .tooltip(marker.label().clone())
+            .on_click(move |_, window, cx| open_details(&id, window, cx))
+    })
+```
+
+`decorations` paints a background on every line of each `DiffLineRange`. A
+range ending on the other side covers its start side from `start` onwards and
+its end side up to `end`. The fill sits above the change background and below
+inline emphasis, search highlights and text; a selected line shows the
+selection instead, and copying is unchanged. Where decorations overlap, the
+last supplied one is shown. Without `with_background`, the fill is a
+translucent warning color.
+
+`gutter_markers` together with `render_gutter_marker` adds a lane, one row high
+and wide, between the line numbers and the code. The lane holds one marker per
+line; when several target the same line, the first supplied is shown. Render a
+focusable control, such as a ghost `Button` that announces
+`DiffGutterMarker::label()`, so the marker works with Enter and Space as well as
+the pointer. Pressing a marker does not start a text or line selection. The
+application owns the details panel and returns focus when it closes.
+
+Like annotations, decorations and markers are supplied on every render, so the
+current builder call is their only source.
 
 ## Pointer and keyboard interaction
 

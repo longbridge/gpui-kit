@@ -241,7 +241,15 @@ Text input system based on Rope data structure:
    readers. Value types whose fields are the definition and cannot grow (`Point`,
    `Selection`, `Edges`) are exempt. See the "Public Data Types Across the Seam" section
    of `docs/ARCHITECTURE.md`.
-8. **Spell `Context` out**: Name a context type `ComboboxTriggerContext`, never `…Ctx`.
+8. **`#[non_exhaustive]` on every public struct with `pub` fields**: Where public fields
+   are deliberate — themes, settings records, design tokens, serialized schemas — mark
+   the struct `#[non_exhaustive]` and implement `Default` (or a constructor), so a new
+   field is not a breaking change. Callers outside the crate then build it with
+   `Default::default()` and assign fields; struct literals, including
+   `..Default::default()`, no longer compile there, so code in other workspace crates
+   must use the same form. Apply this to every new type and to any existing type whose
+   fields a change adds or alters; the value types exempt above stay exempt.
+9. **Spell `Context` out**: Name a context type `ComboboxTriggerContext`, never `…Ctx`.
    `cx` is reserved for GPUI's `App`, `Context<T>`, and `AsyncApp`, so `ctx` for anything
    else reads as a competing context. A callback receiving both takes the GPUI one as `cx`
    and names the other after what it holds (`trigger`, `state`).

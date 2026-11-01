@@ -8,7 +8,8 @@ use crate::{
 };
 use gpui::{
     App, Edges, Entity, Focusable, InteractiveElement, IntoElement, KeyBinding, ParentElement,
-    Pixels, RenderOnce, Styled, Window, div, prelude::FluentBuilder,
+    Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder,
 };
 use gpui_base::TestSupportExt as _;
 
@@ -100,6 +101,7 @@ pub struct DataTable<D: TableDelegate> {
     state: Entity<TableState<D>>,
     options: TableOptions,
     focus_ring_enabled: bool,
+    accessibility_label: Option<SharedString>,
 }
 
 impl<D> DataTable<D>
@@ -112,7 +114,14 @@ where
             state: state.clone(),
             options: TableOptions::default(),
             focus_ring_enabled: true,
+            accessibility_label: None,
         }
+    }
+
+    /// Sets the label exposed to accessibility clients, the table's name.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
     }
 
     /// Set to use stripe style of the table, default to false.
@@ -199,13 +208,32 @@ where
         let bordered = self.options.bordered;
         let focus_ring_enabled = self.focus_ring_enabled;
         let focus_handle = self.state.focus_handle(cx);
-        self.state.update(cx, |state, _| {
+        let (role, rows_count, columns_count) = self.state.update(cx, |state, cx| {
             state.options = self.options;
+            // A table that selects rows or cells is a grid.
+            let role = if state.row_selectable || state.cell_selectable {
+                gpui::Role::Grid
+            } else {
+                gpui::Role::Table
+            };
+            let delegate = state.delegate();
+            (role, delegate.rows_count(cx), delegate.columns_count(cx))
         });
 
+        // The element that holds the keyboard focus is the table's
+        // accessibility node: GPUI reports focus only on an element with a
+        // role, and otherwise falls back to the window.
         div()
             .id("table")
             .test_support()
+            .role(role)
+            .when_some(self.accessibility_label, |this, label| {
+                this.aria_label(label)
+            })
+            // The counts cover every row, not just the rendered ones, plus
+            // the header row.
+            .aria_row_count(rows_count + 1)
+            .aria_column_count(columns_count)
             .size_full()
             .key_context(CONTEXT)
             .track_focus(&focus_handle)

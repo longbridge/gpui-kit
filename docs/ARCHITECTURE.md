@@ -258,9 +258,30 @@ apply to value types whose fields _are_ the definition and cannot grow, such as
 mirror an external schema, such as the LSP `Diagnostic`.
 
 Design-token records (`ColorTokens`, `RadiusTokens`, and the rest of
-`theme_tokens`) still carry `pub` fields. They have the same growth problem, and
-converting them is tracked separately because every theme in `gpui-component`
-constructs them.
+`theme_tokens`) keep `pub` fields: themes read and write them field by field.
+They carry `#[non_exhaustive]` under the rule below.
+
+Where `pub` fields are deliberate — themes, settings records, design tokens,
+serialized schemas — the struct must carry `#[non_exhaustive]` and implement
+`Default` or a constructor. Adding a field is then not a breaking change.
+Outside the defining crate, callers build the value from `Default::default()`
+and assign fields; a struct literal, including `..Default::default()`, does not
+compile there, so other workspace crates use the same form:
+
+```rust
+let mut theme = gpui_base::Theme::default();
+theme.tokens = tokens;
+theme.cursor_blink = cursor_blink;
+```
+
+Apply this to every new type and to any existing type whose fields a change
+adds or alters. Every theme record already carries it: both `Theme` structs,
+the Base token records, the Component theme schema (`ThemeConfig`,
+`ThemeColor`, `ThemeConfigColors` and the `Semantic*Config` types), the
+highlight theme (`HighlightTheme`, `HighlightThemeStyle`, `SyntaxColors`),
+`MotionTokens` and the theme settings records (`ListSettings`,
+`NotificationSettings`, `SheetSettings`). Value types exempt above stay exempt, and remaining existing
+types migrate in their own changes. The Coding Guides state the same rule.
 
 ## Input, Textarea, and Editor Architecture
 

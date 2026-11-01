@@ -107,3 +107,10 @@ name = "rendering"
 test = false
 harness = false
 required-features = ["test-support", "component", "assets"]
+
+[[test]]
+name = "native_shutdown"
+# Uses the native event loop and a hidden window; requires a desktop session.
+# Run explicitly with `cargo test -p gpui-kit --test native_shutdown`.
+test = false
+harness = false
