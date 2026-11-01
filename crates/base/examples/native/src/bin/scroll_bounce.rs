@@ -13,8 +13,8 @@ mod palette;
 use gpui::{
     App, AppContext as _, Context, InteractiveElement as _, IntoElement, ListAlignment, ListState,
     MouseButton, ParentElement as _, Pixels, PlatformInput, Point, Render, ScrollDelta,
-    ScrollHandle, ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, TouchPhase,
-    Window, WindowBounds, WindowOptions, div, list, point, px, size,
+    ScrollEvent, ScrollHandle, StatefulInteractiveElement as _, Styled as _, TouchPhase, Window,
+    WindowBounds, WindowOptions, div, list, point, px, size,
 };
 use gpui_base::{Button, ScrollBounce};
 
@@ -34,14 +34,14 @@ struct MouseScroll {
 }
 
 impl MouseScroll {
-    fn event(&mut self, position: Point<Pixels>, phase: TouchPhase) -> ScrollWheelEvent {
+    fn event(&mut self, position: Point<Pixels>, phase: TouchPhase) -> ScrollEvent {
         let delta = if phase == TouchPhase::Moved {
             position.y - self.previous.y
         } else {
             px(0.)
         };
         self.previous = position;
-        ScrollWheelEvent {
+        ScrollEvent {
             position: self.anchor,
             delta: ScrollDelta::Pixels(point(px(0.), delta)),
             touch_phase: phase,
@@ -50,11 +50,11 @@ impl MouseScroll {
     }
 }
 
-fn send_scroll(event: ScrollWheelEvent, window: &Window, cx: &mut App) {
+fn send_scroll(event: ScrollEvent, window: &Window, cx: &mut App) {
     // Mouse listeners are temporarily taken out during dispatch. Re-entering
     // dispatch synchronously would miss the viewport's scroll listeners.
     window.defer(cx, move |window, cx| {
-        window.dispatch_event(PlatformInput::ScrollWheel(event), cx);
+        window.dispatch_event(PlatformInput::Scroll(event), cx);
     });
 }
 
@@ -127,7 +127,7 @@ impl Render for Example {
                             div().p_4().border_b_1().border_color(border).bg(surface)
                                 .child(format!("Message {} — swipe, hold, release, reverse", ix + 1))
                                 .into_any_element()
-                        }).flex_1()).enabled(self.enabled))))
+                        }).flex_1()).enabled(self.enabled).scroll_wheel(false))))
                 .child(div().flex().flex_col().flex_1().min_w_0().min_h_0().gap_2()
                     .child("Short content · both edges")
                     .child(ScrollBounce::new(("short", generation), &self.short,
@@ -137,7 +137,7 @@ impl Render for Example {
                                 .child("This content fits inside the viewport. Pull down or up.")
                                 .child(div().id("horizontal").overflow_x_scroll().h_16()
                                     .child(div().w(gpui::rems(48.)).child("← Horizontal content — drag sideways across this row to verify nested scrolling →")))))
-                        .enabled(self.enabled))))
+                        .enabled(self.enabled).scroll_wheel(false))))
     }
 }
 

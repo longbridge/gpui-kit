@@ -49,7 +49,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 
 `PathBuilder.fill()` 与 `.stroke(width)` 返回一个句柄，可链式调用 `move_to`、`line_to`、`curve_to`、`cubic_bezier_to`、`arc_to`、`add_polygon`、`close` 与 `dash_array`，最后以 `build()` 收尾。用 `window.paint_path(path, background)` 把结果画出来——它是唯一一个通过对象取到的元素构造器，因为它镜像的东西在 Rust 侧就是窗口上的一个方法。
 
-`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。
+`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。`list` 的 `item_count` 变化时，读者停留在视口顶部的那一项上：列表按 `get_key` 给出的键重新找到这一项并滚回去，所以在上方插入一页更早的条目、或在下方追加一条，都不会挪动正在读的内容。加上 `with_follow_mode("tail")` 后，`list` 改为停在末尾，追加条目或最后一项变高时都跟到底，直到读者向上滚动。`on_visible_range_change` 在一帧结束后报告 `list` 显示了哪些条目，脚本可以据此在读者接近任一端时加载更多。
 
 字符串本身也是元素，和 GPUI 里 `&str` 实现 `IntoElement` 完全一样：`.child("hello")` 就是写文本的方式，样式来自持有它的那个元素。
 
@@ -146,6 +146,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 | `phase()`                  | 这次调用处于哪个 `ScopePhase`                                        |
 | `theme()`                  | 当前 `gpui_kit::base::Theme` 的语义 token 投影                       |
 | `open_url(url)`            | 把一个绝对的 `http`/`https` URL 交给系统处理器                       |
+| `open_path(path)`          | 用默认程序打开 `capabilities.fs.read` 授权范围内的文件或目录              |
 | `read_from_clipboard()`    | 剪贴板里的文本，没有文本时是 `undefined`                             |
 | `write_to_clipboard(text)` | 替换剪贴板里的文本                                                   |
 | `focus_handle()`           | 一个新的 `FocusHandle`；属于 `init` 或事件处理器，绝不属于 `render`  |
@@ -154,7 +155,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 | `sleep(ms?)`               | 在 GPUI 的 foreground executor 上，`ms` 之后 resolve                 |
 | `timer`                    | `Timer`：`after` 与 `every`                                          |
 
-其中好几个都指名了它所镜像的 GPUI 方法：`open_url` 是 `App::open_url`，`read_from_clipboard` 与 `write_to_clipboard` 是 `App::read_from_clipboard` 与 `App::write_to_clipboard`，`focus_handle` 是 `App::focus_handle`（GPUI 没有 `FocusHandle::new`，这里同样没有），`new` 是 `AppContext::new`，`spawn` 是 `App::spawn`。
+其中好几个都指名了它所镜像的 GPUI 方法：`open_url` 是 `App::open_url`，`open_path` 是 `App::open_with_system`，`read_from_clipboard` 与 `write_to_clipboard` 是 `App::read_from_clipboard` 与 `App::write_to_clipboard`，`focus_handle` 是 `App::focus_handle`（GPUI 没有 `FocusHandle::new`，这里同样没有），`new` 是 `AppContext::new`，`spawn` 是 `App::spawn`。
 
 ### `AsyncContext`
 
@@ -355,6 +356,7 @@ area 上的方法是 `add_panel(view, options)`、`remove_panel(id)`、`panels()
 | `set_rows(rows: number): void`                            | 可见行数                                                                |
 | `set_auto_grow(min_rows: number, max_rows: number): void` | 在这两者之间随内容增高                                                  |
 | `set_soft_wrap(wrap: boolean): void`                      | 长行是否折行                                                            |
+| `set_submit_on_enter(submit: boolean): void`              | 回车是否提交而不是换行                                                  |
 
 #### `SliderState`
 
@@ -598,25 +600,27 @@ render() {
 
 ### 事件
 
-| 方法                             | 交付什么                                                                    |
-| -------------------------------- | --------------------------------------------------------------------------- |
-| `on_click(handler)`              | 激活时的 `(ClickEvent, cx)`                                                 |
-| `on_mouse_move(handler)`         | 指针悬停在元素上时的 `(MouseMoveEvent, cx)`                                 |
-| `on_hover(handler)`              | 指针进入与离开时的 `(hovered, cx)`                                          |
-| `on_key_down(handler)`           | 该元素持有键盘时按下按键的 `(KeyEvent, cx)`                                 |
-| `on_key_up(handler)`             | 同一条焦点路径上松开按键的 `(KeyEvent, cx)`                                 |
-| `on_mouse_down(button, handler)` | 按下该按钮时的 `(MouseButtonEvent, cx)`                                     |
-| `on_mouse_up(button, handler)`   | 松开时的 `(MouseButtonEvent, cx)`                                           |
-| `on_mouse_down_out(handler)`     | 在该元素之外任意位置按下时的 `(MouseButtonEvent, cx)`                       |
-| `on_scroll_wheel(handler)`       | 滚轮或触控板滚动时的 `(ScrollWheelEvent, cx)`                               |
-| `on_action(action, handler)`     | 该命名 action 被派发到此元素或其内部时的 `(ActionEvent, cx)`                |
-| `on_change(handler)`             | 开关变化时的 `(checked, cx)`；新值由脚本保存                                |
-| `on_step(handler)`               | `("increment" \| "decrement", cx)`，并且它会**取代**内置的步进              |
-| `on_item_click(handler)`         | 虚拟列表某一行被点击时的 `(key, cx)`，按 key 而不是按下标                   |
-| `on_open_change(handler)`        | 脚本之外的东西改变了 `Popover` 的打开状态时的 `(open, cx)`                  |
-| `on_confirm(handler)`            | 在打开的 `Select` 或 `Combobox` 中按下回车；无参数                          |
-| `on_dismiss(handler)`            | 在打开的 `Select` 或 `Combobox` 中按下 Escape，早于 `on_open_change(false)` |
-| `on_resize(handler)`             | 可调整组的拖拽结束后的 `(sizes, cx)`                                        |
+| 方法                               | 交付什么                                                                    |
+| ---------------------------------- | --------------------------------------------------------------------------- |
+| `on_click(handler)`                | 激活时的 `(ClickEvent, cx)`                                                 |
+| `on_mouse_move(handler)`           | 指针悬停在元素上时的 `(MouseMoveEvent, cx)`                                 |
+| `on_hover(handler)`                | 指针进入与离开时的 `(hovered, cx)`                                          |
+| `on_key_down(handler)`             | 该元素持有键盘时按下按键的 `(KeyEvent, cx)`                                 |
+| `on_key_up(handler)`               | 同一条焦点路径上松开按键的 `(KeyEvent, cx)`                                 |
+| `on_mouse_down(button, handler)`   | 按下该按钮时的 `(MouseButtonEvent, cx)`                                     |
+| `on_mouse_up(button, handler)`     | 松开时的 `(MouseButtonEvent, cx)`                                           |
+| `on_mouse_down_out(handler)`       | 在该元素之外任意位置按下时的 `(MouseButtonEvent, cx)`                       |
+| `on_scroll_wheel(handler)`         | 滚轮或触控板滚动时的 `(ScrollWheelEvent, cx)`                               |
+| `on_pinch(handler)`                | 触控板或触摸屏双指缩放每一步的 `(PinchEvent, cx)`                           |
+| `on_action(action, handler)`       | 该命名 action 被派发到此元素或其内部时的 `(ActionEvent, cx)`                |
+| `on_change(handler)`               | 开关变化时的 `(checked, cx)`；新值由脚本保存                                |
+| `on_step(handler)`                 | `("increment" \| "decrement", cx)`，并且它会**取代**内置的步进              |
+| `on_item_click(handler)`           | 虚拟列表某一行被点击时的 `(key, cx)`，按 key 而不是按下标                   |
+| `on_visible_range_change(handler)` | `list` 显示的条目或条目总数在一帧后变化时的 `(range, count, cx)`            |
+| `on_open_change(handler)`          | 脚本之外的东西改变了 `Popover` 的打开状态时的 `(open, cx)`                  |
+| `on_confirm(handler)`              | 在打开的 `Select` 或 `Combobox` 中按下回车；无参数                          |
+| `on_dismiss(handler)`              | 在打开的 `Select` 或 `Combobox` 中按下 Escape，早于 `on_open_change(false)` |
+| `on_resize(handler)`               | 可调整组的拖拽结束后的 `(sizes, cx)`                                        |
 
 ### Actions 与键绑定
 
@@ -694,6 +698,7 @@ render(_cx) {
 | `viewport_from_layout()`                            | 让 `Scrollbar` 从自身的盒子取 viewport         |
 | `track_scroll(handle)`                              | 给虚拟列表一个脚本可以驱动的滚动位置           |
 | `with_item_to_measure_index(index)`                 | 虚拟列表在它滚动的那个轴上测量哪一项           |
+| `with_follow_mode(mode)`                            | `"tail"` 让 `list` 在追加条目时停在末尾        |
 | `size_range(min, max?)`                             | `resizable_panel()` 可被拖拽的范围，单位为像素 |
 
 ### 锚定浮层

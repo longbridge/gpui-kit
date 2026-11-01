@@ -43,7 +43,11 @@
 //! explicitly, because "under whose authority is this code being loaded" is a
 //! question the caller has to answer rather than inherit.
 
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{
+    cell::RefCell,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use crate::{
     capability::Capabilities,
@@ -70,6 +74,9 @@ pub struct Policy {
     /// question asked of persistence.
     application: Rc<str>,
     capabilities: Capabilities,
+    /// The application's own data directory, shown to script as
+    /// `process.dataDir`. A path, not a grant: reaching it still needs a root.
+    data_dir: Option<Rc<Path>>,
     /// A live handle, not a value — and deliberately unlike `capabilities`.
     ///
     /// A grant is frozen with the code it was given to: that is the whole point
@@ -113,6 +120,7 @@ impl Policy {
         Self {
             application: Rc::from(DEFAULT_APPLICATION),
             capabilities: Capabilities::default(),
+            data_dir: None,
             modules: Rc::new(RefCell::new(Rc::new(HostModules::default()))),
             store: Rc::new(RefCell::new(None)),
             session: Rc::new(RefCell::new(Some(Storage::in_memory()))),
@@ -143,6 +151,21 @@ impl Policy {
     pub fn with_capabilities(mut self, capabilities: Capabilities) -> Self {
         self.capabilities = capabilities;
         self
+    }
+
+    /// Names the application's data directory, which script reads as
+    /// `process.dataDir`.
+    ///
+    /// The host places the directory, so only the host can say where it is —
+    /// and an application that writes its own files there, or shows the user
+    /// where their data lives, otherwise has to guess.
+    pub fn with_data_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.data_dir = Some(Rc::from(path.into()));
+        self
+    }
+
+    pub fn data_dir(&self) -> Option<&Path> {
+        self.data_dir.as_deref()
     }
 
     /// Names the `localStorage` file and reads it.
@@ -264,6 +287,7 @@ impl Policy {
             // the layout the user had.
             application: self.application.clone(),
             capabilities: self.capabilities.clone(),
+            data_dir: self.data_dir.clone(),
             modules: self.modules.clone(),
             store: self.store.clone(),
             session: self.session.clone(),

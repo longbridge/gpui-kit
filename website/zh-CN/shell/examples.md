@@ -29,7 +29,7 @@ Rust Host 二进制——见
 ## Todo list
 
 ```bash
-cargo run -p gpui-shell -- examples/js_todolist
+cargo run -p gpui-shell -- run examples/js_todolist
 ```
 
 `examples/js_todolist/` 的目的是把整个运行时都跑一遍，而不是做到最小——`gpui-shell` 哪里坏了，通常先在这里露出来。
@@ -80,7 +80,7 @@ export function load() {
 ## 工作区
 
 ```bash
-cargo run -p gpui-shell -- examples/js_dock
+cargo run -p gpui-shell -- run examples/js_dock
 ```
 
 `examples/js_dock/` 是一个可停靠的工作区——左边是文件列表，中间是文档，布局会以你离开时的样子回来。

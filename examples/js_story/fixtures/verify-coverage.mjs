@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Static coverage audit for the JavaScript scaffold. It reads the canonical
-// component-shell inventory and the explicit catalog imports without loading
+// gpui-shell component inventory and the explicit catalog imports without loading
 // gpui, so it remains runnable while the adapter is still being built.
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -14,7 +14,7 @@ const fail = (message) => {
 };
 
 const inventory = JSON.parse(
-  read("crates/component-shell/component-inventory.json"),
+  read("crates/shell/component-inventory.json"),
 );
 const catalogSource = read("examples/js_story/catalog.js");
 const coverageSource = read("examples/js_story/stories/coverage.js");
@@ -45,9 +45,13 @@ const records = familyFiles.flatMap((file) => {
 const inventoryStories = inventory.items.filter(
   (item) => item.source === "story",
 );
+// The gallery mirrors the Rust Story app, which shows `gpui-component` alone.
+// `gpui-webview` is a separate crate with its own example,
+// `examples/js_webview`, so its surfaces have no route to cover them here.
+const GALLERY_SOURCES = new Set(["ui", "story"]);
 const inventorySurfaces = new Map();
 for (const item of inventory.items) {
-  if (!item.registration) continue;
+  if (!item.registration || !GALLERY_SOURCES.has(item.source)) continue;
   const surface =
     item.registration.status === "registered"
       ? (item.registration.api ?? item.registration.descriptor)

@@ -9,6 +9,7 @@ extern crate gpui_fast as gpui;
 #[cfg(all(feature = "gpui-fast", test))]
 extern crate gpui_fast_platform as gpui_platform;
 
+mod a11y_disabled;
 mod accordion;
 pub mod actions;
 mod alert_dialog;
@@ -46,6 +47,7 @@ mod nav_stack;
 mod number_input;
 mod observe;
 mod otp_input;
+mod overscroll;
 mod pagination;
 pub mod plot;
 mod popover;
@@ -143,7 +145,7 @@ pub use number_input::{
     Decrement, Increment, NumberInput, NumberInputEvent, NumberInputText, NumberStep, StepAction,
     step_value,
 };
-pub use observe::{ObservedElement, TestSupportExt};
+pub use observe::{ObservedElement, ObservedTextElement, TestSupportExt, TestTextExt};
 pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
 pub use plot::PlotMotion;
@@ -163,7 +165,9 @@ pub use resizable::{
 };
 pub use root::{Root, RootPlugin};
 pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
-pub use scrollable_mask::{RoundedFrameCover, ScrollableMask};
+pub use scrollable_mask::{
+    HorizontalScrollClaim, RoundedFrameCover, ScrollableMask, last_horizontal_scroll_claim,
+};
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,
     ScrollbarStyles, ScrollbarThumbStyle, ScrollbarTrackStyle,

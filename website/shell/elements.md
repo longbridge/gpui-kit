@@ -61,6 +61,8 @@ It is pinned to the top right by default. Use the existing anchor vocabulary to 
 
 The JavaScript habit would be `new Button(id)`. The runtime does not offer it, and the reason is the whole subject of this page: `new` promises an object with an identity — something you can keep, store on the instance, and use again. That is exactly what a description is not. `Button.new(id)` reads as "construct a description", which is what it does, and it matches the Rust spelling character for character.
 
+The same form works for `"gpui-component"`: `Button.new("save")`, `InputState.new("Name")`. Its exports also accept `new Button(...)`, which scripts written before `.new` existed use; write `.new` in new code so one file has one construction form.
+
 Views are the opposite case, and use the standard form: `class Counter extends View`. A View genuinely does have an identity and cross-frame state, and it is owned by GPUI. Two construction shapes in one file, because the two kinds of thing have different lifetimes.
 
 ### Ids
@@ -176,6 +178,7 @@ These are not styles; they report state to the base layer, which handles the int
 | `.on_mouse_up(button, handler)`   | [input-capable](#where-input-is-installed) | Its release                                                   |
 | `.on_mouse_down_out(handler)`     | [input-capable](#where-input-is-installed) | A press anywhere **outside** this element                     |
 | `.on_scroll_wheel(handler)`       | [input-capable](#where-input-is-installed) | Wheel and trackpad scrolling over it                          |
+| `.on_pinch(handler)`              | [input-capable](#where-input-is-installed) | A trackpad or touch pinch over it                             |
 | `.on_action(action, handler)`     | [input-capable](#where-input-is-installed) | A named action dispatched to it or into it                    |
 | `.key_context(name)`              | [input-capable](#where-input-is-installed) | The key-binding context this element and its subtree sit in   |
 
@@ -260,9 +263,19 @@ A scroll handler receives pixels either way, and the original line count when th
 });
 ```
 
+A pinch arrives as a zoom change per step of the gesture, so multiplying by `1 + delta` follows it. Keep the wheel handler beside it for mice and platforms without a pinch:
+
+```js
+.on_pinch((event, cx) => {
+  this.zoom *= 1 + event.delta;      // 0.1 is a 10% increase
+  // event.phase                     — "started", "moved", "ended" or "cancelled"
+  cx.notify();
+});
+```
+
 ### Where input is installed
 
-The eight methods above are GPUI's own `InteractiveElement` builders, and the shell installs them on `div`, `h_flex`, `v_flex`, `Button`, `Link`, `Checkbox`, `Switch`, `Radio`, `Toggle`, `Tabs` and `Tab`.
+The nine methods above are GPUI's own `InteractiveElement` builders, and the shell installs them on `div`, `h_flex`, `v_flex`, `Button`, `Link`, `Checkbox`, `Switch`, `Radio`, `Toggle`, `Tabs` and `Tab`.
 
 Every other component builds its own base type and hangs its own listeners on it, so a handler written on one of those is recorded in the description and never reaches GPUI. The log says so rather than leaving you to find it:
 

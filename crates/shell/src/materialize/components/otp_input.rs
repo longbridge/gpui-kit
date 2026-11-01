@@ -200,6 +200,14 @@ pub(in crate::materialize) fn otp_input(
     // After the cells, because the cells are what an `OtpInput` is. A script
     // that adds a child gets it beside them rather than instead of them.
     all.extend(children);
+    // The state, mounted as a view so that its notifications reach the screen.
+    // The cells above read it while they are built, but it is a plain entity:
+    // a keystroke or a caret blink notifies it and dirties no view, and the
+    // frame replays `ShellRoot`'s cached content with the old cells until the
+    // pointer moves. As a view node under the script view, its notification
+    // dirties every view above it. Its render is `Empty`, and the absolute
+    // holder keeps it out of the flow, so a script `gap` adds no space.
+    all.push(div().absolute().child(state.clone()).into_any_element());
 
     let otp = OtpInput::new(&state).disabled(behavior.disabled);
     finish(otp, refinement, all)

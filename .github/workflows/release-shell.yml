@@ -1,0 +1,152 @@
+name: "Release gpui-shell"
+
+# `gpui-shell` is not on crates.io (its QuickJS dependencies are git-only), so
+# it ships as a prebuilt binary attached to the GitHub release of each version,
+# built with its default `components` feature so an installed runtime also runs
+# applications that import `gpui-component`.
+#
+# Asset names carry no version, so `releases/latest/download/<asset>` always
+# resolves: `website/public/shell/install.sh`, Homebrew and mise all download
+# by that name.
+on:
+  push:
+    tags:
+      - "v*"
+  # Attaches binaries to a release that already exists, built from the branch
+  # the run is started on — for a release published before this workflow, or
+  # to rebuild one. GitHub only offers this for workflows on the default branch.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the binaries to, e.g. v0.7.3"
+        required: true
+  # Labelling a pull request `release-shell` attaches binaries built from its
+  # head to the release named by gpui-shell's version (`v` + the `version` in
+  # crates/shell/Cargo.toml). Unlike `workflow_dispatch`, this works before the
+  # workflow reaches the default branch.
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  group: release-shell-${{ inputs.tag || github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: gpui-shell (${{ matrix.target }})
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'release-shell' }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            run_on: macos-latest
+          - target: x86_64-apple-darwin
+            run_on: macos-latest
+          - target: x86_64-unknown-linux-gnu
+            run_on: ubuntu-latest
+          - target: x86_64-pc-windows-msvc
+            run_on: windows-latest
+    runs-on: ${{ matrix.run_on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The pull request's own head, not the merge commit GitHub would
+          # otherwise check out.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Choose the release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${{ github.event_name }}" in
+            push) tag="${{ github.ref_name }}" ;;
+            workflow_dispatch) tag="$INPUT_TAG" ;;
+            pull_request)
+              version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/shell/Cargo.toml | head -n 1)
+              tag="v$version"
+              ;;
+          esac
+          # Only a tag push may create its release; every other run attaches
+          # to one that already exists.
+          if [ "${{ github.event_name }}" != push ] && ! gh release view "$tag" > /dev/null; then
+            echo "::error::release $tag does not exist"
+            exit 1
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+          cache-save-if: false
+      - name: Install system dependencies
+        if: ${{ matrix.run_on != 'windows-latest' }}
+        run: script/bootstrap
+      - name: Build
+        run: cargo build -p gpui-shell --release --locked --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          name="gpui-shell-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/gpui-shell.exe" "dist/$name/"
+          else
+            cp "target/${{ matrix.target }}/release/gpui-shell" "dist/$name/"
+          fi
+          cp crates/shell/README.md LICENSE-APACHE "dist/$name/"
+          cd dist
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            7z a "$name.zip" "$name" > /dev/null
+            sha256sum "$name.zip" > "$name.zip.sha256"
+          else
+            tar -czf "$name.tar.gz" "$name"
+            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          fi
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            dist/gpui-shell-*.tar.gz
+            dist/gpui-shell-*.zip
+            dist/gpui-shell-*.sha256
+          fail_on_unmatched_files: false
+      # The installer goes with the binaries it downloads, once per release.
+      - name: Upload the installer
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: website/public/shell/install.sh
+
+  # A run that rebuilds an existing release's binaries from another commit
+  # records that commit as `shell-<tag>`, so the website's Shell pages for the
+  # release describe the binary people download (see script/snapshot-website).
+  # A tag push builds the tag itself and needs no record.
+  record:
+    name: Record the commit the binaries were built from
+    needs: build
+    if: ${{ github.event_name != 'push' && (github.event_name != 'pull_request' || github.event.label.name == 'release-shell') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Tag the build
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            tag="$INPUT_TAG"
+          else
+            version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/shell/Cargo.toml | head -n 1)
+            tag="v$version"
+          fi
+          git tag -f "shell-$tag"
+          git push -f origin "refs/tags/shell-$tag"

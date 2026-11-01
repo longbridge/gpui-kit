@@ -111,7 +111,9 @@ Rust Debug builds leave GPUI, the component library, layout, and text rendering
 largely unoptimized. As a result, an application started with `cargo run` can
 render and respond much more slowly than its release build. The profile below
 optimizes those framework dependencies while your application code remains in
-Debug mode and keeps its normal debugging workflow.
+Debug mode and keeps its normal debugging workflow. Leave proc-macro crates such
+as `gpui-pre-macros` out: they only run inside the compiler, so optimizing them
+adds compile time without making the application faster.
 
 This setting does **not** make compilation faster. Compiling the optimized
 dependencies can take longer, especially on the first build; the benefit is
@@ -125,7 +127,6 @@ gpui-pre = { opt-level = 3 }
 gpui-component = { opt-level = 3 }
 gpui-kit = { opt-level = 3 }
 gpui-kit-assets = { opt-level = 3 }
-gpui-pre-macros = { opt-level = 3 }
 gpui-pre-platform = { opt-level = 3 }
 rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }

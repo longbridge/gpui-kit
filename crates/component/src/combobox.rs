@@ -199,9 +199,10 @@ where
                             .collect();
                         let changed = before_values != after_values;
                         let should_close = !multiple
-                            && selection
-                                .iter()
-                                .any(|(_, selected)| selected.value() == item.value());
+                            && (changed
+                                || selection
+                                    .iter()
+                                    .any(|(_, selected)| selected.value() == item.value()));
 
                         let new_selection = weak_confirm.update(cx, |this, cx| {
                             this.state.selection = selection;
@@ -481,9 +482,10 @@ where
             .collect();
         let changed = before_values != after_values;
         let should_close = !self.multiple
-            && selection
-                .iter()
-                .any(|(_, selected)| selected.value() == item.value());
+            && (changed
+                || selection
+                    .iter()
+                    .any(|(_, selected)| selected.value() == item.value()));
 
         self.state.selection = selection;
         self.state.sync_snapshot(cx);
@@ -1600,6 +1602,94 @@ mod tests {
         });
     }
 
+    struct RedirectDelegate {
+        items: SearchableVec<&'static str>,
+        confirmations: Rc<Cell<usize>>,
+    }
+
+    impl SearchableListDelegate for RedirectDelegate {
+        type Item = &'static str;
+
+        fn items_count(&self, section: usize) -> usize {
+            self.items.items_count(section)
+        }
+
+        fn item(&self, ix: IndexPath) -> Option<&&'static str> {
+            self.items.item(ix)
+        }
+
+        fn position<V>(&self, value: &V) -> Option<IndexPath>
+        where
+            &'static str: SearchableListItem<Value = V>,
+            V: PartialEq,
+        {
+            self.items.position(value)
+        }
+
+        fn on_will_change(
+            &mut self,
+            selection: &mut Vec<(IndexPath, &'static str)>,
+            _: &[SearchableListChange],
+        ) {
+            *selection = vec![(IndexPath::new(2), "C++")];
+        }
+
+        fn on_confirm(&mut self, selection: &[(IndexPath, &'static str)]) {
+            assert_eq!(selection[0].1, "C++");
+            self.confirmations.set(self.confirmations.get() + 1);
+        }
+    }
+
+    #[gpui::test]
+    fn single_select_confirms_delegate_replacement(cx: &mut TestAppContext) {
+        use crate::list::ListDelegate as _;
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        for through_list in [false, true] {
+            let confirmations = Rc::new(Cell::new(0));
+            let state = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    ComboboxState::new(
+                        RedirectDelegate {
+                            items: SearchableVec::new(vec!["Rust", "Go", "C++"]),
+                            confirmations: confirmations.clone(),
+                        },
+                        vec![IndexPath::new(0)],
+                        window,
+                        cx,
+                    )
+                })
+            });
+            let events = Rc::new(Cell::new(0));
+            let event_count = events.clone();
+            let _subscription = cx.update(|_, cx| {
+                cx.subscribe(&state, move |_, _: &ComboboxEvent<RedirectDelegate>, _| {
+                    event_count.set(event_count.get() + 1);
+                })
+            });
+            cx.update(|window, cx| {
+                state.update(cx, |state, cx| {
+                    state.set_open(true, cx);
+                    if through_list {
+                        state.state.list.update(cx, |list, cx| {
+                            list.set_selected_index(Some(IndexPath::new(1)), window, cx);
+                            list.delegate_mut().confirm(false, window, cx);
+                        });
+                    } else {
+                        state.handle_item_select(IndexPath::new(1), window, cx);
+                    }
+                });
+            });
+            cx.run_until_parked();
+            cx.update(|_, cx| {
+                assert_eq!(state.read(cx).selected_values(), vec!["C++"]);
+                assert!(!state.read(cx).state.open);
+                assert_eq!(confirmations.get(), 1);
+                assert_eq!(events.get(), 2, "one Change and one Confirm");
+            });
+        }
+    }
+
     fn left_press(position: Point<Pixels>) -> MouseDownEvent {
         MouseDownEvent {
             button: MouseButton::Left,
@@ -1772,6 +1862,65 @@ mod tests {
                     "only Confirm, no Change"
                 );
             });
+        }
+    }
+
+    /// A page holding a combobox under retained views.
+    #[cfg(feature = "gpui-fast")]
+    mod retained {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{
+            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+            TestAppContext, Window, div, px,
+        };
+
+        use crate::{
+            combobox::{Combobox, ComboboxState},
+            searchable_list::SearchableVec,
+        };
+
+        /// A page that shows a combobox and what it selected, counting its
+        /// renders.
+        struct Page {
+            state: Entity<ComboboxState<SearchableVec<&'static str>>>,
+            renders: Rc<Cell<usize>>,
+        }
+
+        impl Render for Page {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                let selected = self.state.read(cx).selected_values();
+                div()
+                    .w(px(240.))
+                    .child(Combobox::new(&self.state))
+                    .child(format!("{selected:?}"))
+            }
+        }
+
+        /// Drawing a combobox again changes nothing in it: the page around
+        /// it, which reads its selection, is not built again for it.
+        #[gpui::test]
+        fn drawing_a_combobox_again_leaves_the_page_around_it_retained(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let renders = Rc::new(Cell::new(0));
+            let (_, cx) = cx.add_window_view({
+                let renders = renders.clone();
+                move |window, cx| {
+                    let items = SearchableVec::new(vec!["Rust", "Go", "C++"]);
+                    Page {
+                        state: cx.new(|cx| ComboboxState::new(items, vec![], window, cx)),
+                        renders,
+                    }
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let rendered = renders.get();
+            for _ in 0..3 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert_eq!(renders.get(), rendered, "the page was built again");
         }
     }
 }

@@ -1,7 +1,7 @@
 [package]
 name = "webview"
 description = "A minimal example of webview inside the GPUI application."
-version = "0.7.1"
+version = "0.8.1"
 publish = false
 edition.workspace = true
 
@@ -9,11 +9,12 @@ edition.workspace = true
 inspector = []
 
 [dependencies]
-gpui-kit.workspace = true
+# GPUI Fast lets the example's menu render above the page; `gpui-webview` follows the Kit.
+gpui-kit = { workspace = true, features = ["gpui-fast"] }
 anyhow.workspace = true
 
 # WebView dependencies
-gpui-webview = { path = "../../crates/webview" }
+gpui-webview = { path = "../../crates/webview", features = ["gpui-fast"] }
 wry = { version = "0.53.3", package = "lb-wry" }
 
 [lints]

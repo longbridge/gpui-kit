@@ -11,6 +11,7 @@ use gpui::{
 
 use crate::{
     Decrement, Increment, StyledExt as _,
+    a11y_disabled::A11yDisabledExt as _,
     actions::{SelectLeft, SelectNextColumn, SelectPrevColumn, SelectRight},
     input::Delete,
 };
@@ -597,6 +598,19 @@ impl RenderOnce for TimeField {
                     .on_action(window.listener_for(&self.state, TimeFieldState::on_next_column))
                     .on_action(window.listener_for(&self.state, TimeFieldState::on_prev_column))
                     .on_key_down(window.listener_for(&self.state, TimeFieldState::on_key_down))
+                    // A press on the field outside any segment focuses it and selects the
+                    // first segment; a press on a segment stops here and selects that one.
+                    .on_mouse_down(MouseButton::Left, {
+                        let state = self.state.clone();
+                        let focus_handle = focus_handle.clone();
+                        move |_: &MouseDownEvent, window, cx| {
+                            focus_handle.focus(window, cx);
+                            state.update(cx, |state, cx| {
+                                let first = state.editor.segments()[0];
+                                state.select_segment(first, cx);
+                            });
+                        }
+                    })
             });
 
         for (ix, segment) in editor.segments().iter().copied().enumerate() {
@@ -620,6 +634,7 @@ impl RenderOnce for TimeField {
                 let focus_handle = focus_handle.clone();
                 item =
                     item.on_mouse_down(MouseButton::Left, move |_: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
                         focus_handle.focus(window, cx);
                         state.update(cx, |state, cx| state.select_segment(segment, cx));
                     });
@@ -627,7 +642,7 @@ impl RenderOnce for TimeField {
             root = root.child((self.segment)(item, segment_state, window, cx));
         }
 
-        root.refine_style(&self.style)
+        root.refine_style(&self.style).a11y_disabled(disabled)
     }
 }
 

@@ -1,9 +1,10 @@
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IconName, Selectable, Sizable, StyledExt as _,
+    ActiveTheme, Disableable, IconName, Selectable, Sizable, StyledExt as _, WindowExt as _,
     button::{Button, ButtonVariants},
     diff::{
-        Diff, DiffAnnotation, DiffChangeIndicator, DiffFile, DiffHoverHighlight, DiffHunkSeparator,
-        DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode, DiffSide, DiffState,
+        Diff, DiffAnnotation, DiffChangeIndicator, DiffDecoration, DiffFile, DiffGutterMarker,
+        DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange,
+        DiffMode, DiffSide, DiffState,
     },
     h_flex, v_flex,
 };
@@ -384,7 +385,38 @@ impl Render for DiffStory {
                             })
                             .soft_wrap(self.wrap)
                             .when(self.example == 0, |diff| {
-                                diff.annotations(annotations)
+                                // A diagnostic marks its line in place; the
+                                // marker opens application-owned details.
+                                let diagnostic = DiffLinePosition::new(
+                                    "src/retry.rs",
+                                    DiffSide::Modified,
+                                    21,
+                                );
+                                diff.decorations([DiffDecoration::new(DiffLineRange::new(
+                                    "src/retry.rs",
+                                    DiffSide::Modified,
+                                    21,
+                                    21,
+                                ))])
+                                .gutter_markers([DiffGutterMarker::new(
+                                    "overflow",
+                                    diagnostic,
+                                )
+                                .with_label("Possible overflow")])
+                                .render_gutter_marker(|marker, _, _| {
+                                    Button::new(marker.id().clone())
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::TriangleAlert)
+                                        .tooltip(marker.label().clone())
+                                        .on_click(|_, window, cx| {
+                                            window.push_notification(
+                                                "2_u32.pow(attempt) overflows for attempts above 31",
+                                                cx,
+                                            )
+                                        })
+                                })
+                                .annotations(annotations)
                                     .render_annotation(move |annotation, _, cx| {
                                         let (id, body, resolved) = comments
                                             .iter()

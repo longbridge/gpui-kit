@@ -57,6 +57,16 @@ Switch::new("notifications")
     })
 ```
 
+### 不带标签
+
+没有可见文字的 Switch 没有无障碍名称，屏幕阅读器无法将它与其他开关区分开。用 `.accessibility_label(...)` 设置名称；这不会添加可见标签：
+
+```rust
+Switch::new("airplane-mode")
+    .accessibility_label("Airplane mode")
+    .checked(false)
+```
+
 ### 不同尺寸
 
 ```rust
@@ -143,6 +153,7 @@ Switch::new("switch")
 | `checked(bool)` | 设置当前选中状态 |
 | `label(text)` | 设置标签文本 |
 | `label_side(side)` | 设置标签位置，`Side::Left` 或 `Side::Right` |
+| `accessibility_label(text)` | 屏幕阅读器朗读的名称；没有可见标签时需要设置 |
 | `disabled(bool)` | 设置禁用状态 |
 | `tooltip(text)` | 添加提示文本 |
 | `color(color)` | 设置选中时的背景色，默认 `theme.primary` |

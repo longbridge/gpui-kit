@@ -1,0 +1,92 @@
+# Environment variables every gpui-shell application can read from
+# `process.env` without listing them in `capabilities.process.env`.
+#
+# One name per line, in upper case; `#` starts a comment. Compiled into the
+# runtime by `capability.rs`, whose tests check every entry. A name matches
+# regardless of case, so `HTTP_PROXY` also lets a script read `http_proxy`,
+# under the spelling the environment uses.
+#
+# A variable belongs here when it describes the user's machine, session or
+# preferences and is something ordinary desktop and maintenance tools need.
+# Tokens, keys, passwords and credentials never belong here, nor do addresses
+# that hand over another program's authority (`DBUS_SESSION_BUS_ADDRESS`,
+# `SSH_AUTH_SOCK`). When in doubt, leave it out — an application can still ask
+# for a variable by name in its manifest.
+
+# The user.
+HOME
+USER
+LOGNAME
+USERNAME
+USERPROFILE
+HOMEDRIVE
+HOMEPATH
+
+# The machine.
+HOSTNAME
+COMPUTERNAME
+PROCESSOR_ARCHITECTURE
+
+# Language and time.
+LANG
+LANGUAGE
+LC_ALL
+LC_ADDRESS
+LC_COLLATE
+LC_CTYPE
+LC_IDENTIFICATION
+LC_MEASUREMENT
+LC_MESSAGES
+LC_MONETARY
+LC_NAME
+LC_NUMERIC
+LC_PAPER
+LC_TELEPHONE
+LC_TIME
+TZ
+
+# Preferred tools. `PATH` reveals which toolchains are installed but holds no
+# secret, and maintenance tools need it to find and report on them; running a
+# command still needs `capabilities.fs.execute`. `PATHEXT` is its Windows half.
+PATH
+PATHEXT
+SHELL
+EDITOR
+VISUAL
+PAGER
+BROWSER
+TERM
+
+# The desktop session.
+DISPLAY
+WAYLAND_DISPLAY
+XDG_CURRENT_DESKTOP
+XDG_SESSION_TYPE
+DESKTOP_SESSION
+
+# Network proxies. A proxy URL can carry a user name and password
+# (`http://user:pass@proxy:8080`); they are listed because tools that reach the
+# network need to honour the user's proxy.
+HTTP_PROXY
+HTTPS_PROXY
+ALL_PROXY
+NO_PROXY
+
+# Where the platform keeps things.
+TMPDIR
+TEMP
+TMP
+XDG_CONFIG_HOME
+XDG_DATA_HOME
+XDG_CACHE_HOME
+XDG_STATE_HOME
+XDG_RUNTIME_DIR
+XDG_CONFIG_DIRS
+XDG_DATA_DIRS
+APPDATA
+LOCALAPPDATA
+PROGRAMDATA
+PROGRAMFILES
+PROGRAMFILES(X86)
+SYSTEMROOT
+WINDIR

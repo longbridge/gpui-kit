@@ -706,13 +706,14 @@ impl Render for QuestionnaireStory {
                                             })
                                             .into_any_element()
                                     })
-                                    .render_shortcut(|choice, _, _| {
+                                    .render_shortcut(|choice, _, cx| {
                                         let Some(shortcut) = choice.shortcut() else {
                                             return div().into_any_element();
                                         };
-                                        let Ok(keystroke) =
-                                            Keystroke::parse(&shortcut.to_lowercase())
-                                        else {
+                                        let Ok(keystroke) = Keystroke::parse_with_os(
+                                            &shortcut.to_lowercase(),
+                                            cx.platform_info().os,
+                                        ) else {
                                             return div().into_any_element();
                                         };
                                         Kbd::new(keystroke).outline().into_any_element()

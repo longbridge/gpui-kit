@@ -7,7 +7,7 @@ use gpui::{
 
 use super::{EditorState, Input};
 use crate::native_menu::NativeMenu;
-use crate::{ActiveTheme as _, RoleOverride, StyledExt as _};
+use crate::{ActiveTheme as _, RoleOverride, Sizable, Size, StyledExt as _};
 
 /// A code editor takes its rows from the font, so that a smaller or larger
 /// font keeps its leading in proportion.
@@ -18,6 +18,7 @@ const EDITOR_LINE_HEIGHT: f32 = 1.5;
 pub struct Editor {
     state: Entity<EditorState>,
     style: StyleRefinement,
+    size: Size,
     height: Option<DefiniteLength>,
     appearance: bool,
     bordered: bool,
@@ -40,6 +41,7 @@ impl Editor {
         Self {
             state: state.clone(),
             style: StyleRefinement::default(),
+            size: Size::default(),
             height: None,
             appearance: true,
             bordered: true,
@@ -127,6 +129,16 @@ impl Editor {
     }
 }
 
+/// Match the padding and density of Input and Textarea in the same form by
+/// applying the same size tier. The editor keeps its independently configured
+/// code font size and line height.
+impl Sizable for Editor {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.size = size.into();
+        self
+    }
+}
+
 impl Styled for Editor {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
@@ -143,6 +155,7 @@ impl RenderOnce for Editor {
             .font_family(cx.theme().mono_font_family.clone())
             .text_size(cx.theme().mono_font_size)
             .line_height(relative(EDITOR_LINE_HEIGHT))
+            .with_size(self.size)
             .appearance(self.appearance)
             .bordered(self.bordered)
             .focus_bordered(false)
@@ -167,8 +180,8 @@ mod tests {
     use super::*;
     use crate::input::EditorState;
     use gpui::{
-        AppContext as _, Context, ParentElement as _, Pixels, Render, TestAppContext,
-        VisualTestContext, div, px,
+        AppContext as _, Context, InteractiveElement as _, ParentElement as _, Pixels, Render,
+        TestAppContext, VisualTestContext, div, px,
     };
 
     struct Harness {
@@ -217,6 +230,63 @@ mod tests {
         assert_eq!(line_height(cx, Some(px(24.))), px(36.));
         assert_eq!(line_height(cx, Some(px(40.))), px(60.));
     }
+
+    struct SizedHarness {
+        state: Entity<EditorState>,
+        /// A size set on the editor; `None` leaves the default.
+        size: Option<Size>,
+    }
+
+    impl Render for SizedHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().debug_selector(|| "frame".into()).size_full().child(
+                Editor::new(&self.state).when_some(self.size, |this, size| this.with_size(size)),
+            )
+        }
+    }
+
+    /// How far the text starts below the top of the editor's frame, and the
+    /// row height it laid out with.
+    fn top_inset(cx: &mut TestAppContext, size: Option<Size>) -> (Pixels, Pixels) {
+        cx.update(crate::init);
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("fn main() {}"));
+            state = Some(editor.clone());
+            SizedHarness {
+                state: editor,
+                size,
+            }
+        });
+        let state = state.unwrap();
+        VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+
+        let frame = cx.debug_bounds("frame").expect("the frame must lay out");
+        let (text, line_height) = cx.read(|cx| {
+            let state = state.read(cx);
+            let line_height = state.line_height().expect("the editor must lay out");
+            (state.input_bounds(), line_height)
+        });
+        (text.top() - frame.top(), line_height)
+    }
+
+    #[gpui::test]
+    fn the_insets_follow_the_size(cx: &mut TestAppContext) {
+        let (medium, rows) = top_inset(cx, Some(Size::Medium));
+        // With no size set, the editor keeps the medium insets it always had.
+        assert_eq!(top_inset(cx, None), (medium, rows));
+        for size in [Size::XSmall, Size::Small, Size::Large] {
+            let (inset, line_height) = top_inset(cx, Some(size));
+            assert_eq!(
+                medium - inset,
+                Size::Medium.input_py() - size.input_py(),
+                "{size:?}"
+            );
+            // Only the insets change, not the font.
+            assert_eq!(line_height, rows, "{size:?}");
+        }
+    }
+
     #[gpui::test]
     fn language_config_works_without_render_sync(cx: &mut TestAppContext) {
         use crate::input::{AutoClosingPair, language_config::LanguageConfig, set_language_config};

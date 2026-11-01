@@ -10,7 +10,7 @@ maturity: [preview]
 脚本引擎位于一条内部接口之后。这条分界线（seam）之上的一切——元素描述 arena、把描述变成真实元素的 `materialize`、CallScope、样式表、主题、能力模型、浮层 Host 、hot-reload——都与引擎无关，只有引擎模块知道脚本值长什么样。
 
 ```bash
-cargo run -p gpui-shell -- examples/js_todolist
+cargo run -p gpui-shell -- run examples/js_todolist
 ```
 
 [QuickJS](https://github.com/quickjs-ng/quickjs) 经由 [`rquickjs`](https://github.com/DelSkayn/rquickjs) 随发行版一起提供——后者 vendored 的是 `quickjs-ng` 这个分支——它也是今天唯一的引擎。它仍然放在 `quickjs` 这个 cargo feature 之后，不启用任何引擎构建是**编译错误**，而不是编出一个什么都不导出的 crate。

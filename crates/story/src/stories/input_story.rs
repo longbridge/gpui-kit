@@ -10,6 +10,7 @@ pub fn init(_: &mut App) {}
 
 pub struct InputStory {
     tokens: Entity<super::input_tokens::TokenExample>,
+    completion: Entity<super::input_completion::CompletionExample>,
     input1: Entity<InputState>,
     input2: Entity<InputState>,
     input_esc: Entity<InputState>,
@@ -261,6 +262,7 @@ impl InputStory {
 
         Self {
             tokens: super::input_tokens::TokenExample::new(false, window, cx),
+            completion: super::input_completion::CompletionExample::new(window, cx),
             input1,
             input2,
             input_esc,
@@ -619,5 +621,11 @@ impl Render for InputStory {
             .child(section("Atomic inline tokens")
                 .description("References keep their identity through selection, deletion and undo. Copy returns the underlying text.")
                 .w_full().child(self.tokens.clone()))
+            .child(
+                section("Completion")
+                    .description("The application owns the candidates, the menu and the keys it captures; type $ to complete a variable.")
+                    .w_128()
+                    .child(self.completion.clone()),
+            )
     }
 }

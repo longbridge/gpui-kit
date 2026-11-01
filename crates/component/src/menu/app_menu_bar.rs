@@ -5,12 +5,13 @@ use crate::{
     global_state::GlobalState,
     h_flex,
     menu::PopupMenu,
+    scroll::ScrollableMask,
 };
 use gpui::{
     App, AppContext as _, ClickEvent, Context, DismissEvent, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, MouseButton, OwnedMenu, ParentElement,
-    Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, anchored,
-    deferred, div, prelude::FluentBuilder, px,
+    Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    Window, anchored, deferred, div, prelude::FluentBuilder, px,
 };
 
 const CONTEXT: &str = "AppMenuBar";
@@ -27,6 +28,7 @@ pub struct AppMenuBar {
     menus: Vec<Entity<AppMenu>>,
     selected_index: Option<usize>,
     action_context: Option<FocusHandle>,
+    scroll_handle: ScrollHandle,
 }
 
 impl AppMenuBar {
@@ -37,6 +39,7 @@ impl AppMenuBar {
                 selected_index: None,
                 action_context: None,
                 menus: Vec::new(),
+                scroll_handle: ScrollHandle::new(),
             };
             this.reload(cx);
             this
@@ -118,18 +121,25 @@ impl AppMenuBar {
 
 impl Render for AppMenuBar {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .id("app-menu-bar")
-            .role(Role::MenuBar)
-            .key_context(CONTEXT)
-            .on_action(cx.listener(Self::on_move_left))
-            .on_action(cx.listener(Self::on_move_right))
-            .on_action(cx.listener(Self::on_cancel))
+        div()
+            .relative()
             .size_full()
-            .gap_x_1()
-            .overflow_x_scroll()
-            .lock_scroll_axis()
-            .children(self.menus.clone())
+            .child(
+                h_flex()
+                    .id("app-menu-bar")
+                    .role(Role::MenuBar)
+                    .key_context(CONTEXT)
+                    .on_action(cx.listener(Self::on_move_left))
+                    .on_action(cx.listener(Self::on_move_right))
+                    .on_action(cx.listener(Self::on_cancel))
+                    .size_full()
+                    .gap_x_1()
+                    .overflow_x_scroll()
+                    .lock_scroll_axis()
+                    .track_scroll(&self.scroll_handle)
+                    .children(self.menus.clone()),
+            )
+            .child(ScrollableMask::vertical_wheel(&self.scroll_handle))
     }
 }
 
@@ -332,6 +342,7 @@ mod tests {
                     menus: Vec::new(),
                     selected_index: None,
                     action_context: None,
+                    scroll_handle: ScrollHandle::new(),
                 }),
                 first_focus,
                 second_focus,

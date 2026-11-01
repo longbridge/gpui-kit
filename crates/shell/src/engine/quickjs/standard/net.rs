@@ -1,3 +1,4 @@
+use crate::engine::quickjs::js_error;
 use std::{
     io::{Read as _, Write as _},
     net::{Shutdown, TcpStream},
@@ -6,7 +7,7 @@ use std::{
 };
 
 use rquickjs::{
-    Ctx, Exception, IntoJs, Object, Promise, Result, TypedArray, Value,
+    Ctx, IntoJs, Object, Promise, Result, TypedArray, Value,
     function::{Func, Opt},
     module::{Declarations, Exports, ModuleDef},
 };
@@ -40,7 +41,7 @@ impl ModuleDef for NetModule {
 fn connect<'js>(ctx: Ctx<'js>, host_name: String, port: u16) -> Result<Promise<'js>> {
     let normalized = host_name.to_ascii_lowercase();
     if !host::capabilities().may_reach(&normalized) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             &ctx,
             &format!(
                 "network access to `{normalized}` is not granted; add it to capabilities.network.hosts"
@@ -91,7 +92,7 @@ impl<'js> IntoJs<'js> for Socket {
             "write",
             Func::from(move |ctx: Ctx<'js>, data: String| -> Result<Promise<'js>> {
                 if data.len() > IO_LIMIT {
-                    return Err(Exception::throw_range(
+                    return Err(js_error::range_error(
                         &ctx,
                         &format!("socket write exceeded the {IO_LIMIT} byte limit"),
                     ));
@@ -113,7 +114,7 @@ impl<'js> IntoJs<'js> for Socket {
                 move |ctx: Ctx<'js>, size: Opt<usize>| -> Result<Promise<'js>> {
                     let size = size.0.unwrap_or(64 * 1024);
                     if size > IO_LIMIT {
-                        return Err(Exception::throw_range(
+                        return Err(js_error::range_error(
                             &ctx,
                             &format!("socket read exceeded the {IO_LIMIT} byte limit"),
                         ));

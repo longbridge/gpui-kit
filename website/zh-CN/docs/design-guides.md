@@ -473,6 +473,8 @@ Dense 不等于拥挤。在 table、tree、command palette、editor 与 dock 中
 
 ## 国际化与平台适配
 
+无障碍（A11y）名称和标签可以保持英文，无需本地化。为操作某个条目的控件命名时，保留条目自身的标签，即使该标签已经本地化。这项例外不适用于可见界面文案。
+
 文案必须承受扩展、CJK 排版和不同快捷键写法。不要按一条英文 label 固定控件宽度；不要把文字放进 raster asset；不要拼接翻译片段；只有存在 tooltip 等恢复路径时才截断 label。
 
 尊重有意义的平台差异：Command/Control、原生窗口装饰、系统 appearance、scrollbar、menu 和 notification 能力。各平台的信息架构应稳定，但不能为了表面像素一致而消除用户熟悉的平台行为。

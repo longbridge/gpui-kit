@@ -251,6 +251,17 @@ let state = cx.new(|cx| {
 });
 ```
 
+### 修饰键点击
+
+按住 ⌘（Windows 和 Linux 上为 Ctrl）或 Shift 点击行时，表格会像普通点击一样选中该行。如果 delegate 自己维护多行选择并处理这些点击（通常在鼠标按下时），请关闭表格对这类点击的选择，避免覆盖 delegate 的选择：
+
+```rust
+let state = cx.new(|cx| {
+    TableState::new(delegate, window, cx)
+        .select_on_modifier_click(false)
+});
+```
+
 ### 单元格选择
 
 启用 `cell_selectable(true)` 后：
@@ -328,6 +339,27 @@ cx.subscribe_in(&state, window, |view, table, event, _, cx| {
 }).detach();
 ```
 
+### 按内容自动调整列宽
+
+当 delegate 实现了 `TableDelegate::fit_column` 时，双击列宽调整手柄会把该列调整为其最宽内容的宽度。`fit_column` 返回内容本身的宽度，表格会加上单元格内边距，按列的 `min_width` 和 `max_width` 限制，并发出 `TableEvent::ColumnWidthsChanged`。默认返回 `None`，此时列宽保持不变。可排序列的表头还包含表格绘制的排序图标（0.75rem 图标，两侧各 2 px 内边距），测量表头时需要计入。
+
+```rust
+impl TableDelegate for MyTableDelegate {
+    fn fit_column(
+        &mut self,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> Option<Pixels> {
+        // 用 `window.text_system().shape_line(..)` 测量 `col_ix` 的表头和每一行的文本，
+        // 返回其中最宽的宽度。
+        Some(self.widest_text(col_ix, window, cx))
+    }
+}
+```
+
+也可以在代码中调用 `TableState::fit_col(col_ix, window, cx)`，并用 `TableState::col_width(col_ix)` 读取列当前的绘制宽度。
+
 ## 无限加载
 
 如果你的数据来自分页接口或流式加载，可以在 delegate 中实现按需加载：
@@ -361,6 +393,7 @@ DataTable::new(&state)
     .header_row_height(px(48.))
     .stripe(true)
     .bordered(true)
+    .fixed_cols_border(true)
     .scrollbar_visible(true, true)
 ```
 
@@ -370,7 +403,7 @@ DataTable::new(&state)
 
 - `↑/↓` 在行之间移动
 - `←/→` 在列之间移动
-- `Home` / `End` 跳到首尾
+- `Home` / `End` 跳到第一行或最后一行
 - `PageUp/PageDown` 按页移动
 - `Escape` 清除选中
 
@@ -410,6 +443,8 @@ DataTable::new(&state)
 - `clear_selection(cx)`
 - `scroll_to_row(row_ix, cx)`
 - `scroll_to_col(col_ix, cx)`
+- `col_width(col_ix)` - 返回列当前的绘制宽度
+- `fit_col(col_ix, window, cx)` - 把列调整为其内容的宽度，等同于双击列宽调整手柄
 
 #### Column
 
@@ -424,6 +459,7 @@ DataTable::new(&state)
 - `resizable(bool)`
 - `movable(bool)`
 - `selectable(bool)`
+- `max_width(pixels)` - 设置拖拽调整列宽时的最大宽度，默认为 1200px；需要更宽的列时可以显式设置更大的值
 
 [DataTable]: https://docs.rs/gpui-component/latest/gpui_component/table/struct.DataTable.html
 [TableState]: https://docs.rs/gpui-component/latest/gpui_component/table/struct.TableState.html
@@ -433,3 +469,11 @@ DataTable::new(&state)
 [TableSelection]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableSelection.html
 [ColumnSort]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnSort.html
 [ColumnFixed]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnFixed.html
+
+## 滚动回弹
+
+```rust
+DataTable::new(&state).scroll_bounce(true)
+```
+
+开启 `scroll_bounce(true)` 后，超出视口高度的内容在精细像素滚动到达顶部或底部时越过边缘并弹回，例如 macOS 上的触控板或 Magic Mouse。普通鼠标滚轮产生按行滚动，不触发回弹。新的精细滚动手势或反向精细滚动会接管回弹；普通滚轮输入会取消回弹并正常滚动。逻辑滚动位置始终限制在正常范围内，滚动条保持固定，表头也保持固定。内容未超出视口时不回弹。iOS、Android 和 macOS 默认开启（与系统自带的滚动视图一致），其他平台默认关闭；系统要求减弱动态效果时不产生位移。

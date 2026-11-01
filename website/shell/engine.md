@@ -10,7 +10,7 @@ maturity: [preview]
 The scripting engine sits behind one internal interface. Everything above it — the element description arena, the materializer, the call scope, the style table, the theme, the capability model, the overlay host, hot-reload — is engine independent, and only the engine module knows what a script value is.
 
 ```bash
-cargo run -p gpui-shell -- examples/js_todolist
+cargo run -p gpui-shell -- run examples/js_todolist
 ```
 
 [QuickJS](https://github.com/quickjs-ng/quickjs), via [`rquickjs`](https://github.com/DelSkayn/rquickjs) — which vendors the `quickjs-ng` fork — is the engine that ships and the only one today. It sits behind a `quickjs` cargo feature all the same, and building with no engine is a **compile error** rather than a crate that exports nothing.

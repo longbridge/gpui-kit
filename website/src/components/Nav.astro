@@ -82,6 +82,8 @@ function swapLocale(path: string) {
 const langSwitchHref = langSwitchOverride ?? swapLocale(currentPath);
 const langLabel = isZh ? 'EN' : '中';
 const resourcesLabel = isZh ? '资源' : 'Resources';
+const projectsLabel = isZh ? '切换项目' : 'Switch project';
+const nativeShellUrl = isZh ? 'https://nsh.dev/zh-CN' : 'https://nsh.dev';
 const versionsLabel = isZh ? '版本' : 'Versions';
 const currentVersionLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 ---
@@ -95,6 +97,40 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
       </svg>
       <span>GPUI Kit</span>
     </a>
+
+    <details class="site-nav__projects">
+      <summary aria-label={projectsLabel} title={projectsLabel}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </summary>
+      <div class="site-nav__projects-menu">
+        <a href={base} class="is-current" aria-current="true">
+          <svg class="site-nav__logo site-nav__project-logo" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M4 4h24v5H10v14h18v5H4V4Z" />
+            <path d="M16 13h12v10h-5v-5h-7v-5Z" />
+          </svg>
+          <div class="site-nav__project-copy">
+            <strong>GPUI Kit</strong>
+            <span>{isZh ? 'GPUI 桌面应用的组件与工具集' : 'Components and tools for GPUI desktop apps'}</span>
+          </div>
+        </a>
+        <a href={nativeShellUrl} target="_blank" rel="noopener noreferrer">
+          <svg class="site-nav__project-logo site-nav__native-shell-logo" viewBox="14 12 100 100" aria-hidden="true">
+            <defs>
+              <linearGradient id="nav-native-shell-gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" class="site-nav__native-shell-top" />
+                <stop offset="1" class="site-nav__native-shell-bottom" />
+              </linearGradient>
+            </defs>
+            <path d="M30 100 V58 a34 34 0 0 1 68 0 V100" fill="none" stroke="url(#nav-native-shell-gradient)" stroke-width="20" stroke-linecap="round" />
+            <circle cx="64" cy="76" r="11" fill="currentColor" />
+          </svg>
+          <div class="site-nav__project-copy">
+            <strong>Native Shell</strong>
+            <span>{isZh ? '由 AI 生成、原生渲染的 UI' : 'AI-generated UI, rendered natively'}</span>
+          </div>
+        </a>
+      </div>
+    </details>
 
     <div class="site-nav__links" id="site-nav-links">
       {navLinks.map(link => (
@@ -197,6 +233,16 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
 </nav>
 
 <script>
+  const projects = document.querySelector<HTMLDetailsElement>('.site-nav__projects');
+  document.addEventListener('click', (event) => {
+    if (projects?.open && !projects.contains(event.target as Node)) projects.open = false;
+  });
+  projects?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    projects.open = false;
+    projects.querySelector('summary')?.focus();
+  });
+
   // Visibility is owned by CSS (`:hover`, `:focus-within`), so `aria-expanded`
   // is derived from the element rather than tracked separately — two sources of
   // truth drift apart. Escape adds the one state CSS cannot express: dismissed

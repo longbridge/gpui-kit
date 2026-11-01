@@ -105,7 +105,7 @@ cargo run -p hello_world
 
 ## 提升开发模式运行性能
 
-Rust Debug 构建下，GPUI、组件库、布局和文字渲染相关 crate 基本没有优化，因此通过 `cargo run` 启动的应用，其渲染与交互性能会明显低于 release build。下面的配置只优化这些框架依赖，应用自身代码仍保持 Debug mode，可以继续使用正常的调试流程。
+Rust Debug 构建下，GPUI、组件库、布局和文字渲染相关 crate 基本没有优化，因此通过 `cargo run` 启动的应用，其渲染与交互性能会明显低于 release build。下面的配置只优化这些框架依赖，应用自身代码仍保持 Debug mode，可以继续使用正常的调试流程。不要加入 `gpui-pre-macros` 这类 proc-macro crate：它们只在编译期运行，优化它们只会增加编译时间，不会让应用运行得更快。
 
 这个配置**不会加快编译**。启用优化后，这些依赖的编译时间可能更长，尤其是首次构建；它改善的是开发过程中运行 GPUI 应用时的性能。Cargo 的[package profile override](https://doc.rust-lang.org/cargo/reference/profiles.html#overrides) 只在应用或 workspace 根目录的 `Cargo.toml` 中生效：
 
@@ -115,7 +115,6 @@ gpui-pre = { opt-level = 3 }
 gpui-component = { opt-level = 3 }
 gpui-kit = { opt-level = 3 }
 gpui-kit-assets = { opt-level = 3 }
-gpui-pre-macros = { opt-level = 3 }
 gpui-pre-platform = { opt-level = 3 }
 rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }

@@ -148,6 +148,14 @@ NumberInput::new(&input)
 NumberInput::new(&input).disabled(true)
 ```
 
+### 无障碍名称
+
+数值输入本身没有可见文字，屏幕阅读器无法将它与其他输入框区分开。用 `.accessibility_label(...)` 设置名称，通常与旁边显示的标签一致；这不会添加可见标签：
+
+```rust
+NumberInput::new(&input).accessibility_label("Font size")
+```
+
 ### 关闭默认外观
 
 ```rust
@@ -219,6 +227,7 @@ NumberInput::decrement(&number_input, window, cx);
 | `prefix(el)` | 添加前缀元素 |
 | `suffix(el)` | 添加后缀元素 |
 | `appearance(bool)` | 开启或关闭默认样式 |
+| `accessibility_label(str)` | 屏幕阅读器朗读的名称 |
 | `disabled(bool)` | 设置禁用状态 |
 | `increment(state, window, cx)` | 以代码方式递增 |
 | `decrement(state, window, cx)` | 以代码方式递减 |

@@ -342,3 +342,42 @@ markdown(source)
         gpui_kit::div().child(format!("Run {}", code_block.lang().unwrap_or_default()))
     })
 ```
+
+## 行内代码样式
+
+通过 `TextView::inline_code_style(StyleRefinement)` 覆盖行内代码样式。覆盖在主题、显式样式和表面颜色适配之后应用；未指定的属性保留默认值，指定的颜色在反色表面上也保持不变。
+
+现有 `TextViewStyle::inline_code(HighlightStyle)` 保持兼容；视图上的覆盖样式具有更高优先级，公开的 `TextViewStyle` 结构字段不变。
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "Run `cargo build` first.")
+    .inline_code_style(
+        StyleRefinement::default()
+            .text_size(rems(1.))
+            .px(rems(0.25))
+            .border_1()
+            .border_color(cx.theme().border),
+    )
+```
+
+支持字体、字号、字体特性、后备字体、字重、斜体、文字颜色、下划线、删除线、背景、边框宽度／颜色／线型、圆角和内边距。字号使用像素或相对于窗口的 rem；非有限值和非正值会被忽略。默认字号仍为周围文字的 0.875 倍，默认不绘制边框。内边距和边框宽度参与换行与表格列宽计算。外边距、定位、flex、显式容器尺寸、overflow 和交互属性不参与渲染；行高由段落控制。
+
+## 列表与引用块样式
+
+通过 `TextView::list_style(StyleRefinement)` 和 `blockquote_style(StyleRefinement)` 覆盖列表标记和引用块样式。覆盖在主题、显式样式和表面颜色适配之后应用；未指定的属性保留默认值，指定的颜色在反色表面上也保持不变。公开的 `TextViewStyle` 结构字段不变。
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(cx.theme().primary))
+    .blockquote_style(StyleRefinement::default().border_color(cx.theme().primary))
+```
+
+列表标记样式作用于每个列表项的项目符号或序号列，叠加在默认样式之上：次要文字颜色、以列表缩进为最小宽度、文字右对齐、右内边距为缩进的 0.3 倍。颜色、字体、字号、字重等文字属性用于标记本身；宽度、内边距等盒模型属性会改变标记列。其文字颜色也用于未勾选任务复选框的边框；已勾选的复选框仍使用链接颜色。
+
+引用块样式作用于引用容器，叠加在默认样式之上：次要文字颜色、边框颜色的 2px 左边框、左内边距为正文字号的 0.9 倍。边框宽度和颜色用于引用竖线；文字属性、背景、内边距和圆角作用于引用及其内部内容。子块显式设置的样式仍优先，例如标题和表格的字号。其他元素属性与普通 `div` 一样作用于容器。代码块、表格、分隔线和已完成任务仍使用共享的次要文字颜色和边框颜色。

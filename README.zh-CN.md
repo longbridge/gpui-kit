@@ -19,7 +19,7 @@ gpui-kit             应用唯一需要依赖的 crate
 └── gpui-component   GPUI Component：完整的带样式 UI 系统
 ```
 
-`gpui-kit` 会固定配套的 GPUI 版本并导出 GPUI、base、component 和 assets，Rust 应用只需声明这一个依赖。JavaScript 扩展宿主另行依赖 `gpui-shell`；`gpui-component-shell` 提供带样式的组件目录。
+`gpui-kit` 会固定配套的 GPUI 版本并导出 GPUI、base、component 和 assets，Rust 应用只需声明这一个依赖。JavaScript 扩展宿主另行依赖 `gpui-shell`；它默认开启的 `components` feature 提供带样式的组件目录。
 
 ## 特性
 
@@ -224,6 +224,10 @@ cargo run -p window_title
 ## 与其他框架对比
 
 请查看站点上的[与 Iced、egui、Qt 6 的对比](https://gpui-kit.com/zh-CN/docs/comparison)。
+
+## 相关项目:Native Shell
+
+[Native Shell](https://nsh.dev/zh-CN)([源码](https://github.com/longbridge/native-shell))是我们的兄弟项目,由 AI 生成 UI 并在 iOS、Android、Linux(GTK)和 macOS(AppKit)上原生渲染。它的 GPUI 桌面后端正在开发中,将基于 GPUI Kit 构建。
 
 ## 许可证
 

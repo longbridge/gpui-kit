@@ -257,6 +257,16 @@ state.update(cx, |state, cx| {
 });
 ```
 
+### Scroll bounce
+
+```rust
+Select::new(&state).scroll_bounce(true)
+```
+
+`scroll_bounce(true)` lets the dropdown list stretch at its ends and spring
+back with precise pixel scrolling, such as a trackpad or Magic Mouse on macOS,
+as [List](./list.md#scroll-bounce) does. It is enabled by default on iOS, Android and macOS, whose own scroll views bounce, and disabled elsewhere.
+
 ## Examples
 
 ### Language Selector

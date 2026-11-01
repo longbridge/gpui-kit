@@ -11,9 +11,9 @@ use gpui::{
     Anchor, App, Axis, Background, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element,
     ElementId, EntityId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
     IntoElement, IsZero, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style,
-    TouchDragEvent, TouchPhase, UniformListScrollHandle, Window, fill, point,
-    prelude::FluentBuilder, px, relative, size,
+    PaintQuad, Pixels, Point, Position, ScrollEvent, ScrollHandle, Size, Style, TouchDragEvent,
+    TouchPhase, UniformListScrollHandle, Window, fill, point, prelude::FluentBuilder, px, relative,
+    size,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -819,6 +819,8 @@ pub struct Scrollbar {
     scroll_handle: Rc<dyn ScrollbarHandle>,
     scroll_size: Option<Size<Pixels>>,
     viewport_bounds: Option<Bounds<Pixels>>,
+    // Scroll range may use a smaller viewport than the padded track bounds.
+    scroll_viewport_size: Option<Size<Pixels>>,
     use_layout_bounds: bool,
     /// Maximum frames per second for scrolling by drag. Default is 120 FPS.
     ///
@@ -843,6 +845,7 @@ impl Scrollbar {
             max_fps: 120,
             scroll_size: None,
             viewport_bounds: None,
+            scroll_viewport_size: None,
             use_layout_bounds: false,
             styles: ScrollbarStyles::default(),
         }
@@ -895,6 +898,11 @@ impl Scrollbar {
         self
     }
 
+    pub(crate) fn scroll_viewport_size(mut self, size: Size<Pixels>) -> Self {
+        self.scroll_viewport_size = Some(size);
+        self
+    }
+
     /// Use the scrollbar element's layout bounds as its viewport.
     ///
     /// This is useful for composite widgets whose scrollbar viewport excludes
@@ -941,6 +949,11 @@ impl Scrollbar {
     #[doc(hidden)]
     pub const fn width() -> Pixels {
         WIDTH
+    }
+
+    /// The width of a track this theme gives scrollbars without styles of their own.
+    pub(crate) fn themed_track_width(cx: &App) -> Pixels {
+        cx.theme().scrollbar.styles().track.width.unwrap_or(WIDTH)
     }
 
     fn resolve_track(
@@ -1201,21 +1214,22 @@ struct ThumbGeometry {
 impl ThumbGeometry {
     fn new(
         origin: Pixels,
-        container: Pixels,
+        track_size: Pixels,
+        viewport_size: Pixels,
         content: Pixels,
         margin_end: Pixels,
         inset: Pixels,
         min_length: Pixels,
     ) -> Self {
-        let track = (container - margin_end).max(px(0.));
-        let logical_length = (container / content * container).max(min_length).min(track);
+        let track = (track_size - margin_end).max(px(0.));
+        let logical_length = (viewport_size / content * track).max(min_length).min(track);
         let inset = inset.clamp(px(0.), logical_length / 2.);
         Self {
             origin,
             inset,
             length: logical_length - inset * 2.,
             travel: track - logical_length,
-            extent: content - container,
+            extent: content - viewport_size,
         }
     }
 
@@ -1370,6 +1384,7 @@ impl Element for Scrollbar {
         let scroll_size = self
             .scroll_size
             .unwrap_or(self.scroll_handle.content_size());
+        let scroll_viewport_size = self.scroll_viewport_size.unwrap_or(hitbox.size);
 
         for axis in self.axis.all().into_iter() {
             let is_vertical = axis.is_vertical();
@@ -1379,19 +1394,22 @@ impl Element for Scrollbar {
                 .width
                 .or(cx.theme().scrollbar.styles().track.width)
                 .unwrap_or(WIDTH);
-            let (scroll_area_size, container_size, scroll_position) = if is_vertical {
-                (
-                    scroll_size.height,
-                    hitbox.size.height,
-                    self.scroll_handle.offset().y,
-                )
-            } else {
-                (
-                    scroll_size.width,
-                    hitbox.size.width,
-                    self.scroll_handle.offset().x,
-                )
-            };
+            let (scroll_area_size, container_size, scroll_viewport_size, scroll_position) =
+                if is_vertical {
+                    (
+                        scroll_size.height,
+                        hitbox.size.height,
+                        scroll_viewport_size.height,
+                        self.scroll_handle.offset().y,
+                    )
+                } else {
+                    (
+                        scroll_size.width,
+                        hitbox.size.width,
+                        scroll_viewport_size.width,
+                        self.scroll_handle.offset().x,
+                    )
+                };
 
             // The horizontal scrollbar is set avoid overlapping with the vertical scrollbar, if the vertical scrollbar is visible.
             let margin_end = if has_both && !is_vertical {
@@ -1401,7 +1419,7 @@ impl Element for Scrollbar {
             };
 
             // Hide scrollbar, if the scroll area is smaller than the container.
-            if scroll_area_size <= container_size {
+            if scroll_area_size <= scroll_viewport_size {
                 has_both = false;
                 continue;
             }
@@ -1484,6 +1502,7 @@ impl Element for Scrollbar {
             let geometry = ThumbGeometry::new(
                 origin,
                 container_size,
+                scroll_viewport_size,
                 scroll_area_size,
                 margin_end,
                 inset,
@@ -1493,6 +1512,7 @@ impl Element for Scrollbar {
             let active_geometry = ThumbGeometry::new(
                 origin,
                 container_size,
+                scroll_viewport_size,
                 scroll_area_size,
                 margin_end,
                 active_inset,
@@ -1590,7 +1610,6 @@ impl Element for Scrollbar {
                         radius = px(0.);
                     }
                     radius = clamp_thumb_radius(radius, state.thumb_fill_bounds);
-                    let bounds = state.bounds;
                     let thumb_bounds = state.thumb_bounds;
                     let geometry = state.geometry;
                     let active_geometry = state.active_geometry;
@@ -1642,7 +1661,7 @@ impl Element for Scrollbar {
                         let state = scrollbar_state.clone();
                         let scroll_handle = self.scroll_handle.clone();
 
-                        move |event: &ScrollWheelEvent, phase, _, cx| {
+                        move |event: &ScrollEvent, phase, _, cx| {
                             if phase.bubble() && hitbox_bounds.contains(&event.position) {
                                 if scroll_handle.offset() != state.get().last_scroll_offset {
                                     state.set(state.get().with_last_scroll(
@@ -1710,11 +1729,15 @@ impl Element for Scrollbar {
 
                     if is_visible {
                         window.on_mouse_event({
+                            // The hitbox rather than the bounds, so that an
+                            // element above the bar (a menu, a dialog) keeps
+                            // the press.
+                            let bar_hitbox = state.bar_hitbox.clone();
                             let state = scrollbar_state.clone();
                             let scroll_handle = self.scroll_handle.clone();
 
-                            move |event: &MouseDownEvent, phase, _, cx| {
-                                if phase.bubble() && bounds.contains(&event.position) {
+                            move |event: &MouseDownEvent, phase, window, cx| {
+                                if phase.bubble() && bar_hitbox.is_hovered(window) {
                                     cx.stop_propagation();
 
                                     if thumb_bounds.contains(&event.position) {
@@ -1751,6 +1774,7 @@ impl Element for Scrollbar {
                     }
 
                     window.on_mouse_event({
+                        let bar_hitbox = state.bar_hitbox.clone();
                         let scroll_handle = self.scroll_handle.clone();
                         let state = scrollbar_state.clone();
                         let max_fps_duration = Duration::from_secs_f64(1. / self.max_fps as f64);
@@ -1761,7 +1785,8 @@ impl Element for Scrollbar {
                             // we need to update the hovered state and increase the last_scroll_time.
                             let need_hover_to_update = is_hover_to_show || is_visible;
                             // Update hovered state for scrollbar
-                            if bounds.contains(&event.position) && need_hover_to_update {
+                            let bar_hovered = bar_hitbox.is_hovered(window);
+                            if bar_hovered && need_hover_to_update {
                                 let hover_changed = state.get().hovered_axis != Some(axis);
                                 state.set(state.get().with_hovered(Some(axis), Instant::now()));
                                 notify |= hover_changed;
@@ -1772,6 +1797,7 @@ impl Element for Scrollbar {
 
                             // Update hovered state for scrollbar thumb
                             if tracks_thumb_hover(mode, is_visible)
+                                && bar_hovered
                                 && thumb_bounds.contains(&event.position)
                             {
                                 if state.get().hovered_on_thumb != Some(axis) {
@@ -1850,8 +1876,8 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use gpui::{
-        Context, Modifiers, MouseButton, ParentElement as _, Render, Styled as _, TestAppContext,
-        VisualTestContext, div,
+        Context, InteractiveElement as _, Modifiers, MouseButton, ParentElement as _, Render,
+        Styled as _, TestAppContext, VisualTestContext, div,
     };
 
     #[test]
@@ -2256,14 +2282,17 @@ mod tests {
         handle: TestHandle,
         axis: ScrollbarAxis,
         mode: ScrollbarMode,
+        scroll_viewport_size: Option<Size<Pixels>>,
     }
 
     impl Render for ScrollbarHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div()
-                .relative()
-                .size(px(100.))
-                .child(Scrollbar::new(&self.handle).axis(self.axis).mode(self.mode))
+            let mut scrollbar = Scrollbar::new(&self.handle).axis(self.axis).mode(self.mode);
+            if let Some(size) = self.scroll_viewport_size {
+                scrollbar = scrollbar.scroll_viewport_size(size);
+            }
+
+            div().relative().size(px(100.)).child(scrollbar)
         }
     }
 
@@ -2276,10 +2305,50 @@ mod tests {
         let handle = TestHandle::new(content_size);
         let (_, cx) = cx.add_window_view({
             let handle = handle.clone();
-            move |_, _| ScrollbarHarness { handle, axis, mode }
+            move |_, _| ScrollbarHarness {
+                handle,
+                axis,
+                mode,
+                scroll_viewport_size: None,
+            }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         (cx, handle)
+    }
+
+    #[gpui::test]
+    fn thumb_drag_reaches_content_end_when_track_includes_padding(cx: &mut TestAppContext) {
+        let handle = TestHandle::new(size(px(100.), px(160.)));
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollbarHarness {
+                handle,
+                axis: ScrollbarAxis::Vertical,
+                mode: ScrollbarMode::Always,
+                scroll_viewport_size: Some(size(px(100.), px(80.))),
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        cx.simulate_mouse_down(
+            point(px(95.), px(20.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(
+            point(px(95.), px(99.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_up(
+            point(px(95.), px(99.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+
+        assert_eq!(handle.offset().y, px(-80.));
     }
 
     #[test]
@@ -2515,6 +2584,78 @@ mod tests {
         assert_eq!(handle.offset(), Point::default());
     }
 
+    /// A vertical scrollbar with an occluding element over part of it, as a
+    /// menu or dialog would be.
+    struct CoveredHarness {
+        handle: TestHandle,
+        mode: ScrollbarMode,
+        cover: Bounds<Pixels>,
+    }
+
+    impl Render for CoveredHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .relative()
+                .size(px(100.))
+                .child(
+                    Scrollbar::new(&self.handle)
+                        .axis(ScrollbarAxis::Vertical)
+                        .mode(self.mode),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left(self.cover.left())
+                        .top(self.cover.top())
+                        .w(self.cover.size.width)
+                        .h(self.cover.size.height)
+                        .occlude(),
+                )
+        }
+    }
+
+    fn covered_harness(
+        cx: &mut TestAppContext,
+        mode: ScrollbarMode,
+        cover: Bounds<Pixels>,
+    ) -> (&mut VisualTestContext, TestHandle) {
+        let handle = TestHandle::new(size(px(100.), px(500.)));
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| CoveredHarness {
+                handle,
+                mode,
+                cover,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (cx, handle)
+    }
+
+    #[gpui::test]
+    fn a_press_on_an_element_over_the_track_is_left_to_it(cx: &mut TestAppContext) {
+        let cover = Bounds::new(point(px(50.), px(60.)), size(px(50.), px(40.)));
+        let (cx, handle) = covered_harness(cx, ScrollbarMode::Always, cover);
+        cx.simulate_click(point(px(95.), px(80.)), Modifiers::default());
+        assert_eq!(handle.offset(), Point::default());
+
+        // The track left uncovered still takes a press.
+        cx.simulate_click(point(px(95.), px(50.)), Modifiers::default());
+        assert!(handle.offset().y < px(0.));
+    }
+
+    #[gpui::test]
+    fn hovering_an_element_over_a_hover_scrollbar_does_not_reveal_it(cx: &mut TestAppContext) {
+        let cover = Bounds::new(point(px(50.), px(0.)), size(px(50.), px(50.)));
+        let (cx, handle) = covered_harness(cx, ScrollbarMode::Hover, cover);
+        cx.simulate_mouse_move(point(px(95.), px(20.)), None, Modifiers::default());
+        cx.run_until_parked();
+
+        // Uncovered, but the bar never showed, so it takes no press.
+        cx.simulate_click(point(px(95.), px(80.)), Modifiers::default());
+        assert_eq!(handle.offset(), Point::default());
+    }
+
     #[gpui::test]
     fn hovering_reveals_scrollbar_for_track_interaction(cx: &mut TestAppContext) {
         let (cx, handle) = harness(
@@ -2540,6 +2681,7 @@ mod tests {
                 handle,
                 axis: ScrollbarAxis::Vertical,
                 mode: ScrollbarMode::Always,
+                scroll_viewport_size: None,
             }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
@@ -2605,7 +2747,8 @@ mod tests {
 
     #[test]
     fn full_track_thumb_does_not_reset_the_scroll_offset() {
-        let geometry = ThumbGeometry::new(px(20.), px(40.), px(500.), px(0.), px(4.), px(64.));
+        let geometry =
+            ThumbGeometry::new(px(20.), px(40.), px(40.), px(500.), px(0.), px(4.), px(64.));
         let offset = point(px(0.), px(-100.));
         assert_eq!(
             geometry.drag_offset(
@@ -2615,6 +2758,26 @@ mod tests {
                 offset
             ),
             offset
+        );
+    }
+
+    #[test]
+    fn thumb_geometry_maps_content_viewport_to_padded_track() {
+        let geometry =
+            ThumbGeometry::new(px(20.), px(96.), px(80.), px(160.), px(0.), px(0.), px(0.));
+
+        assert_eq!(geometry.length, px(48.));
+        assert_eq!(geometry.travel, px(48.));
+        assert_eq!(geometry.extent, px(80.));
+        assert_eq!(geometry.offset(px(68.), px(0.)), px(-80.));
+
+        let barely_overflowing =
+            ThumbGeometry::new(px(20.), px(96.), px(80.), px(85.), px(0.), px(0.), px(0.));
+        assert_eq!(barely_overflowing.extent, px(5.));
+        assert!(barely_overflowing.travel > px(0.));
+        assert_eq!(
+            barely_overflowing.offset(px(20.) + barely_overflowing.travel, px(0.)),
+            px(-5.)
         );
     }
 

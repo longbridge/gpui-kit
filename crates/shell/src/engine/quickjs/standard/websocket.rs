@@ -1,3 +1,4 @@
+use crate::engine::quickjs::js_error;
 use std::{
     collections::VecDeque,
     net::TcpStream,
@@ -11,7 +12,7 @@ use std::{
 };
 
 use rquickjs::{
-    Ctx, Exception, FromJs, IntoJs, Object, Promise, Result, TypedArray, Value,
+    Ctx, FromJs, IntoJs, Object, Promise, Result, TypedArray, Value,
     function::{Func, Opt},
     module::{Declarations, Exports, ModuleDef},
 };
@@ -64,7 +65,7 @@ impl<'js> FromJs<'js> for ConnectOptions {
             return Ok(Self::default());
         }
         let Some(object) = value.into_object() else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "WebSocket.connect(url, options) expects an object with headers",
             ));
@@ -72,7 +73,7 @@ impl<'js> FromJs<'js> for ConnectOptions {
         for key in object.keys::<String>() {
             let key = key?;
             if key != "headers" {
-                return Err(Exception::throw_type(
+                return Err(js_error::type_error(
                     ctx,
                     &format!(
                         "unknown option `{key}` for WebSocket.connect(url, options); expected headers"
@@ -91,7 +92,7 @@ fn parse_headers<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<HeaderMap> {
         return Ok(HeaderMap::new());
     }
     let Some(object) = value.into_object() else {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "WebSocket.connect(url, options).headers expects a plain object of string values",
         ));
@@ -101,7 +102,7 @@ fn parse_headers<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<HeaderMap> {
         let (name, value) = entry?;
         let normalized = name.to_ascii_lowercase();
         if is_forbidden_handshake_header(&normalized) {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "WebSocket.connect(url, options).headers may not set handshake-control or credential header `{name}`"
@@ -109,16 +110,16 @@ fn parse_headers<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<HeaderMap> {
             ));
         }
         let name = HeaderName::from_bytes(normalized.as_bytes()).map_err(|_| {
-            Exception::throw_type(ctx, "WebSocket.connect received an invalid header name")
+            js_error::type_error(ctx, "WebSocket.connect received an invalid header name")
         })?;
         let value = String::from_js(ctx, value).map_err(|_| {
-            Exception::throw_type(
+            js_error::type_error(
                 ctx,
                 "WebSocket.connect(url, options).headers expects string header values",
             )
         })?;
         let value = HeaderValue::from_str(&value).map_err(|_| {
-            Exception::throw_type(ctx, "WebSocket.connect received an invalid header value")
+            js_error::type_error(ctx, "WebSocket.connect received an invalid header value")
         })?;
         headers.append(name, value);
     }
@@ -134,19 +135,19 @@ fn is_forbidden_handshake_header(name: &str) -> bool {
 
 fn connect<'js>(ctx: Ctx<'js>, url: String, options: Opt<ConnectOptions>) -> Result<Promise<'js>> {
     let parsed = reqwest::Url::parse(&url)
-        .map_err(|error| Exception::throw_type(&ctx, &format!("invalid WebSocket URL: {error}")))?;
+        .map_err(|error| js_error::type_error(&ctx, &format!("invalid WebSocket URL: {error}")))?;
     if !matches!(parsed.scheme(), "ws" | "wss") {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             &ctx,
             "WebSocket.connect(url) expects a ws:// or wss:// URL",
         ));
     }
     let host_name = parsed
         .host_str()
-        .ok_or_else(|| Exception::throw_type(&ctx, "WebSocket URL has no host"))?
+        .ok_or_else(|| js_error::type_error(&ctx, "WebSocket URL has no host"))?
         .to_owned();
     if !host::capabilities().may_reach(&host_name) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             &ctx,
             &format!(
                 "network access to `{host_name}` is not granted; add it to capabilities.network.hosts"
@@ -154,7 +155,7 @@ fn connect<'js>(ctx: Ctx<'js>, url: String, options: Opt<ConnectOptions>) -> Res
         ));
     }
     let port = parsed.port_or_known_default().ok_or_else(|| {
-        Exception::throw_type(&ctx, "WebSocket URL has no port and no known default")
+        js_error::type_error(&ctx, "WebSocket URL has no port and no known default")
     })?;
     let headers = options.0.unwrap_or_default().headers;
     scheduler::blocking(&ctx, "WebSocket.connect(url)", move || {
@@ -165,6 +166,10 @@ fn connect<'js>(ctx: Ctx<'js>, url: String, options: Opt<ConnectOptions>) -> Res
             .into_client_request()
             .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
         request.headers_mut().extend(headers);
+        request
+            .headers_mut()
+            .entry(tungstenite::http::header::USER_AGENT)
+            .or_insert(HeaderValue::from_static(super::USER_AGENT));
         let operation = format!("WebSocket host {host_name}:{port}");
         let (stream, deadline) =
             network_connect::connect_tcp(&host_name, port, IO_TIMEOUT, &operation)
@@ -243,7 +248,7 @@ fn outgoing_message<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Message> {
     if value.is_string() {
         let text = String::from_js(ctx, value)?;
         if text.len() > MESSAGE_LIMIT {
-            return Err(Exception::throw_range(
+            return Err(js_error::range_error(
                 ctx,
                 &format!("WebSocket write exceeded the {MESSAGE_LIMIT} byte limit"),
             ));
@@ -252,16 +257,14 @@ fn outgoing_message<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Message> {
     }
 
     let bytes = TypedArray::<u8>::from_js(ctx, value).map_err(|_| {
-        Exception::throw_type(ctx, "WebSocket.write(data) expects a string or Uint8Array")
+        js_error::type_error(ctx, "WebSocket.write(data) expects a string or Uint8Array")
     })?;
-    let bytes = bytes
-        .as_bytes()
-        .ok_or_else(|| {
-            Exception::throw_type(ctx, "WebSocket.write(data) received a detached Uint8Array")
-        })?
-        .to_vec();
+    // SAFETY: finish copying before error creation or other JavaScript can run.
+    let bytes = unsafe { bytes.as_bytes().map(<[u8]>::to_vec) }.ok_or_else(|| {
+        js_error::type_error(ctx, "WebSocket.write(data) received a detached Uint8Array")
+    })?;
     if bytes.len() > MESSAGE_LIMIT {
-        return Err(Exception::throw_range(
+        return Err(js_error::range_error(
             ctx,
             &format!("WebSocket write exceeded the {MESSAGE_LIMIT} byte limit"),
         ));
@@ -498,7 +501,7 @@ impl<'js> IntoJs<'js> for Socket {
                     .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                     .is_err()
                 {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "WebSocket.read() already has an outstanding read",
                     ));

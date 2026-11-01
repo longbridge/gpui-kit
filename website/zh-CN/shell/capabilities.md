@@ -37,7 +37,9 @@ gpui_kit::shell::set_capabilities(
 | 退出请求 | 授予                           |
 | 网络     | **不**授予                     |
 
-因此应用可以读自己的源码与资源、使用自己的存储，除此之外没有别的。它刻意比“全部放开”要窄，因为将来安装的插件会走同一条代码路径、由 manifest 来决定授权——而一个对本地运行足够宽松的默认，继承过去就是错的默认。
+因此，没有 manifest 的应用可以读自己的源码与资源、使用自己的存储，除此之外没有别的。它刻意比“全部放开”要窄，因为将来安装的插件会走同一条代码路径、由 manifest 来决定授权——而一个对本地运行足够宽松的默认，继承过去就是错的默认。
+
+有 manifest 时，它授予的一切同样生效：上面两个目录是**追加**到它的 `fs` 根目录里，而不是替换掉它们；本地运行无论如何都会授予的 `process.exit` 也照旧。
 
 ## 拒绝信息会写明怎么修
 
@@ -107,6 +109,17 @@ module 运行之前从 Git 抓取它——`import { Title } from "omarchy-ui"`�
 
 这个块里的每项授权省略时都默认**拒绝**，只有 `storage` 默认给予——要拒绝它就写 `"storage": false`。
 
+`fs` 根目录是一个路径，或以三个 placeholder 之一开头的路径：`${pluginDir}`（应用目录）、`${dataDir}`（它的存储目录）和 `${homeDir}`（用户的主目录）。相对路径以应用目录为基准，绝对路径按原样使用。管理用户自己文件的应用，用 `${homeDir}` 申请这些文件，不必把用户名写死：
+
+```json
+"fs": {
+  "read": ["${homeDir}/.claude/skills"],
+  "write": ["${homeDir}/.claude/skills"]
+}
+```
+
+`${homeDir}` 的值与环境变量 `HOME`（Windows 上是 `USERPROFILE`）相同，但 manifest 不读取环境变量，也不展开 `~`。写成 `$HOME/…`、`${HOME}/…` 或 `~/…` 的根目录会在读取 manifest 时报错，并给出应改用的 `${homeDir}` 写法，而不是悄悄变成应用目录下的一个子目录。主目录未知时，`${homeDir}` 下的根目录不会进入授权。脚本用 `os.homedir()` 读取同一个路径，不需要授权。
+
 未知字段、非法 reverse-DNS id、显式填写但不合法的 SemVer、不兼容的 `shell-version`、逃出目录的 entry，以及未知 `${...}` placeholder 都会在代码执行前令 manifest 失效。省略 `version` 时显示为 `unknown`。省略 `shell-version` 时接受当前 runtime；显式填写时，它表示应用所需的最早兼容 gpui-shell 版本。版本不低于该要求的 runtime 都会被接受。独立 CLI 会拒绝非法 manifest，不会在假设已经不一致时继续执行 entry。
 
 每条 scoped `network.http` 规则除了 host、method 与 path 外，还会绑定请求的 scheme 与有效端口。`scheme` 默认为 `https`；`port` 默认为该 scheme 的标准端口，仅非默认 endpoint 需要显式填写。
@@ -130,11 +143,17 @@ import * as fs from "fs/promises";
 | `fs.unlink(path)`                           | —                                |
 | `fs.rmdir(path)`                            | —                                |
 | `fs.mkdir(path, options?)`                  | —                                |
+| `fs.stat(path)`                             | `Stats`，跟随符号链接            |
+| `fs.lstat(path)`                            | 符号链接本身的 `Stats`           |
+| `fs.rename(from, to)`                       | —                                |
+| `fs.readlink(path)`                         | 符号链接里存的目标               |
 
 ```js
 const source = await fs.readFile("notes.md", "utf8");
 await fs.writeFile("notes.md", source + "\n");
 ```
+
+`Stats` 提供 `isFile()`、`isDirectory()`、`isSymbolicLink()`、`size`、`mode`，以及 `Date` 形式的 `mtime`/`atime`/`birthtime` 和对应的 `…Ms` 数值；文件系统没有记录的时间读作 epoch。`stat`、`lstat` 与 `readlink` 需要读权限。`rename` 的两个路径都需要写权限，所以它无法把文件从一个只读的根里搬出去。
 
 相对路径相对某个已授权的根解析；绝对路径必须本来就在某个根之内。这套接口里的每一条路径都经过**同一个解析器**，所以不存在第二处让穿越漏洞藏身的地方。它先做归一化——`../../etc/passwd` 在到达文件系统之前就被拒绝——然后把「是否在根之内」这件事交给文件系统判定，而不是判定字符串：授权承诺的是一个**目录**，而 `data/escape/passwd` 在字面上位于根之内，一旦 `escape` 是符号链接就读到了 `/etc/passwd`。路径中已经存在的最深一段会被连同链接一起解析，其结果必须仍在根之下；解析不到任何目标的符号链接会被直接拒绝，而不是猜它指向哪里。
 
@@ -228,7 +247,7 @@ id 就是身份，所以目录被改名、被移动、被一次升级整个替�
 
 **运行时不会去某个文件里找这个 id。** 只有安装了这个应用的那一层知道它叫什么；运行时自己挑一个 manifest 去读，等于对一件不属于它的事情宣称权威。
 
-被"指向"某个目录的 Host——这个命令行、一个 dev server——没有这样一个名字，而在那种情况下路径确实就是身份。`gpui_kit::shell::bundle_id_for_path(root)` 用目录名加完整路径的摘要造一个，于是同一个目录总是访问到同一份数据，同一份源码的两个 checkout 也互不干扰。这在你正在编辑它时是对的，在它已经被安装之后是错的——而这正是声明一个真名字带来的区别。
+`gpui-shell` 命令使用 manifest 的 `id`，所以 `run -d`、已安装的副本和打包后的副本访问的是同一份数据。只被"指向"一个没有 manifest 的目录的 Host 没有这样一个名字，而在那种情况下路径确实就是身份。`gpui_kit::shell::bundle_id_for_path(root)` 用目录名加完整路径的摘要造一个，于是同一个目录总是访问到同一份数据，同一份源码的两个 checkout 也互不干扰。这在你正在编辑它时是对的，在它已经被安装之后是错的——而这正是声明一个真名字带来的区别。
 
 id 允许 `a-z`、`0-9`、`.`、`-`、`_`，不允许 `..`。这不是整洁问题：它会被拼到用户数据目录后面，没检查的 id 能够到目录里的其他东西。数据放在那里而不是应用内部，因为应用目录可能只读、往往是一个 git checkout，也不是用户预期自己数据所在的地方。
 
@@ -289,7 +308,7 @@ console.warn("could not save");
 
 多余的参数会以空格分隔追加在后面，与 `console.log` 的行为一致。结构化的值以 JSON 打印，因为那是读日志的人想看到的形式。
 
-输出通过 `tracing` 走，target 是 `gpui_kit::shell::script`，所以在日志过滤里脚本输出与 Host 输出是可分开的。**没有安装 `tracing` subscriber 的 Host 会把这些全部丢弃**——连同运行时自己报告的抛异常的处理函数、未处理的 rejection 与 phase 非法的调用。`gpui-shell` 二进制安装的是一个 `INFO` 级别的 stderr sink，`--dev` 下是 `DEBUG`。
+输出通过 `tracing` 走，target 是 `gpui_kit::shell::script`，所以在日志过滤里脚本输出与 Host 输出是可分开的。**没有安装 `tracing` subscriber 的 Host 会把这些全部丢弃**——连同运行时自己报告的抛异常的处理函数、未处理的 rejection 与 phase 非法的调用。`gpui-shell` 二进制安装的是一个 `INFO` 级别的 stderr sink，`dev` 命令下是 `DEBUG`。
 
 ## `process`
 
@@ -306,6 +325,29 @@ process.exit(0);
 
 执行是有界的：30 秒、stdout 8 MiB、stderr 8 MiB。触及任一上限都会终止并回收子进程，同时 reject promise。取消所属任务或销毁 runtime 也会终止子进程。子进程从清空的环境开始，不会继承 Host secret；shell 也不提供添加环境变量的选项。
 
+`process.run(command, args, { cwd, timeoutMs })` 可以带第三个参数：工作目录（必须在 `capabilities.fs.read` 授权范围内），以及替代 30 秒的超时时间。
+
+### 流式执行：`process.spawn`
+
+```js
+const child = process.spawn("codex", ["exec", "--json", task], { cwd, lines: true });
+child
+  .on("stdout", (line, cx) => { this.events.push(JSON.parse(line)); cx.notify(); })
+  .on("stderr", (line) => console.warn(line))
+  .on("exit", ({ code, signal, error }, cx) => { this.done = true; cx.notify(); });
+```
+
+`process.run` 要等命令结束才返回。有些命令会运行好几分钟、需要通过 stdin 交互，或者需要边运行边读取输出，比如以 JSON lines 流式输出的 AI 命令行，或者通过 stdin/stdout 说协议的常驻服务。这类命令要在输出到达时就拿到它。`spawn` 立即返回一个 `ChildProcess`：
+
+- `on("stdout" | "stderr", (text, cx) => …)`：读到输出就投递；`lines: true` 时按行投递，不含换行符，跨多次读取的行会拼接完整，结尾没有换行的最后一行也会投递。输出按 UTF-8 解码，字符跨两次读取也不会被拆坏。输出总量没有上限，但单行超过 8 MiB 会杀掉进程，因为一行要等到换行符出现才能交出。
+- `on("exit", ({ code, signal, error }, cx) => …)`：**只触发一次，并且在最后一次输出之后**。运行时主动停止进程时（`timeoutMs` 到期，或者单行过长）会带上 `error`；进程自己结束或被 `kill()` 时没有 `error`。
+- `write(text)` 和 `end()`：子进程以 `stdin: "pipe"` 启动时，用来写入和关闭 stdin。
+- `kill()`：杀掉整个进程组（Windows 上是 Job Object），命令自己启动的子进程也一起结束。
+
+处理函数在 UI 线程上执行，拿到的是异步 `cx`，和 `cx.spawn` 任务里的一样，所以可以 `cx.notify()`，跨 `await` 也能继续使用。除非用 `timeoutMs` 指定，否则**没有超时限制**。子进程归属于启动它的视图：视图被释放、`dev --watch` 下应用重载、窗口关闭时，都会杀掉它以及它启动的所有进程，不会留下孤儿进程。
+
+`spawn` 和 `run` 使用相同的授权，按同样的方式在 Host 的 PATH 上查找命令，也同样以清空的环境启动。
+
 它受执行授权约束，授权有三种形态：拒绝（默认）、命令名白名单，或不受限。被拒绝的命令**在调用处抛出**而不是 reject，和被拒绝的 `fs` 路径一样——没人 await 的 rejected promise，等于没人看见的拒绝。
 
 `process.exit` 在运行时内部是**一个请求，绝不是 `exit(2)`**。它把退出码交给 Host 安装的处理函数，由后者决定怎么做——关闭插件的面板、关闭窗口、结束进程。一个插件不能把 Host 进程带走，而 Host 可能还有未保存的状态。
@@ -315,6 +357,27 @@ process.exit(0);
 这个名字上的撞车是刻意的。`process` 正是 JavaScript 作者——或者生成 JavaScript 的模型——会去伸手拿的名字，所以运行时把自己受能力约束的接口放在那里，而不是把这个名字空着、任其看起来像 Node 的却行为不同。
 
 `process.exit` 使用独立的 `capabilities.process.exit` 授权。文件系统访问权不会隐式获得关闭面板、窗口或进程的权限。
+
+### 东西在哪里
+
+```js
+import os from "os";
+
+process.dataDir; // 这个应用的存储目录，即 `${dataDir}` 所指的目录
+os.homedir(); // 用户的主目录
+import.meta.url; // "file:///…/main.js"，当前运行的模块
+process.env.EDITOR; // 默认可读；其他变量要在 manifest 里列出
+```
+
+这些路径都不需要授权：路径只说明东西在哪里，能否读写仍由 `fs` 授权决定。环境变量不同，因为变量的*值*可能是交给 Host、而不是交给它运行的每个脚本的 token。所以 `process.env` 只包含一组描述用户机器、会话和偏好的默认变量——`HOME`、`USER`、`HOSTNAME`、`LANG`、`TZ`、`PATH`、`EDITOR`、`DISPLAY`、代理设置、XDG 目录及其 Windows 对应变量，但绝不包含 token、密钥或密码——再加上 `capabilities.process.env` 列出的变量，而且只包含已设置的：
+
+```json
+"process": { "env": ["MY_APP_MODE"] }
+```
+
+变量名匹配不区分大小写：列出 `HTTP_PROXY` 时，环境里的 `http_proxy` 也能读到，键名保持环境中的原样。默认变量清单统一维护在 [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env)。
+
+它始终是一个对象，所以不授权时 `process.env.X ?? fallback` 也能用。
 
 ## 沙箱
 
@@ -343,20 +406,20 @@ process.exit(0);
 这里没有 quickjs-libc 的 `std`：quickjs-libc 从一开始就没有被编进这个构建。运行时仍提供下文列出的、经过审计的小型 `os` 模块。
 
 ::: tip 开发模式
-`--dev` 会启用源码监听，并在构造运行时之前调用 `gpui_kit::shell::set_development_mode(true)`。它会恢复动态代码构造器并让内建原型保持可写。
+`--dev`（配合 `run` 或 `dev`）会在构造运行时之前调用 `gpui_kit::shell::set_development_mode(true)`。它会恢复动态代码构造器并让内建原型保持可写。
 
 开发模式从不放宽能力约束。它让语言更好摆弄，但不会发出任何人没有声明过的访问权限——因为一项作者从没写下来的授权，就是一项在生产环境里会缺失的授权。
 :::
 
 ## 网络与安全标准 API
 
-全局 `fetch(url, options?)` 返回 promise，结果提供 `{ status, ok, url, , json() }`。它的授权比原始网络更窄：每次请求与 redirect 都必须匹配声明的 HTTP host、method，以及精确 path 或 path prefix；HTTPS 永不降级到 HTTP，authorization 与调用方 header 也不会跨 origin。
+全局 `fetch(url, options?)` 返回 promise，结果提供 `{ status, ok, url, text(), json(), arrayBuffer(), bytes() }`；响应体在被要求转成文本之前一直是字节，所以二进制下载经过 `arrayBuffer()` 不会走样。脚本没有自己设置 `User-Agent` 时，请求会带上 `User-Agent: gpui-shell/<version>`，因为有些 API 会拒绝没有它的请求。它的授权比原始网络更窄：每次请求与 redirect 都必须匹配声明的 HTTP host、method，以及精确 path 或 path prefix；HTTPS 永不降级到 HTTP，authorization 与调用方 header 也不会跨 origin。
 
 `net.connect(host, port)` 与 `websocket` 模块具名导出的 `WebSocket.connect(url, { headers? })` 使用 `capabilities.network.hosts`。`WebSocket` 不会安装成浏览器全局，也不是构造器。Raw TCP 的 `read()` 返回 `Uint8Array`，到达 EOF 时返回 `null`，因此传输分块不会经过有损文本解码。WebSocket 支持文本与 `Uint8Array` 消息，并通过单一 actor 串行化写入；它不会跟随 redirect。Connect、handshake 与 write 操作都有 30 秒 timeout。每个 socket 同一时间只允许一个 outstanding `read()`；第二个会立即 reject，而不是与第一个争抢下一条消息。凭证 header 与握手控制 header 会被拒绝。Raw TCP 与 WebSocket 权限有意比 HTTP request grant 更宽。
 
 DNS 解析是有界的进程级共享服务：所有应用共用两个 resolver worker 和一个最多 64 个请求的队列。排队沿用每次连接已有的 deadline，所以饱和时会以 timeout 失败，不会无界增长内存或线程。这是资源收敛，不是每应用的服务质量保证；同一进程中运行互不信任应用的 Host，不会获得应用之间的 DNS 公平性。
 
-运行时还提供 `buffer`、`path`、`url`、`crypto`、`zlib`、`console`、`process` 与 `os`。它们是生成的 `gpui-kit.d.ts` 所声明、经过审计的 LLRT/Host 子集；`node:` 别名和任意 Node 内建模块不属于 shell 契约。
+运行时还提供 `buffer`、`path`、`url`、`crypto`、`zlib`、`console`、`process` 与 `os`，以及 UTF-8 的全局 `TextEncoder` 与 `TextDecoder`。它们是生成的 `gpui-kit.d.ts` 所声明、经过审计的 LLRT/Host 子集；`node:` 别名和任意 Node 内建模块不属于 shell 契约。
 
 ## 还没有的东西
 

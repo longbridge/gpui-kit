@@ -223,6 +223,9 @@ impl RenderOnce for ResizablePanelGroup {
 /// internally, so a sized panel that should hold its width when a
 /// sibling collapses needs to opt out of growth via `.flex_none()`.
 ///
+/// To keep a panel's size when the group's container resizes, use
+/// [`ResizablePanel::fixed`].
+///
 /// ```ignore
 /// h_resizable("layout")
 ///     .child(resizable_panel().size(px(220.)).flex_none().child(sidebar))
@@ -249,6 +252,7 @@ pub struct ResizablePanel {
     visible: bool,
     style: StyleRefinement,
     handle_appearance: Option<ResizeHandleRenderer>,
+    fixed: bool,
 }
 
 impl ResizablePanel {
@@ -264,6 +268,7 @@ impl ResizablePanel {
             visible: true,
             style: StyleRefinement::default(),
             handle_appearance: None,
+            fixed: false,
         }
     }
 
@@ -284,6 +289,18 @@ impl ResizablePanel {
     /// Default is [`PANEL_MIN_SIZE`] to [`Pixels::MAX`].
     pub fn size_range(mut self, range: impl Into<Range<Pixels>>) -> Self {
         self.size_range = range.into();
+        self
+    }
+
+    /// Keep this panel's size when the group's container resizes.
+    ///
+    /// When the container grows or shrinks, the other panels share the
+    /// difference in proportion to their sizes, so a sidebar or an inspector
+    /// keeps the width the user gave it. Dragging its own handle still resizes
+    /// it. It needs a [`Self::size`], and at least one panel in the group
+    /// should not be fixed.
+    pub fn fixed(mut self) -> Self {
+        self.fixed = true;
         self
     }
 }
@@ -315,6 +332,8 @@ impl RenderOnce for ResizablePanel {
             .get(self.panel_ix)
             .expect("BUG: The `index` of ResizablePanel should be one of in `state`.");
         let size_range = self.size_range.clone();
+        // A fixed panel needs a size to keep; without one it lays out as usual.
+        let fixed = self.fixed && self.initial_size.is_some();
 
         div()
             .id(("resizable-panel", self.panel_ix))
@@ -353,17 +372,23 @@ impl RenderOnce for ResizablePanel {
                 Some(size) => this.flex_basis(size.min(size_range.end).max(size_range.start)),
                 None => this,
             })
+            // A fixed panel neither grows nor shrinks with the container, so
+            // the first frame of a resize already has its size. Not
+            // `flex_none`, which also resets the basis set above.
+            .when(fixed, |this| this.flex_grow_0().flex_shrink_0())
             .on_prepaint({
                 let state = state.clone();
                 move |bounds, _, cx| {
-                    if !state
-                        .read(cx)
-                        .panel_size_changes(self.panel_ix, bounds, &self.size_range)
-                    {
+                    if !state.read(cx).panel_size_changes(
+                        self.panel_ix,
+                        bounds,
+                        &self.size_range,
+                        fixed,
+                    ) {
                         return;
                     }
                     state.update(cx, |state, cx| {
-                        state.update_panel_size(self.panel_ix, bounds, self.size_range, cx)
+                        state.update_panel_size(self.panel_ix, bounds, self.size_range, fixed, cx)
                     })
                 }
             })
@@ -444,17 +469,18 @@ impl Element for ResizePanelGroupElement {
         _: &mut Self::RequestLayoutState,
         _: &mut Self::PrepaintState,
         window: &mut Window,
-        cx: &mut App,
+        _: &mut App,
     ) {
         window.on_mouse_event({
             let state = self.state.clone();
             let axis = self.axis;
-            let current_ix = state.read(cx).resizing_panel_ix;
             move |e: &MouseMoveEvent, phase, window, cx| {
                 if !phase.bubble() {
                     return;
                 }
-                let Some(ix) = current_ix else { return };
+                let Some(ix) = state.read(cx).resizing_panel_ix else {
+                    return;
+                };
 
                 state.update(cx, |state, cx| {
                     let panel = state.panels.get(ix).expect("BUG: invalid panel index");
@@ -481,10 +507,9 @@ impl Element for ResizePanelGroupElement {
         // When any mouse up, stop dragging
         window.on_mouse_event({
             let state = self.state.clone();
-            let current_ix = state.read(cx).resizing_panel_ix;
             let on_resize = self.on_resize.clone();
             move |_: &MouseUpEvent, phase, window, cx| {
-                if current_ix.is_none() {
+                if state.read(cx).resizing_panel_ix.is_none() {
                     return;
                 }
                 if phase.bubble() {

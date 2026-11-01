@@ -85,6 +85,43 @@ pub struct PluginManifest {
     entry: String,
     dependencies: BTreeMap<String, GitDependency>,
     capabilities: CapabilitiesFile,
+    window: Option<WindowSize>,
+}
+
+/// The size an application's window opens at, in logical pixels.
+///
+/// Only the opening size: the person using the application can still resize
+/// the window, and the host keeps its own default when the manifest is silent.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowSize {
+    /// Width in logical pixels.
+    width: f32,
+    /// Height in logical pixels.
+    height: f32,
+}
+
+impl WindowSize {
+    /// Width in logical pixels.
+    pub fn width(&self) -> f32 {
+        self.width
+    }
+
+    /// Height in logical pixels.
+    pub fn height(&self) -> f32 {
+        self.height
+    }
+
+    fn validate(&self) -> Result<(), ManifestProblem> {
+        for (name, value) in [("width", self.width), ("height", self.height)] {
+            if !value.is_finite() || value <= 0. {
+                return Err(ManifestProblem::Window(format!(
+                    "`{name}` must be a positive number of logical pixels, found {value}"
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One JavaScript package fetched from Git before an application starts.
@@ -333,6 +370,17 @@ impl PluginManifest {
         };
         capabilities.validate_placeholders()?;
         capabilities.validate_network()?;
+        capabilities.validate_env()?;
+
+        let window = match fields.get("window") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => {
+                let size: WindowSize = serde_json::from_value(value.clone())
+                    .map_err(|error| ManifestProblem::Window(error.to_string()))?;
+                size.validate()?;
+                Some(size)
+            }
+        };
 
         Ok(Self {
             id,
@@ -342,6 +390,7 @@ impl PluginManifest {
             entry,
             dependencies,
             capabilities,
+            window,
         })
     }
 
@@ -379,6 +428,11 @@ impl PluginManifest {
         &self.dependencies
     }
 
+    /// The size the window opens at, when the manifest names one.
+    pub fn window(&self) -> Option<WindowSize> {
+        self.window
+    }
+
     /// The grant this manifest asks for, resolved against the two directories
     /// only the host knows.
     ///
@@ -390,12 +444,22 @@ impl PluginManifest {
     /// host and nowhere else. A relative path is anchored to the plugin
     /// directory; an absolute path is taken as written, and is the case a host
     /// policy or an approval prompt (§19.2) exists to gate.
+    ///
+    /// `${homeDir}` is the user's home directory, read from the environment,
+    /// so that a grant on the user's own files — `${homeDir}/.config/app` —
+    /// does not have to hard-code a user name. A path under it is dropped from
+    /// the grant when the home directory is unknown, rather than anchored
+    /// somewhere it was not meant to be.
     pub fn capabilities(&self, plugin_dir: &Path, data_dir: &Path) -> Capabilities {
-        self.capabilities.grant(plugin_dir, data_dir)
+        self.capabilities.grant(&Anchors {
+            plugin_dir,
+            data_dir,
+            home_dir: crate::runtime::home_dir().as_deref(),
+        })
     }
 }
 
-const FIELDS: [&str; 7] = [
+const FIELDS: [&str; 8] = [
     "id",
     "name",
     "version",
@@ -403,6 +467,7 @@ const FIELDS: [&str; 7] = [
     "entry",
     "dependencies",
     "capabilities",
+    "window",
 ];
 
 fn validate_dependencies(
@@ -654,6 +719,10 @@ struct ManifestFile {
     /// storage — see [`CapabilitiesFile::storage`].
     #[serde(default)]
     capabilities: CapabilitiesFile,
+    /// The size the window opens at, e.g. `{"width": 360, "height": 520}`.
+    /// Absent means the host's default.
+    #[serde(default)]
+    window: Option<WindowSize>,
 }
 
 /// The `capabilities` block, before it is anchored to real directories.
@@ -692,11 +761,13 @@ struct CapabilitiesFile {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct FsGrantFile {
-    /// Directories that may be read. `${pluginDir}` and `${dataDir}` expand to
-    /// the plugin's own directory and its storage directory.
+    /// Directories that may be read. `${pluginDir}`, `${dataDir}` and
+    /// `${homeDir}` expand to the plugin's own directory, its storage directory
+    /// and the user's home directory; a relative path is anchored to the plugin
+    /// directory, and an absolute one is taken as written.
     #[serde(default)]
     read: Vec<String>,
-    /// Directories that may be written.
+    /// Directories that may be written, with the same placeholders as `read`.
     #[serde(default)]
     write: Vec<String>,
     /// Commands `process.run` may start.
@@ -759,12 +830,26 @@ struct ClipboardGrantFile {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProcessGrantFile {
+    /// Whether `process.exit()` may ask the host to exit.
     #[serde(default)]
     exit: bool,
+    /// Environment variables `process.env` shows, by name. Every other
+    /// variable is absent, because the environment routinely holds tokens and
+    /// keys meant for the host rather than for every script it runs.
+    #[serde(default)]
+    env: Vec<String>,
 }
 
 const PLUGIN_DIR_PLACEHOLDER: &str = "${pluginDir}";
 const DATA_DIR_PLACEHOLDER: &str = "${dataDir}";
+const HOME_DIR_PLACEHOLDER: &str = "${homeDir}";
+
+/// The directories a manifest's placeholders expand to.
+struct Anchors<'a> {
+    plugin_dir: &'a Path,
+    data_dir: &'a Path,
+    home_dir: Option<&'a Path>,
+}
 
 fn granted() -> bool {
     true
@@ -788,7 +873,7 @@ impl Default for CapabilitiesFile {
 }
 
 impl CapabilitiesFile {
-    fn grant(&self, plugin_dir: &Path, data_dir: &Path) -> Capabilities {
+    fn grant(&self, anchors: &Anchors) -> Capabilities {
         let fs = self.fs.clone().unwrap_or_default();
         let clipboard = self.clipboard.clone().unwrap_or_default();
         let process = self.process.clone().unwrap_or_default();
@@ -800,8 +885,8 @@ impl CapabilitiesFile {
 
         let network = self.network.clone().unwrap_or_default();
         Capabilities::new()
-            .read_roots(expand_all(&fs.read, plugin_dir, data_dir))
-            .write_roots(expand_all(&fs.write, plugin_dir, data_dir))
+            .read_roots(expand_all(&fs.read, anchors))
+            .write_roots(expand_all(&fs.write, anchors))
             .execute(execute)
             .network_hosts(network.hosts.into_iter().map(|host| host.to_lowercase()))
             .http_requests(network.http.into_iter().map(|request| {
@@ -821,6 +906,7 @@ impl CapabilitiesFile {
             .clipboard_read(clipboard.read)
             .clipboard_write(clipboard.write)
             .exit(process.exit)
+            .env_variables(process.env)
     }
 
     /// A placeholder the host does not expand would otherwise reach
@@ -834,6 +920,13 @@ impl CapabilitiesFile {
 
         for (field, paths) in [("read", &fs.read), ("write", &fs.write)] {
             for path in paths {
+                if let Some(problem) = unexpanded_home(path) {
+                    return Err(ManifestProblem::UnexpandedPath {
+                        field: format!("capabilities.fs.{field}"),
+                        path: path.clone(),
+                        suggestion: problem,
+                    });
+                }
                 if let Some(placeholder) = unknown_placeholder(path) {
                     return Err(ManifestProblem::UnknownPlaceholder {
                         field: format!("capabilities.fs.{field}"),
@@ -843,6 +936,20 @@ impl CapabilitiesFile {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_env(&self) -> Result<(), ManifestProblem> {
+        let Some(process) = &self.process else {
+            return Ok(());
+        };
+        for name in &process.env {
+            if name.is_empty() || name.contains(['=', '\0']) {
+                return Err(ManifestProblem::Capabilities(format!(
+                    "process.env entry `{name}` must be an environment variable name"
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -896,13 +1003,46 @@ impl CapabilitiesFile {
     }
 }
 
+/// Spellings of the home directory a shell or an environment would expand,
+/// which a manifest does not.
+///
+/// The manifest's own spelling is `${homeDir}`, but `$HOME`, `${HOME}` and `~`
+/// are what an author types from habit. `${HOME}` would at least be refused as
+/// an unknown placeholder; the other two are not placeholders at all, so they
+/// would quietly become a relative directory such as `<app>/$HOME/.claude`
+/// and grant nothing. Each one is caught here with the path rewritten.
+const HOME_SPELLINGS: [&str; 6] = [
+    "${HOME}",
+    "$HOME",
+    "${USERPROFILE}",
+    "$USERPROFILE",
+    "%USERPROFILE%",
+    "~",
+];
+
+/// The path rewritten with `${homeDir}` when it starts with a home spelling
+/// the manifest does not expand, and `None` otherwise.
+fn unexpanded_home(path: &str) -> Option<String> {
+    HOME_SPELLINGS.iter().find_map(|spelling| {
+        let rest = path.strip_prefix(spelling)?;
+        (rest.is_empty() || rest.starts_with(['/', '\\']))
+            .then(|| format!("{HOME_DIR_PLACEHOLDER}{rest}"))
+    })
+}
+
 fn unknown_placeholder(value: &str) -> Option<String> {
     let mut rest = value;
     while let Some(start) = rest.find("${") {
         let tail = &rest[start..];
         let end = tail.find('}')? + 1;
         let placeholder = &tail[..end];
-        if placeholder != PLUGIN_DIR_PLACEHOLDER && placeholder != DATA_DIR_PLACEHOLDER {
+        if ![
+            PLUGIN_DIR_PLACEHOLDER,
+            DATA_DIR_PLACEHOLDER,
+            HOME_DIR_PLACEHOLDER,
+        ]
+        .contains(&placeholder)
+        {
             return Some(placeholder.to_owned());
         }
         rest = &tail[end..];
@@ -910,27 +1050,38 @@ fn unknown_placeholder(value: &str) -> Option<String> {
     None
 }
 
-fn expand_all(paths: &[String], plugin_dir: &Path, data_dir: &Path) -> Vec<PathBuf> {
+fn expand_all(paths: &[String], anchors: &Anchors) -> Vec<PathBuf> {
     paths
         .iter()
-        .map(|path| expand(path, plugin_dir, data_dir))
+        .filter_map(|path| expand(path, anchors))
         .collect()
 }
 
-fn expand(raw: &str, plugin_dir: &Path, data_dir: &Path) -> PathBuf {
-    let expanded = raw
+/// `None` for a path under `${homeDir}` when there is no home directory: left
+/// in, the placeholder would become a relative directory inside the plugin.
+fn expand(raw: &str, anchors: &Anchors) -> Option<PathBuf> {
+    let mut expanded = raw
         .replace(
             PLUGIN_DIR_PLACEHOLDER,
-            plugin_dir.to_string_lossy().as_ref(),
+            anchors.plugin_dir.to_string_lossy().as_ref(),
         )
-        .replace(DATA_DIR_PLACEHOLDER, data_dir.to_string_lossy().as_ref());
+        .replace(
+            DATA_DIR_PLACEHOLDER,
+            anchors.data_dir.to_string_lossy().as_ref(),
+        );
+    if expanded.contains(HOME_DIR_PLACEHOLDER) {
+        expanded = expanded.replace(
+            HOME_DIR_PLACEHOLDER,
+            anchors.home_dir?.to_string_lossy().as_ref(),
+        );
+    }
 
     let path = PathBuf::from(expanded);
-    if path.is_absolute() {
+    Some(if path.is_absolute() {
         path
     } else {
-        plugin_dir.join(path)
-    }
+        anchors.plugin_dir.join(path)
+    })
 }
 
 // -----------------------------------------------------------------------------
@@ -1019,8 +1170,16 @@ pub enum ManifestProblem {
         field: String,
         placeholder: String,
     },
+    /// A path that starts with a shell's spelling of the home directory, with
+    /// the same path written the way the manifest expands it.
+    UnexpandedPath {
+        field: String,
+        path: String,
+        suggestion: String,
+    },
     Capabilities(String),
     Dependencies(String),
+    Window(String),
 }
 
 /// What each field is for, in one line, appended to the error that reports it
@@ -1110,7 +1269,15 @@ impl std::fmt::Display for ManifestProblem {
             ),
             ManifestProblem::UnknownPlaceholder { field, placeholder } => write!(
                 f,
-                "unknown placeholder `{placeholder}` in {field}: the manifest may use {PLUGIN_DIR_PLACEHOLDER} and {DATA_DIR_PLACEHOLDER}"
+                "unknown placeholder `{placeholder}` in {field}: the manifest may use {PLUGIN_DIR_PLACEHOLDER}, {DATA_DIR_PLACEHOLDER} and {HOME_DIR_PLACEHOLDER}"
+            ),
+            ManifestProblem::UnexpandedPath {
+                field,
+                path,
+                suggestion,
+            } => write!(
+                f,
+                "\"{path}\" in {field} is not expanded: the manifest does not read environment variables or `~`; write \"{suggestion}\""
             ),
             ManifestProblem::Capabilities(error) => write!(
                 f,
@@ -1119,6 +1286,10 @@ impl std::fmt::Display for ManifestProblem {
             ManifestProblem::Dependencies(error) => write!(
                 f,
                 "invalid `dependencies`: {error}. Use a GitHub owner/repository shorthand or full Git URL with an optional #ref, or an object with a Git URL, exactly one non-empty `branch` or `tag`, and an optional repository-relative `entry`"
+            ),
+            ManifestProblem::Window(error) => write!(
+                f,
+                "invalid `window`: {error}. Expected an object such as {{\"width\": 360, \"height\": 520}}, in logical pixels"
             ),
         }
     }
@@ -1213,6 +1384,7 @@ fn load_plugin(
             // the same name apart.
             .with_application(&id)
             .with_capabilities(manifest.capabilities(&root, &data_dir))
+            .with_data_dir(data_dir.clone())
             .with_storage_path(store_path.clone()),
     );
 
@@ -1337,10 +1509,55 @@ impl ShellRuntime {
         let object = view.read(cx).object().clone();
         let policy = view.read(cx).policy();
         let snapshot = self.build_snapshot(&object, Some(view), policy, window, cx)?;
-        // Keep the application and its callback-owning snapshot alive until
-        // the native elements have been built and dropped.
-        crate::materialize::try_materialize(self, &snapshot, window, cx)?;
-        Ok(snapshot.debug_tree())
+        let tree = snapshot.debug_tree();
+
+        // Materialized during a real frame, as every frame is: native element
+        // state — a scroll position, retained component state — belongs to the
+        // view being drawn, and GPUI only has one while it draws. The probe
+        // becomes the hidden window's root for this one frame and holds the
+        // application's callback-owning snapshot until the native elements
+        // have been built and dropped.
+        let outcome = Rc::new(std::cell::RefCell::new(None));
+        let runtime = self.clone();
+        let sink = outcome.clone();
+        window.replace_root(cx, move |_, _| MaterializeProbe {
+            runtime,
+            snapshot,
+            outcome: sink,
+            materialized: false,
+        });
+        window.draw(cx).clear(cx);
+
+        outcome
+            .borrow_mut()
+            .take()
+            .unwrap_or_else(|| Err(anyhow::anyhow!("the application was never materialized")))?;
+        Ok(tree)
+    }
+}
+
+/// Materializes one snapshot from inside its own render, for [`ShellRuntime::check`].
+struct MaterializeProbe {
+    runtime: Rc<ShellRuntime>,
+    snapshot: crate::snapshot::RenderSnapshot,
+    outcome: Rc<std::cell::RefCell<Option<Result<()>>>>,
+    materialized: bool,
+}
+
+impl Render for MaterializeProbe {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The window may draw again after the check has read its outcome;
+        // the check is one materialization, as it was before it ran inside a
+        // frame.
+        if self.materialized {
+            return gpui::Empty;
+        }
+        self.materialized = true;
+        let materialized =
+            crate::materialize::try_materialize(&self.runtime, &self.snapshot, window, cx)
+                .map(drop);
+        *self.outcome.borrow_mut() = Some(materialized);
+        gpui::Empty
     }
 }
 
@@ -2466,6 +2683,43 @@ mod tests {
     }
 
     #[test]
+    fn the_window_size_is_read_from_the_manifest() {
+        let manifest = PluginManifest::parse(
+            r#"{"id": "com.example.calc", "name": "Calc", "entry": "main.js",
+                "window": {"width": 360, "height": 520}}"#,
+        )
+        .expect("a window size is a valid manifest field");
+        let window = manifest.window().expect("the size is kept");
+        assert_eq!((window.width(), window.height()), (360., 520.));
+
+        let manifest = PluginManifest::parse(
+            r#"{"id": "com.example.calc", "name": "Calc", "entry": "main.js"}"#,
+        )
+        .expect("the window is optional");
+        assert_eq!(manifest.window(), None);
+    }
+
+    #[test]
+    fn invalid_window_sizes_are_rejected() {
+        for window in [
+            r#"{"width": 0, "height": 520}"#,
+            r#"{"width": 360, "height": -1}"#,
+            r#"{"width": 360}"#,
+            r#"{"width": 360, "height": 520, "x": 0}"#,
+            r#""360x520""#,
+        ] {
+            let source = format!(
+                r#"{{"id": "com.example.calc", "name": "Calc", "entry": "main.js", "window": {window}}}"#
+            );
+            let error = PluginManifest::parse(&source).expect_err(window);
+            assert!(
+                error.to_string().contains("invalid `window`"),
+                "{window}: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn an_omitted_application_version_is_reported_as_unknown() {
         let source = VALID.replace("        \"version\": \"1.2.0\",\n", "");
         let manifest = PluginManifest::parse(&source).expect("version metadata is optional");
@@ -2752,15 +3006,95 @@ mod tests {
 
     #[test]
     fn an_unexpanded_placeholder_is_caught_before_it_becomes_a_directory() {
-        let source = VALID.replacen("${dataDir}", "${homeDir}", 1);
-        let error = PluginManifest::parse(&source).expect_err("`${homeDir}` does not exist");
+        let source = VALID.replacen("${dataDir}", "${desktopDir}", 1);
+        let error = PluginManifest::parse(&source).expect_err("`${desktopDir}` does not exist");
         assert_eq!(
             error.problem(),
             &ManifestProblem::UnknownPlaceholder {
                 field: "capabilities.fs.read".to_owned(),
-                placeholder: "${homeDir}".to_owned(),
+                placeholder: "${desktopDir}".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn a_shell_spelling_of_home_is_refused_with_the_manifest_spelling() {
+        for (written, suggestion) in [
+            ("$HOME/.claude", "${homeDir}/.claude"),
+            ("${HOME}/.claude", "${homeDir}/.claude"),
+            ("~/.claude", "${homeDir}/.claude"),
+            ("~", "${homeDir}"),
+            ("%USERPROFILE%\\\\.claude", "${homeDir}\\\\.claude"),
+        ] {
+            let source = VALID.replacen("${dataDir}", written, 1);
+            let error = PluginManifest::parse(&source)
+                .expect_err("a shell spelling of home must not become a relative directory");
+            assert_eq!(
+                error.problem(),
+                &ManifestProblem::UnexpandedPath {
+                    field: "capabilities.fs.read".to_owned(),
+                    path: written.replace("\\\\", "\\"),
+                    suggestion: suggestion.replace("\\\\", "\\"),
+                },
+            );
+        }
+
+        // A directory that merely starts with the same letters is a real name.
+        let source = VALID.replacen("${dataDir}", "~notes", 1);
+        assert!(PluginManifest::parse(&source).is_ok());
+    }
+
+    #[test]
+    fn the_home_directory_placeholder_names_the_users_own_files() {
+        let source = VALID.replacen(
+            "\"read\": [\"${pluginDir}\", \"${dataDir}\"]",
+            "\"read\": [\"${pluginDir}\", \"${homeDir}/.claude/skills\"]",
+            1,
+        );
+        let manifest = PluginManifest::parse(&source).expect("`${homeDir}` is a placeholder");
+        let fs = manifest.capabilities.fs.as_ref().expect("an fs grant");
+        let home = Path::new("/home/example");
+        let anchors = Anchors {
+            plugin_dir: Path::new("/plugins/a"),
+            data_dir: Path::new("/data/a"),
+            home_dir: Some(home),
+        };
+        assert_eq!(
+            expand_all(&fs.read, &anchors),
+            [PathBuf::from("/plugins/a"), home.join(".claude/skills")]
+        );
+
+        // Without a home directory the grant shrinks rather than landing in
+        // a directory named `${homeDir}` inside the plugin.
+        let homeless = Anchors {
+            home_dir: None,
+            ..anchors
+        };
+        assert_eq!(
+            expand_all(&fs.read, &homeless),
+            [PathBuf::from("/plugins/a")]
+        );
+    }
+
+    #[test]
+    fn environment_variables_are_granted_by_name() {
+        let source = VALID.replacen(
+            "\"process\": { \"exit\": true }",
+            "\"process\": { \"exit\": true, \"env\": [\"EDITOR\"] }",
+            1,
+        );
+        let manifest = PluginManifest::parse(&source).expect("`env` is a process grant");
+        let capabilities = manifest.capabilities(Path::new("/plugins/a"), Path::new("/data/a"));
+        assert_eq!(capabilities.granted_env_variables(), ["EDITOR"]);
+        assert!(capabilities.summary().contains(&"env: EDITOR".to_owned()));
+
+        let source = VALID.replacen(
+            "\"process\": { \"exit\": true }",
+            "\"process\": { \"env\": [\"A=B\"] }",
+            1,
+        );
+        let error = PluginManifest::parse(&source).expect_err("`A=B` is not a name");
+        assert!(matches!(error.problem(), ManifestProblem::Capabilities(_)));
     }
 
     #[test]
@@ -2883,6 +3217,7 @@ mod tests {
         assert_eq!(described.entry, parsed.entry);
         assert_eq!(described.dependencies, parsed.dependencies);
         assert_eq!(described.capabilities, parsed.capabilities);
+        assert_eq!(described.window, parsed.window);
     }
 
     #[test]
@@ -2908,6 +3243,7 @@ mod tests {
             "clipboard",
             "process",
             "exit",
+            "env",
         ] {
             assert!(
                 schema.contains(grant),

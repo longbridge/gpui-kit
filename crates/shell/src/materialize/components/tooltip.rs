@@ -111,9 +111,9 @@ where
         .on_prepaint(move |bounds, _, _| writer.set(bounds))
         .on_hover(move |hovered, window, cx| {
             let Some(overlay) = ShellRoot::tooltip_overlay(window, cx) else {
-                // No overlay layer means the window's first view is not a
-                // `ShellRoot`, which is a host wiring mistake rather than a
-                // script one — and one the window announces loudly elsewhere.
+                // No overlay layer means the window has no `ShellRoot`, which
+                // is a host wiring mistake rather than a script one — and one
+                // the window announces loudly elsewhere.
                 return;
             };
             if !*hovered {

@@ -68,7 +68,7 @@ fn parse_hex(value: &str) -> Option<Hsla> {
 /// Formats a color as `#RRGGBB`, or `#RRGGBBAA` when it is translucent.
 fn hex_string(color: Hsla) -> String {
     let rgba = Rgba::from(color);
-    let channel = |value: f32| (value * 255.) as u32;
+    let channel = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
     if rgba.a < 1. {
         format!(
             "#{:02X}{:02X}{:02X}{:02X}",
@@ -185,7 +185,6 @@ pub struct ColorPickerState {
     /// A builder-supplied value cannot reach the sliders without a `Window`,
     /// so the first render flushes it through [`Self::sync_pending_value`].
     needs_slider_sync: bool,
-    suppress_input_change: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -201,10 +200,6 @@ impl ColorPickerState {
             window,
             |this, input, event: &InputEvent, window, cx| match event {
                 InputEvent::Change => {
-                    if this.suppress_input_change {
-                        this.suppress_input_change = false;
-                        return;
-                    }
                     let value = input.read(cx).value();
                     if this.preview_hex(value.as_str(), window, cx) {
                         let color = this.preview.expect("valid hex leaves a preview");
@@ -244,7 +239,6 @@ impl ColorPickerState {
             hex_input,
             sliders,
             needs_slider_sync: false,
-            suppress_input_change: false,
             _subscriptions: subscriptions,
         }
     }
@@ -431,10 +425,9 @@ impl ColorPickerState {
         cx.notify();
     }
 
-    /// Writes the hex field, suppressing the change it would otherwise feed
-    /// back through `Hsla` → hex → `Hsla` and lose precision to.
+    /// Writes the hex field. `InputState::set_value` emits no change event,
+    /// so nothing feeds back, and the next typed edit still previews.
     fn write_hex_input(&mut self, value: Option<Hsla>, window: &mut Window, cx: &mut App) {
-        self.suppress_input_change = true;
         let text = value.map(hex_string).unwrap_or_default();
         self.hex_input
             .update(cx, |input, cx| input.set_value(text, window, cx));
@@ -808,7 +801,7 @@ mod tests {
     #[test]
     fn formats_alpha_only_when_translucent() {
         assert_eq!(hex_string(hsla(0., 1., 0.5, 1.)), "#FF0000");
-        assert_eq!(hex_string(hsla(0., 1., 0.5, 0.5)), "#FF00007F");
+        assert_eq!(hex_string(hsla(0., 1., 0.5, 0.5)), "#FF000080");
     }
 
     fn state(cx: &mut TestAppContext) -> (Entity<ColorPickerState>, &mut gpui::VisualTestContext) {
@@ -855,6 +848,26 @@ mod tests {
         });
         state.read_with(cx, |state, _| {
             assert_eq!(state.displayed_color(), Some(committed));
+        });
+    }
+
+    #[gpui::test]
+    fn first_hex_edit_after_set_value_previews(cx: &mut TestAppContext) {
+        let (state, cx) = state(cx);
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_value(hsla(0., 1., 0.5, 1.), window, cx)
+            });
+            // A typed edit: new text and the change event it brings.
+            let input = state.read(cx).hex_input().clone();
+            input.update(cx, |input, cx| {
+                input.set_value("#00FF00", window, cx);
+                cx.emit(InputEvent::Change);
+            });
+        });
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.preview().map(hex_string).as_deref(), Some("#00FF00"));
         });
     }
 

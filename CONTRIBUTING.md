@@ -175,6 +175,26 @@ Use `samply record` command to start rust development, and do some operations in
 
 When we are ready to release a new version, please follow the steps below:
 
+Before every release, query crates.io for the latest non-yanked stable
+`gpui-pre` and `gpui-fast` versions and update both families together in the
+workspace manifest and Cargo.lock. Keep the `gpui-pre-*` snapshot requirements
+exact, including the matching platform, Web, macros and sum-tree packages;
+check independently versioned crates such as `gpui-pre-reqwest` separately.
+Verify both the default and GPUI Fast builds after updating. If the dependencies
+are already current, record the versions checked. Do not publish a release
+with either backend left on an older published version.
+
+A patch release may change behavior, but must preserve source compatibility
+with the previous release, including public struct literals and associated
+types. Check the public APIs before tagging; defer incompatible changes rather
+than publishing them in a patch release. An explicitly authorized upstream GPUI
+API migration is an exception: document its changed signatures and migration
+steps in the release notes while preserving Kit-owned API compatibility.
+
+Publish `gpui-shell` after its workspace dependencies. Its QuickJS binding,
+JIT runtime and standard modules must use matching crates.io releases, without
+Git dependencies or a local compatibility facade.
+
 ### Use the script to bump the version(Recommended)
 
 ```bash

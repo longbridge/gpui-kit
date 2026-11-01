@@ -228,6 +228,322 @@ fn fs_module_cannot_follow_a_symlink_out_of_a_granted_root(cx: &mut TestAppConte
     let _ = std::fs::remove_dir_all(&base);
 }
 
+const METADATA_PROBE: &str = r#"
+import { div, View } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import * as fs from "fs/promises";
+
+export default class Probe extends View {
+  init(_props, cx) {
+    this.state = "pending";
+    cx.spawn(async (cx) => {
+      try {
+        await fs.writeFile("draft.txt", "hello");
+        const file = await fs.stat("draft.txt");
+        const root = await fs.stat(".");
+        const fresh = Date.now() - file.mtimeMs < 60000 && file.mtime instanceof Date;
+        await fs.rename("draft.txt", "final.txt");
+        const moved = !(await fs.exists("draft.txt")) && await fs.readFile("final.txt", "utf8");
+        const link = await fs.lstat("link.txt");
+        const target = await fs.readlink("link.txt");
+        const followed = await fs.stat("link.txt");
+        this.state = [
+          `${file.isFile()}:${file.isDirectory()}:${file.size}:${fresh}`,
+          `${root.isDirectory()}`,
+          moved,
+          `${link.isSymbolicLink()}:${target}:${followed.isFile()}:${followed.isSymbolicLink()}`,
+        ].join("|");
+      } catch (error) {
+        this.state = `failed: ${error.message}`;
+      }
+      cx.notify();
+    });
+  }
+  render() { return v_flex().child(this.state); }
+}
+"#;
+
+#[cfg(unix)]
+#[gpui::test]
+fn stat_rename_and_readlink_settle_through_promises(cx: &mut TestAppContext) {
+    let directory =
+        std::env::temp_dir().join(format!("gpui-shell-fs-metadata-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("a granted root");
+    std::fs::write(directory.join("target.txt"), "linked").expect("link target");
+    std::os::unix::fs::symlink("target.txt", directory.join("link.txt")).expect("symlink");
+
+    let rendered = metadata_probe(
+        cx,
+        Capabilities::new()
+            .read_roots([directory.clone()])
+            .write_roots([directory.clone()]),
+        METADATA_PROBE,
+    );
+    assert!(
+        rendered.contains("true:false:5:true|true|hello|true:target.txt:true:false"),
+        "{rendered}"
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
+// Only Unix tests use the link probes: creating a symlink needs privileges on Windows.
+#[cfg(unix)]
+const ABSOLUTE_LINK_PROBE: &str = r#"
+import { div, View } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import * as fs from "fs/promises";
+
+export default class Probe extends View {
+  init(_props, cx) {
+    this.state = "pending";
+    cx.spawn(async (cx) => {
+      const root = "__ROOT__";
+      const outcome = async (body) => {
+        try {
+          return String(await body());
+        } catch (error) {
+          return `rejected(${error.message})`;
+        }
+      };
+      // Which layer said no: the capability gate names the manifest key to
+      // add, an error from the filesystem does not.
+      const refusal = async (body) => {
+        try {
+          await body();
+          return "allowed";
+        } catch (error) {
+          return error.message.includes("capabilities.fs") ? "denied" : "failed";
+        }
+      };
+      const link = `${root}/link.txt`;
+      this.state = [
+        await outcome(async () => (await fs.lstat(link)).isSymbolicLink()),
+        await outcome(() => fs.readlink(link)),
+        await outcome(() => fs.readFile(`${root}/absolute-link.txt`, "utf8")),
+        await outcome(async () => {
+          await fs.rename(`${root}/to-move.txt`, `${root}/moved.txt`);
+          return (await fs.lstat(`${root}/moved.txt`)).isSymbolicLink();
+        }),
+        await outcome(async () => {
+          await fs.rename(`${root}/replacement.txt`, `${root}/replaced-link.txt`);
+          const entry = await fs.lstat(`${root}/replaced-link.txt`);
+          const text = await fs.readFile(`${root}/replaced-link.txt`, "utf8");
+          return `${entry.isSymbolicLink()}:${text}`;
+        }),
+        await refusal(() => fs.rmdir(`${root}/empty-link`)),
+        await outcome(() => fs.unlink(link)),
+      ].join("|");
+      cx.notify();
+    });
+  }
+  render() { return v_flex().child(this.state); }
+}
+"#;
+
+/// An absolute path names a symlink the same way a relative one does: `lstat`,
+/// `readlink`, `rename`, `rmdir` and `unlink` act on the link itself, not on
+/// what it points to. Renaming onto a link replaces the link and leaves its
+/// former target alone; `rmdir` on a link to an empty directory is past the
+/// gate and fails below it as a non-directory, rather than removing the
+/// directory. Reading through a link
+/// whose stored target is absolute keeps working.
+#[cfg(unix)]
+#[gpui::test]
+fn link_operations_on_an_absolute_path_act_on_the_link(cx: &mut TestAppContext) {
+    let directory = std::env::temp_dir().join(format!(
+        "gpui-shell-fs-absolute-link-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("a granted root");
+    std::fs::write(directory.join("target.txt"), "linked").expect("link target");
+    std::os::unix::fs::symlink("target.txt", directory.join("link.txt")).expect("symlink");
+    std::os::unix::fs::symlink("target.txt", directory.join("to-move.txt")).expect("symlink");
+    std::os::unix::fs::symlink(
+        directory.join("target.txt"),
+        directory.join("absolute-link.txt"),
+    )
+    .expect("symlink with an absolute target");
+    std::fs::write(directory.join("replacement.txt"), "replacement").expect("rename source");
+    std::fs::write(directory.join("former-target.txt"), "former").expect("former target");
+    std::os::unix::fs::symlink(
+        directory.join("former-target.txt"),
+        directory.join("replaced-link.txt"),
+    )
+    .expect("symlink at the rename destination");
+    std::fs::create_dir(directory.join("empty")).expect("an empty directory");
+    std::os::unix::fs::symlink(directory.join("empty"), directory.join("empty-link"))
+        .expect("symlink to an empty directory");
+
+    let source = ABSOLUTE_LINK_PROBE.replace("__ROOT__", &directory.to_string_lossy());
+    let rendered = metadata_probe(
+        cx,
+        Capabilities::new()
+            .read_roots([directory.clone()])
+            .write_roots([directory.clone()]),
+        &source,
+    );
+    let target_survived = directory.join("target.txt").is_file();
+    let link_removed = std::fs::symlink_metadata(directory.join("link.txt")).is_err();
+    let former_target = std::fs::read_to_string(directory.join("former-target.txt")).ok();
+    let empty_link_kept = std::fs::symlink_metadata(directory.join("empty-link"))
+        .is_ok_and(|metadata| metadata.is_symlink())
+        && directory.join("empty").is_dir();
+    let _ = std::fs::remove_dir_all(&directory);
+
+    // One assertion reporting everything, so a failure shows every symptom at once.
+    assert!(
+        rendered.contains("true|target.txt|linked|true|false:replacement|failed|undefined")
+            && target_survived
+            && link_removed
+            && former_target.as_deref() == Some("former")
+            && empty_link_kept,
+        "probe: {rendered}; target survived: {target_survived}; link removed: {link_removed}; \
+         former target: {former_target:?}; empty link kept: {empty_link_kept}"
+    );
+}
+
+#[cfg(unix)]
+const OUTSIDE_LINK_PROBE: &str = r#"
+import { div, View } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import * as fs from "fs/promises";
+
+export default class Probe extends View {
+  init(_props, cx) {
+    this.state = "pending";
+    cx.spawn(async (cx) => {
+      const root = "__ROOT__";
+      const outcome = async (body) => {
+        try {
+          return String(await body());
+        } catch (error) {
+          return `rejected(${error.message})`;
+        }
+      };
+      // Which layer said no: the capability gate names the manifest key to
+      // add, an error from the filesystem does not.
+      const refusal = async (body) => {
+        try {
+          await body();
+          return "allowed";
+        } catch (error) {
+          return error.message.includes("capabilities.fs") ? "denied" : "failed";
+        }
+      };
+      const link = `${root}/outside-link.txt`;
+      const moved = `${root}/moved-link.txt`;
+      this.state = [
+        await outcome(async () => (await fs.lstat(link)).isSymbolicLink()),
+        await outcome(() => fs.readlink(link)),
+        await refusal(() => fs.stat(link)),
+        await refusal(() => fs.readFile(link, "utf8")),
+        await outcome(async () => {
+          await fs.rename(link, moved);
+          return (await fs.lstat(moved)).isSymbolicLink();
+        }),
+        await outcome(() => fs.unlink(moved)),
+      ].join("|");
+      cx.notify();
+    });
+  }
+  render() { return v_flex().child(this.state); }
+}
+"#;
+
+/// A link inside the root whose target is a real file outside it: the link
+/// entry is the application's to describe, move and remove, while `stat` and
+/// `readFile`, which follow it, are still denied at the capability gate.
+#[cfg(unix)]
+#[gpui::test]
+fn link_operations_reach_a_link_whose_target_is_outside_the_root(cx: &mut TestAppContext) {
+    let base =
+        std::env::temp_dir().join(format!("gpui-shell-fs-outside-link-{}", std::process::id()));
+    let root = base.join("root");
+    let outside = base.join("outside");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&root).expect("a granted root");
+    std::fs::create_dir_all(&outside).expect("outside the root");
+    std::fs::write(outside.join("secret.txt"), "secret").expect("outside target");
+    std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("outside-link.txt"))
+        .expect("symlink out of the root");
+
+    let source = OUTSIDE_LINK_PROBE.replace("__ROOT__", &root.to_string_lossy());
+    let rendered = metadata_probe(
+        cx,
+        Capabilities::new()
+            .read_roots([root.clone()])
+            .write_roots([root.clone()]),
+        &source,
+    );
+    let expected = format!(
+        "true|{}|denied|denied|true|undefined",
+        outside.join("secret.txt").display()
+    );
+    let secret = std::fs::read_to_string(outside.join("secret.txt")).ok();
+    let links_gone = std::fs::symlink_metadata(root.join("outside-link.txt")).is_err()
+        && std::fs::symlink_metadata(root.join("moved-link.txt")).is_err();
+    let _ = std::fs::remove_dir_all(&base);
+
+    assert!(
+        rendered.contains(&expected) && secret.as_deref() == Some("secret") && links_gone,
+        "probe: {rendered}; expected: {expected}; secret: {secret:?}; links gone: {links_gone}"
+    );
+}
+
+/// `rename` needs write access at both ends, so it cannot carry a file out of
+/// a root the application may only read.
+#[gpui::test]
+fn rename_needs_write_access_at_both_ends(cx: &mut TestAppContext) {
+    let base = std::env::temp_dir().join(format!("gpui-shell-fs-rename-{}", std::process::id()));
+    let readable = base.join("readable");
+    let writable = base.join("writable");
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&readable).expect("read root");
+    std::fs::create_dir_all(&writable).expect("write root");
+    std::fs::write(readable.join("kept.txt"), "kept").expect("source file");
+
+    let source = METADATA_PROBE.replace(
+        r#"await fs.writeFile("draft.txt", "hello");"#,
+        &format!(
+            r#"await fs.rename({:?}, {:?});"#,
+            readable.join("kept.txt"),
+            writable.join("taken.txt")
+        ),
+    );
+    let rendered = metadata_probe(
+        cx,
+        Capabilities::new()
+            .read_roots([readable.clone(), writable.clone()])
+            .write_roots([writable.clone()]),
+        &source,
+    );
+    assert!(
+        rendered.contains("failed:") && rendered.contains("capabilities.fs.write"),
+        "{rendered}"
+    );
+    assert!(readable.join("kept.txt").exists());
+    assert!(!writable.join("taken.txt").exists());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+fn metadata_probe(cx: &mut TestAppContext, capabilities: Capabilities, source: &str) -> String {
+    cx.update(crate::init);
+    crate::set_capabilities(capabilities);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let view_type = runtime.load_source("fs-metadata.js", source).expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let view = context
+        .update(|window, cx| runtime.instantiate_view(&view_type, window, cx))
+        .expect("instantiate");
+    context.run_until_parked();
+    draw(&mut context, &view);
+    snapshot_text(&mut context, &view)
+}
+
 fn denial_probe(cx: &mut TestAppContext, capabilities: Capabilities, path: &str) -> String {
     cx.update(crate::init);
     crate::set_capabilities(capabilities);
@@ -282,6 +598,14 @@ export default class Probe extends View {
     for (let i = 0; i < localStorage.length; i += 1) keys.push(localStorage.key(i));
     this.state = `${JSON.parse(localStorage.getItem("window")).title}|${keys.join(",")}`;
 
+    // A missing entry is `null`, as on the web, so `=== null` finds it.
+    const missing = [
+      localStorage.getItem("absent"),
+      localStorage.key(99),
+      sessionStorage.getItem("absent"),
+    ];
+    this.state += missing.every((value) => value === null) ? "|null" : "|not-null";
+
     // Memory only, and gone with the process: it never reaches the file this
     // test is about, which is the whole distinction between the two.
     sessionStorage.setItem("scratch", "kept for this run");
@@ -326,6 +650,10 @@ fn the_store_answers_from_memory_and_persists_off_thread(cx: &mut TestAppContext
     assert!(
         immediate.contains("Notes|window,theme"),
         "the store should answer from memory without awaiting: {immediate}"
+    );
+    assert!(
+        immediate.contains("|null"),
+        "a missing entry should read as null: {immediate}"
     );
 
     context.run_until_parked();

@@ -39,6 +39,28 @@ Textarea::new(&message)
 
 组件最多增长到 `max_rows`，之后内容在内部滚动。
 
+## 按内容定高
+
+宿主自行控制高度时，可以读取 `notes.read(cx).display_map().wrap_row_count()`。
+使用与 [Editor 相同的 prewrap 模式](./editor.md#按内容定高)，可以在首次布局前得到行数；
+请传入 Textarea 实际使用的字体、字号和文本区宽度，而不是 Editor 默认的等宽字体设置。
+
+## 滚动
+
+只要文本框中的内容可以滚动，在文本框上的滚动就只作用于文本框，滚到文本末尾也不会带动外层页面；内容未超出文本框时，滚动交给外层页面。
+
+## 滚动回弹
+
+```rust
+let notes = cx.new(|cx| {
+    TextareaState::new(window, cx)
+        .rows(10)
+        .scroll_bounce(true)
+});
+```
+
+开启 `scroll_bounce(true)` 后，内容高于文本框时，触控板或 Magic Mouse 的精细像素滚动及其惯性到达顶部或底部时，会让文本越过边缘，再弹回原位。普通鼠标滚轮产生按行滚动，不触发回弹；外框保持不动。iOS、Android 和 macOS 默认开启（与系统自带的滚动视图一致），其他平台默认关闭；系统要求减弱动态效果时，文本停在边缘，不会越过。
+
 ## 值与事件
 
 ```rust

@@ -12,35 +12,32 @@
 //! along with what confines it. This file is about the two decisions the
 //! confinement forced.
 //!
-//! # A row cannot register a handler
+//! # A row's handlers live as long as its frame
 //!
-//! The natural script for a list is `row.on_click(...)`, one handler per row.
-//! It cannot work here, and the reason is worth writing down because it is not
+//! The natural script for a list is `row.on_click(...)`, one handler per row,
+//! and the reason it needs care is worth writing down because it is not
 //! obvious from either side.
 //!
 //! Callbacks belong to the snapshot that registered them: a generation is
 //! opened when a script render begins, committed when it succeeds, and retired
 //! when the snapshot drops. That lifetime is exactly right for a description
 //! that stands until script state changes — and exactly wrong for a row, which
-//! is rebuilt on every frame the list is on screen. Twenty visible rows over a
-//! thousand frames of scrolling would leave twenty thousand persistent
-//! JavaScript functions in the arena, unreachable and unreleased, for as long
-//! as the view stood.
+//! is rebuilt on every frame the list is on screen. Registered against the
+//! render, twenty visible rows over a thousand frames of scrolling would leave
+//! twenty thousand persistent JavaScript functions in the arena, unreachable
+//! and unreleased, for as long as the view stood.
 //!
-//! So registering one is refused where it is written, and the list carries a
-//! single `on_item_click((key, cx) => …)` instead — registered from the view's
-//! `render()`, in the ordinary way, with the ordinary lifetime. The key comes
-//! from the list's required `get_key(index)` and is captured with the hit box.
-//! An event delivered from an older frame therefore still identifies the item
-//! that owned that box rather than whichever item later moved into its index.
+//! So each batch of rows records into a callback generation of its own, owned
+//! by a snapshot of the batch. Every row drawn from it holds that snapshot in a
+//! listener, and GPUI keeps a frame's listeners until the next frame replaces
+//! them — so the generation is retired exactly when nothing on screen can
+//! deliver an event to it. A batch that registered nothing skips all of this.
 //!
-//! What it does not cover is a row with *several* independently clickable
-//! parts. Doing that properly needs a callback generation scoped to a batch of
-//! items — opened when the batch is described, retired when the next batch
-//! replaces it — which is a lifetime `CallbackArena` does not have today. The
-//! shape is recorded in the implementation plan as P9; nothing here forecloses
-//! it, and the refusal above becomes an ordinary registration against the
-//! batch's generation when it exists.
+//! The list also carries a single `on_item_click((key, cx) => …)`, registered
+//! from the view's `render()` with the ordinary lifetime. The key comes from the
+//! list's required `get_key(index)` and is captured with the hit box, so an
+//! event delivered from an older frame still identifies the item that owned
+//! that box rather than whichever item later moved into its index.
 //!
 //! # The geometry is base's, the pairing is by name
 //!
@@ -73,6 +70,7 @@ use crate::{
         components::scrollbar::{SharedScroll, shared_scroll_position},
         materialize_subtree, warn_ignored_key, warn_unhonoured_a11y,
     },
+    snapshot::RenderSnapshot,
     spec::{CallbackId, VirtualListSpec},
 };
 
@@ -140,6 +138,19 @@ pub(in crate::materialize) fn virtual_list(
     // role or hit state for any of this to land on.
     warn_unhonoured_a11y(&behavior, name, &[]);
     warn_lazy_list_misuse(name, &children, &states);
+    if behavior.follow_mode.is_some() {
+        tracing::warn!(
+            "with_follow_mode is ignored on a {name}: it places rows by the sizes the script \
+             states and has no follow mode. `scroll_to_bottom` on its VirtualListScrollHandle \
+             is how a script keeps it at the end"
+        );
+    }
+    if behavior.on_visible_range_change.is_some() {
+        tracing::warn!(
+            "on_visible_range_change is ignored on a {name}: it is list that reports its \
+             visible range after the frame"
+        );
+    }
 
     let identity = ElementId::Name(SharedString::from(spec.id().to_owned()));
     let scroll = scroll_position(runtime, &behavior, &identity, window, cx);
@@ -260,12 +271,17 @@ pub(in crate::materialize) fn render_range(
             );
         }
 
+        let lease = described.lease();
         described
             .roots()
             .iter()
             .zip(described.keys())
             .map(|(root, key)| {
                 let item = materialize_subtree(&runtime, described.arena(), *root, window, cx);
+                let item = match &lease {
+                    Some(lease) => leased(item, lease.clone()),
+                    None => item,
+                };
                 if handlers.is_empty() {
                     item
                 } else {
@@ -274,6 +290,23 @@ pub(in crate::materialize) fn render_range(
             })
             .collect()
     })
+}
+
+/// Keeps a batch's handlers callable for as long as a row drawn from it is.
+///
+/// GPUI keeps a frame's listeners until the next frame replaces them, so a
+/// listener that owns the lease releases the batch's callback generation
+/// exactly when nothing on screen can deliver an event to it any more. The box
+/// is `size_full` for the reason given on [`clickable`]: it is the row's own box
+/// when placed and collapses to the content when measured.
+fn leased(item: AnyElement, lease: RenderSnapshot) -> AnyElement {
+    div()
+        .size_full()
+        .child(item)
+        .on_mouse_move(move |_, _, _| {
+            let _ = &lease;
+        })
+        .into_any_element()
 }
 
 /// The list-level handlers a row reports through. Both are optional, and a

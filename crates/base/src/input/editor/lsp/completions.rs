@@ -14,10 +14,116 @@ use crate::input::{InputBaseState, ShowCompletions};
 /// Default debounce duration for inline completions.
 const DEFAULT_INLINE_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// Decides which bytes of a completion label the menu paints as the match.
+///
+/// `query` is the word typed since the menu opened. Returned ranges are byte
+/// offsets into [`CompletionItem::label`].
+pub type CompletionHighlighter = dyn Fn(&str, &CompletionItem) -> Vec<Range<usize>>;
+
+/// Highlight a prefix of the completion label, matching today's menu.
+///
+/// The painted length is [`CompletionItem::filter_text`] when the item sets
+/// one, otherwise the query. It is shortened so the range never splits a
+/// character. An empty length paints nothing.
+pub fn highlight_prefix(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    let matched_len = item
+        .filter_text
+        .as_ref()
+        .map(|text| text.len())
+        .unwrap_or(query.len())
+        .min(item.label.len());
+    let end = item.label.floor_char_boundary(matched_len);
+    if end == 0 { Vec::new() } else { vec![0..end] }
+}
+
+/// Highlight the first case-insensitive occurrence of `query` in the label.
+///
+/// An empty query, or a query that does not occur as a contiguous span,
+/// paints nothing.
+pub fn highlight_contains(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    let query: Vec<char> = query.chars().collect();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let label: Vec<(usize, char)> = item.label.char_indices().collect();
+    let Some(last_start) = label.len().checked_sub(query.len()) else {
+        return Vec::new();
+    };
+
+    for start in 0..=last_start {
+        let matched = query
+            .iter()
+            .zip(label[start..].iter())
+            .all(|(query_char, (_, label_char))| chars_eq_ignore_case(*query_char, *label_char));
+        if !matched {
+            continue;
+        }
+
+        let byte_start = label[start].0;
+        let (last_index, last_char) = label[start + query.len() - 1];
+        return vec![byte_start..last_index + last_char.len_utf8()];
+    }
+    Vec::new()
+}
+
+/// Highlight each character of `query` in order, skipping characters in between.
+///
+/// Matching is case-insensitive. Adjacent hits merge into one range, so a
+/// contiguous match still paints as a single span. A query that cannot be
+/// matched in full paints nothing.
+pub fn highlight_characters(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    let mut rest = item.label.as_str();
+    let mut base = 0usize;
+    for query_char in query.chars() {
+        let Some((index, matched)) = rest
+            .char_indices()
+            .find(|(_, label_char)| chars_eq_ignore_case(query_char, *label_char))
+        else {
+            return Vec::new();
+        };
+
+        let start = base + index;
+        let end = start + matched.len_utf8();
+        let next = index + matched.len_utf8();
+        base += next;
+        rest = &rest[next..];
+        if let Some(last) = ranges.last_mut() {
+            if last.end == start {
+                last.end = end;
+                continue;
+            }
+        }
+        ranges.push(start..end);
+    }
+    ranges
+}
+
+fn chars_eq_ignore_case(left: char, right: char) -> bool {
+    left == right
+        || left.eq_ignore_ascii_case(&right)
+        || left.to_lowercase().eq(right.to_lowercase())
+}
+
 /// Display options for the LSP completion popover.
 ///
 /// Accessed through [`super::Lsp::completion_menu`] so embedders can tweak the
-/// popover without growing the [`InputBaseState`] API.
+/// popover without growing the [`InputBaseState`] API. Label highlighting is
+/// configured separately, on [`super::Lsp::completion_highlighter`].
+///
+/// ```
+/// use gpui_base::input::CompletionMenuOptions;
+/// let options = CompletionMenuOptions {
+///     max_width: gpui::px(480.),
+/// };
+/// let _copied = options;
+/// let _again = options;
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct CompletionMenuOptions {
     /// Maximum width of the popover.
@@ -451,5 +557,73 @@ impl InputBaseState<EditorMode> {
         let completion_text = completion_item.insert_text;
         self.replace_text_in_range_silent(Some(range_utf16), &completion_text, window, cx);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(label: &str, filter_text: Option<&str>) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            filter_text: filter_text.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn prefix_uses_the_query_length_unless_filter_text_is_set() {
+        assert_eq!(highlight_prefix("fl", &item("flag", None)), vec![0..2]);
+        assert_eq!(highlight_prefix("fl", &item("flag", Some("f"))), vec![0..1]);
+        assert_eq!(
+            highlight_prefix("flagpole", &item("flag", None)),
+            vec![0..4]
+        );
+        assert!(highlight_prefix("", &item("flag", None)).is_empty());
+    }
+
+    #[test]
+    fn prefix_does_not_split_a_character() {
+        assert_eq!(highlight_prefix("你", &item("你好", None)), vec![0..3]);
+        assert!(highlight_prefix("a", &item("你", None)).is_empty());
+    }
+
+    #[test]
+    fn contains_highlights_the_first_contiguous_match() {
+        // "dialog" itself ends in "log", so that hit comes before the suffix.
+        assert_eq!(
+            highlight_contains("log", &item("dialog_log", None)),
+            vec![3..6]
+        );
+        assert_eq!(
+            highlight_contains("LOG", &item("dialog_log", None)),
+            vec![3..6]
+        );
+        assert_eq!(
+            highlight_contains("log", &item("catalog", None)),
+            vec![4..7]
+        );
+        assert_eq!(
+            highlight_contains("好世", &item("你好世界", None)),
+            vec![3..9]
+        );
+        assert!(highlight_contains("log", &item("flag", None)).is_empty());
+        assert!(highlight_contains("", &item("flag", None)).is_empty());
+    }
+
+    #[test]
+    fn characters_highlight_gaps_and_merge_adjacent_hits() {
+        assert_eq!(highlight_characters("fl", &item("flag", None)), vec![0..2]);
+        assert_eq!(
+            highlight_characters("fl", &item("file_loader", None)),
+            vec![0..1, 2..3]
+        );
+        assert_eq!(
+            highlight_characters("你世", &item("你好世界", None)),
+            vec![0..3, 6..9]
+        );
+        assert!(highlight_characters("fx", &item("flag", None)).is_empty());
+        assert!(highlight_characters("", &item("flag", None)).is_empty());
     }
 }

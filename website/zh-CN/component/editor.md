@@ -91,6 +91,17 @@ Editor::new(&editor).h(px(320.))
 
 使用 `.language()` 指定语法高亮语言。应用需要启用对应的 Cargo feature，例如 `tree-sitter-rust` 或 `tree-sitter-markdown`；也可以使用 `tree-sitter-languages` 包含全部内置语法。
 
+高亮引擎有两种，通过 `gpui-kit` 的 Cargo feature 选择，默认都不启用：
+
+- `tree-sitter`：解析出语法树，折叠和需要语法信息的编辑行为也依赖它。每种语言对应上面提到的一个 grammar feature，全部启用会让应用增加几十 MB。
+- `syntect`：用正则表达式为约 200 种语言提供高亮，只增加几 MB。它不生成语法树，所以折叠按花括号匹配，编辑时也没有语法上下文。适合只需要显示高亮代码、不需要结构化编辑器的应用：
+
+```toml
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["syntect"] }
+```
+
+两者同时启用时使用 `tree-sitter`。
+
 ## 编辑器选项
 
 ```rust
@@ -100,9 +111,12 @@ let editor = cx.new(|cx| {
         .line_number(true)
         .folding(true)
         .show_whitespaces(true)
+        .scroll_bounce(true)
         .default_value(source)
 });
 ```
+
+`scroll_bounce(true)` 让超出编辑器高度的代码在触控板或 Magic Mouse 的精细像素滚动到达顶部或底部时越过边缘并弹回，与 [Textarea](./textarea.md#滚动回弹) 相同。行号栏随代码移动，外框和滚动条保持不动；普通鼠标滚轮的按行滚动不触发回弹。
 
 ## 主动补全
 
@@ -279,6 +293,64 @@ review_ranges.dispose(cx); // 释放集合，使该句柄及其克隆全部失�
 会重建对应集合的索引；编辑文本时线性更新受影响的集合，不重新排序。
 Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用。
 
+### 行号槽与概览标尺装饰
+
+需要在文本之外标记整行（例如版本控制 diff 中新增、修改或删除的行）时，使用这两个集合。
+`GutterDecorationCollection` 在行号之前的窄带中绘制标记。
+`OverviewRulerDecorationCollection` 在垂直滚动条轨道上绘制标记，Monaco 将这条轨道称为概览标尺。
+要同时在两处显示标记，请分别创建两个集合。
+
+```rust
+use gpui_kit::component::input::{
+    GutterDecoration, OverviewRulerDecoration, OverviewRulerLane,
+};
+
+let style = &cx.theme().highlight_theme.style;
+let (added, deleted) = (style.status.created(cx), style.status.deleted(cx));
+
+let gutter = editor.update(cx, |state, cx| {
+    state.create_gutter_decorations_collection(
+        vec![
+            GutterDecoration::new(10..42).with_color(added), // 标记范围触及的每一行。
+            GutterDecoration::new(60..60).with_color(deleted), // 标记从偏移 60 开始的那一行上方的边界。
+        ],
+        cx,
+    )
+});
+let ruler = editor.update(cx, |state, cx| {
+    state.create_overview_ruler_decorations_collection(
+        vec![
+            OverviewRulerDecoration::new(10..42)
+                .with_lane(OverviewRulerLane::Left)
+                .with_color(added.opacity(0.6)),
+        ],
+        cx,
+    )
+});
+```
+
+- 使用非空范围可以标记它触及的每一行，相当于 Monaco 的 `isWholeLine`。结束在行首的范围不标记该行。
+  使用**空**范围可以标记行边界，例如被删除的行原来所在的位置。范围位于行首时，标记显示在该行上方；
+  位于其他位置时，标记显示在该行下方。没有末尾换行的文档中，`text.len()` 会标记最后一行下方。
+  行号槽用竖条表示非空范围，用胶囊表示边界。
+- 这两种集合会保留空范围，文本装饰和几何装饰会丢弃空范围。在空范围处插入文字时，文字会插入到范围之后。
+  编辑使一个范围变空时，集合会保留它并把它作为边界。它们使用与其他装饰集合相同的句柄和
+  `set`/`append`/`clear`/`dispose` 方法。重新计算装饰后，请对整个集合调用 `set`；两次更新之间，
+  编辑跟踪会让标记留在原来的行上。
+- 只要存在行号槽集合（包括空集合），行号槽就会预留窄带，标记变化时文本不会移动。
+  默认宽度为 3 px，可用 `gutter_decorations_width` 或 `set_gutter_decorations_width` 修改。
+  如果范围起点位于折叠内部，行号槽会在折叠所在行绘制一条竖条，折叠之后的剩余部分照常标记；
+  `with_folded_color` 可以设置折叠所在行那条竖条的颜色。
+- 概览标尺有四个分区（lane）。`Left`、`Center`（默认）和 `Right` 各占轨道的三分之一；`Full` 占用整个轨道。
+  按惯例，版本控制使用 `Left`，搜索结果使用 `Center`，诊断使用 `Right`。每个标记按所在行占内容高度的比例定位，
+  高度至少为 6 px。同一分区中颜色相同且相互接触的标记会合并。
+- 标记绘制在滚动条下方，无论滚动条是 Base 提供的还是由 `set_scrollbar_renderer` 提供的。
+  滑块淡出时，标记仍然可见。
+- 不调用 `with_color` 时，两个集合都使用编辑器前景色。版本控制的颜色可以读取高亮主题中
+  Zed 的状态键 `created`、`modified` 和 `deleted`，对应方法为 `status.created(cx)`、
+  `status.modified(cx)` 和 `status.deleted(cx)`。缺少对应键时，这些方法分别使用 `success`、
+  `warning` 和 `error`。
+
 ## 值与事件
 
 ```rust
@@ -290,6 +362,31 @@ editor.update(cx, |state, cx| {
 ```
 
 `EditorState` 会发出 `InputEvent::Change`、`Focus` 和 `Blur` 等事件。
+
+需要增量同步时，请订阅 `InputEditsEvent`。每个事件都包含自己的有序编辑记录和每次编辑后的
+文档，即使多次变更一起排队也能正确对应。`set_value` 是静默操作，不会发出这两种事件。
+
+## 按内容定高
+
+`display_map().wrap_row_count()` 返回文本软换行后占用的行数，只读编辑器可以据此按内容设定高度。布局会在第一帧计算它；如果需要在此之前得到行数，请在设置值之后，用字体、字号和文本区宽度调用 `prewrap`：
+
+```rust
+use gpui_kit::component::ActiveTheme as _;
+
+let editor = cx.new(|cx| {
+    let mut state = EditorState::new(window, cx)
+        .line_number(false)
+        .default_value(snippet);
+    let mut font = window.text_style().font();
+    font.family = cx.theme().mono_font_family.clone();
+    state.prewrap(font, cx.theme().mono_font_size, width, cx);
+    state
+});
+let rows = editor.read(cx).display_map().wrap_row_count();
+```
+
+`width` 是编辑器宽度减去内边距；显示行号时还要减去行号栏宽度。折叠的行仍计入行数。
+字体和字号必须与编辑器实际使用的文本样式一致。此示例使用主题默认值；如果自定义了编辑器的字体或字号，请将相同的值传给 `prewrap`。
 
 ## 字体
 
@@ -308,6 +405,19 @@ Editor::new(&editor)
 
 这些就是所有元素都有的 [`Styled`](https://docs.rs/gpui/latest/gpui/trait.Styled.html)
 方法，`font_weight`、`line_height` 用法相同。
+
+## 尺寸
+
+Editor 与 Input、Textarea 放在同一个表单中时，可以通过 `Sizable` 设置相同的尺寸档位，
+协调它们的内边距和密度，使样式表现保持一致。Editor 的代码字体仍由自身的字体样式独立配置。
+
+```rust
+Editor::new(&editor).large()
+Editor::new(&editor) // medium（默认）
+Editor::new(&editor).xsmall()
+```
+
+与 `Textarea` 不同，尺寸只改变代码四周的内边距，不改变字号（见[字体](#字体)）。`xsmall` 去掉代码上下的内边距。
 
 ## 外观
 

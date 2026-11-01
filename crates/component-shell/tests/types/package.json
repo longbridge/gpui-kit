@@ -1,6 +1,0 @@
-{
-  "name": "gpui-component-shell-type-contracts",
-  "private": true,
-  "scripts": { "test": "node run.mjs" },
-  "devDependencies": { "typescript": "5.9.3" }
-}

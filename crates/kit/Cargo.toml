@@ -1,6 +1,6 @@
 [package]
 name = "gpui-kit"
-version = "0.7.1"
+version = "0.8.1"
 description = "GPUI Kit: one dependency for building desktop applications with GPUI, GPUI Base, GPUI Component and default assets."
 keywords = ["desktop", "gpui", "shadcn", "ui", "uikit"]
 categories = ["gui"]
@@ -31,7 +31,12 @@ inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector
 decimal = ["component", "gpui-component/decimal"]
 # Speech input: microphone capture and the system speech recognizer.
 speech = ["component", "gpui-component/speech"]
+# Syntax highlighting from a tree-sitter syntax tree, which also drives folding
+# and syntax-aware editing. Each language is a `tree-sitter-*` grammar feature.
 tree-sitter = ["component", "gpui-component/tree-sitter"]
+# Lighter syntax highlighting: about 200 languages from syntect for a few
+# megabytes, with no syntax tree. With both enabled, tree-sitter is used.
+syntect = ["component", "gpui-component/syntect"]
 tree-sitter-languages = ["component", "gpui-component/tree-sitter-languages"]
 tree-sitter-astro = ["component", "gpui-component/tree-sitter-astro"]
 tree-sitter-bash = ["component", "gpui-component/tree-sitter-bash"]
@@ -93,71 +98,7 @@ gpui-fast = { workspace = true, features = ["test-support"] }
 lsp-types.workspace = true
 
 [[test]]
-name = "window"
-required-features = ["test-support"]
-
-[[test]]
-name = "lifecycle"
-required-features = ["test-support"]
-
-[[test]]
-name = "components"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "input"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "input_focus"
-required-features = ["test-support", "component"]
-
-[[test]]
 name = "ui"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "root"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "controls"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "interactions"
-required-features = ["test-support"]
-
-[[test]]
-name = "event_helpers"
-required-features = ["test-support"]
-
-[[test]]
-name = "query_helpers"
-required-features = ["test-support"]
-
-[[test]]
-name = "composition_helpers"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "environment"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "control_steps"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "slider_steps"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "semantic_controls"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "collection_steps"
 required-features = ["test-support", "component"]
 
 [[test]]
@@ -168,41 +109,8 @@ harness = false
 required-features = ["test-support", "component", "assets"]
 
 [[test]]
-name = "disclosure"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "overlays"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "menu"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "collections"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "date_picker"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "dock"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "search"
-required-features = ["assets", "test-support", "component"]
-
-[[test]]
-name = "touch_selection"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "text_selection"
-required-features = ["test-support", "component"]
-
-[[test]]
-name = "diff"
-required-features = ["test-support", "component"]
+name = "native_shutdown"
+# Uses the native event loop and a hidden window; requires a desktop session.
+# Run explicitly with `cargo test -p gpui-kit --test native_shutdown`.
+test = false
+harness = false

@@ -78,7 +78,7 @@ impl Default for Column {
             movable: true,
             selectable: true,
             min_width: px(20.0),
-            max_width: px(f32::MAX),
+            max_width: px(1200.),
         }
     }
 }
@@ -121,15 +121,20 @@ impl Column {
         self
     }
 
-    /// Set the text alignment of the column to center.
+    /// Center the column's text, in its header and in its cells.
+    ///
+    /// The table aligns text; a cell that renders its own layout, such as a
+    /// flex row, aligns that layout itself.
     pub fn text_center(mut self) -> Self {
         self.align = TextAlign::Center;
         self
     }
 
-    /// Set the alignment of the column text, default is left.
+    /// Right-align the column's text, in its header and in its cells. The
+    /// default is left.
     ///
-    /// Only `text_left`, `text_right` is supported.
+    /// The table aligns text; a cell that renders its own layout, such as a
+    /// flex row, aligns that layout itself.
     pub fn text_right(mut self) -> Self {
         self.align = TextAlign::Right;
         self
@@ -211,7 +216,11 @@ impl Column {
         self
     }
 
-    /// Set the minimum width of the column, default is 1200px
+    /// Set the maximum width when resizing the column, default is 1200px.
+    ///
+    /// The default protects against oversized columns during resizing. Set a
+    /// larger maximum explicitly when wider columns are needed. It does not
+    /// limit an initial width set afterwards with [`Self::width`].
     pub fn max_width(mut self, max_width: impl Into<Pixels>) -> Self {
         let max_width = max_width.into();
         self.max_width = max_width;

@@ -342,3 +342,11 @@ state.update(cx, |state, cx| {
     state.set_selected_index(Some(IndexPath::new(5)), window, cx);
 });
 ```
+
+## 滚动回弹
+
+```rust
+List::new(&state).scroll_bounce(true)
+```
+
+开启 `scroll_bounce(true)` 后，超出视口高度的内容在精细像素滚动到达顶部或底部时越过边缘并弹回，例如 macOS 上的触控板或 Magic Mouse。普通鼠标滚轮产生按行滚动，不触发回弹。新的精细滚动手势或反向精细滚动会接管回弹；普通滚轮输入会取消回弹并正常滚动。逻辑滚动位置始终限制在正常范围内，滚动条保持固定。内容未超出视口时不回弹。iOS、Android 和 macOS 默认开启（与系统自带的滚动视图一致），其他平台默认关闭；系统要求减弱动态效果时不产生位移。

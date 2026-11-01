@@ -1,6 +1,6 @@
-// These exports are public constructors from the current component-shell
-// inventory. Constructor calls intentionally use `new`, matching the generated
-// gpui-component declarations.
+// These exports are public constructors from the inventory of gpui-shell's
+// `components` catalog. Constructor calls intentionally use `new`, matching the
+// generated gpui-component declarations.
 import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import {
@@ -145,6 +145,7 @@ import {
   TextareaState,
   TimeField,
   TimeFieldState,
+  TitleBar,
   Stepper,
   StepperItem,
   SuccessAlert,
@@ -1883,6 +1884,32 @@ export function registeredExamples(surface, cx) {
               .right_content(asElement(new Button("status-position").ghost().size("xsmall").label("Ln 12, Col 34")))
               .right_content(asElement(new VerticalSeparator().h(14)))
               .right_content(asElement(new Button("status-language").ghost().size("xsmall").label("JavaScript"))),
+          ),
+        },
+      ];
+    case "TitleBar":
+      return [
+        {
+          label: "Window title bar",
+          description:
+            "The bar above this gallery is the same component. Pressing an empty part of it moves the window; the trailing buttons stop that press so they stay clickable.",
+          element: asElement(
+            div()
+              .w_full()
+              .border(1)
+              .child(
+                asElement(
+                  new TitleBar()
+                    .child(asElement(new Text("Untitled document")))
+                    .child(
+                      h_flex()
+                        .px(8)
+                        .gap(4)
+                        .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
+                        .child(asElement(new Button("title-bar-share").ghost().size("small").label("Share"))),
+                    ),
+                ),
+              ),
           ),
         },
       ];

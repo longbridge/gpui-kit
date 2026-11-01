@@ -34,6 +34,28 @@ pub struct Capabilities {
     clipboard_read: bool,
     clipboard_write: bool,
     exit: bool,
+    env_variables: Vec<String>,
+}
+
+/// Environment variables every application sees without asking.
+///
+/// Each one describes the user's setup — who they are, their language and
+/// time zone, the tools they prefer, where the platform keeps things — and none
+/// carries a secret. Without them every application would list the same names
+/// in its manifest, and a grant everyone writes is a grant nobody reads. A
+/// variable outside this list still needs `capabilities.process.env`.
+///
+/// The list lives in `default-env`, one name per line, so adding or
+/// reviewing a variable is a change to that file alone.
+pub(crate) fn default_env_variables() -> &'static [&'static str] {
+    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        include_str!("default-env")
+            .lines()
+            .map(|line| line.split('#').next().unwrap_or_default().trim())
+            .filter(|name| !name.is_empty())
+            .collect()
+    })
 }
 
 /// A scheme-, effective-port-, method-, and path-scoped HTTP grant for one host.
@@ -131,7 +153,69 @@ pub enum ExecuteGrant {
     Unrestricted,
 }
 
+fn add_roots(granted: &mut Vec<PathBuf>, roots: impl IntoIterator<Item = PathBuf>) {
+    for root in roots {
+        if !granted.contains(&root) {
+            granted.push(root);
+        }
+    }
+}
+
 impl Capabilities {
+    /// One line per granted capability, for a host that shows what an
+    /// application asks for before running it. Empty when nothing is granted.
+    pub(crate) fn summary(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        let paths = |roots: &[PathBuf]| {
+            roots
+                .iter()
+                .map(|root| root.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if !self.read_roots.is_empty() {
+            lines.push(format!("fs read: {}", paths(&self.read_roots)));
+        }
+        if !self.write_roots.is_empty() {
+            lines.push(format!("fs write: {}", paths(&self.write_roots)));
+        }
+        if !self.network_hosts.is_empty() {
+            lines.push(format!("network: {}", self.network_hosts.join(", ")));
+        }
+        for request in &self.http_requests {
+            lines.push(format!(
+                "http: {} {}://{}{}",
+                request.methods.join("|"),
+                request.scheme,
+                request.host,
+                request
+                    .port
+                    .map(|port| format!(":{port}"))
+                    .unwrap_or_default()
+            ));
+        }
+        match &self.execute {
+            ExecuteGrant::Denied => {}
+            ExecuteGrant::Allowed(commands) => {
+                lines.push(format!("process: {}", commands.join(", ")));
+            }
+            ExecuteGrant::Unrestricted => lines.push("process: any command".to_owned()),
+        }
+        if self.storage {
+            lines.push("storage".to_owned());
+        }
+        match (self.clipboard_read, self.clipboard_write) {
+            (true, true) => lines.push("clipboard: read, write".to_owned()),
+            (true, false) => lines.push("clipboard: read".to_owned()),
+            (false, true) => lines.push("clipboard: write".to_owned()),
+            (false, false) => {}
+        }
+        if !self.env_variables.is_empty() {
+            lines.push(format!("env: {}", self.env_variables.join(", ")));
+        }
+        lines
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -143,6 +227,20 @@ impl Capabilities {
 
     pub fn write_roots(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
         self.write_roots = roots.into_iter().collect();
+        self
+    }
+
+    /// Adds read roots to the ones already granted, where [`Self::read_roots`]
+    /// replaces them. A host that anchors an application to its own directories
+    /// widens the manifest's grant this way rather than overwriting it.
+    pub(crate) fn add_read_roots(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        add_roots(&mut self.read_roots, roots);
+        self
+    }
+
+    /// Adds write roots to the ones already granted. See [`Self::add_read_roots`].
+    pub(crate) fn add_write_roots(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        add_roots(&mut self.write_roots, roots);
         self
     }
 
@@ -183,6 +281,35 @@ impl Capabilities {
     pub fn exit(mut self, allowed: bool) -> Self {
         self.exit = allowed;
         self
+    }
+
+    /// Environment variables `process.env` may show beyond
+    /// [`default_env_variables`]. Everything else in the host's environment
+    /// stays out of reach: it routinely holds tokens and keys that were handed
+    /// to the host, not to every script it runs.
+    pub fn env_variables(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.env_variables = names.into_iter().collect();
+        self
+    }
+
+    /// Whether `process.env` may show `name`: one of the defaults or a
+    /// granted name, compared without regard to case.
+    ///
+    /// Case is ignored because the same variable is spelled both ways in the
+    /// wild — most Unix programs read `http_proxy`, others `HTTP_PROXY` — and
+    /// Windows does not distinguish them at all. One spelling in the list or
+    /// the manifest covers every one the environment uses.
+    pub(crate) fn may_show_env_variable(&self, name: &str) -> bool {
+        default_env_variables()
+            .iter()
+            .copied()
+            .chain(self.env_variables.iter().map(String::as_str))
+            .any(|visible| visible.eq_ignore_ascii_case(name))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn granted_env_variables(&self) -> &[String] {
+        &self.env_variables
     }
 
     pub fn may_exit(&self) -> bool {
@@ -264,6 +391,27 @@ impl Capabilities {
     /// functions and the asset source, so there is no second path policy to keep
     /// in sync.
     pub(crate) fn open(&self, path: &Path, access: Access) -> Result<Grant, CapabilityError> {
+        self.open_resolving(path, access, Final::Follow)
+    }
+
+    /// [`Self::open`] for an operation on a path's final component itself —
+    /// `lstat`, `readlink`, `unlink`, `rmdir`, either end of `rename` — which
+    /// must not follow it when it is a symlink.
+    ///
+    /// The directories leading up to it are still resolved, so a path reached
+    /// through `/var` on macOS agrees with its root. Only the last component is
+    /// kept as written, which is what the relative form of the same path already
+    /// gets from the lexical branch.
+    pub(crate) fn open_link(&self, path: &Path, access: Access) -> Result<Grant, CapabilityError> {
+        self.open_resolving(path, access, Final::Keep)
+    }
+
+    fn open_resolving(
+        &self,
+        path: &Path,
+        access: Access,
+        last: Final,
+    ) -> Result<Grant, CapabilityError> {
         let roots = match access {
             Access::Read => &self.read_roots,
             Access::Write => &self.write_roots,
@@ -287,9 +435,32 @@ impl Capabilities {
                 // Resolved the same way the root was, or the two disagree about
                 // a directory neither of them left: on macOS a temporary path
                 // reaches `/private/var` through `/var`.
-                let normalized = resolved_root(path).unwrap_or_else(|| normalize(path));
+                //
+                // Resolving runs `canonicalize`, which follows a symlink in the
+                // last component too. That is right for reading through the link
+                // — a stored target that is absolute is one `Dir` will not follow
+                // — and wrong for an operation on the link, which would land on
+                // its target instead.
+                let resolved_path = match (last, path.parent(), path.file_name()) {
+                    (Final::Keep, Some(parent), Some(name)) => {
+                        resolved_root(parent).map(|parent| parent.join(name))
+                    }
+                    _ => resolved_root(path),
+                };
+                let normalized = resolved_path.unwrap_or_else(|| normalize(path));
                 match normalized.strip_prefix(&resolved) {
                     Ok(relative) => relative.to_path_buf(),
+                    // The root itself, named by a path whose last component is a
+                    // link to it — `~/.claude/skills` pointing into a dotfiles
+                    // checkout. Kept as written it lies outside the resolved
+                    // root, but there is no link *inside* the grant to act on:
+                    // the operation is on the root, as `open` would have it.
+                    Err(_)
+                        if last == Final::Keep
+                            && resolved_root(path).as_deref() == Some(resolved.as_path()) =>
+                    {
+                        PathBuf::new()
+                    }
                     Err(_) => continue,
                 }
             } else {
@@ -325,7 +496,11 @@ impl Capabilities {
                 relative
             };
 
-            return Ok(Grant { dir, relative });
+            return Ok(Grant {
+                dir,
+                root: resolved,
+                relative,
+            });
         }
 
         Err(CapabilityError::OutsideRoots {
@@ -333,6 +508,15 @@ impl Capabilities {
             access,
         })
     }
+}
+
+/// Whether [`Capabilities::open`] resolves a symlink in a path's last component.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Final {
+    /// Read or write through the link, to what it names.
+    Follow,
+    /// Act on the link itself.
+    Keep,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,6 +603,8 @@ pub(crate) fn install(capabilities: Capabilities) {
 #[derive(Debug)]
 pub(crate) struct Grant {
     dir: Dir,
+    /// The root `dir` was opened at, resolved.
+    root: PathBuf,
     relative: PathBuf,
 }
 
@@ -442,6 +628,22 @@ impl Grant {
     /// handle is — but the words a script needs to recognize what it asked for.
     pub fn describe(&self) -> String {
         self.relative.display().to_string()
+    }
+
+    /// The target as a path another program can open, once the granted
+    /// handle has confirmed it exists.
+    ///
+    /// The check goes through the handle rather than the path, so a link that
+    /// leads out of the grant is refused here as a read through it would be.
+    /// What comes back is only for handing to the system — `open_with_system`
+    /// takes a path, not a handle — and nothing in this process opens it.
+    pub(crate) fn system_path(&self) -> std::io::Result<PathBuf> {
+        self.dir.metadata(&self.relative)?;
+        Ok(if self.relative == Path::new(".") {
+            self.root.clone()
+        } else {
+            self.root.join(&self.relative)
+        })
     }
 
     /// Splits into the two halves, for work that moves to another thread.
@@ -765,5 +967,171 @@ mod symlink_tests {
             "a write followed a dangling symlink out of the root"
         );
         assert!(!outside.join("not-there.txt").exists());
+    }
+
+    #[test]
+    fn open_link_names_the_link_itself_given_an_absolute_path() {
+        let sandbox = Sandbox::new("link-itself");
+        sandbox.link("alias", Path::new("ours.txt"));
+        let capabilities = sandbox.granted();
+        let alias = sandbox.root.join("inside/alias");
+
+        let link = capabilities
+            .open_link(&alias, Access::Read)
+            .expect("a path inside the root");
+        assert_eq!(link.path(), Path::new("alias"));
+        assert!(
+            link.dir()
+                .symlink_metadata(link.path())
+                .expect("the link")
+                .is_symlink()
+        );
+
+        // Reading through it still resolves to what it names.
+        let through = capabilities
+            .open(&alias, Access::Read)
+            .expect("a path inside the root");
+        assert_eq!(through.path(), Path::new("ours.txt"));
+    }
+
+    #[test]
+    fn a_root_that_is_itself_a_link_can_be_named_by_its_own_path() {
+        let sandbox = Sandbox::new("linked-root");
+        let alias = sandbox.root.join("alias");
+        std::os::unix::fs::symlink(sandbox.root.join("inside"), &alias).expect("a linked root");
+        let capabilities = Capabilities::new()
+            .read_roots([alias.clone()])
+            .write_roots([alias.clone()]);
+
+        let root = capabilities
+            .open_link(&alias, Access::Read)
+            .expect("the root, named through the link it was granted as");
+        assert_eq!(root.path(), Path::new("."));
+        assert!(
+            root.dir()
+                .symlink_metadata(root.path())
+                .expect("the root")
+                .is_dir()
+        );
+
+        let inside = capabilities
+            .open_link(&alias.join("ours.txt"), Access::Write)
+            .expect("a path inside the linked root");
+        assert_eq!(inside.path(), Path::new("ours.txt"));
+    }
+
+    #[test]
+    fn open_link_keeps_a_dangling_link_and_removes_only_the_link() {
+        let sandbox = Sandbox::new("link-dangling");
+        let outside = sandbox.outside();
+        sandbox.link("dangling", &outside.join("not-there.txt"));
+        let capabilities = sandbox.granted();
+
+        let link = capabilities
+            .open_link(&sandbox.root.join("inside/dangling"), Access::Write)
+            .expect("a path inside the root");
+        assert_eq!(link.path(), Path::new("dangling"));
+        link.dir()
+            .remove_file(link.path())
+            .expect("the link itself is removed");
+        assert!(
+            std::fs::symlink_metadata(sandbox.root.join("inside/dangling")).is_err(),
+            "the link is gone"
+        );
+        assert!(!outside.join("not-there.txt").exists());
+    }
+
+    #[test]
+    fn open_link_names_a_link_out_of_the_root_that_open_refuses_to_follow() {
+        let sandbox = Sandbox::new("link-outside");
+        let outside = sandbox.outside();
+        sandbox.link("secret", &outside.join("secret.txt"));
+        let capabilities = sandbox.granted();
+        let secret = sandbox.root.join("inside/secret");
+
+        let link = capabilities
+            .open_link(&secret, Access::Write)
+            .expect("the link is inside the root");
+        assert_eq!(link.path(), Path::new("secret"));
+        assert!(
+            link.dir()
+                .symlink_metadata(link.path())
+                .expect("the link")
+                .is_symlink()
+        );
+
+        assert!(
+            capabilities.open(&secret, Access::Read).is_err(),
+            "following a link out of the root was accepted"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.join("secret.txt")).expect("the target"),
+            "secret"
+        );
+    }
+
+    #[test]
+    fn open_link_refuses_a_parent_that_leads_out_of_the_root() {
+        let sandbox = Sandbox::new("link-parent");
+        let outside = sandbox.outside();
+        sandbox.link("escape", &outside);
+        let capabilities = sandbox.granted();
+
+        assert!(
+            capabilities
+                .open_link(
+                    &sandbox.root.join("inside/escape/secret.txt"),
+                    Access::Write
+                )
+                .is_err(),
+            "a parent that resolves outside the root was accepted"
+        );
+        assert!(outside.join("secret.txt").exists());
+    }
+
+    #[test]
+    fn the_default_environment_holds_only_plain_unique_names_with_no_secrets() {
+        let names = default_env_variables();
+        assert!(names.contains(&"HOME"), "the list must parse: {names:?}");
+        for (index, name) in names.iter().enumerate() {
+            assert!(
+                name.chars().all(|c| {
+                    c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, '_' | '(' | ')')
+                }),
+                "`{name}` in default-env is not an upper-case variable name; \
+                 one spelling covers every case"
+            );
+            assert!(
+                !names[..index].contains(name),
+                "`{name}` is listed twice in default-env"
+            );
+            for secret in [
+                "TOKEN",
+                "SECRET",
+                "PASSWORD",
+                "PASSWD",
+                "CREDENTIAL",
+                "KEY",
+                "AUTH",
+                "COOKIE",
+                "SESSION_ID",
+                "BUS_ADDRESS",
+            ] {
+                assert!(
+                    !name.contains(secret),
+                    "`{name}` looks like it can carry a secret or another program's \
+                     authority; ask for it in the manifest instead"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_variable_is_shown_under_any_spelling_of_a_listed_name() {
+        let capabilities = Capabilities::new().env_variables(["my_app_mode".to_owned()]);
+        assert!(capabilities.may_show_env_variable("HTTP_PROXY"));
+        assert!(capabilities.may_show_env_variable("http_proxy"));
+        assert!(capabilities.may_show_env_variable("MY_APP_MODE"));
+        assert!(!capabilities.may_show_env_variable("GITHUB_TOKEN"));
     }
 }

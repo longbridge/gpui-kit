@@ -150,6 +150,15 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
     }
 
     fn confirm(&mut self, secondary: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        let Some(ix) = self.selected_index else {
+            return;
+        };
+        let Some(item) = self.delegate.item(ix) else {
+            return;
+        };
+        if !self.delegate.is_item_enabled(ix, item, cx) {
+            return;
+        }
         (self.on_confirm)(self.selected_index, secondary, window, cx);
     }
 

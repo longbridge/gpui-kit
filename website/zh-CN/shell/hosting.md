@@ -144,26 +144,27 @@ reading.structure_repeat_rate();  // 一次重建产出的结构，与它替换�
 
 Host 的 debug 构建，**单次脚本渲染大约比 release 慢三倍**，而差距全部来自两个依赖。
 在一个实时应用上实测——一个每笔行情都重渲染的行情终端，用运行时自带的
-[`RuntimeMetrics`](#观察它花了多少)：
+[`RuntimeMetrics`](#观察它花了多少)。这组数据测于从 `rquickjs` 切换到 `quickjs-jit` 之前，
+`quickjs-jit` 的包以同样的方式拆分解释器和绑定：
 
-| `[profile.dev.package]`          | 平均脚本渲染 | 平均物化   |
-| -------------------------------- | ------------ | ---------- |
-| 不配，或只写 `rquickjs`          | 31.5 ms      | 3.9 ms     |
-| `rquickjs-sys` + `rquickjs-core` | **11.3 ms**  | **1.2 ms** |
-| release（对照）                  | 11.0 ms      | 1.2 ms     |
+| `[profile.dev.package]`                | 平均脚本渲染 | 平均物化   |
+| -------------------------------------- | ------------ | ---------- |
+| 不配，或只写 `quickjs-jit`             | 31.5 ms      | 3.9 ms     |
+| `quickjs-jit-sys` + `quickjs-jit-core` | **11.3 ms**  | **1.2 ms** |
+| release（对照）                        | 11.0 ms      | 1.2 ms     |
 
 所以：
 
 ```toml
 [profile.dev.package]
-rquickjs-sys = { opt-level = 3 }
-rquickjs-core = { opt-level = 3 }
+quickjs-jit-sys = { opt-level = 3 }
+quickjs-jit-core = { opt-level = 3 }
 ```
 
-**只写 `rquickjs` 没有任何作用**，这正是坑所在：它是一个薄门面，把 `rquickjs-core`
-重新导出而已，写它既没优化到解释器，也没优化到绑定。`rquickjs-sys` 编译的是 QuickJS
+**只写 `quickjs-jit` 没有任何作用**，这正是坑所在：它是一个薄门面，把 `quickjs-jit-core`
+重新导出而已，写它既没优化到解释器，也没优化到绑定。`quickjs-jit-sys` 编译的是 QuickJS
 本体——C 源码，经 `cc` 构建，而 `cc` 读的是**那个包**在 profile 里的优化级别；
-`rquickjs-core` 则是每一个跨界值的转换所在。没优化的解释器，正是让 debug 构建
+`quickjs-jit-core` 则是每一个跨界值的转换所在。没优化的解释器，正是让 debug 构建
 用起来像另一个产品的原因。
 
 `llrt_*` 那批**不需要**这么做。同一个应用上实测，它们带来的差异在噪声范围内：
@@ -191,13 +192,13 @@ gpui_kit::shell::on_exit_request(|request, window, cx| {
 
 ## Hot-reload
 
-一个调用就能开起来，`--watch` 用的也是这一个：
+一个调用就能开起来，`dev` 命令用的也是这一个：
 
 ```rust
 runtime.watch(&root, window, cx)?.forget();
 ```
 
-`runtime.watch` 从已加载的 root 读取解析后的目录与 manifest entry，不再让 Host 维护第二份可能漂移的元数据。它不暗藏构建模式策略：CLI 在解析到 `--watch` 后启用监听，嵌入式 Host 则可以把调用放进 `#[cfg(debug_assertions)]`。返回的 `Watcher` 持有这次监听：把它 drop 掉，循环就停；`.forget()` 则让它跟随 View 继续运行。 View、运行时或窗口任意一个消失时，循环也会自己结束。
+`runtime.watch` 从已加载的 root 读取解析后的目录与 manifest entry，不再让 Host 维护第二份可能漂移的元数据。它不暗藏构建模式策略：CLI 只在 `dev` 命令或 `run --watch` 下启用监听，嵌入式 Host 则可以把调用放进 `#[cfg(debug_assertions)]`。返回的 `Watcher` 持有这次监听：把它 drop 掉，循环就停；`.forget()` 则让它跟随 View 继续运行。 View、运行时或窗口任意一个消失时，循环也会自己结束。
 
 一次重载会重新读取**每一个**模块，入口也在内——一个悄悄用了旧 import 的 hot-reload 比没有更糟，因为它看起来是成功的。它会先把所有可能失败的活干完，再去碰活着的那个 View：新代码加载失败时，上一个 View 继续运行，错误进 `tracing`，窗口里由一条固定 id 的 toast 报出来；下一次成功的重载会撤掉这条 toast。
 

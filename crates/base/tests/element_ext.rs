@@ -15,6 +15,7 @@ impl Render for PrepaintHarness {
         let captured = self.captured.clone();
         div()
             .size(px(80.))
+            .p(px(10.))
             .on_prepaint(move |bounds, _, _| *captured.borrow_mut() = Some(bounds))
     }
 }
@@ -28,6 +29,7 @@ fn prepaint_callback_observes_the_parent_bounds(cx: &mut TestAppContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
 
     let bounds = result.borrow().expect("prepaint callback should run");
+    assert_eq!(bounds.origin, gpui::point(px(0.), px(0.)));
     assert_eq!(bounds.size.width, px(80.));
     assert_eq!(bounds.size.height, px(80.));
 }

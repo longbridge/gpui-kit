@@ -318,13 +318,15 @@ The boundaries are:
 - `with_content_style(...)` refines the viewport containing the list and
   optional vertical scrollbar.
 - `with_list_style(...)` refines the GPUI virtual list after its default
-  `px_3()` / `py_2()` padding. GPUI lists offset rows only vertically, so the
-  horizontal padding component — the default and any refinement — is carried
-  by every row wrapper.
+  `px_3()` / `py_2()` padding. GPUI lists offset rows only vertically, and
+  measure their scroll extent without their own padding, so the padding
+  components — the default and any refinement — are carried by the row
+  wrappers: the horizontal one by every row, the vertical one by the first
+  and the last row.
 - `with_row_style(...)` refines the full-width wrapper around each rendered row;
   the default wrapper includes `pb_8()` between rows, like a CSS gap. The
-  list's own bottom padding owns the gap between the last row and whatever
-  sits below the transcript.
+  list padding wrapper after the last row owns the gap between it and
+  whatever sits below the transcript. Row padding remains independent of it.
 - `scrollbar(false)` hides the built-in vertical scrollbar; it does not disable
   scrolling or remove keyboard/wheel interaction.
 - `with_bottom_fade(color)` fades the transcript's bottom edge into the given
