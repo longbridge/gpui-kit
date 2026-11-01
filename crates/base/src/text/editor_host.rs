@@ -141,6 +141,26 @@ impl RenderContext {
         self
     }
 
+    /// Supplies this render's foreground ranges for a keyed paragraph leaf,
+    /// including a heading or table cell. Replaces any ranges for the same key.
+    ///
+    /// Ranges use the leaf's rendered UTF-8 bytes; images and custom inline
+    /// objects occupy one U+FFFC (three bytes), as in [`LeafGeometry`]. Text
+    /// ranges are clipped to each text fragment; non-character boundaries and
+    /// empty or reversed ranges are ignored. An object's foreground changes
+    /// only when a range covers its entire placeholder; images are unchanged.
+    ///
+    /// These colors override mark and link foregrounds; later ranges win
+    /// overlaps. Other mark properties and link activation are preserved.
+    /// Uncovered text inherits its ordinary foreground. Colors belong to this
+    /// rendering context, never the document tree: supply current theme/surface
+    /// colors on each render, or omit the ranges to restore inheritance.
+    pub fn with_foreground_ranges(mut self, key: u64, ranges: Vec<(Range<usize>, Hsla)>) -> Self {
+        let foregrounds = self.node.foregrounds.get_or_insert_with(Default::default);
+        Arc::make_mut(foregrounds).insert(key, ranges);
+        self
+    }
+
     /// Sets the Markdown extensions that render custom nodes.
     pub fn with_markdown_extensions(mut self, extensions: Arc<MarkdownExtensions>) -> Self {
         self.node.markdown_extensions = extensions;
@@ -725,11 +745,15 @@ mod tests {
         out: Geometries,
         width: Pixels,
         sink: Option<Rc<dyn EditorSink>>,
+        render_context: Option<RenderContext>,
     }
 
     impl Render for Host {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            let rcx = RenderContext::from_app(cx)
+            let rcx = self
+                .render_context
+                .clone()
+                .unwrap_or_else(|| RenderContext::from_app(cx))
                 .with_markdown_extensions(self.extensions.clone())
                 .with_body_font_size(px(16.));
             let refs: Vec<&BlockNode> = self.blocks.iter().collect();
@@ -779,6 +803,7 @@ mod tests {
                 out,
                 width,
                 sink: None,
+                render_context: None,
             }
         });
         settle(vcx);
@@ -806,6 +831,72 @@ mod tests {
                 },
             )),
         )
+    }
+
+    #[gpui::test]
+    fn render_local_foregrounds_keep_reused_leaf_geometry(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let out = Geometries::default();
+        let (host, vcx) = cx.add_window_view({
+            let out = out.clone();
+            move |_, cx| {
+                let mut mixed = plain("a中😀").with_leaf_key(2);
+                mixed.push(atom());
+                mixed.push(InlineNode::new("tail"));
+                Host {
+                    blocks: vec![
+                        BlockNode::Paragraph(plain("a中😀").with_leaf_key(1)),
+                        BlockNode::Paragraph(mixed),
+                    ],
+                    extensions: atom_plugin(),
+                    decorations: HashMap::new(),
+                    out,
+                    width: px(300.),
+                    sink: None,
+                    render_context: Some(
+                        RenderContext::from_app(cx)
+                            .with_foreground_ranges(1, vec![(0..8, gpui::red())])
+                            .with_foreground_ranges(2, vec![(0..15, gpui::red())]),
+                    ),
+                }
+            }
+        });
+        settle(vcx);
+        let before = out.borrow().clone();
+        for color in [Some(gpui::blue()), None] {
+            host.update(vcx, |host, cx| {
+                let ranges: Vec<_> = color.map(|color| (0..15, color)).into_iter().collect();
+                host.render_context = Some(
+                    RenderContext::from_app(cx)
+                        .with_foreground_ranges(1, vec![(0..15, gpui::red())])
+                        .with_foreground_ranges(1, ranges.clone())
+                        .with_foreground_ranges(2, ranges.clone()),
+                );
+                assert_eq!(
+                    host.render_context
+                        .as_ref()
+                        .unwrap()
+                        .node
+                        .foregrounds
+                        .as_ref()
+                        .unwrap()[&1],
+                    ranges
+                );
+                cx.notify();
+            });
+            settle(vcx);
+            let after = out.borrow();
+            for key in [1, 2] {
+                assert_eq!(after[&key].bounds(), before[&key].bounds());
+                assert_eq!(after[&key].len(), before[&key].len());
+                for at in [0, 1, 4, 8] {
+                    assert_eq!(
+                        after[&key].position_for_index(at),
+                        before[&key].position_for_index(at)
+                    );
+                }
+            }
+        }
     }
 
     fn atom() -> InlineNode {
@@ -1100,6 +1191,7 @@ mod tests {
                 out,
                 width: px(600.),
                 sink: None,
+                render_context: None,
             }
         });
         settle(vcx);
@@ -1194,6 +1286,7 @@ mod tests {
                 out: Geometries::default(),
                 width: px(300.),
                 sink: Some(sink),
+                render_context: None,
             }
         });
         settle(vcx);

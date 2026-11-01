@@ -24,7 +24,7 @@ use crate::{
         document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
             Inline, InlineHighlight, InlineState, code_insets, combine_highlights, fade_highlights,
-            point_in_text_selection, text_runs, text_size_ranges,
+            foreground_highlights, point_in_text_selection, text_runs, text_size_ranges,
         },
         inline_flow::{InlineFlow, InlineFlowItem, slice_ranges},
         range_highlight::{RangeHighlightFrame, RevealAt, RevealRequest},
@@ -1637,7 +1637,12 @@ impl Paragraph {
         {
             return (
                 cached.text.clone(),
-                cached.highlights.clone(),
+                foreground_highlights(
+                    cached.highlights.clone(),
+                    &cached.text,
+                    0,
+                    node_cx.foregrounds(self.leaf_key()),
+                ),
                 cached.links.clone(),
             );
         }
@@ -1674,6 +1679,8 @@ impl Paragraph {
                 links: links.clone(),
             }));
         }
+        let highlights =
+            foreground_highlights(highlights, &text, 0, node_cx.foregrounds(self.leaf_key()));
         (text, highlights, links)
     }
 
@@ -2676,6 +2683,8 @@ pub(crate) struct NodeContext {
     pub(crate) stream_fade: Option<Arc<StreamFadeFrame>>,
     /// The application's range highlights, when there are any.
     pub(crate) range_highlights: Option<Arc<RangeHighlightFrame>>,
+    /// Render-local glyph colors supplied by an external editor, keyed by leaf.
+    pub(crate) foregrounds: Option<Arc<HashMap<u64, Vec<(Range<usize>, Hsla)>>>>,
     /// The line being scrolled into view, when there is one.
     pub(crate) reveal: Option<RevealRequest>,
     /// The font size the text view inherits this frame, or zero when not
@@ -2684,6 +2693,11 @@ pub(crate) struct NodeContext {
 }
 
 impl NodeContext {
+    fn foregrounds(&self, key: Option<u64>) -> &[(Range<usize>, Hsla)] {
+        key.and_then(|key| self.foregrounds.as_ref()?.get(&key))
+            .map_or(&[], Vec::as_slice)
+    }
+
     fn image_source(&self, image: &ImageNode) -> ImageSource {
         match &self.image_source {
             Some(resolve) => resolve(&image.url),
@@ -3216,6 +3230,37 @@ impl Paragraph {
             });
         }
 
+        let foregrounds = node_cx.foregrounds(self.leaf_key());
+        if !foregrounds.is_empty() {
+            let mut offset = 0;
+            for item in &mut items {
+                match item {
+                    InlineFlowItem::Text {
+                        text, highlights, ..
+                    } => {
+                        *highlights = foreground_highlights(
+                            std::mem::take(highlights),
+                            text,
+                            offset,
+                            foregrounds,
+                        );
+                        offset += text.len();
+                    }
+                    InlineFlowItem::Object { style, .. } => {
+                        let end = offset + '\u{FFFC}'.len_utf8();
+                        if let Some((_, color)) = foregrounds
+                            .iter()
+                            .rev()
+                            .find(|(range, _)| range.start <= offset && end <= range.end)
+                        {
+                            style.color = Some(*color);
+                        }
+                        offset = end;
+                    }
+                    InlineFlowItem::Image { .. } => offset += '\u{FFFC}'.len_utf8(),
+                }
+            }
+        }
         items
     }
 }
@@ -4467,6 +4512,154 @@ impl BlockNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_foregrounds_follow_the_render_context_without_entering_the_paragraph_cache() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let link = LinkMark {
+                url: "https://example.com".into(),
+                ..Default::default()
+            };
+            let mut paragraph = Paragraph::default().with_leaf_key(7);
+            paragraph.push(InlineNode::new("a中😀link").marks(vec![
+                (0..12, TextMark::default().bold()),
+                (1..12, TextMark::default().italic().link(link.clone())),
+            ]));
+            let original = paragraph.clone();
+            let base = NodeContext::default();
+            let (_, inherited, _) = paragraph.plain_render(&base, cx);
+            let cached = paragraph.render_cache.0.lock().unwrap().clone().unwrap();
+            for color in [gpui::red(), gpui::blue()] {
+                let context = NodeContext {
+                    foregrounds: Some(Arc::new(HashMap::from([(7, vec![(0..12, color)])]))),
+                    ..base.clone()
+                };
+                let (text, highlights, links) = paragraph.plain_render(&context, cx);
+                assert_eq!(text.as_ref(), "a中😀link");
+                assert_eq!(links, vec![(1..12, link.clone())]);
+                assert!(highlights.iter().all(|(_, h)| h.style.color == Some(color)));
+                assert!(
+                    highlights
+                        .iter()
+                        .all(|(_, h)| h.style.font_weight == Some(FontWeight::BOLD))
+                );
+                assert!(
+                    highlights
+                        .iter()
+                        .filter(|(r, _)| r.start >= 1)
+                        .all(|(_, h)| h.style.font_style == Some(FontStyle::Italic)
+                            && h.style.underline.is_some())
+                );
+                assert!(Arc::ptr_eq(
+                    &cached,
+                    paragraph.render_cache.0.lock().unwrap().as_ref().unwrap()
+                ));
+            }
+            // Clearing a context's ranges restores inherited mark/link colors,
+            // even though the document and cached mark styles are unchanged.
+            let context = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(7, vec![])]))),
+                ..base.clone()
+            };
+            assert_eq!(paragraph.plain_render(&context, cx).1, inherited);
+            let invalid = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(7, vec![(2..3, gpui::red())])]))),
+                ..base.clone()
+            };
+            assert_eq!(paragraph.plain_render(&invalid, cx).1, inherited);
+            let other_leaf = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(8, vec![(0..12, gpui::red())])]))),
+                ..base
+            };
+            assert_eq!(paragraph.plain_render(&other_leaf, cx).1, inherited);
+            assert_eq!(paragraph, original);
+        });
+    }
+
+    #[test]
+    fn host_foregrounds_override_mixed_links_and_preserve_atom_byte_coordinates() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let link = LinkMark {
+                url: "https://example.com".into(),
+                ..Default::default()
+            };
+            let mut paragraph = Paragraph::default().with_leaf_key(7);
+            paragraph.push(InlineNode::new("a中😀link").marks(vec![
+                (0..12, TextMark::default().bold()),
+                (1..12, TextMark::default().link(link.clone())),
+                (4..8, TextMark::default().code()),
+            ]));
+            paragraph.push(
+                InlineNode::custom(MarkdownNode::new("atom", ()).text("long fallback"))
+                    .marks(vec![(0..13, TextMark::default().link(link.clone()))]),
+            );
+            paragraph.push(InlineNode::new("尾"));
+            paragraph.push(InlineNode::image(ImageNode::default()));
+            paragraph.push(InlineNode::new("z"));
+            let context = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(
+                    7,
+                    vec![
+                        (0..22, gpui::red()),
+                        (15..18, gpui::blue()),
+                        (21..22, gpui::blue()),
+                    ],
+                )]))),
+                ..Default::default()
+            };
+            let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            assert_eq!(items.len(), 5);
+            let InlineFlowItem::Text {
+                text,
+                highlights,
+                links,
+                ..
+            } = &items[0]
+            else {
+                panic!("text");
+            };
+            assert_eq!(text.as_ref(), "a中😀link");
+            assert_eq!(links, &vec![(1..12, link.clone())]);
+            assert!(
+                highlights
+                    .iter()
+                    .all(|(_, h)| h.style.color == Some(gpui::red()))
+            );
+            assert!(
+                highlights
+                    .iter()
+                    .any(|(r, h)| r.start == 4 && h.code_style.is_some())
+            );
+            let InlineFlowItem::Object {
+                style,
+                link: actual_link,
+                ..
+            } = &items[1]
+            else {
+                panic!("object");
+            };
+            assert_eq!(style.color, Some(gpui::red()));
+            assert_eq!(actual_link.as_ref(), Some(&link));
+            assert!(style.underline.is_some());
+            for ix in [2, 4] {
+                let InlineFlowItem::Text { highlights, .. } = &items[ix] else {
+                    panic!("trailing text");
+                };
+                assert!(
+                    highlights
+                        .iter()
+                        .all(|(_, h)| h.style.color == Some(gpui::blue()))
+                );
+                assert!(!highlights.is_empty());
+            }
+        });
+    }
 
     #[test]
     fn block_plugin_selection_copies_both_formats_and_clears_synchronously() {
