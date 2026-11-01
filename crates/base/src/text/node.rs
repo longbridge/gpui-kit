@@ -19,8 +19,8 @@ use crate::{
     GlobalState, ScrollableMask, Scrollbar, StyledExt, h_flex,
     scrollable_mask::horizontal_scroll_area,
     text::{
-        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        MarkdownNode, TableActionsFn,
+        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, LinkFilterFn,
+        MarkdownExtensions, MarkdownNode, TableActionsFn,
         document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
             Inline, InlineHighlight, InlineState, code_insets, combine_highlights, fade_highlights,
@@ -1592,8 +1592,23 @@ struct ParagraphRender {
     mono_font: SharedString,
     text: SharedString,
     highlights: Vec<(Range<usize>, InlineHighlight)>,
-    /// Links as written, before reference resolution.
+    /// Every link as written, before reference resolution, kept or not.
     links: Vec<(Range<usize>, LinkMark)>,
+    /// Whether the link filter kept each of `links`. The highlights depend on
+    /// it, so the cache holds only while the filter still answers the same.
+    kept: Vec<bool>,
+}
+
+impl ParagraphRender {
+    /// The links the filter kept.
+    fn kept_links(&self) -> Vec<(Range<usize>, LinkMark)> {
+        self.links
+            .iter()
+            .zip(&self.kept)
+            .filter(|(_, kept)| **kept)
+            .map(|(link, _)| link.clone())
+            .collect()
+    }
 }
 
 impl PartialEq for Paragraph {
@@ -1631,17 +1646,23 @@ impl Paragraph {
             && let Some(cached) = cache.as_ref()
             && (Arc::ptr_eq(&cached.style, &node_cx.style) || *cached.style == *node_cx.style)
             && cached.mono_font == mono_font
+            && cached
+                .links
+                .iter()
+                .zip(&cached.kept)
+                .all(|((_, link), kept)| node_cx.keeps_link(link) == *kept)
         {
             return (
                 cached.text.clone(),
                 cached.highlights.clone(),
-                cached.links.clone(),
+                cached.kept_links(),
             );
         }
 
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
         let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
+        let mut kept = vec![];
         let mut offset = 0;
         for inline_node in &self.children {
             let text_len = inline_node.text.len();
@@ -1651,9 +1672,13 @@ impl Paragraph {
                 let inner_range = (offset + range.start)..(offset + range.end);
                 let mut highlight = mark_highlight(style, node_cx, cx);
                 if let Some(link_mark) = style.link.clone() {
-                    highlight.style.color = Some(node_cx.style.link());
-                    highlight.style.underline = Some(link_underline(&node_cx.style));
+                    let keep = node_cx.keeps_link(&link_mark);
+                    if keep {
+                        highlight.style.color = Some(node_cx.style.link());
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
+                    }
                     links.push((inner_range.clone(), link_mark));
+                    kept.push(keep);
                 }
                 node_highlights.push((inner_range, highlight));
             }
@@ -1661,14 +1686,17 @@ impl Paragraph {
             offset += text_len;
         }
         let text = SharedString::from(text);
+        let render = Arc::new(ParagraphRender {
+            style: node_cx.style.clone(),
+            mono_font,
+            text: text.clone(),
+            highlights: highlights.clone(),
+            links,
+            kept,
+        });
+        let links = render.kept_links();
         if let Ok(mut cache) = self.render_cache.0.lock() {
-            *cache = Some(Arc::new(ParagraphRender {
-                style: node_cx.style.clone(),
-                mono_font,
-                text: text.clone(),
-                highlights: highlights.clone(),
-                links: links.clone(),
-            }));
+            *cache = Some(render);
         }
         (text, highlights, links)
     }
@@ -2667,6 +2695,8 @@ pub(crate) struct NodeContext {
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,
     pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    /// Which links are drawn as links; every one when `None`.
+    pub(crate) link_filter: Option<Arc<LinkFilterFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
     /// This frame's streamed fade-in, when any text is still fading.
     pub(crate) stream_fade: Option<Arc<StreamFadeFrame>>,
@@ -2680,6 +2710,22 @@ pub(crate) struct NodeContext {
 }
 
 impl NodeContext {
+    /// The link `link` points to: the definition a reference link names, or
+    /// `link` itself.
+    fn resolved_link<'a>(&'a self, link: &'a LinkMark) -> &'a LinkMark {
+        link.identifier
+            .as_ref()
+            .and_then(|identifier| self.link_refs.get(identifier))
+            .unwrap_or(link)
+    }
+
+    /// Whether `link` is drawn as a link, as the view's link filter decides.
+    fn keeps_link(&self, link: &LinkMark) -> bool {
+        self.link_filter
+            .as_ref()
+            .is_none_or(|keep| keep(&self.resolved_link(link).url))
+    }
+
     fn image_source(&self, image: &ImageNode) -> ImageSource {
         match &self.image_source {
             Some(resolve) => resolve(&image.url),
@@ -2901,13 +2947,14 @@ impl Paragraph {
                     );
                 }
                 let link_click_handler = node_cx.link_click_handler.clone();
+                let image_link = image.link.clone().filter(|link| node_cx.keeps_link(link));
                 child_nodes.push(
                     img(node_cx.image_source(image))
                         .id(ix)
                         .object_fit(ObjectFit::Contain)
                         .max_w(relative(1.))
                         .when_some(image.width, |this, width| this.w(width))
-                        .when_some(image.link.clone(), |this, link| {
+                        .when_some(image_link, |this, link| {
                             let link_click_handler = link_click_handler.clone();
                             let aux_link = link.clone();
                             let aux_link_click_handler = link_click_handler.clone();
@@ -2949,18 +2996,15 @@ impl Paragraph {
                     let inner_range = (offset + range.start)..(offset + range.end);
                     let mut highlight = mark_highlight(style, node_cx, cx);
 
-                    if let Some(mut link_mark) = style.link.clone() {
+                    if let Some(link_mark) = style.link.as_ref()
+                        && node_cx.keeps_link(link_mark)
+                    {
                         highlight.style.color = Some(node_cx.style.link());
                         highlight.style.underline = Some(link_underline(&node_cx.style));
-
-                        // convert link references, replace link
-                        if let Some(identifier) = link_mark.identifier.as_ref() {
-                            if let Some(mark) = node_cx.link_refs.get(identifier) {
-                                link_mark = mark.clone();
-                            }
-                        }
-
-                        links.push((inner_range.clone(), link_mark));
+                        links.push((
+                            inner_range.clone(),
+                            node_cx.resolved_link(link_mark).clone(),
+                        ));
                     }
 
                     node_highlights.push((inner_range, highlight));
@@ -3069,14 +3113,10 @@ impl Paragraph {
                 let mut object_link = None;
                 for (_, mark) in &inline_node.marks {
                     object_style = object_style.highlight(mark_highlight(mark, node_cx, cx).style);
-                    if let Some(link) = &mark.link {
-                        object_link = Some(
-                            link.identifier
-                                .as_ref()
-                                .and_then(|id| node_cx.link_refs.get(id))
-                                .unwrap_or(link)
-                                .clone(),
-                        );
+                    if let Some(link) = &mark.link
+                        && node_cx.keeps_link(link)
+                    {
+                        object_link = Some(node_cx.resolved_link(link).clone());
                         object_style.color = Some(node_cx.style.link());
                         object_style.underline = Some(link_underline(&node_cx.style));
                     }
@@ -4616,6 +4656,81 @@ mod tests {
         }
         assert_eq!(paragraph.selected_text(), "文 x² Eng");
         assert_eq!(paragraph.selected_source(), "文 **$x^2$** Eng");
+    }
+
+    #[test]
+    fn a_link_the_filter_rejects_is_drawn_as_text_and_the_cache_follows_the_filter() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let link = |url: &str| {
+                let mut mark = TextMark::default();
+                mark.link = Some(LinkMark {
+                    url: url.to_string().into(),
+                    ..Default::default()
+                });
+                mark
+            };
+            let mut by_reference = TextMark::default();
+            by_reference.link = Some(LinkMark {
+                identifier: Some("ref".into()),
+                ..Default::default()
+            });
+            // "live dead cited": three links, the last one a reference link.
+            let paragraph = Paragraph {
+                children: vec![InlineNode::new("live dead cited").marks(vec![
+                    (0..4, link("https://live.example")),
+                    (5..9, link("app://dead")),
+                    (10..15, by_reference),
+                ])],
+                ..Default::default()
+            };
+            let mut node_cx = NodeContext::default();
+            node_cx.link_refs.insert(
+                "ref".into(),
+                LinkMark {
+                    url: "https://cited.example".into(),
+                    ..Default::default()
+                },
+            );
+            let underlined = |highlights: &[(Range<usize>, InlineHighlight)], at: usize| {
+                highlights.iter().any(|(range, highlight)| {
+                    range.contains(&at) && highlight.style.underline.is_some()
+                })
+            };
+
+            let (_, highlights, links) = paragraph.plain_render(&node_cx, cx);
+            assert_eq!(links.len(), 3, "without a filter every link is a link");
+            assert!(underlined(&highlights, 5));
+
+            // The filter sees each link's resolved URL, the reference included.
+            let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+            let recorded = seen.clone();
+            node_cx.link_filter = Some(Arc::new(move |url: &SharedString| {
+                recorded.lock().unwrap().push(url.to_string());
+                url.starts_with("https://")
+            }));
+            let (_, highlights, links) = paragraph.plain_render(&node_cx, cx);
+            let urls: Vec<_> = links.iter().map(|(range, _)| range.clone()).collect();
+            assert_eq!(
+                urls,
+                [0..4, 10..15],
+                "the cached render must follow the new filter"
+            );
+            assert!(underlined(&highlights, 0) && underlined(&highlights, 10));
+            assert!(
+                !underlined(&highlights, 5),
+                "a rejected link is drawn as text"
+            );
+            assert!(
+                seen.lock()
+                    .unwrap()
+                    .contains(&"https://cited.example".to_string()),
+                "the filter judges a reference link by its definition"
+            );
+        });
     }
 
     #[test]
