@@ -128,6 +128,12 @@ impl TextView {
         self.inner = self.inner.blockquote_style(style);
         self
     }
+    /// Sets the weight of strong text (`**bold**`) over the resolved theme or
+    /// explicit style. Bold by default.
+    pub fn strong_weight(mut self, weight: gpui::FontWeight) -> Self {
+        self.inner = self.inner.strong_weight(weight);
+        self
+    }
     /// Sets whether a copied selection carries Markdown source or plain text.
     pub fn selection_format(mut self, value: SelectionFormat) -> Self {
         self.inner = self.inner.selection_format(value);
