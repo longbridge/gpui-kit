@@ -1013,7 +1013,6 @@ pub struct InlineNode {
     custom_selection: Arc<Mutex<bool>>,
     /// The text styles, each tuple contains the range of the text and the style.
     pub(crate) marks: Vec<(Range<usize>, TextMark)>,
-    foreground: Option<Hsla>,
     /// Rendered UTF-8 byte spans paired with their exact Markdown source spans.
     pub(crate) source_segments: Vec<SourceSegment>,
 
@@ -1026,7 +1025,6 @@ impl PartialEq for InlineNode {
             && self.image == other.image
             && self.custom == other.custom
             && self.marks == other.marks
-            && self.foreground == other.foreground
             && self.source_segments == other.source_segments
     }
 }
@@ -1483,7 +1481,6 @@ impl InlineNode {
             custom: None,
             custom_selection: Arc::default(),
             marks: vec![],
-            foreground: None,
             source_segments: vec![],
             state: Arc::new(Mutex::new(InlineState::default())),
         }
@@ -1507,31 +1504,6 @@ impl InlineNode {
     pub fn marks(mut self, marks: Vec<(Range<usize>, TextMark)>) -> Self {
         self.marks = marks;
         self
-    }
-
-    /// Overrides the foreground of this text run without changing its marks or geometry.
-    /// Split adjacent runs when only part of a leaf needs a different color.
-    pub fn with_foreground(mut self, color: Hsla) -> Self {
-        self.foreground = Some(color);
-        self
-    }
-
-    /// Explicit text foreground, or `None` to inherit the render context.
-    pub fn foreground(&self) -> Option<Hsla> {
-        self.foreground
-    }
-
-    fn foreground_highlight(&self, offset: usize) -> Option<(Range<usize>, InlineHighlight)> {
-        self.foreground.map(|color| {
-            (
-                offset..offset + self.text.len(),
-                HighlightStyle {
-                    color: Some(color),
-                    ..Default::default()
-                }
-                .into(),
-            )
-        })
     }
 
     /// The text of the run (the fallback text of a custom node, empty for an image).
@@ -1685,7 +1657,6 @@ impl Paragraph {
                 }
                 node_highlights.push((inner_range, highlight));
             }
-            node_highlights.extend(inline_node.foreground_highlight(offset));
             highlights = combine_highlights(highlights, node_highlights);
             offset += text_len;
         }
@@ -2817,7 +2788,7 @@ impl Paragraph {
         let mut highlights = vec![];
         let mut offset = 0;
         for inline_node in &self.children {
-            let mut node_highlights = inline_node
+            let node_highlights = inline_node
                 .marks
                 .iter()
                 .map(|(range, mark)| {
@@ -2827,7 +2798,6 @@ impl Paragraph {
                     )
                 })
                 .collect::<Vec<_>>();
-            node_highlights.extend(inline_node.foreground_highlight(offset));
             highlights = combine_highlights(highlights, node_highlights);
             offset += inline_node.text.len();
         }
@@ -2996,7 +2966,6 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                node_highlights.extend(inline_node.foreground_highlight(offset));
                 highlights = combine_highlights(highlights, node_highlights);
                 offset += text_len;
             }
@@ -3097,7 +3066,6 @@ impl Paragraph {
                     });
                 }
                 let mut object_style = HighlightStyle::default();
-                object_style.color = inline_node.foreground;
                 let mut object_link = None;
                 for (_, mark) in &inline_node.marks {
                     object_style = object_style.highlight(mark_highlight(mark, node_cx, cx).style);
@@ -3190,7 +3158,6 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                node_highlights.extend(inline_node.foreground_highlight(offset));
                 highlights = combine_highlights(highlights, node_highlights);
                 offset += text_len;
             }
@@ -4466,52 +4433,6 @@ impl BlockNode {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn run_foreground_preserves_text_and_marks_in_plain_and_mixed_flow() {
-        use super::*;
-        use gpui::{Empty, TestApp};
-        let mut app = TestApp::new();
-        let mut window = app.open_window(|_, _| Empty);
-        window.update(|_, _, cx| {
-            cx.set_global(crate::Theme::default());
-            let color = gpui::rgb(0x5B6660).into();
-            let node = InlineNode::new("**中😀**")
-                .marks(vec![(0..11, TextMark::default().bold())])
-                .with_foreground(color);
-            let mut paragraph = Paragraph::default();
-            paragraph.push(node.clone());
-            let context = NodeContext::default();
-            let (text, highlights, _) = paragraph.plain_render(&context, cx);
-            assert_eq!(text.as_ref(), node.text());
-            assert!(
-                highlights
-                    .iter()
-                    .all(|(_, style)| style.style.color == Some(color))
-            );
-            assert!(
-                highlights
-                    .iter()
-                    .all(|(_, style)| style.style.font_weight == Some(FontWeight::BOLD))
-            );
-            let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
-            let InlineFlowItem::Text {
-                text, highlights, ..
-            } = &items[0]
-            else {
-                panic!("text flow")
-            };
-            assert_eq!(text.as_ref(), node.text());
-            assert!(
-                highlights
-                    .iter()
-                    .all(|(_, style)| style.style.color == Some(color))
-            );
-            assert_ne!(
-                node,
-                InlineNode::new(node.text()).marks(node.mark_runs().to_vec())
-            );
-        });
-    }
     use super::*;
 
     #[test]
