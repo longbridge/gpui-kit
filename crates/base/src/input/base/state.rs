@@ -40,7 +40,7 @@ use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::{
-    InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    InputEdit, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
@@ -134,6 +134,33 @@ pub enum InputEvent {
     PressEnter { secondary: bool, shift: bool },
     Focus,
     Blur,
+}
+
+/// Emitted alongside [`InputEvent::Change`] with the edits that produced it.
+///
+/// Entries are in application order. The [`Rope`] in each entry is the document
+/// text immediately after that edit. For the first entry, the text before the
+/// edit is the state before the change; for later entries it is the text after
+/// the previous entry.
+///
+/// One keypress yields one entry; a multi-cursor or grouped change yields one
+/// entry per applied replacement. Use this when an application needs the exact
+/// edits, for example to maintain gutter decorations or send incremental
+/// document changes, instead of installing a custom highlighter.
+#[derive(Clone)]
+pub struct InputChangeEvent {
+    edits: Vec<(InputEdit, Rope)>,
+}
+
+impl InputChangeEvent {
+    pub(crate) fn new(edits: Vec<(InputEdit, Rope)>) -> Self {
+        Self { edits }
+    }
+
+    /// The edits that produced the change, in application order.
+    pub fn edits(&self) -> &[(InputEdit, Rope)] {
+        &self.edits
+    }
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -424,6 +451,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
     pub(super) replaying_history: bool,
+    /// Edits collected while a token-aware history replay runs, delivered with
+    /// the single [`InputChangeEvent`] that replay emits.
+    replay_input_edits: Vec<(InputEdit, Rope)>,
     pub(super) validated_token_edit: bool,
     pub(super) document_revision: u64,
     pub(super) token_presentation: super::InlineTokenPresentation,
@@ -717,6 +747,7 @@ impl InputPresentation {
 }
 
 impl<M: InputModeKind> EventEmitter<InputEvent> for InputBaseState<M> {}
+impl<M: InputModeKind> EventEmitter<InputChangeEvent> for InputBaseState<M> {}
 
 impl<M: InputModeKind> InputBaseState<M> {
     #[doc(hidden)]
@@ -960,6 +991,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             inline_tokens: None,
             pending_token: None,
             replaying_history: false,
+            replay_input_edits: Vec::new(),
             validated_token_edit: false,
             document_revision: 0,
             token_presentation: Default::default(),
@@ -3359,6 +3391,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         if token_aware {
             self.emit_events = false;
         }
+        self.replay_input_edits.clear();
         self.replaying_history = token_aware;
         self.undo_manager.set_ignoring(true);
         for change in &replay.changes {
@@ -3382,8 +3415,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.undo_manager.set_ignoring(false);
         self.replaying_history = false;
         self.emit_events = emit_events;
-        if token_aware && emit_events {
-            cx.emit(InputEvent::Change);
+        if token_aware {
+            let edits = std::mem::take(&mut self.replay_input_edits);
+            if emit_events {
+                cx.emit(InputEvent::Change);
+                cx.emit(InputChangeEvent::new(edits));
+            }
         }
         cx.notify();
     }
@@ -4262,6 +4299,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Several edits reach the highlighter as one batch, so it reparses
         // once for the change instead of once per edit.
         let mut highlighter_edits = Vec::new();
+        let mut input_edits = Vec::with_capacity(sorted.len());
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
             self.mode.adjust_auto_closed_pair(range, new_text.len());
@@ -4283,10 +4321,14 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.display_map
                 .on_text_changed(&self.text, range, &Rope::from(*new_text), cx);
 
+            let edit = super::mode::replacement_input_edit(&old_text, &self.text, range, new_text);
+            input_edits.push((edit, self.text.clone()));
+            if self.replaying_history {
+                self.replay_input_edits.push((edit, self.text.clone()));
+            }
+
             if group {
                 if self.is_code_editor() {
-                    let edit =
-                        super::mode::replacement_input_edit(&old_text, &self.text, range, new_text);
                     highlighter_edits.push((edit, self.text.clone()));
                 }
             } else {
@@ -4296,6 +4338,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                         old_text: &old_text,
                         new_text: &self.text,
                         change_text: new_text,
+                        input_edit: Some(edit),
                         force: true,
                     },
                     window,
@@ -4390,6 +4433,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
         if self.emit_events {
             cx.emit(InputEvent::Change);
+            cx.emit(InputChangeEvent::new(input_edits));
         }
         cx.notify();
     }
@@ -4713,12 +4757,18 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         self.display_map
             .on_text_changed(&self.text, &range, &Rope::from(new_text), cx);
 
+        let edit = super::mode::replacement_input_edit(&old_text, &self.text, &range, new_text);
+        if self.replaying_history {
+            self.replay_input_edits.push((edit, self.text.clone()));
+        }
+
         self.mode.update_highlighter::<M>(
             super::mode::HighlighterUpdate {
                 selected_range: &range,
                 old_text: &old_text,
                 new_text: &self.text,
                 change_text: &new_text,
+                input_edit: Some(edit),
                 force: true,
             },
             window,
@@ -4750,6 +4800,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         }
         if self.emit_events {
             cx.emit(InputEvent::Change);
+            cx.emit(InputChangeEvent::new(vec![(edit, self.text.clone())]));
         }
         cx.notify();
     }
@@ -4837,6 +4888,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 old_text: &old_text,
                 new_text: &self.text,
                 change_text: &new_text,
+                input_edit: None,
                 force: true,
             },
             window,
@@ -4998,6 +5050,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                     old_text: &self.text,
                     new_text: &self.text,
                     change_text: "",
+                    input_edit: None,
                     force: false,
                 },
                 window,
@@ -8742,6 +8795,222 @@ mod tests {
             *updates.borrow(),
             vec![vec!["aaa bbb Y".to_string(), "X bbb Y".to_string()]]
         );
+    }
+
+    /// The edit-aware change event carries the edit and its text after, while
+    /// the existing `InputEvent::Change` still fires.
+    #[gpui::test]
+    fn test_input_change_event_carries_edits(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("hello world"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        let observed = Rc::new(std::cell::RefCell::new(
+            Vec::<Vec<(InputEdit, String)>>::new(),
+        ));
+        let changes = Rc::new(Cell::new(0));
+        let seen = observed.clone();
+        let change_count = changes.clone();
+        let (_edit_subscription, _change_subscription) = cx.update(|_, cx| {
+            let edits = cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                seen.borrow_mut().push(
+                    event
+                        .edits()
+                        .iter()
+                        .map(|(edit, text)| (*edit, text.to_string()))
+                        .collect(),
+                );
+            });
+            let change = cx.subscribe(&input, move |_, event: &InputEvent, _| {
+                if matches!(event, InputEvent::Change) {
+                    change_count.set(change_count.get() + 1);
+                }
+            });
+            (edits, change)
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(5..5, " big".to_string())], window, cx);
+            });
+        });
+
+        assert_eq!(changes.get(), 1);
+        let observed = observed.borrow();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].len(), 1);
+        let (edit, text_after) = &observed[0][0];
+        assert_eq!(edit.start_byte, 5);
+        assert_eq!(edit.old_end_byte, 5);
+        assert_eq!(edit.new_end_byte, 9);
+        assert_eq!(edit.start_position, crate::input::Point::new(0, 5));
+        assert_eq!(edit.old_end_position, crate::input::Point::new(0, 5));
+        assert_eq!(edit.new_end_position, crate::input::Point::new(0, 9));
+        assert_eq!(text_after, "hello big world");
+    }
+
+    /// A grouped change carries every applied edit in application order.
+    #[gpui::test]
+    fn test_input_change_event_carries_grouped_edits(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("aaa bbb ccc"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        let observed = Rc::new(std::cell::RefCell::new(
+            Vec::<Vec<(InputEdit, String)>>::new(),
+        ));
+        let seen = observed.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                seen.borrow_mut().push(
+                    event
+                        .edits()
+                        .iter()
+                        .map(|(edit, text)| (*edit, text.to_string()))
+                        .collect(),
+                );
+            })
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(
+                    &[(0..3, "X".to_string()), (8..11, "Y".to_string())],
+                    window,
+                    cx,
+                );
+            });
+        });
+
+        let observed = observed.borrow();
+        assert_eq!(observed.len(), 1);
+        let edits = &observed[0];
+        assert_eq!(edits.len(), 2);
+        // The higher offset is applied first, before the lower one.
+        assert_eq!(edits[0].0.start_byte, 8);
+        assert_eq!(edits[0].0.old_end_byte, 11);
+        assert_eq!(edits[0].0.new_end_byte, 9);
+        assert_eq!(edits[0].1, "aaa bbb Y");
+        assert_eq!(edits[1].0.start_byte, 0);
+        assert_eq!(edits[1].0.old_end_byte, 3);
+        assert_eq!(edits[1].0.new_end_byte, 1);
+        assert_eq!(edits[1].1, "X bbb Y");
+    }
+
+    /// The edit-aware event carries edits even when no highlighter can be installed.
+    #[gpui::test]
+    fn test_input_change_event_without_a_highlighter(cx: &mut TestAppContext) {
+        let input_view = InputView::new(cx);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        let observed = Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
+        let seen = observed.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                seen.borrow_mut().push(
+                    event
+                        .edits()
+                        .iter()
+                        .map(|(_, text)| text.to_string())
+                        .collect(),
+                );
+            })
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("fn main() {}", window, cx);
+                let no_highlighter: InputHighlighterFactory = Rc::new(|_: &str| None);
+                state.set_highlighter_factory(no_highlighter, cx);
+                state.replace_text_in_ranges(&[(12..12, "\n".to_string())], window, cx);
+            });
+        });
+
+        assert_eq!(*observed.borrow(), vec![vec!["fn main() {}\n".to_string()]]);
+    }
+
+    /// Each deferred change carries its own edits, even when several are
+    /// queued in one update.
+    #[gpui::test]
+    fn test_input_change_event_carries_each_deferred_change(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("one"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        let first = Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
+        let second = Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
+        let seen_first = first.clone();
+        let seen_second = second.clone();
+        let (_subscription_a, _subscription_b) = cx.update(|_, cx| {
+            let first = cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                seen_first.borrow_mut().push(
+                    event
+                        .edits()
+                        .iter()
+                        .map(|(_, text)| text.to_string())
+                        .collect(),
+                );
+            });
+            let second = cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                seen_second.borrow_mut().push(
+                    event
+                        .edits()
+                        .iter()
+                        .map(|(_, text)| text.to_string())
+                        .collect(),
+                );
+            });
+            (first, second)
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(3..3, " two".to_string())], window, cx);
+                state.replace_text_in_ranges(&[(7..7, " three".to_string())], window, cx);
+            });
+        });
+
+        assert_eq!(
+            *first.borrow(),
+            vec![
+                vec!["one two".to_string()],
+                vec!["one two three".to_string()],
+            ]
+        );
+        assert_eq!(*second.borrow(), *first.borrow());
+    }
+
+    /// A silent replacement in the same update does not erase the queued
+    /// change's payload.
+    #[gpui::test]
+    fn test_input_change_event_survives_silent_replacement(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value("hello"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        let observed = Rc::new(std::cell::RefCell::new(Vec::<Vec<String>>::new()));
+        let seen = observed.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                seen.borrow_mut().push(
+                    event
+                        .edits()
+                        .iter()
+                        .map(|(_, text)| text.to_string())
+                        .collect(),
+                );
+            })
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_ranges(&[(5..5, " world".to_string())], window, cx);
+                state.set_value("reset", window, cx);
+            });
+        });
+
+        assert_eq!(*observed.borrow(), vec![vec!["hello world".to_string()]]);
     }
 
     /// An IME composition (marking then commit) undoes as a single unit.

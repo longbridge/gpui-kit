@@ -185,6 +185,8 @@ cx.subscribe_in(&input, window, |view, state, event, window, cx| {
 });
 ```
 
+`InputChangeEvent` 会与 `InputEvent::Change` 同时发出，携带产生该变更的编辑，按应用顺序排列。每个编辑都附带该次编辑之后立即得到的文档文本，这正是 gutter 装饰等增量消费者所需的数据。
+
 ### 自定义外观
 
 ```rust

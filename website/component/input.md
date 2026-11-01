@@ -197,6 +197,11 @@ cx.subscribe_in(&input, window, |view, state, event, window, cx| {
 });
 ```
 
+`InputChangeEvent` is emitted alongside `InputEvent::Change` with the edits
+that produced it, in application order. Each edit is paired with the document
+text immediately after it, which is what incremental consumers such as gutter
+decorations need.
+
 ### Custom Appearance
 
 ```rust

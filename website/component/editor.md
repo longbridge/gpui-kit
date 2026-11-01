@@ -443,6 +443,10 @@ cx.subscribe(&editor, |this, state, event: &InputEvent, cx| {
 });
 ```
 
+`InputChangeEvent` is emitted alongside `InputEvent::Change` with the edits
+that produced it, in application order, each paired with the document text
+immediately after it.
+
 ## Sizing to content
 
 `display_map().wrap_row_count()` is the number of rows the text takes once soft

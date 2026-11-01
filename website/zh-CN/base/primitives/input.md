@@ -52,6 +52,8 @@ let password = cx.new(|cx| {
 
 `InputState` 会发出 `InputEvent::Change`、`PressEnter`、`Focus` 和 `Blur`。订阅事件后读取新值，并在更新宿主状态后调用 `cx.notify()`。
 
+`InputChangeEvent` 会与 `InputEvent::Change` 同时发出，携带产生该变更的编辑，按应用顺序排列。每个条目将一个 `InputEdit` 与该次编辑之后立即得到的文档文本配对。需要精确的行号和字节偏移时使用它，例如维护 gutter 装饰或发送增量文档变更，而无需安装自定义高亮器。
+
 ## 表现
 
 `gpui-base` 不安装产品样式。向状态提供 `InputEditorStyle`，并把控件组合进自己的边框容器。若需要现成主题、尺寸、边框、前后缀槽位和清除按钮，请使用 [`gpui-component` Input](../../component/input.md)。

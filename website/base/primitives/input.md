@@ -71,6 +71,22 @@ cx.subscribe(&input, |this, state, event: &InputEvent, cx| {
 });
 ```
 
+`InputChangeEvent` is emitted alongside `InputEvent::Change` with the edits
+that produced it, in application order. Each entry pairs an `InputEdit` with
+the document text immediately after that edit. Use it when you need exact rows
+and byte offsets, for example to maintain gutter decorations or send
+incremental document changes, instead of installing a custom highlighter.
+
+```rust
+cx.subscribe(&input, |this, _, event: &InputChangeEvent, cx| {
+    for (edit, text_after) in event.edits() {
+        // edit.start_position, edit.old_end_position, edit.new_end_position
+        // text_after is the document just after this edit
+    }
+    cx.notify();
+});
+```
+
 ## Presentation
 
 `gpui-base` does not install product styling. Supply `InputEditorStyle` to the
