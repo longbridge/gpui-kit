@@ -3492,8 +3492,14 @@ impl<M: InputModeKind> InputBaseState<M> {
     ///
     /// Non-empty ranges expand to character boundaries. Empty ranges remain empty and are
     /// clipped to the preceding character boundary.
+    /// When `range.start > range.end`, restores a backward selection with the caret at the end.
     pub fn set_selected_range(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
-        let range = self.normalize_token_range(range);
+        let reversed = range.start > range.end;
+        let range = self.normalize_token_range(if reversed {
+            range.end..range.start
+        } else {
+            range
+        });
         let end_bias = if range.start == range.end {
             Bias::Left
         } else {
@@ -3502,10 +3508,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         let start = self.text.clip_offset(range.start, Bias::Left);
         let end = self.text.clip_offset(range.end, end_bias);
 
-        self.move_to(start, None, cx);
+        let (anchor, head) = if reversed { (end, start) } else { (start, end) };
+        self.move_to(anchor, None, cx);
         self.active_selection_mut().reversed = false;
         self.selected_word_range = None;
-        self.select_to(end, cx);
+        self.select_to(head, cx);
     }
 
     /// Add `range` as an additional selection, keeping the existing ones —
