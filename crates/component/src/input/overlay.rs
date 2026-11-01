@@ -354,12 +354,13 @@ impl<M: OverlayMode> InputOverlayHost<M> {
             // session. Re-showing it for that echo would select the query or steal
             // focus from replacement, so preserve changes the panel already holds.
             // External mode changes still move focus out of a hidden replace field.
+            // Query edits can change the viewport anchor; it does not identify
+            // an explicit request to select the query again.
             let was = &self.search_signature;
             let query_echo = search_open
                 && was.open
                 && (was.replace_mode == search_signature.replace_mode
                     || panel_replace_mode == search_signature.replace_mode)
-                && was.anchor_offset == search_signature.anchor_offset
                 && was.activation_revision == search_signature.activation_revision
                 && self.search.read(cx).query(cx) == search_session.query;
             self.search_signature = search_signature;
@@ -467,6 +468,73 @@ mod tests {
         ) -> impl IntoElement {
             div()
         }
+    }
+
+    #[gpui::test]
+    fn typing_search_query_across_frames_preserves_selection(cx: &mut gpui::TestAppContext) {
+        use gpui::{ParentElement as _, Styled as _};
+
+        struct SearchEditor(Entity<crate::input::EditorState>);
+
+        impl Render for SearchEditor {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div().size_full().child(crate::input::Editor::new(&self.0))
+            }
+        }
+
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            SearchEditor(cx.new(|cx| {
+                crate::input::EditorState::new(window, cx).default_value("{\"host\": \"a.test\"}")
+            }))
+        });
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        state.update(cx, |state, cx| state.open_search(false, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let search_input = cx.read(|cx| {
+            cx.global::<InputOverlayRegistry<crate::input::EditorMode>>()
+                .hosts[&state.entity_id()]
+                .1
+                .search
+                .read(cx)
+                .search_input()
+                .clone()
+        });
+        // Overlay sync deliberately skips automatic focus in unit test builds.
+        cx.update(|window, cx| {
+            search_input.update(cx, |input, cx| input.focus(window, cx));
+            window.draw(cx).clear(cx);
+        });
+
+        for (character, expected) in [("h", "h"), ("o", "ho"), ("s", "hos"), ("t", "host")] {
+            cx.simulate_input(character);
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.read(|cx| {
+                let input = search_input.read(cx);
+                assert_eq!(input.value(), expected);
+                assert_eq!(input.selected_range(), expected.len()..expected.len());
+                assert_eq!(state.read(cx).search_session().query, expected);
+            });
+        }
+
+        // Explicit reopen and externally supplied queries must still select all.
+        state.update(cx, |state, cx| state.open_search(false, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            search_input.read_with(cx, |input, _| input.selected_range()),
+            0..4
+        );
+        cx.update(|window, cx| {
+            search_input.update(cx, |input, cx| input.unselect(window, cx));
+        });
+        state.update(cx, |state, cx| state.set_search_query("test", true, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.read(|cx| {
+            assert_eq!(search_input.read(cx).value(), "test");
+            assert_eq!(search_input.read(cx).selected_range(), 0..4);
+        });
     }
 
     /// Asking for search again, while it is already open, must re-select the query.
