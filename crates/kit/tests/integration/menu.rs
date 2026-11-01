@@ -1052,17 +1052,24 @@ fn nested_context_menu_uses_the_innermost_right_click_target(cx: &mut TestAppCon
 }
 
 /// A context menu over the whole window, with one submenu.
-struct WindowMenu;
+struct WindowMenu {
+    parent_width: f32,
+    submenu_width: f32,
+}
 impl Render for WindowMenu {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let parent_width = self.parent_width;
+        let submenu_width = self.submenu_width;
         div()
             .id("window-menu")
             .test_support()
             .size_full()
-            .context_menu(|menu, window, cx| {
-                menu.submenu("More", window, cx, |menu, _, _| {
-                    menu.menu("Save copy", Box::new(Save))
-                })
+            .context_menu(move |menu, window, cx| {
+                menu.min_w(px(parent_width))
+                    .submenu("More", window, cx, move |menu, _, _| {
+                        menu.min_w(px(submenu_width))
+                            .menu("Save copy", Box::new(Save))
+                    })
             })
     }
 }
@@ -1071,11 +1078,16 @@ impl Render for WindowMenu {
 /// gives back the submenu item's bounds and the submenu's.
 async fn open_submenu_at(
     x: f32,
+    parent_width: f32,
+    submenu_width: f32,
     cx: &mut TestAppContext,
 ) -> (gpui_kit::Bounds<Pixels>, gpui_kit::Bounds<Pixels>) {
     cx.update(gpui_kit::init);
     let (handle, _) = common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
-        cx.new(|_| WindowMenu)
+        cx.new(|_| WindowMenu {
+            parent_width,
+            submenu_width,
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -1137,7 +1149,7 @@ async fn open_submenu_at(
 /// the 500 px cap on a menu's width of the window's right edge.
 #[gpui_kit::test]
 async fn a_submenu_with_room_opens_on_the_right(cx: &mut TestAppContext) {
-    let (item, submenu) = open_submenu_at(400., cx).await;
+    let (item, submenu) = open_submenu_at(400., 128., 128., cx).await;
     assert!(
         item.left() + px(500.) > px(800.) && item.right() + submenu.size.width < px(800.),
         "the menu {item:?} is within 500 px of the right edge, with room after it"
@@ -1151,9 +1163,25 @@ async fn a_submenu_with_room_opens_on_the_right(cx: &mut TestAppContext) {
 /// A submenu without room on the right opens on the left.
 #[gpui_kit::test]
 async fn a_submenu_by_the_window_s_edge_opens_on_the_left(cx: &mut TestAppContext) {
-    let (item, submenu) = open_submenu_at(790., cx).await;
+    let (item, submenu) = open_submenu_at(790., 128., 128., cx).await;
     assert!(
         submenu.center().x < item.left(),
         "the submenu {submenu:?} opens left of {item:?}"
+    );
+}
+
+/// The first layout must use the measured submenu width, not its parent's width.
+#[gpui_kit::test]
+async fn submenus_with_different_widths_choose_the_side_that_fits(cx: &mut TestAppContext) {
+    let (item, submenu) = open_submenu_at(420., 128., 320., cx).await;
+    assert!(
+        submenu.right() <= item.left(),
+        "wide submenu {submenu:?} should open left of {item:?}"
+    );
+
+    let (item, submenu) = open_submenu_at(330., 300., 128., cx).await;
+    assert!(
+        submenu.center().x > item.right(),
+        "narrow submenu {submenu:?} should open right of {item:?}"
     );
 }
