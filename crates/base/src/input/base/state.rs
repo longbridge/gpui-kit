@@ -5382,6 +5382,34 @@ mod tests {
     }
 
     #[gpui::test]
+    fn selected_range_restores_unicode_direction_without_splitting_characters(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::input::EditorState;
+        cx.update(crate::init);
+        cx.open_window(size(px(400.), px(100.)), |window, cx| {
+            let _state = cx.new(|cx| {
+                let mut state = EditorState::new(window, cx).default_value("中😀a");
+                state.set_selected_range(8..3, cx);
+                let selected = state.selected_text_range(false, window, cx).unwrap();
+                assert_eq!(selected.range, 1..4);
+                assert!(selected.reversed);
+                state.set_selected_range(3..8, cx);
+                let selected = state.selected_text_range(false, window, cx).unwrap();
+                assert_eq!(selected.range, 1..4);
+                assert!(!selected.reversed);
+                state.set_selected_range(4..4, cx);
+                assert_eq!(
+                    state.selected_text_range(false, window, cx).unwrap().range,
+                    1..1
+                );
+                state
+            });
+            gpui::EmptyView
+        });
+    }
+
+    #[gpui::test]
     fn test_inline_token_wrap_and_size_refresh(cx: &mut TestAppContext) {
         use crate::input::{InlineToken, InlineTokenPresentation};
         let width = Rc::new(Cell::new(4000.));
