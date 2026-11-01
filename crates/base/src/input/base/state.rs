@@ -3481,6 +3481,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         (*self.selections.active()).into()
     }
 
+    /// Whether the active selection's caret is at the start of its range.
+    ///
+    /// Collapsed selections are not reversed. Use this with [`Self::selected_range`]
+    /// and [`Self::set_selected_range_with_direction`] to restore a selection.
+    pub fn is_selection_reversed(&self) -> bool {
+        let selection = self.selections.active();
+        !selection.is_empty() && selection.reversed
+    }
+
     pub fn select_all(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.undo_manager.break_transaction_coalescing();
         self.selections.remove_all_but_active();
@@ -3492,14 +3501,23 @@ impl<M: InputModeKind> InputBaseState<M> {
     ///
     /// Non-empty ranges expand to character boundaries. Empty ranges remain empty and are
     /// clipped to the preceding character boundary.
-    /// When `range.start > range.end`, restores a backward selection with the caret at the end.
     pub fn set_selected_range(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
-        let reversed = range.start > range.end;
-        let range = self.normalize_token_range(if reversed {
-            range.end..range.start
-        } else {
-            range
-        });
+        self.set_selected_range_with_direction(range, false, cx);
+    }
+
+    /// Set the selected UTF-8 byte range and the active caret direction.
+    ///
+    /// With `reversed`, the caret is at the start and the anchor is at the end.
+    /// Empty ranges collapse to a caret regardless of direction. Range clipping,
+    /// token boundaries and removal of additional cursors follow
+    /// [`Self::set_selected_range`].
+    pub fn set_selected_range_with_direction(
+        &mut self,
+        range: Range<usize>,
+        reversed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let range = self.normalize_token_range(range);
         let end_bias = if range.start == range.end {
             Bias::Left
         } else {
@@ -5390,15 +5408,27 @@ mod tests {
         cx.open_window(size(px(400.), px(100.)), |window, cx| {
             let _state = cx.new(|cx| {
                 let mut state = EditorState::new(window, cx).default_value("中😀a");
-                state.set_selected_range(8..3, cx);
+                state.set_selected_range_with_direction(3..8, true, cx);
                 let selected = state.selected_text_range(false, window, cx).unwrap();
                 assert_eq!(selected.range, 1..4);
                 assert!(selected.reversed);
+                assert_eq!(state.selected_range(), 3..8);
+                assert!(state.is_selection_reversed());
+                let range = state.selected_range();
+                let reversed = state.is_selection_reversed();
+                state.set_selected_range_with_direction(range, reversed, cx);
+                assert!(state.is_selection_reversed());
                 state.set_selected_range(3..8, cx);
                 let selected = state.selected_text_range(false, window, cx).unwrap();
                 assert_eq!(selected.range, 1..4);
                 assert!(!selected.reversed);
-                state.set_selected_range(4..4, cx);
+                assert!(!state.is_selection_reversed());
+                // A reversed Rust Range remains empty for existing callers.
+                state.set_selected_range(Range { start: 8, end: 3 }, cx);
+                assert_eq!(state.selected_range(), 8..8);
+                assert!(!state.is_selection_reversed());
+                state.set_selected_range_with_direction(4..4, true, cx);
+                assert!(!state.is_selection_reversed());
                 assert_eq!(
                     state.selected_text_range(false, window, cx).unwrap().range,
                     1..1

@@ -305,6 +305,10 @@ editor.update(cx, |state, cx| {
 
 `EditorState` 会发出 `InputEvent::Change`、`Focus` 和 `Blur` 等事件。
 
+需要在编辑器视图之间保留选区方向时，请一起保存 `selected_range()` 和
+`is_selection_reversed()`，再通过 `set_selected_range_with_direction(range, reversed, cx)`
+恢复。范围使用 UTF-8 字节偏移；`set_selected_range` 仍将空范围视为光标位置。
+
 ## 按内容定高
 
 `display_map().wrap_row_count()` 返回文本软换行后占用的行数，只读编辑器可以据此按内容设定高度。布局会在第一帧计算它；如果需要在此之前得到行数，请在设置值之后，用字体、字号和文本区宽度调用 `prewrap`：

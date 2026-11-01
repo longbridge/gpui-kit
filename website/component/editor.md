@@ -374,6 +374,11 @@ cx.subscribe(&editor, |this, state, event: &InputEvent, cx| {
 });
 ```
 
+To preserve selection direction across editor views, save `selected_range()`
+and `is_selection_reversed()` together. Restore them with
+`set_selected_range_with_direction(range, reversed, cx)`. The range uses UTF-8
+byte offsets; `set_selected_range` continues to treat an empty range as a caret.
+
 ## Sizing to content
 
 `display_map().wrap_row_count()` is the number of rows the text takes once soft
