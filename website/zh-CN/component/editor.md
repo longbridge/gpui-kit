@@ -363,6 +363,9 @@ editor.update(cx, |state, cx| {
 
 `EditorState` 会发出 `InputEvent::Change`、`Focus` 和 `Blur` 等事件。
 
+需要增量同步时，请订阅 `InputEditsEvent`。每个事件都包含自己的有序编辑记录和每次编辑后的
+文档，即使多次变更一起排队也能正确对应。`set_value` 是静默操作，不会发出这两种事件。
+
 ## 按内容定高
 
 `display_map().wrap_row_count()` 返回文本软换行后占用的行数，只读编辑器可以据此按内容设定高度。布局会在第一帧计算它；如果需要在此之前得到行数，请在设置值之后，用字体、字号和文本区宽度调用 `prewrap`：

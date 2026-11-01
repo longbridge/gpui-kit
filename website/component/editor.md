@@ -443,6 +443,10 @@ cx.subscribe(&editor, |this, state, event: &InputEvent, cx| {
 });
 ```
 
+For incremental synchronization, subscribe to `InputEditsEvent`. Each event
+carries its own ordered edits and the document after each edit, even when several changes are
+queued together. `set_value` is silent and does not emit either event.
+
 ## Sizing to content
 
 `display_map().wrap_row_count()` is the number of rows the text takes once soft
