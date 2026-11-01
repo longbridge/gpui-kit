@@ -506,9 +506,7 @@ impl Element for InlineFlow {
 
         // Editor leaf byte offset where each item starts: text items count
         // their bytes, images and custom nodes one U+FFFC.
-        let editor = self
-            .editor_key
-            .and_then(|key| super::editor_seam::current().map(|sink| (key, sink)));
+        let editor = self.editor_key.zip(super::editor_seam::current());
         // Ordinary TextViews do not allocate editor bookkeeping.
         let item_starts: Vec<usize> = if let Some((key, sink)) = &editor {
             sink.begin_pieces(*key);

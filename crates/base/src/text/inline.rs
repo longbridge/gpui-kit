@@ -1209,6 +1209,8 @@ impl Element for Inline {
         cx: &mut App,
     ) {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
+        #[cfg(feature = "test-support")]
+        crate::test_support::record_text(self.text.clone(), false, bounds, window);
         let current_view = window.current_view();
         let hitbox = prepaint;
         if !self.reclaim_styled_text() {

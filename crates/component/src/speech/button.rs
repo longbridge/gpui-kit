@@ -1,4 +1,9 @@
-use gpui::{App, ElementId, Entity, IntoElement, RenderOnce, StyleRefinement, Styled, Window, div};
+use std::sync::Arc;
+
+use gpui::{
+    App, ElementId, Entity, IntoElement, ParentElement as _, RenderOnce, StyleRefinement, Styled,
+    Window, div, prelude::FluentBuilder as _, px,
+};
 use rust_i18n::t;
 
 use crate::{
@@ -6,13 +11,15 @@ use crate::{
     button::{Button, ButtonVariants as _},
 };
 
-use super::{SpeechState, SpeechStatus};
+use super::{SpeechIndicator, SpeechState, SpeechStatus};
 
 /// The button that starts and stops a [`SpeechState`]'s session.
 ///
-/// Shows a microphone at rest and a stop glyph, pressed, while capturing; a
-/// click toggles the session. While the final result is pending it shows a
-/// spinner and ignores clicks.
+/// Shows a microphone at rest and, pressed, a [`SpeechIndicator`] while
+/// capturing: bars that move with the voice, turning into a stop glyph under
+/// the pointer or while the button has keyboard focus. A click toggles the
+/// session. While the final result is pending it shows a spinner and ignores
+/// clicks.
 ///
 /// Renders nothing when the state has no recognizer on this platform, unless
 /// [`Self::show_when_unsupported`] is set, and renders disabled while the
@@ -71,7 +78,20 @@ impl Disableable for SpeechButton {
 }
 
 impl RenderOnce for SpeechButton {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Kept here rather than in the Button so that keyboard focus can show
+        // the stop glyph, which the indicator otherwise reveals only under
+        // the pointer.
+        let focus_handle = window
+            .use_keyed_state(
+                ElementId::NamedChild(Arc::new(self.id.clone()), "focus".into()),
+                cx,
+                |_, cx| cx.focus_handle(),
+            )
+            .read(cx)
+            .clone();
+        let keyboard_focused = focus_handle.is_focused(window) && window.last_input_was_keyboard();
+
         let state = self.state.read(cx);
         let status = state.status();
         let supported = state.has_recognizer();
@@ -90,16 +110,36 @@ impl RenderOnce for SpeechButton {
             t!("Speech.Start")
         };
 
+        let stopping = status == SpeechStatus::Stopping;
+
         Button::new(self.id)
             .ghost()
             .with_size(self.size)
-            .icon(if capturing {
-                IconName::Square
-            } else {
-                IconName::Mic
+            .track_focus(&focus_handle)
+            .map(|this| {
+                if capturing && !keyboard_focused {
+                    // With a child instead of an icon the button sizes to its
+                    // content, so give it the icon button's square and let the
+                    // indicator fill it.
+                    let (side, icon) = match self.size {
+                        Size::Size(side) => (side, Size::Size(side * 0.75)),
+                        Size::XSmall => (px(20.), Size::XSmall),
+                        Size::Small => (px(24.), Size::Small),
+                        size => (px(32.), size),
+                    };
+                    this.size(side)
+                        .p_0()
+                        .child(SpeechIndicator::new(&self.state).with_size(icon))
+                } else {
+                    this.icon(if capturing || stopping {
+                        IconName::Square
+                    } else {
+                        IconName::Mic
+                    })
+                }
             })
             .selected(capturing)
-            .loading(status == SpeechStatus::Stopping)
+            .loading(stopping)
             .disabled(self.disabled || !available)
             .tooltip(label.clone())
             .accessibility_label(label)

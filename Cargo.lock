@@ -9970,6 +9970,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "gpui-kit",
+ "libc",
 ]
 
 [[package]]
