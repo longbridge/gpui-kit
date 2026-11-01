@@ -4,6 +4,8 @@ use gpui::{
     prelude::FluentBuilder as _, relative,
 };
 
+use gpui_base::TestTextExt as _;
+
 use crate::{ActiveTheme, StyledExt};
 
 /// A tag for displaying keyboard keybindings.
@@ -257,6 +259,7 @@ impl RenderOnce for Kbd {
             .flex_shrink_0()
             .refine_style(&self.style)
             .child(Self::format(&self.stroke))
+            .test_text(Self::format(&self.stroke))
             .into_any_element()
     }
 }

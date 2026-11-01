@@ -53,6 +53,8 @@ mod lifecycle;
 mod menu;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod overlays;
+#[cfg(all(feature = "test-support", feature = "component"))]
+mod painted_text;
 #[cfg(feature = "test-support")]
 mod query_helpers;
 #[cfg(all(feature = "test-support", feature = "component"))]

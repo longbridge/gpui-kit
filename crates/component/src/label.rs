@@ -5,6 +5,8 @@ use gpui::{
     Styled, StyledText, Window, div, prelude::FluentBuilder, rems,
 };
 
+use gpui_base::TestTextExt as _;
+
 use crate::{ActiveTheme, StyledExt};
 
 const MASKED: &'static str = "•";
@@ -213,6 +215,7 @@ impl RenderOnce for Label {
             .child(
                 StyledText::new(&text).when_some(highlights, |this, hl| this.with_highlights(hl)),
             )
+            .test_text(text)
     }
 }
 
@@ -252,6 +255,39 @@ mod tests {
         });
         let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
         cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn records_displayed_text_under_its_identified_parent(cx: &mut gpui::TestAppContext) {
+        use gpui::InteractiveElement as _;
+
+        struct Labels;
+        impl gpui::Render for Labels {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+                    .id("box")
+                    .child(Label::new("Hello"))
+                    .child(Label::new("secret").masked(true))
+            }
+        }
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| Labels);
+        // Root starts each frame; this window has none.
+        cx.update(|window, cx| {
+            gpui_base::test_support::begin_frame(window);
+            window.draw(cx).clear(cx)
+        });
+        cx.update(|window, _| {
+            let texts: Vec<_> = gpui_base::test_support::texts(window)
+                .iter()
+                .map(|text| {
+                    assert!(text.path().contains(&"box".into()), "{:?}", text.path());
+                    text.text().to_owned()
+                })
+                .collect();
+            assert_eq!(texts, ["Hello", "••••••"]);
+        });
     }
 
     #[test]

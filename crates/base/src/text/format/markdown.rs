@@ -858,6 +858,17 @@ fn parse_paragraph(
                 ..Default::default()
             });
         }
+        Node::ImageReference(raw) => {
+            if let Some(definition) = cx.link_refs.get(raw.identifier.as_str()) {
+                paragraph.push_image(ImageNode {
+                    url: definition.url.clone().into(),
+                    title: definition.title.clone(),
+                    alt: Some(raw.alt.clone().into()),
+                    span,
+                    ..Default::default()
+                });
+            }
+        }
         Node::Break(_) => {
             // Hard line break (trailing two spaces / backslash). Mirror the
             // inline-HTML <br> path: emit a newline inline node so the break
@@ -948,7 +959,32 @@ fn parse_paragraph(
     text
 }
 
+/// Definitions may follow their references or live inside a container. The
+/// parser normalizes identifiers; CommonMark uses the first definition.
+fn collect_definitions(node: &Node, definitions: &mut BTreeMap<String, LinkMark>) {
+    if let Node::Definition(def) = node {
+        definitions
+            .entry(def.identifier.clone())
+            .or_insert_with(|| LinkMark {
+                url: def.url.clone().into(),
+                identifier: Some(def.identifier.clone().into()),
+                title: def.title.clone().map(Into::into),
+            });
+    }
+    if let Some(children) = node.children() {
+        for child in children {
+            collect_definitions(child, definitions);
+        }
+    }
+}
+
 fn ast_to_document(source: &str, root: mdast::Node, cx: &mut NodeContext) -> ParsedDocument {
+    let mut definitions = BTreeMap::new();
+    collect_definitions(&root, &mut definitions);
+    for (identifier, definition) in definitions {
+        cx.add_ref(identifier.into(), definition);
+    }
+
     let root = match root {
         Node::Root(r) => r,
         _ => panic!("expected root node"),
@@ -1138,23 +1174,12 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             paragraph.span = new_span(def.position, cx);
             BlockNode::Paragraph(paragraph)
         }
-        Node::Definition(def) => {
-            cx.add_ref(
-                def.identifier.clone().into(),
-                LinkMark {
-                    url: def.url.clone().into(),
-                    identifier: Some(def.identifier.clone().into()),
-                    title: def.title.clone().map(Into::into),
-                },
-            );
-
-            BlockNode::Definition {
-                identifier: def.identifier.clone().into(),
-                url: def.url.clone().into(),
-                title: def.title.clone().map(|s| s.into()),
-                span: new_span(def.position, cx),
-            }
-        }
+        Node::Definition(def) => BlockNode::Definition {
+            identifier: def.identifier.clone().into(),
+            url: def.url.clone().into(),
+            title: def.title.clone().map(|s| s.into()),
+            span: new_span(def.position, cx),
+        },
         _ => {
             if cfg!(debug_assertions) {
                 tracing::warn!("unsupported node: {:#?}", value);
@@ -1986,6 +2011,89 @@ mod tests {
                 .iter()
                 .any(|(_, mark)| mark.bold && mark.italic),
             "nested emphasis should produce a bold and italic mark"
+        );
+    }
+
+    #[test]
+    fn test_reference_images() {
+        for (reference, alt) in [
+            ("![Alt &amp; text][PiCtUrE]", "Alt & text"),
+            ("![picture][]", "picture"),
+            ("![picture]", "picture"),
+        ] {
+            for destination in [
+                "https://example.com/image.png",
+                "./image.png",
+                "file:///image.png",
+                "data:image/png;base64,iVBORw0KGgo=",
+            ] {
+                let source =
+                    format!("Before {reference} after.\n\n[picture]: {destination} \"Title\"\n");
+                let mut cx = NodeContext {
+                    offset: 17,
+                    ..Default::default()
+                };
+                let document = parse(&source, &mut cx).unwrap();
+                let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+                assert_eq!(paragraph.children.len(), 3, "{source}");
+                assert_eq!(paragraph.children[0].text.as_ref(), "Before ");
+                assert_eq!(paragraph.children[2].text.as_ref(), " after.");
+                let image = paragraph.children[1].as_image().expect("reference image");
+                assert_eq!(image.url.as_ref(), destination);
+                assert_eq!(image.alt.as_deref(), Some(alt));
+                assert_eq!(image.title.as_deref(), Some("Title"));
+                assert_eq!(
+                    image.span,
+                    Some(Span {
+                        start: 24,
+                        end: 24 + reference.len()
+                    })
+                );
+                assert_eq!(image.width, None);
+                assert_eq!(image.height, None);
+                match image.source() {
+                    gpui::ImageSource::Image(_) => assert!(destination.starts_with("data:")),
+                    gpui::ImageSource::Resource(gpui::Resource::Uri(uri)) => {
+                        assert!(!destination.starts_with("data:"));
+                        assert_eq!(uri.as_ref(), destination);
+                    }
+                    _ => panic!("unexpected image source"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_reference_image_definition_lookup() {
+        let source = "![alt][Some   LABEL]\n\n> [some label]: first.png\n\n[some label]: second.png \"Ignored\"\n";
+        let document = parse(source, &mut NodeContext::default()).unwrap();
+        let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+        let image = paragraph.children[0].as_image().expect("reference image");
+        assert_eq!(image.url.as_ref(), "first.png");
+        assert_eq!(image.title, None);
+        assert_eq!(image.alt.as_deref(), Some("alt"));
+
+        let source = "[picture]: image.png\n\n[![alt][picture]](https://example.com)";
+        let document = parse(source, &mut NodeContext::default()).unwrap();
+        let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+        let image = paragraph.children[0]
+            .as_image()
+            .expect("linked reference image");
+        assert_eq!(image.url.as_ref(), "image.png");
+        assert_eq!(
+            image.link.as_ref().unwrap().url.as_ref(),
+            "https://example.com"
+        );
+
+        let source = "![missing][unknown] ![collapsed][] ![shortcut]";
+        let document = parse(source, &mut NodeContext::default()).unwrap();
+        let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+        assert_eq!(paragraph.text(), source);
+        assert!(
+            paragraph
+                .children
+                .iter()
+                .all(|child| child.as_image().is_none())
         );
     }
 

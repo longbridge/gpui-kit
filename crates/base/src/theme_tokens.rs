@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct SemanticThemeTokens {
     pub colors: ColorTokens,
     pub radius: RadiusTokens,
@@ -17,6 +18,7 @@ pub struct SemanticThemeTokens {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct ColorTokens {
     pub background: Hsla,
     pub foreground: Hsla,
@@ -106,6 +108,7 @@ impl ColorTokens {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct RadiusTokens {
     pub none: Pixels,
     pub sm: Pixels,
@@ -129,6 +132,7 @@ impl Default for RadiusTokens {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct SpacingTokens {
     pub xxs: Pixels,
     pub xs: Pixels,
@@ -154,13 +158,22 @@ impl Default for SpacingTokens {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct TextStyleToken {
     pub size: Pixels,
     pub line_height: Pixels,
     pub weight: FontWeight,
 }
 
+impl Default for TextStyleToken {
+    /// The body text style, matching [`TypographyTokens::md`].
+    fn default() -> Self {
+        text_style(16., 24.)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct TypographyTokens {
     pub sans: SharedString,
     pub mono: SharedString,
@@ -188,6 +201,7 @@ impl Default for TypographyTokens {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct ShadowTokens {
     pub sm: Vec<BoxShadow>,
     pub md: Vec<BoxShadow>,

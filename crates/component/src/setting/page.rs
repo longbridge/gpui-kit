@@ -122,6 +122,37 @@ impl SettingPage {
         }
     }
 
+    /// The group the sidebar marks for the given scroll position: the titled
+    /// group at or above the top of the viewport. At the end of the list the
+    /// last groups cannot reach the top, so a group selected below the top
+    /// stays marked, and the last group is marked otherwise. `None` marks the
+    /// page itself.
+    fn group_at_scroll_top(
+        &self,
+        group_indices: &[usize],
+        selected_group_ix: Option<usize>,
+        scroll_top: ListOffset,
+        is_scrolled_to_end: bool,
+    ) -> Option<usize> {
+        let selected_pos =
+            selected_group_ix.and_then(|ix| group_indices.iter().position(|&g| g == ix));
+        if is_scrolled_to_end && selected_pos.is_some_and(|pos| pos > scroll_top.item_ix) {
+            return selected_group_ix;
+        }
+
+        let top_pos = if is_scrolled_to_end {
+            group_indices.len().saturating_sub(1)
+        } else {
+            scroll_top.item_ix
+        };
+        group_indices
+            .iter()
+            .take(top_pos + 1)
+            .rev()
+            .copied()
+            .find(|&ix| self.groups[ix].title.is_some())
+    }
+
     pub(super) fn render(
         &self,
         ix: usize,
@@ -146,6 +177,8 @@ impl SettingPage {
                 list: ListState::new(groups_count, ListAlignment::Top, px(100.)),
                 query: query.clone(),
                 groups: group_indices.to_vec(),
+                scroll_top: ListOffset::default(),
+                scrolled_programmatically: false,
             },
         );
         let changed =
@@ -177,6 +210,31 @@ impl SettingPage {
                 item_ix: visible_ix,
                 offset_in_item: px(0.),
             });
+        }
+
+        // Follow the scroll position in the sidebar, like a table of contents.
+        let scroll_top = list_state.logical_scroll_top();
+        let programmatic = changed || scroll_group_ix.is_some();
+        let scrolled = !programmatic
+            && !page_state.read(cx).scrolled_programmatically
+            && page_state.read(cx).scroll_top != scroll_top;
+        page_state.update(cx, |state, _| {
+            state.scroll_top = scroll_top;
+            state.scrolled_programmatically = programmatic;
+        });
+        if scrolled {
+            let selected_group_ix = state.read(cx).selected_index.group_ix;
+            let group_ix = self.group_at_scroll_top(
+                group_indices,
+                selected_group_ix,
+                scroll_top,
+                list_state.is_scrolled_to_end() == Some(true),
+            );
+            if group_ix != selected_group_ix {
+                state.update(cx, |state, _| state.selected_index.group_ix = group_ix);
+                // The sidebar has already been rendered in this frame.
+                window.refresh();
+            }
         }
 
         v_flex()
@@ -263,4 +321,9 @@ struct PageState {
     list: ListState,
     query: SharedString,
     groups: Vec<usize>,
+    /// The scroll position seen by the last render.
+    scroll_top: ListOffset,
+    /// Set when the page scrolls itself, so the clamping applied by the next
+    /// layout is not mistaken for the user moving through the page.
+    scrolled_programmatically: bool,
 }

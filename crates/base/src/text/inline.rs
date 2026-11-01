@@ -16,11 +16,11 @@ use std::{
 };
 
 use gpui::{
-    App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId, Global,
-    GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    IntoElement, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, StyledText, Task, TextAlign,
-    TextLayout, TextRun, TextStyle, Window, point, px, quad, size,
+    App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId,
+    ForegroundExecutor, Global, GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior,
+    Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, StyledText, Task,
+    TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, quad, size,
 };
 
 use crate::{
@@ -404,9 +404,16 @@ const RETAINED_SWEEP_AT: usize = 4096;
 /// ([`SWEPT_AT_DROPS`]), so that one thread's sweep does not use up another's.
 static DROPPED_STATES: AtomicUsize = AtomicUsize::new(0);
 
+/// Owns the App's retained-layout notifications and foreground sweep task.
 struct RetainedLayoutCleanup {
+    /// Closed before teardown so late state drops cannot wake the task.
     sender: Sender<()>,
+    /// Cancelled while its executor is still alive.
     _task: Task<()>,
+    // App drops its executors before globals. Closing the channel can wake
+    // the task, so keep its scheduler alive until after channel/task teardown;
+    // otherwise the wake drops the receiver under the channel's event lock.
+    _executor: ForegroundExecutor,
 }
 
 impl Global for RetainedLayoutCleanup {}
@@ -436,6 +443,7 @@ pub(super) fn init(cx: &mut App) {
     cx.set_global(RetainedLayoutCleanup {
         sender,
         _task: task,
+        _executor: cx.foreground_executor().clone(),
     });
 }
 
@@ -1201,6 +1209,8 @@ impl Element for Inline {
         cx: &mut App,
     ) {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
+        #[cfg(feature = "test-support")]
+        crate::test_support::record_text(self.text.clone(), false, bounds, window);
         let current_view = window.current_view();
         let hitbox = prepaint;
         if !self.reclaim_styled_text() {
