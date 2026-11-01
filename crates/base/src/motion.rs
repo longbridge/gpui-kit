@@ -658,7 +658,7 @@ mod css_timing_tests {
         Easing, IterationCount, LinearStop, MotionPhase, PlaybackDirection, SignedDuration,
         StepPosition, Timing,
     };
-    use std::time::Duration;
+    use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
     #[test]
     fn css_keyword_easing_matches_published_reference_samples() {
@@ -729,6 +729,29 @@ mod css_timing_tests {
         assert!(
             Easing::linear_stops([LinearStop::at(0.0, 0.8), LinearStop::at(1.0, 0.2)]).is_err()
         );
+    }
+
+    #[test]
+    fn curves_built_without_stops_or_jumps_sample_linearly() {
+        // Both are rejected by the constructors, but the variants are public.
+        let no_stops = Easing::LinearStops(Arc::from([]));
+        let no_jumps = Easing::Steps {
+            count: NonZeroU32::MIN,
+            position: StepPosition::JumpNone,
+        };
+
+        for (progress, expected) in [(-1.0, 0.0), (0.25, 0.25), (2.0, 1.0)] {
+            assert_eq!(
+                no_stops.sample(progress),
+                expected,
+                "no stops at {progress}"
+            );
+            assert_eq!(
+                no_jumps.sample(progress),
+                expected,
+                "no jumps at {progress}"
+            );
+        }
     }
 
     #[test]

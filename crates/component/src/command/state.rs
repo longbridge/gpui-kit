@@ -847,6 +847,11 @@ impl CommandState {
             .id(self.matched[matched_ix].index_path)
             .test_support()
             .role(Role::ListBoxOption)
+            // The row's text is drawn by a child that isn't an accessibility
+            // node, so the row names itself.
+            .when_some(item.label_text().cloned(), |this, label| {
+                this.aria_label(label)
+            })
             .aria_selected(selected)
             .when(disabled, |this| this.text_color(muted_foreground))
             .when(!disabled, |this| {

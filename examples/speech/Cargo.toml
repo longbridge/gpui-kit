@@ -10,6 +10,9 @@ anyhow.workspace = true
 cpal = "0.15.3"
 gpui-kit = { workspace = true, features = ["speech"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [lints]
 workspace = true
 

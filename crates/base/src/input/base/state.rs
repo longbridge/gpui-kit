@@ -28,7 +28,7 @@ use super::{
     change::Change,
     cursor::{CursorSelection, Selections},
     element::{
-        EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, TextElement,
+        EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, OverviewRulerRows, TextElement,
         clamp_horizontal_scroll_offset,
     },
     kind::InputModeKind,
@@ -513,6 +513,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// The size of the scrollable content.
     pub(crate) scroll_size: gpui::Size<Pixels>,
     pub(super) editor_scrollbar_snapshot: Cell<Option<EditorScrollbarSnapshot>>,
+    /// Overview ruler marks in display rows, kept between frames.
+    pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -1001,6 +1003,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             overscroll: Overscroll::default(),
             scroll_size: gpui::size(px(0.), px(0.)),
             editor_scrollbar_snapshot: Cell::new(None),
+            overview_ruler_rows: Default::default(),
             longest_line_width: Cell::new(None),
             editor_paddings: Edges::default(),
             deferred_scroll_offset: None,
@@ -4462,6 +4465,39 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         })
     }
 
+    /// Select the given range, as the platform's own text UI asks when it
+    /// drives the selection: a native selection handle, or the macOS IME.
+    ///
+    /// The end that moved becomes the cursor, so dragging the start handle
+    /// leaves a reversed selection and keeps the moving end in view. Text and
+    /// undo history are left alone.
+    fn set_selected_text_range(
+        &mut self,
+        range_utf16: Range<usize>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self.selected_range();
+        let was_reversed = self.active_selection().reversed;
+        let range = self.range_from_utf16(&range_utf16);
+        let range = range.start.min(range.end)..range.start.max(range.end);
+        self.set_selected_range(range, cx);
+
+        let range = self.selected_range();
+        let reversed = if range == previous {
+            was_reversed
+        } else if !range.is_empty() && range.end == previous.start {
+            true
+        } else if !range.is_empty() && range.start == previous.end {
+            false
+        } else {
+            !range.is_empty() && range.start != previous.start && range.end == previous.end
+        };
+        self.active_selection_mut().reversed = reversed;
+        self.scroll_to(self.cursor(), None, cx);
+        cx.notify();
+    }
+
     fn marked_text_range(
         &self,
         _window: &mut Window,
@@ -5913,6 +5949,65 @@ mod tests {
                     assert_eq!(state.token_spans()[0].range(), 5..7);
                     let (_, exit) = state.token_hover(5, bounds, false, None).unwrap();
                     assert_eq!(exit.range_utf16(), (3, 5));
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn test_set_selected_text_range(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler as _;
+        cx.update(crate::init);
+        // "🙂" is 2 UTF-16 units and 4 bytes.
+        let view = InputView::build(cx, |state| state.default_value("🙂 hello world"));
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    fn selection(
+                        state: &mut InputBaseState<InputMode>,
+                        window: &mut Window,
+                        cx: &mut Context<InputBaseState<InputMode>>,
+                    ) -> (Range<usize>, bool) {
+                        let selection = state.selected_text_range(false, window, cx).unwrap();
+                        (selection.range, selection.reversed)
+                    }
+
+                    state.set_selected_text_range(3..8, window, cx);
+                    assert_eq!(state.selected_range(), 5..10);
+                    assert_eq!(selection(state, window, cx), (3..8, false));
+
+                    // Dragging the end handle keeps the selection forward.
+                    state.set_selected_text_range(3..14, window, cx);
+                    assert_eq!(selection(state, window, cx), (3..14, false));
+                    assert_eq!(state.cursor(), 16);
+
+                    // Dragging the start handle reverses it, so the start is the cursor.
+                    state.set_selected_text_range(9..14, window, cx);
+                    assert_eq!(selection(state, window, cx), (9..14, true));
+                    assert_eq!(state.cursor(), 11);
+
+                    // A repeated range keeps its direction.
+                    state.set_selected_text_range(9..14, window, cx);
+                    assert_eq!(selection(state, window, cx), (9..14, true));
+
+                    // Out of range clamps; a backwards range is normalized.
+                    state.set_selected_text_range(100..9, window, cx);
+                    assert_eq!(selection(state, window, cx), (9..14, true));
+
+                    // Either handle can cross the stationary end.
+                    state.set_selected_text_range(3..8, window, cx);
+                    state.set_selected_text_range(2..3, window, cx);
+                    assert_eq!(selection(state, window, cx), (2..3, true));
+                    assert_eq!(state.cursor(), 4);
+                    state.set_selected_text_range(3..8, window, cx);
+                    state.set_selected_text_range(8..9, window, cx);
+                    assert_eq!(selection(state, window, cx), (8..9, false));
+                    assert_eq!(state.cursor(), 11);
+
+                    // Collapsing places a forward cursor and leaves the text alone.
+                    state.set_selected_text_range(2..2, window, cx);
+                    assert_eq!(selection(state, window, cx), (2..2, false));
+                    assert_eq!(state.value(), "🙂 hello world");
                 });
             })
             .unwrap();

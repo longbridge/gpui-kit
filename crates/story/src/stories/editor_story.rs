@@ -103,6 +103,8 @@ pub struct EditorStory {
     completions_state: Entity<EditorState>,
     _decorations: TextDecorationCollection,
     _range_decorations: RangeDecorationCollection,
+    _gutter_decorations: GutterDecorationCollection,
+    _overview_ruler_decorations: OverviewRulerDecorationCollection,
     active_tab: usize,
     readonly: bool,
     font_family: Option<SharedString>,
@@ -237,6 +239,45 @@ impl EditorStory {
             )
         });
 
+        // Version-control marks: the Italic line modified, the Underline line
+        // added, and lines deleted before the Fill line. The gutter strip and the
+        // scrollbar track are separate owners of the same ranges.
+        let italic_line = italic_start..underline_start;
+        let underline_line =
+            underline_start..underline_start + "Underline marks review text.\n".len();
+        let deleted = fill_start - "Fill: ".len();
+        let style = &cx.theme().highlight_theme.style;
+        let (added, modified, removed) = (
+            style.status.created(cx),
+            style.status.modified(cx),
+            style.status.deleted(cx),
+        );
+        let gutter_decorations = decorations_state.update(cx, |state, cx| {
+            state.create_gutter_decorations_collection(
+                vec![
+                    GutterDecoration::new(italic_line.clone()).with_color(modified),
+                    GutterDecoration::new(underline_line.clone()).with_color(added),
+                    GutterDecoration::new(deleted..deleted).with_color(removed),
+                ],
+                cx,
+            )
+        });
+        let overview_ruler_decorations = decorations_state.update(cx, |state, cx| {
+            let mark = |range, color: gpui_kit::Hsla| {
+                OverviewRulerDecoration::new(range)
+                    .with_lane(OverviewRulerLane::Left)
+                    .with_color(color.opacity(0.6))
+            };
+            state.create_overview_ruler_decorations_collection(
+                vec![
+                    mark(italic_line, modified),
+                    mark(underline_line, added),
+                    mark(deleted..deleted, removed),
+                ],
+                cx,
+            )
+        });
+
         let completion_highlight = Rc::new(Cell::new(StoryCompletionHighlight::Prefix));
         let provider_highlight = completion_highlight.clone();
         let completions_state = cx.new(|cx| {
@@ -253,6 +294,8 @@ impl EditorStory {
             completions_state,
             _decorations: decorations,
             _range_decorations: range_decorations,
+            _gutter_decorations: gutter_decorations,
+            _overview_ruler_decorations: overview_ruler_decorations,
             active_tab: 0,
             readonly: false,
             font_family: None,

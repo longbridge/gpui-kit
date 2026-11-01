@@ -3,6 +3,8 @@
 # tokenizer reads as misspelled words; ignoring the exact handles keeps the
 # rest of the file checked.
 extend-ignore-re = [
+    # Expected alphabetic list marker for ordinal 53.
+    '\(53, "BA"\)',
     '\\u\{[0-9A-Fa-f]+\}',
     '@UncertaintyDeterminesYou4ndMe',
     '@alex-vas',

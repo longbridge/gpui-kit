@@ -6,6 +6,8 @@
 //! prints the same checks to the terminal and exits.
 
 mod demo;
+#[cfg(target_os = "macos")]
+mod responsibility;
 
 use std::{
     borrow::Cow,
@@ -832,6 +834,9 @@ fn print_checks(cx: &mut App) {
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    responsibility::disclaim();
+
     let check = std::env::args().any(|arg| arg == "--check");
     let app = gpui_kit::application().with_assets(AppAssets);
 

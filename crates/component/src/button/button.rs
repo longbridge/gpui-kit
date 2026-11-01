@@ -769,6 +769,8 @@ impl RenderOnce for Button {
             .accessibility_label
             .clone()
             .or_else(|| self.label.clone());
+        // Like an HTML `title`, the tooltip describes the button.
+        let description = self.tooltip.as_ref().map(|(tooltip, _)| tooltip.clone());
         let content = h_flex()
             .id("label")
             .size_full()
@@ -836,6 +838,9 @@ impl RenderOnce for Button {
         })
         .when_some(accessibility_label, |this, label| {
             this.accessibility_label(label)
+        })
+        .when_some(description, |this, description| {
+            this.aria_description(description)
         })
         .when_some(self.toggled, |this, toggled| {
             this.aria_toggled(if toggled {
