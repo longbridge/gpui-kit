@@ -115,13 +115,16 @@ impl Render for Placement {
                     .dropdown_menu(|menu, _, _| {
                         menu.menu_with_check("Left", true, Box::new(Save))
                             .menu_with_check("Right", false, Box::new(Save))
+                            .separator()
+                            .menu("Reset", Box::new(Save))
                     }),
             )
     }
 }
 
 /// The check a menu draws beside an item is its state for assistive
-/// technology too, so a screen reader can say which option is chosen.
+/// technology too, so a screen reader can say which option is chosen. An
+/// option left unchecked says so, and a plain command has no check state.
 #[gpui_kit::test]
 fn a_checked_menu_item_reports_its_check(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -133,7 +136,8 @@ fn a_checked_menu_item_reports_its_check(cx: &mut TestAppContext) {
         window.click("placement", cx);
         let menu = window.within("popup-menu");
         assert_eq!(menu.find(0usize).checked(), Some(true));
-        assert_eq!(menu.find(1usize).checked(), None);
+        assert_eq!(menu.find(1usize).checked(), Some(false));
+        assert_eq!(menu.find(3usize).checked(), None);
     })
     .unwrap();
 }
