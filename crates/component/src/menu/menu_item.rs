@@ -14,7 +14,7 @@ pub(crate) struct MenuItemElement {
     style: StyleRefinement,
     disabled: bool,
     selected: bool,
-    checked: bool,
+    checked: Option<bool>,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     children: SmallVec<[AnyElement; 2]>,
@@ -30,7 +30,7 @@ impl MenuItemElement {
             style: StyleRefinement::default(),
             disabled: false,
             selected: false,
-            checked: false,
+            checked: None,
             on_click: None,
             on_hover: None,
             children: SmallVec::new(),
@@ -43,9 +43,10 @@ impl MenuItemElement {
         self
     }
 
-    /// Set whether the menu item is checked, for assistive technology. The
-    /// check mark itself is drawn by the menu.
-    pub(crate) fn checked(mut self, checked: bool) -> Self {
+    /// Set whether the menu item is checked, for assistive technology, or
+    /// `None` for an item that is not an option. The check mark itself is
+    /// drawn by the menu.
+    pub(crate) fn checked(mut self, checked: Option<bool>) -> Self {
         self.checked = checked;
         self
     }
@@ -106,7 +107,13 @@ impl RenderOnce for MenuItemElement {
             .role(Role::MenuItem)
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .aria_selected(self.selected)
-            .when(self.checked, |this| this.aria_toggled(Toggled::True))
+            .when_some(self.checked, |this, checked| {
+                this.aria_toggled(if checked {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
+            })
             .gap_x_1()
             .py_1()
             .px_2()

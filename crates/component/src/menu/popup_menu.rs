@@ -14,6 +14,7 @@ use gpui::{
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
 use gpui_base::TestSupportExt as _;
 
+use std::collections::HashSet;
 use std::rc::Rc;
 
 const CONTEXT: &str = "PopupMenu";
@@ -300,6 +301,9 @@ pub struct PopupMenu {
     bounds: Bounds<Pixels>,
     size: Size,
     check_side: Side,
+    /// Indexes of the items added as options that can be checked, so an
+    /// unchecked one reports its state rather than reading as a command.
+    checkable: HashSet<usize>,
 
     /// The parent menu of this menu, if this is a submenu
     parent_menu: Option<WeakEntity<Self>>,
@@ -344,6 +348,7 @@ impl PopupMenu {
             max_width: None,
             max_height: None,
             check_side: Side::Left,
+            checkable: HashSet::new(),
             bounds: Bounds::default(),
             scrollable: false,
             scroll_handle: ScrollHandle::default(),
@@ -581,6 +586,7 @@ impl PopupMenu {
         action: Box<dyn Action>,
         disabled: bool,
     ) -> Self {
+        self.checkable.insert(self.menu_items.len());
         self.add_menu_item(label, None, action, disabled, checked);
         self
     }
@@ -669,6 +675,7 @@ impl PopupMenu {
         F: Fn(&mut Window, &mut App) -> E + 'static,
         E: IntoElement,
     {
+        self.checkable.insert(self.menu_items.len());
         self.menu_items.push(
             PopupMenuItem::element(builder)
                 .action(action)
@@ -801,11 +808,13 @@ impl PopupMenu {
                     disabled,
                     ..
                 } => {
-                    self = self.menu_with_check_and_disabled(
-                        name,
-                        checked,
-                        action.boxed_clone(),
-                        disabled,
+                    // Every application menu action has a check state, so an
+                    // unchecked one is not known to be an option.
+                    self = self.item(
+                        PopupMenuItem::new(name)
+                            .action(action.boxed_clone())
+                            .disabled(disabled)
+                            .checked(checked),
                     )
                 }
                 OwnedMenuItem::Separator => {
@@ -1307,7 +1316,9 @@ impl PopupMenu {
                 cx.notify();
             }))
             .when_some(item.a11y_label(), |this, label| this.aria_label(label))
-            .checked(item.is_checked());
+            .checked(
+                (item.is_checked() || self.checkable.contains(&ix)).then(|| item.is_checked()),
+            );
 
         match item {
             PopupMenuItem::Separator => this
