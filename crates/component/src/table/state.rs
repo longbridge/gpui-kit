@@ -1559,8 +1559,15 @@ where
         E: gpui::StatefulInteractiveElement + FluentBuilder,
     {
         let cell = if self.cell_selectable {
+            let is_selected = self.selected_cell() == Some((row_ix, col_ix));
             cell.role(gpui::Role::GridCell)
-                .aria_selected(self.selected_cell() == Some((row_ix, col_ix)))
+                .aria_selected(is_selected)
+                // While the table has focus, the selected cell is the
+                // focused node for assistive technology.
+                .when(
+                    is_selected && self.focus_handle.is_focused(window),
+                    |this| this.aria_active_descendant(),
+                )
         } else {
             cell.role(gpui::Role::Cell)
         };
@@ -2255,6 +2262,12 @@ where
                 // Row 0 is the header row.
                 .aria_row_index(row_ix + 1)
                 .aria_selected(is_selected)
+                // While the table has focus, the selected row is the focused
+                // node for assistive technology.
+                .when(
+                    is_selected && self.focus_handle.is_focused(window),
+                    |this| this.aria_active_descendant(),
+                )
                 .h_flex()
                 .w_full()
                 .h(row_height)
