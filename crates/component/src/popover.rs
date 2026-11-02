@@ -967,15 +967,14 @@ mod tests {
     #[gpui::test]
     fn the_enter_motion_starts_over_every_time_the_dropdown_opens(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
+        let executor = cx.executor();
         let (view, window) = cx.add_window_view(|_, _| Harness { open: true });
 
         window.update(|window, cx| window.draw(cx).clear(cx));
         let opening = window.debug_bounds("surface").unwrap().origin;
 
-        // The animation runs off the wall clock, so settling is waited out
-        // rather than stepped. Several times the duration leaves room for a
-        // loaded machine.
-        std::thread::sleep(DROPDOWN_ENTER_DURATION * 4);
+        // The animation runs on the test clock, so settling is stepped.
+        executor.advance_clock(DROPDOWN_ENTER_DURATION * 4);
         window.update(|window, cx| window.draw(cx).clear(cx));
         let settled = window.debug_bounds("surface").unwrap().origin;
 
