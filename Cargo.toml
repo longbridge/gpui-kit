@@ -71,9 +71,9 @@ gpui_web = { package = "gpui-pre-web", version = "=0.3.11" }
 # Fast is optional; existing crates select it through their gpui-fast feature.
 # Explicit package fields make Cargo use these dependency keys as Rust crate names;
 # the packages declare the same library names as the pre backend.
-gpui-fast = { package = "gpui-fast", version = "0.1.12", features = ["windows-manifest-provided-by-host"] }
-gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui-fast-web = { package = "gpui-fast-web", version = "0.1.12" }
+gpui-fast = { package = "gpui-fast", version = "0.1.13", features = ["windows-manifest-provided-by-host"] }
+gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.13", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-fast-web = { package = "gpui-fast-web", version = "0.1.13" }
 gpui_macros = { package = "gpui-pre-macros", version = "=0.3.11" }
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.11" }
 sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.11" }
