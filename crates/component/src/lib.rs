@@ -48,6 +48,7 @@ pub mod diff;
 pub mod dock;
 pub mod empty;
 pub mod form;
+pub mod grid_layout;
 pub mod group_box;
 pub mod highlighter;
 pub mod history;
@@ -142,6 +143,7 @@ pub fn init(cx: &mut App) {
     list::init(cx);
     command::init(cx);
     carousel::init(cx);
+    grid_layout::init(cx);
     notification::init(cx);
     popover::init(cx);
     questionnaire::init(cx);
