@@ -169,6 +169,48 @@ pub(super) fn combine_highlights(
     combined
 }
 
+/// Layers host foregrounds after mark/link styling, independent of where a
+/// mark starts. `combine_highlights` folds active spans in start order, so a
+/// mark beginning inside an already active foreground must not win its color.
+pub(super) fn foreground_highlights(
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    text: &str,
+    offset: usize,
+    foregrounds: &[(Range<usize>, Hsla)],
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    let ranges: Vec<_> = foregrounds
+        .iter()
+        .filter_map(|(range, color)| {
+            let start = range.start.saturating_sub(offset).min(text.len());
+            let end = range.end.saturating_sub(offset).min(text.len());
+            (start < end && text.is_char_boundary(start) && text.is_char_boundary(end))
+                .then_some((start..end, *color))
+        })
+        .collect();
+    if ranges.is_empty() {
+        return highlights;
+    }
+    let mut highlights = combine_highlights(
+        highlights,
+        ranges.iter().map(|(range, color)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(*color),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        }),
+    );
+    for (range, highlight) in &mut highlights {
+        if let Some((_, color)) = ranges.iter().rev().find(|(r, _)| r.contains(&range.start)) {
+            highlight.style.color = Some(*color);
+        }
+    }
+    highlights
+}
+
 /// Layers a streamed fade-in over `highlights`: text inside each fade range
 /// loses that share of its color, and a highlight background or decoration
 /// color fades with it so an inline code chip or a link underline does not
