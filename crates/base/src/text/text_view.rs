@@ -2092,6 +2092,91 @@ mod tests {
         });
     }
 
+    struct FittedListTestRoot {
+        text_view: Entity<TextViewState>,
+        width: Pixels,
+    }
+
+    impl Render for FittedListTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(self.width)
+                .flex()
+                .flex_col()
+                .items_end()
+                .text_size(px(16.))
+                .child(crate::TextSelectionLayer)
+                .child(
+                    div()
+                        .debug_selector(|| "fitted-list".into())
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .max_w_full()
+                        .p_4()
+                        .child(TextView::new(&self.text_view).selectable(true)),
+                )
+        }
+    }
+
+    fn fitted_list_bounds(
+        source: &str,
+        width: f32,
+        cx: &mut TestAppContext,
+    ) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>) {
+        let (root, cx) = cx.add_window_view(|_, cx| FittedListTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(source, cx)),
+            width: px(width),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let bubble = cx.debug_bounds("fitted-list").unwrap();
+        let rows = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert!(!rows.is_empty(), "list text must be painted: {source:?}");
+        for row in &rows {
+            assert!(
+                row.left() >= bubble.left() && row.right() <= bubble.right(),
+                "text must remain visible inside the fitted container: {source:?}, {bubble:?}, {row:?}"
+            );
+        }
+        (bubble, rows)
+    }
+
+    #[gpui::test]
+    fn fitted_lists_include_their_body_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (plain, _) = fitted_list_bounds("Hello world", 600., cx);
+        for source in [
+            "3. Hello world",
+            "- Hello world",
+            "- [ ] Hello world",
+            "- [x] Hello world",
+            "Intro\n\n- Hello world",
+            "- Outer\n  - Hello world",
+        ] {
+            let (bubble, _) = fitted_list_bounds(source, 600., cx);
+            assert!(
+                bubble.size.width > plain.size.width,
+                "the marker must leave room for the full body: {source:?}, {bubble:?}, {plain:?}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn fitted_lists_wrap_their_body_within_the_available_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let body = "Visible text that wraps without being clipped. ".repeat(12);
+        for width in [600., 180.] {
+            for prefix in ["3. ", "- ", "- [ ] ", "- [x] ", "- Outer\n  - "] {
+                let (bubble, rows) = fitted_list_bounds(&format!("{prefix}{body}"), width, cx);
+                assert!(bubble.size.width <= px(width));
+                assert!(rows.len() > 1, "the body must wrap: {prefix:?}, {width}");
+            }
+        }
+    }
+
     #[gpui::test]
     fn list_item_renders_fenced_code_block_at_document_width(cx: &mut TestAppContext) {
         struct ListItemBlockRoot;
