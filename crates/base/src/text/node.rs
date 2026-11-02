@@ -3761,7 +3761,9 @@ impl BlockNode {
             })
             .child(
                 div()
-                    .flex_1()
+                    // Include the body in intrinsic width measurement, while
+                    // still letting it shrink and wrap in a constrained row.
+                    .flex_auto()
                     .min_w_0()
                     .overflow_hidden()
                     // A done task steps back so the open ones stand out.
