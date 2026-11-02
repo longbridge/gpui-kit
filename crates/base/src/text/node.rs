@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ops::Range,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use gpui::{
@@ -2024,8 +2024,15 @@ impl std::fmt::Debug for TableColumnWidthsCache {
     }
 }
 
+fn text_system_id(window: &Window) -> usize {
+    std::rc::Rc::as_ptr(window.text_system()) as usize
+}
+
 struct TableColumnWidths {
-    text_system: Weak<gpui::WindowTextSystem>,
+    /// Identity of the window text system the widths were measured with.
+    /// `WindowTextSystem` is `Rc`-shared and the cache must stay `Send`, so
+    /// only its address is kept.
+    text_system: usize,
     /// The styles the header row and the body rows render with.
     text_styles: TableTextStyles,
     rem_size: Pixels,
@@ -3378,10 +3385,7 @@ fn measure_table_columns(
                     && cached.rem_size == rem_size
                     && cached.mono_family == mono_family
                     && cached.inline_code == inline_code
-                    && cached
-                        .text_system
-                        .upgrade()
-                        .is_some_and(|system| Arc::ptr_eq(&system, window.text_system()))
+                    && cached.text_system == text_system_id(window)
             })
             .cloned()
     });
@@ -3389,7 +3393,7 @@ fn measure_table_columns(
         let (widths, custom_cells) =
             measure_table_text_columns(table, col_count, &text_styles, node_cx, window, cx);
         let measured = Arc::new(TableColumnWidths {
-            text_system: Arc::downgrade(window.text_system()),
+            text_system: text_system_id(window),
             text_styles: text_styles.clone(),
             rem_size,
             mono_family,
