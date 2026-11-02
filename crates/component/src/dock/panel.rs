@@ -475,7 +475,7 @@ mod tests {
         });
         cx.run_until_parked();
         recovered.borrow_mut().tab_names.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             recovered.borrow().tab_names,
@@ -523,7 +523,7 @@ mod tests {
         cx.update(|window, cx| area.update(cx, |area, cx| area.load(state, window, cx).unwrap()));
         cx.run_until_parked();
         recovered.borrow_mut().tab_names.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             recovered.borrow().tab_names,
@@ -555,7 +555,7 @@ mod tests {
         });
         cx.run_until_parked();
         recovered.borrow_mut().tab_names.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             recovered.borrow().tab_names,
