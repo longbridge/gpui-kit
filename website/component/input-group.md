@@ -357,7 +357,7 @@ new InputGroupInput(this.input).px(12).text_base();
 new InputGroupButton("clear").label("Clear").icon("icons/x.svg").font_semibold();
 ```
 
-Run `gpui-component-shell types <application>` to generate editor completion.
+Run `gpui-shell types -d <application>` to generate editor completion.
 
 ## Inline references
 

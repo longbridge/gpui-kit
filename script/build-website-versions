@@ -136,7 +136,10 @@ bunx pagefind --site "$main_output_dir"
 for tag in "${release_tags[@]:1}"; do
   version_dir="$work_dir/$tag"
   output_dir="$repo_root/website/dist/versions/$tag"
-  cached_dir="$version_cache_dir/$tag/$version_fingerprint"
+  # A rebuilt gpui-shell binary moves `shell-<tag>`, and with it the Shell
+  # pages of that version, so the cache key follows it too.
+  shell_commit=$(git -C "$repo_root" rev-parse -q --verify "refs/tags/shell-$tag^{commit}" || true)
+  cached_dir="$version_cache_dir/$tag/$version_fingerprint${shell_commit:+-$shell_commit}"
 
   if [[ -d "$cached_dir" ]]; then
     echo "Reusing cached $tag"

@@ -289,6 +289,29 @@ Known limit: on web `read_from_clipboard()` is `None` (text arrives through
 the platform input handler); image paste there needs async clipboard access
 and permission, and is out of scope.
 
+### Cursor Blinking
+
+A focused input blinks its cursor every 500 ms. Set `Theme::cursor_blink` to
+change the policy for every Input, Textarea, Editor and OTP input in the
+application, including inputs that are already focused:
+
+```rust
+use std::time::Duration;
+use gpui_kit::component::{Theme, input::CursorBlink};
+
+Theme::update(cx, |theme| {
+    theme.cursor_blink = CursorBlink::blinking(Duration::from_millis(530))
+        .with_idle_timeout(Duration::from_secs(5));
+});
+
+// Keep the cursor visible without blinking.
+Theme::update(cx, |theme| theme.cursor_blink = CursorBlink::steady());
+```
+
+`Theme::update` projects the policy onto Base, so it survives theme and mode
+changes. See [Base Input](../base/primitives/input.md#cursor-blinking) for the
+timing rules.
+
 ## Examples
 
 ### Search Input

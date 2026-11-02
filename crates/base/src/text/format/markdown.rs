@@ -280,10 +280,9 @@ fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: 
             _ => {}
         };
     });
-    // GFM fixes the column count with the header/delimiter, not each body row.
-    // Padding/truncation keeps every row on the same measured column grid.
-    row.children
-        .resize_with(table.column_aligns.len(), Default::default);
+    // GFM fixes the column count with the header/delimiter. Leave missing
+    // cells implicit; the renderer places them on the shared column grid.
+    row.children.truncate(table.column_aligns.len());
     table.children.push(row);
 }
 
@@ -859,6 +858,17 @@ fn parse_paragraph(
                 ..Default::default()
             });
         }
+        Node::ImageReference(raw) => {
+            if let Some(definition) = cx.link_refs.get(raw.identifier.as_str()) {
+                paragraph.push_image(ImageNode {
+                    url: definition.url.clone().into(),
+                    title: definition.title.clone(),
+                    alt: Some(raw.alt.clone().into()),
+                    span,
+                    ..Default::default()
+                });
+            }
+        }
         Node::Break(_) => {
             // Hard line break (trailing two spaces / backslash). Mirror the
             // inline-HTML <br> path: emit a newline inline node so the break
@@ -949,7 +959,32 @@ fn parse_paragraph(
     text
 }
 
+/// Definitions may follow their references or live inside a container. The
+/// parser normalizes identifiers; CommonMark uses the first definition.
+fn collect_definitions(node: &Node, definitions: &mut BTreeMap<String, LinkMark>) {
+    if let Node::Definition(def) = node {
+        definitions
+            .entry(def.identifier.clone())
+            .or_insert_with(|| LinkMark {
+                url: def.url.clone().into(),
+                identifier: Some(def.identifier.clone().into()),
+                title: def.title.clone().map(Into::into),
+            });
+    }
+    if let Some(children) = node.children() {
+        for child in children {
+            collect_definitions(child, definitions);
+        }
+    }
+}
+
 fn ast_to_document(source: &str, root: mdast::Node, cx: &mut NodeContext) -> ParsedDocument {
+    let mut definitions = BTreeMap::new();
+    collect_definitions(&root, &mut definitions);
+    for (identifier, definition) in definitions {
+        cx.add_ref(identifier.into(), definition);
+    }
+
     let root = match root {
         Node::Root(r) => r,
         _ => panic!("expected root node"),
@@ -1040,6 +1075,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             let segments = code_source_segments(source, &raw.value, span, cx.offset);
             BlockNode::CodeBlock(
                 CodeBlock::new(raw.value.into(), raw.lang.map(Into::into), span)
+                    .with_meta(raw.meta.map(Into::into))
                     .source_segments(segments),
             )
         }
@@ -1138,23 +1174,12 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             paragraph.span = new_span(def.position, cx);
             BlockNode::Paragraph(paragraph)
         }
-        Node::Definition(def) => {
-            cx.add_ref(
-                def.identifier.clone().into(),
-                LinkMark {
-                    url: def.url.clone().into(),
-                    identifier: Some(def.identifier.clone().into()),
-                    title: def.title.clone().map(Into::into),
-                },
-            );
-
-            BlockNode::Definition {
-                identifier: def.identifier.clone().into(),
-                url: def.url.clone().into(),
-                title: def.title.clone().map(|s| s.into()),
-                span: new_span(def.position, cx),
-            }
-        }
+        Node::Definition(def) => BlockNode::Definition {
+            identifier: def.identifier.clone().into(),
+            url: def.url.clone().into(),
+            title: def.title.clone().map(|s| s.into()),
+            span: new_span(def.position, cx),
+        },
         _ => {
             if cfg!(debug_assertions) {
                 tracing::warn!("unsupported node: {:#?}", value);
@@ -1266,10 +1291,10 @@ mod tests {
     }
 
     #[test]
-    fn table_rows_use_header_column_count() {
+    fn table_rows_keep_missing_cells_implicit() {
         let mut cx = NodeContext::default();
         let document = parse(
-            "| A | B | C |\n| --- | --- | --- |\n| one |\n| two | three | four | ignored |\n",
+            "| A | B | C |\n| --- | --- | --- |\n| one |\n| two | three | four | ignored |\n| five | | six |\n",
             &mut cx,
         )
         .unwrap();
@@ -1277,10 +1302,51 @@ mod tests {
             panic!("expected table");
         };
         assert_eq!(table.column_aligns.len(), 3);
-        assert!(table.children.iter().all(|row| row.children.len() == 3));
+        assert_eq!(
+            table
+                .children
+                .iter()
+                .map(|row| row.children.len())
+                .collect::<Vec<_>>(),
+            [3, 1, 3, 3]
+        );
         assert_eq!(table.children[1].children[0].children.text(), "one");
-        assert!(table.children[1].children[1].children.text().is_empty());
         assert_eq!(table.children[2].children[2].children.text(), "four");
+        assert!(table.children[3].children[1].children.text().is_empty());
+        assert_eq!(table.children[3].children[2].children.text(), "six");
+    }
+
+    #[test]
+    fn sparse_table_cell_count_tracks_source_cells() {
+        for (columns, rows) in [(32, 64), (64, 128)] {
+            let source = format!(
+                "{}|\n{}|\n{}",
+                "|h".repeat(columns),
+                "|---".repeat(columns),
+                "|x|\n".repeat(rows),
+            );
+            let mut cx = NodeContext::default();
+            let document = parse(&source, &mut cx).unwrap();
+            let BlockNode::Table(table) = &document.blocks[0] else {
+                panic!("expected table");
+            };
+            assert_eq!(table.column_aligns.len(), columns);
+            assert_eq!(table.children.len(), rows + 1);
+            assert_eq!(table.children[0].children.len(), columns);
+            assert!(
+                table.children[1..]
+                    .iter()
+                    .all(|row| row.children.len() == 1)
+            );
+            assert_eq!(
+                table
+                    .children
+                    .iter()
+                    .map(|row| row.children.len())
+                    .sum::<usize>(),
+                columns + rows
+            );
+        }
     }
 
     #[test]
@@ -1945,6 +2011,89 @@ mod tests {
                 .iter()
                 .any(|(_, mark)| mark.bold && mark.italic),
             "nested emphasis should produce a bold and italic mark"
+        );
+    }
+
+    #[test]
+    fn test_reference_images() {
+        for (reference, alt) in [
+            ("![Alt &amp; text][PiCtUrE]", "Alt & text"),
+            ("![picture][]", "picture"),
+            ("![picture]", "picture"),
+        ] {
+            for destination in [
+                "https://example.com/image.png",
+                "./image.png",
+                "file:///image.png",
+                "data:image/png;base64,iVBORw0KGgo=",
+            ] {
+                let source =
+                    format!("Before {reference} after.\n\n[picture]: {destination} \"Title\"\n");
+                let mut cx = NodeContext {
+                    offset: 17,
+                    ..Default::default()
+                };
+                let document = parse(&source, &mut cx).unwrap();
+                let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+                assert_eq!(paragraph.children.len(), 3, "{source}");
+                assert_eq!(paragraph.children[0].text.as_ref(), "Before ");
+                assert_eq!(paragraph.children[2].text.as_ref(), " after.");
+                let image = paragraph.children[1].as_image().expect("reference image");
+                assert_eq!(image.url.as_ref(), destination);
+                assert_eq!(image.alt.as_deref(), Some(alt));
+                assert_eq!(image.title.as_deref(), Some("Title"));
+                assert_eq!(
+                    image.span,
+                    Some(Span {
+                        start: 24,
+                        end: 24 + reference.len()
+                    })
+                );
+                assert_eq!(image.width, None);
+                assert_eq!(image.height, None);
+                match image.source() {
+                    gpui::ImageSource::Image(_) => assert!(destination.starts_with("data:")),
+                    gpui::ImageSource::Resource(gpui::Resource::Uri(uri)) => {
+                        assert!(!destination.starts_with("data:"));
+                        assert_eq!(uri.as_ref(), destination);
+                    }
+                    _ => panic!("unexpected image source"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_reference_image_definition_lookup() {
+        let source = "![alt][Some   LABEL]\n\n> [some label]: first.png\n\n[some label]: second.png \"Ignored\"\n";
+        let document = parse(source, &mut NodeContext::default()).unwrap();
+        let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+        let image = paragraph.children[0].as_image().expect("reference image");
+        assert_eq!(image.url.as_ref(), "first.png");
+        assert_eq!(image.title, None);
+        assert_eq!(image.alt.as_deref(), Some("alt"));
+
+        let source = "[picture]: image.png\n\n[![alt][picture]](https://example.com)";
+        let document = parse(source, &mut NodeContext::default()).unwrap();
+        let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+        let image = paragraph.children[0]
+            .as_image()
+            .expect("linked reference image");
+        assert_eq!(image.url.as_ref(), "image.png");
+        assert_eq!(
+            image.link.as_ref().unwrap().url.as_ref(),
+            "https://example.com"
+        );
+
+        let source = "![missing][unknown] ![collapsed][] ![shortcut]";
+        let document = parse(source, &mut NodeContext::default()).unwrap();
+        let paragraph = document.blocks.iter().find_map(first_paragraph).unwrap();
+        assert_eq!(paragraph.text(), source);
+        assert!(
+            paragraph
+                .children
+                .iter()
+                .all(|child| child.as_image().is_none())
         );
     }
 

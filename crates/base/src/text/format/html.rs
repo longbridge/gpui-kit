@@ -53,6 +53,45 @@ const BLOCK_ELEMENTS: [&str; 35] = [
     "script",
 ];
 
+/// A paragraph under construction. A literal line feed is content; only a
+/// trailing HTML break is removed when the complete text block is taken.
+#[derive(Default)]
+struct HtmlParagraph {
+    content: Paragraph,
+    ends_with_break: bool,
+}
+
+impl HtmlParagraph {
+    fn push(&mut self, node: InlineNode) {
+        self.content.push(node);
+        self.ends_with_break = false;
+    }
+
+    fn push_str(&mut self, text: &str) {
+        if !text.is_empty() {
+            self.content.push_str(text);
+            self.ends_with_break = false;
+        }
+    }
+
+    fn push_image(&mut self, image: ImageNode) {
+        self.push(InlineNode::image(image));
+    }
+
+    fn push_break(&mut self) {
+        self.content.push(InlineNode::new("\n"));
+        self.ends_with_break = true;
+    }
+
+    fn take(&mut self) -> Paragraph {
+        if self.ends_with_break {
+            trim_trailing_break(&mut self.content);
+        }
+        self.ends_with_break = false;
+        self.content.take()
+    }
+}
+
 /// Parse HTML into AST Node.
 pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<ParsedDocument, SharedString> {
     let opts = ParseOpts {
@@ -68,7 +107,7 @@ pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<ParsedDocument
         .read_from(&mut cursor)
         .map_err(|e| SharedString::from(format!("{:?}", e)))?;
 
-    let mut paragraph = Paragraph::default();
+    let mut paragraph = HtmlParagraph::default();
     // NOTE: The outer paragraph is not used.
     let node: BlockNode =
         parse_node(&dom.document, &mut paragraph, cx).unwrap_or(BlockNode::Unknown);
@@ -243,13 +282,13 @@ fn parse_table_cell(
     node: &Rc<Node>,
     attrs: &RefCell<Vec<html5ever::Attribute>>,
 ) {
-    let mut paragraph = Paragraph::default();
+    let mut paragraph = HtmlParagraph::default();
     for child in node.children.borrow().iter() {
         parse_paragraph(&mut paragraph, child);
     }
     let width = attr_width_height(attrs).0;
     let table_cell = node::TableCell {
-        children: paragraph,
+        children: paragraph.take(),
         width,
     };
     row.children.push(table_cell);
@@ -275,9 +314,9 @@ fn trim_text(text: &str) -> String {
     out
 }
 
-fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
+fn parse_paragraph(paragraph: &mut HtmlParagraph, node: &Rc<Node>) {
     fn push_merged(
-        paragraph: &mut Paragraph,
+        paragraph: &mut HtmlParagraph,
         text: String,
         marks: Vec<(Range<usize>, TextMark)>,
         new_mark: Option<TextMark>,
@@ -302,17 +341,21 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
 
     fn merge_children_with_mark(
         node: &Node,
-        paragraph: &mut Paragraph,
+        paragraph: &mut HtmlParagraph,
         new_mark: Option<TextMark>,
     ) {
         let mut merged_text = String::new();
         let mut merged_marks = Vec::new();
+        let mut ends_with_break = None;
 
         for child in node.children.borrow().iter() {
-            let mut child_paragraph = Paragraph::default();
+            let mut child_paragraph = HtmlParagraph::default();
             parse_paragraph(&mut child_paragraph, &child);
 
-            for node in child_paragraph.children {
+            if !child_paragraph.content.is_empty() {
+                ends_with_break = Some(child_paragraph.ends_with_break);
+            }
+            for node in child_paragraph.content.children {
                 let offset = merged_text.len();
                 merged_text.push_str(&node.text);
                 for (range, child_mark) in node.marks {
@@ -337,6 +380,9 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
         }
 
         push_merged(paragraph, merged_text, merged_marks, new_mark.clone());
+        if let Some(ends_with_break) = ends_with_break {
+            paragraph.ends_with_break = ends_with_break;
+        }
     }
 
     match &node.data {
@@ -387,6 +433,9 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
                     Some(TextMark::default().link(link_mark)),
                 );
             }
+            local_name!("br") => {
+                paragraph.push_break();
+            }
             local_name!("img") => {
                 let Some(src) = attr_value(attrs, local_name!("src")) else {
                     if cfg!(debug_assertions) {
@@ -420,7 +469,7 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
 
 fn parse_node(
     node: &Rc<Node>,
-    paragraph: &mut Paragraph,
+    paragraph: &mut HtmlParagraph,
     cx: &mut NodeContext,
 ) -> Option<BlockNode> {
     match node.data {
@@ -437,10 +486,13 @@ fn parse_node(
             ref attrs,
             ..
         } => match name.local {
-            local_name!("br") => Some(BlockNode::Break {
-                html: true,
-                span: None,
-            }),
+            // A line break inside the paragraph being built, as a markdown
+            // hard break becomes. As a block of its own it landed apart from
+            // the text on both sides, which then stayed on one line.
+            local_name!("br") => {
+                paragraph.push_break();
+                None
+            }
             local_name!("h1")
             | local_name!("h2")
             | local_name!("h3")
@@ -458,14 +510,14 @@ fn parse_node(
                     .to_digit(10)
                     .unwrap_or(6) as u8;
 
-                let mut paragraph = Paragraph::default();
+                let mut paragraph = HtmlParagraph::default();
                 for child in node.children.borrow().iter() {
                     parse_paragraph(&mut paragraph, child);
                 }
 
                 let heading = BlockNode::Heading {
                     level,
-                    children: paragraph,
+                    children: paragraph.take(),
                     span: None,
                 };
                 if children.len() > 0 {
@@ -494,7 +546,7 @@ fn parse_node(
                 let title = attr_value(&attrs, local_name!("title"));
                 let (width, height) = attr_width_height(&attrs);
 
-                let mut paragraph = Paragraph::default();
+                let mut paragraph = HtmlParagraph::default();
                 paragraph.push_image(ImageNode {
                     url: src.into(),
                     title: title.map(Into::into),
@@ -505,13 +557,13 @@ fn parse_node(
                 });
 
                 if children.len() > 0 {
-                    children.push(BlockNode::Paragraph(paragraph));
+                    children.push(BlockNode::Paragraph(paragraph.take()));
                     Some(BlockNode::Root {
                         children,
                         span: None,
                     })
                 } else {
-                    Some(BlockNode::Paragraph(paragraph))
+                    Some(BlockNode::Paragraph(paragraph.take()))
                 }
             }
             local_name!("ul") | local_name!("ol") => {
@@ -528,24 +580,30 @@ fn parse_node(
                 let mut children = vec![];
                 consume_paragraph(&mut children, paragraph);
 
+                let mut ends_with_break = false;
                 for child in node.children.borrow().iter() {
-                    let mut child_paragraph = Paragraph::default();
+                    let mut child_paragraph = HtmlParagraph::default();
                     if let Some(child_node) = parse_node(child, &mut child_paragraph, cx) {
                         children.push(child_node);
+                        ends_with_break = false;
                     }
-                    if child_paragraph.text_len() > 0 {
+                    if child_paragraph.content.text_len() > 0 {
+                        ends_with_break = child_paragraph.ends_with_break;
                         // If last child is paragraph, merge child
                         if let Some(last_child) = children.last_mut() {
                             if let BlockNode::Paragraph(last_paragraph) = last_child {
-                                last_paragraph.merge(child_paragraph);
+                                last_paragraph.merge(child_paragraph.content);
                                 continue;
                             }
                         }
 
-                        children.push(BlockNode::Paragraph(child_paragraph));
+                        children.push(BlockNode::Paragraph(child_paragraph.content));
                     }
                 }
 
+                if ends_with_break && let Some(BlockNode::Paragraph(last)) = children.last_mut() {
+                    trim_trailing_break(last);
+                }
                 consume_paragraph(&mut children, paragraph);
 
                 Some(BlockNode::ListItem {
@@ -627,7 +685,7 @@ fn parse_node(
                     // Others to as Inline
                     parse_paragraph(paragraph, node);
 
-                    if paragraph.is_image() {
+                    if paragraph.content.is_image() {
                         Some(BlockNode::Paragraph(paragraph.take()))
                     } else {
                         None
@@ -650,7 +708,7 @@ fn parse_node(
 
 fn consume_children_nodes(
     node: &Node,
-    paragraph: &mut Paragraph,
+    paragraph: &mut HtmlParagraph,
     cx: &mut NodeContext,
 ) -> Vec<BlockNode> {
     let mut children = vec![];
@@ -665,12 +723,39 @@ fn consume_children_nodes(
     children
 }
 
-fn consume_paragraph(children: &mut Vec<BlockNode>, paragraph: &mut Paragraph) {
-    if paragraph.is_empty() {
+fn consume_paragraph(children: &mut Vec<BlockNode>, paragraph: &mut HtmlParagraph) {
+    if paragraph.content.is_empty() {
         return;
     }
 
     children.push(BlockNode::Paragraph(paragraph.take()));
+}
+
+/// Drops one trailing HTML break after the parser has established its
+/// provenance. The break may be a separate node or part of a marked run.
+/// A standalone break is retained for Markdown's inline-HTML parser.
+fn trim_trailing_break(paragraph: &mut Paragraph) {
+    if let [only] = paragraph.children.as_slice()
+        && only.text == "\n"
+    {
+        return;
+    }
+    let Some(last) = paragraph.children.last_mut() else {
+        return;
+    };
+    let Some(text) = last.text.strip_suffix('\n').map(str::to_string) else {
+        return;
+    };
+    if text.is_empty() {
+        paragraph.children.pop();
+        return;
+    }
+    let len = text.len();
+    last.text = text.into();
+    last.marks.retain_mut(|(range, _)| {
+        range.end = range.end.min(len);
+        range.start < range.end
+    });
 }
 
 #[cfg(test)]
@@ -708,6 +793,60 @@ mod tests {
             String::from_utf8(cleaned).unwrap(),
             "<p>and <em><code>code</code> <i>italic</i></em> text"
         );
+    }
+
+    #[test]
+    fn test_pre_text_stays_text() {
+        let mut cx = NodeContext::default();
+        for (html, text) in [
+            // Escaped markup is text, not elements.
+            (
+                "<pre>&lt;b&gt;bold&lt;/b&gt; &amp;amp;</pre>",
+                "<b>bold</b> &amp;",
+            ),
+            // Spaces, tabs and line feeds stay as they are.
+            ("<pre>  one\n\n\ttwo  </pre>", "  one\n\n\ttwo  "),
+            // The parser drops only the line feed right after `<pre>`.
+            ("<pre>\none</pre>", "one"),
+            ("<pre>\n\none</pre>", "\none"),
+            // A comment is left out, and the line feed after it kept.
+            ("<pre><!-- note -->\none</pre>", "\none"),
+        ] {
+            let document = super::parse(html, &mut cx).unwrap();
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected one paragraph, got {:?}", document.blocks);
+            };
+            assert_eq!(paragraph.text(), text, "{html}");
+        }
+    }
+
+    #[test]
+    fn test_pre_keeps_whitespace_in_nested_elements() {
+        let mut cx = NodeContext::default();
+        for (html, text) in [
+            // Code in `<pre><code>` keeps its line feeds and indent.
+            (
+                "<pre><code>fn main() {\n    one();\n}</code></pre>",
+                "fn main() {\n    one();\n}",
+            ),
+            // So does text deeper down, and the space between elements.
+            (
+                "<pre><code><b>one</b>  <i>two\n\tthree</i></code></pre>",
+                "one  two\n\tthree",
+            ),
+            // The parser keeps a line feed after `<code>`, unlike `<pre>`.
+            ("<pre><code>\none</code></pre>", "\none"),
+            // Escaped markup is still text.
+            ("<pre><code>&lt;b&gt; &amp;amp;</code></pre>", "<b> &amp;"),
+            // Outside `<pre>`, whitespace is collapsed as before.
+            ("<p><code>one\n   two</code></p>", "one two"),
+        ] {
+            let document = super::parse(html, &mut cx).unwrap();
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected one paragraph, got {:?}", document.blocks);
+            };
+            assert_eq!(paragraph.text(), text, "{html}");
+        }
     }
 
     #[test]
@@ -766,6 +905,137 @@ mod tests {
             "#}
             .trim()
         );
+    }
+
+    /// The text of the one paragraph `html` parses to.
+    fn paragraph_text(html: &str) -> String {
+        let mut cx = NodeContext::default();
+        let document = super::parse(html, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected one paragraph, got {:?}", document.blocks);
+        };
+        paragraph.text()
+    }
+
+    #[test]
+    fn test_br_breaks_the_line_where_it_stands() {
+        assert_eq!(paragraph_text("<p>one<br>two</p>"), "one\ntwo");
+        assert_eq!(
+            paragraph_text("one<br>two<br><br>three"),
+            "one\ntwo\n\nthree"
+        );
+        assert_eq!(paragraph_text("<b>one<br>two</b>"), "one\ntwo");
+        // The minifier trims the spaces around it.
+        assert_eq!(paragraph_text("<p>one <br> two</p>"), "one\ntwo");
+        // As in a browser, a break that ends a block adds no line.
+        assert_eq!(paragraph_text("<p>one<br></p>"), "one");
+        assert_eq!(paragraph_text("<p>one<br><br></p>"), "one\n");
+        // Markdown parses inline HTML one tag at a time and needs the break.
+        assert_eq!(paragraph_text("<br>"), "\n");
+    }
+
+    #[test]
+    fn test_br_that_ends_inline_markup() {
+        // Inside inline markup the break joins the text before it in one
+        // run; at the end of the block it still adds no line.
+        for tag in ["b", "span"] {
+            assert_eq!(
+                paragraph_text(&format!("<p><{tag}>one<br></{tag}></p>")),
+                "one",
+                "{tag}"
+            );
+            assert_eq!(
+                paragraph_text(&format!("<p><{tag}>one<br><br></{tag}></p>")),
+                "one\n",
+                "{tag}"
+            );
+            assert_eq!(
+                paragraph_text(&format!("<p><{tag}>one<br>two</{tag}></p>")),
+                "one\ntwo",
+                "{tag}"
+            );
+        }
+        assert_eq!(paragraph_text("<p>one<b><br></b></p>"), "one");
+        assert_eq!(paragraph_text("<p><b>one<br></b><br></p>"), "one\n");
+
+        // The marks end with the text they kept.
+        let mut cx = NodeContext::default();
+        let document = super::parse("<p><b>one<br></b></p>", &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected one paragraph, got {:?}", document.blocks);
+        };
+        let [node] = paragraph.children.as_slice() else {
+            panic!("expected one node, got {:?}", paragraph.children);
+        };
+        assert!(
+            node.marks.iter().all(|(range, _)| *range == (0..3)),
+            "{:?}",
+            node.marks
+        );
+        assert!(node.marks.iter().any(|(_, mark)| mark.bold));
+    }
+
+    #[test]
+    fn test_literal_trailing_line_feeds_are_preserved() {
+        for (html, expected) in [
+            ("<pre>one\n</pre>", "one\n"),
+            ("<pre>one\n\n</pre>", "one\n\n"),
+            ("<pre>one\n<br></pre>", "one\n"),
+            ("<pre>one<br>\n</pre>", "one\n\n"),
+            ("<textarea>one\n</textarea>", "one\n"),
+        ] {
+            assert_eq!(paragraph_text(html), expected, "{html}");
+        }
+    }
+
+    #[test]
+    fn test_trailing_breaks_at_text_block_boundaries() {
+        for tag in ["p", "h1", "h6", "td", "th", "li"] {
+            for (content, expected) in [
+                ("one<br>", "one"),
+                ("one<br><br>", "one\n"),
+                ("<b>one<br></b>", "one"),
+                ("<span>one<br><br></span>", "one\n"),
+                ("one<br>two", "one\ntwo"),
+                ("one<br><span></span>", "one"),
+            ] {
+                let html = match tag {
+                    "td" | "th" => format!("<table><tr><{tag}>{content}</{tag}></tr></table>"),
+                    "li" => format!("<ul><li>{content}</li></ul>"),
+                    _ => format!("<{tag}>{content}</{tag}>"),
+                };
+                let mut cx = NodeContext::default();
+                let document = super::parse(&html, &mut cx).unwrap();
+                let paragraph = match &document.blocks[0] {
+                    BlockNode::Paragraph(paragraph)
+                    | BlockNode::Heading {
+                        children: paragraph,
+                        ..
+                    } => paragraph,
+                    BlockNode::Table(table) => &table.children[0].children[0].children,
+                    BlockNode::List { children, .. } => {
+                        let BlockNode::ListItem { children, .. } = &children[0] else {
+                            panic!("expected list item: {html}");
+                        };
+                        let [BlockNode::Paragraph(paragraph)] = children.as_slice() else {
+                            panic!("expected one paragraph: {html}");
+                        };
+                        paragraph
+                    }
+                    _ => panic!("expected text block: {html}"),
+                };
+                assert_eq!(paragraph.text(), expected, "{html}");
+                for node in &paragraph.children {
+                    assert!(
+                        node.marks
+                            .iter()
+                            .all(|(range, _)| range.start < range.end
+                                && range.end <= node.text.len()),
+                        "mark outside text: {html}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

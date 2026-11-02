@@ -37,7 +37,9 @@ Running a directory from the command line is an explicit act of trust — the sa
 | Exit request      | Granted                                                  |
 | Network           | **Not** granted                                          |
 
-An application can therefore read its own sources and assets and use its own storage, and nothing else. It is deliberately narrower than "everything", because an installed plugin will one day run through the same code path with a manifest deciding instead — and a grant that is generous for a local run would be the wrong default to inherit.
+Without a manifest, an application can therefore read its own sources and assets and use its own storage, and nothing else. It is deliberately narrower than "everything", because an installed plugin will one day run through the same code path with a manifest deciding instead — and a grant that is generous for a local run would be the wrong default to inherit.
+
+With a manifest, everything it grants applies as well — the two directories above are **added** to its `fs` roots, never put in their place — and so does its `process.exit`, which a local run grants regardless.
 
 ## Refusals name the fix
 
@@ -109,6 +111,17 @@ the cache, and what an editor sees.
 
 Every grant in that block defaults to _denied_ when omitted, except `storage`, which defaults to granted — write `"storage": false` to refuse it.
 
+An `fs` root is a path, or a path starting with one of three placeholders: `${pluginDir}` (the application's directory), `${dataDir}` (its storage directory) and `${homeDir}` (the user's home directory). A relative path is anchored to the application's directory; an absolute one is taken as written. `${homeDir}` is how an application that manages the user's own files asks for them without hard-coding a user name:
+
+```json
+"fs": {
+  "read": ["${homeDir}/.claude/skills"],
+  "write": ["${homeDir}/.claude/skills"]
+}
+```
+
+`${homeDir}` has the same value as the `HOME` environment variable (`USERPROFILE` on Windows), but the manifest reads no environment variables and does not expand `~`. A root written as `$HOME/…`, `${HOME}/…` or `~/…` is refused when the manifest is read, with the `${homeDir}` spelling to use instead, rather than quietly becoming a directory inside the application. When the home directory is unknown, a root under `${homeDir}` is left out of the grant. A script reads the same path with `os.homedir()`, which needs no grant.
+
 Unknown fields, invalid reverse-DNS ids, invalid explicitly declared SemVer values, incompatible `shell-version` values, escaping entries, and unknown `${...}` placeholders invalidate the manifest before code runs. Omitted `version` is reported as `unknown`. Omitted `shell-version` accepts the current runtime; when present, it names the oldest compatible gpui-shell release the application requires. Any runtime at or above that version is accepted. The standalone CLI refuses an invalid manifest instead of executing its entry with silently different assumptions.
 
 Each scoped `network.http` rule binds the request scheme and effective port as well as its host, method and path. `scheme` defaults to `https`; `port` defaults to that scheme's standard port and only needs to be written for a non-default endpoint.
@@ -132,11 +145,17 @@ Every call returns a promise. `await` them, or chain `.then` — and see the not
 | `fs.unlink(path)`                           | —                               |
 | `fs.rmdir(path)`                            | —                               |
 | `fs.mkdir(path, options?)`                  | —                               |
+| `fs.stat(path)`                             | `Stats`, following a symlink    |
+| `fs.lstat(path)`                            | `Stats` of the symlink itself   |
+| `fs.rename(from, to)`                       | —                               |
+| `fs.readlink(path)`                         | The symlink's stored target     |
 
 ```js
 const source = await fs.readFile("notes.md", "utf8");
 await fs.writeFile("notes.md", source + "\n");
 ```
+
+`Stats` has `isFile()`, `isDirectory()`, `isSymbolicLink()`, `size`, `mode`, and `mtime`/`atime`/`birthtime` as `Date`s alongside their `…Ms` numbers; a time the filesystem does not record reads as the epoch. `stat`, `lstat` and `readlink` need read access. `rename` needs write access to both paths, so it cannot carry a file out of a root the application may only read.
 
 A relative path resolves against a granted root; an absolute one must already be inside one. Every path in the surface goes through **one resolver**, so there is no second place for a traversal bug to hide. It normalizes the path — `../../etc/passwd` is rejected before it reaches the filesystem — and then settles containment against the filesystem rather than against the string, because a grant is a promise about a _directory_: `data/escape/passwd` is lexically inside the root and reads `/etc/passwd` if `escape` is a symlink. The deepest part of the path that exists is resolved, links and all, and has to still be under the root; a symlink that resolves to nothing is refused rather than guessed at.
 
@@ -230,7 +249,7 @@ The id is the identity, so the data survives the directory being renamed, moved,
 
 **The runtime does not go looking for the id in a file.** Only the layer that installed the application knows what it is called; a runtime that read it out of a manifest of its own choosing would be claiming authority over something it does not own.
 
-A host that was merely _pointed at_ a directory — this command line, a dev server — has no such name, and there the path really is the identity. `gpui_kit::shell::bundle_id_for_path(root)` builds one from the directory's name and a digest of its full path, so the same directory always reaches the same data and two checkouts of one source stay apart. That is right while you are editing something and wrong once it is installed, which is exactly the difference declaring a real id makes.
+The `gpui-shell` command uses the manifest `id`, so `run -d`, an installed copy and a packaged one all reach the same data. A host that was merely _pointed at_ a directory with no manifest has no such name, and there the path really is the identity. `gpui_kit::shell::bundle_id_for_path(root)` builds one from the directory's name and a digest of its full path, so the same directory always reaches the same data and two checkouts of one source stay apart. That is right while you are editing something and wrong once it is installed, which is exactly the difference declaring a real id makes.
 
 The id may hold `a-z`, `0-9`, `.`, `-` and `_`, and no `..`. That is not tidiness: it is joined onto the user's data directory, so an unchecked one reaches the rest of it. Data lives there rather than inside the application because an application directory may be read-only, is often a git checkout, and is not where a user expects their data to be.
 
@@ -291,7 +310,7 @@ console.warn("could not save");
 
 Extra arguments are appended space-separated, the way `console.log` behaves. Structured values print as JSON, because that is what an author reading a log wants to see.
 
-Output goes through `tracing` with the target `gpui_kit::shell::script`, so script output is separable from host output in a log filter. **A host with no `tracing` subscriber installed discards all of it** — along with the runtime's own reports of throwing handlers, unhandled rejections and illegal-phase calls. The `gpui-shell` binary installs a stderr sink at `INFO`, or `DEBUG` under `--dev`.
+Output goes through `tracing` with the target `gpui_kit::shell::script`, so script output is separable from host output in a log filter. **A host with no `tracing` subscriber installed discards all of it** — along with the runtime's own reports of throwing handlers, unhandled rejections and illegal-phase calls. The `gpui-shell` binary installs a stderr sink at `INFO`, or `DEBUG` under the `dev` command.
 
 ## `process`
 
@@ -308,6 +327,29 @@ Output is **captured, not inherited**: a script that runs a command almost alway
 
 Execution is bounded: 30 seconds, 8 MiB of stdout and 8 MiB of stderr. Reaching a bound kills and reaps the child and rejects the promise. Cancelling owned work or tearing down its runtime also terminates the child. The child starts with a cleared environment rather than inheriting host secrets; the shell does not expose an option to add environment variables.
 
+`process.run(command, args, { cwd, timeoutMs })` takes an optional third argument: a working directory, which must be inside a `capabilities.fs.read` grant, and a deadline other than 30 seconds.
+
+### Streaming: `process.spawn`
+
+```js
+const child = process.spawn("codex", ["exec", "--json", task], { cwd, lines: true });
+child
+  .on("stdout", (line, cx) => { this.events.push(JSON.parse(line)); cx.notify(); })
+  .on("stderr", (line) => console.warn(line))
+  .on("exit", ({ code, signal, error }, cx) => { this.done = true; cx.notify(); });
+```
+
+`process.run` waits for the end. A command that runs for minutes, talks over stdin, or is read as it works — an AI command line streaming JSON lines, a long-lived server speaking a protocol on stdin and stdout — needs its output as it arrives. `spawn` returns a `ChildProcess` at once:
+
+- `on("stdout" | "stderr", (text, cx) => …)` delivers output as it is read, or a line at a time with `lines: true`: without the line ending, joined across reads, and the last line delivered even with no newline after it. Output is decoded as UTF-8 whole, even when a character spans two reads. There is no limit on total output, but a single line over 8 MiB kills the process, because a line is held until its newline arrives.
+- `on("exit", ({ code, signal, error }, cx) => …)` fires **once, after the last output**. `error` is set when the runtime stopped the process — a `timeoutMs` deadline, or a line too long — and absent for a process that ended or was `kill()`ed.
+- `write(text)` and `end()` feed stdin when the child was started with `stdin: "pipe"`.
+- `kill()` kills the whole process group, a Job Object on Windows, so a command's own children go with it.
+
+Handlers run on the UI thread with an async `cx`, as a `cx.spawn` task's do, so they can `cx.notify()` and keep the context across an `await`. There is **no deadline** unless `timeoutMs` asks for one. A child belongs to the view that spawned it: releasing the view, reloading the application under `dev --watch`, or closing the window kills it and everything it started, so nothing is left behind as an orphan.
+
+`spawn` takes the same grant as `run`, resolves the command on the host PATH the same way, and starts it with the same empty environment.
+
 It is gated on an execute grant, which is one of three: denied (the default), an allowlist of command names, or unrestricted. A denied command **throws at the call** rather than rejecting, like a denied `fs` path — a rejected promise nobody awaited is a denial nobody sees.
 
 `process.exit` is **a request, never `exit(2)`** inside the runtime. It hands the code to a handler the host installed, which decides what to do — close the plugin's panel, close the window, end the process. One plugin must not be able to take the host process down, and the host may have unsaved state.
@@ -317,6 +359,27 @@ The handler is not optional: a host that grants the capability without installin
 The name is a deliberate collision. `process` is what a JavaScript author — or a model generating JavaScript — reaches for, so the runtime puts its own capability-gated surface there rather than leaving the name free to look like Node's and behave differently.
 
 `process.exit` has its own `capabilities.process.exit` grant. Filesystem access never implies permission to close a panel, window, or process.
+
+### Where things are
+
+```js
+import os from "os";
+
+process.dataDir; // this application's storage directory, the one `${dataDir}` names
+os.homedir(); // the user's home directory
+import.meta.url; // "file:///…/main.js", the running module
+process.env.EDITOR; // a default; other variables only when the manifest lists them
+```
+
+None of the paths needs a grant: a path says where something is, and reading or writing there is still the `fs` grant's decision. The environment is different, because a variable's _value_ can be a token handed to the host rather than to every script it runs. `process.env` therefore holds a fixed set of variables that describe the user's machine, session and preferences — `HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`, `EDITOR`, `DISPLAY`, the proxy settings, the XDG directories and their Windows counterparts — but never tokens, keys or passwords, plus the ones `capabilities.process.env` names, and only those that are set:
+
+```json
+"process": { "env": ["MY_APP_MODE"] }
+```
+
+Names match regardless of case, so listing `HTTP_PROXY` also shows `http_proxy`, under the spelling the environment uses. The default set is maintained in [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env).
+
+It is always an object, so `process.env.X ?? fallback` works without a grant.
 
 ## The sandbox
 
@@ -345,20 +408,20 @@ The clock restarts on every host call, which is what lets the render path have a
 There is no quickjs-libc `std`: quickjs-libc is not compiled into the build. The runtime does provide the small audited `os` module listed below.
 
 ::: tip Development mode
-`--dev` enables source watching and calls `gpui_kit::shell::set_development_mode(true)` before constructing the runtime. That restores dynamic-code constructors and leaves built-in prototypes writable.
+`--dev`, with `run` or `dev`, calls `gpui_kit::shell::set_development_mode(true)` before constructing the runtime. That restores dynamic-code constructors and leaves built-in prototypes writable.
 
 Development mode never relaxes capability gating. It makes the language easier to poke at; it does not hand out access nobody declared, because a grant the author never wrote down is a grant that will be missing in production.
 :::
 
 ## Network and safe standard APIs
 
-Global `fetch(url, options?)` is promise-based and returns `{ status, ok, url, , json() }`. Its grant is narrower than raw networking: every request and redirect must match a declared HTTP host, method, and exact path or path prefix; HTTPS never downgrades to HTTP, and authorization or caller-supplied headers never cross origins.
+Global `fetch(url, options?)` is promise-based and returns `{ status, ok, url, text(), json(), arrayBuffer(), bytes() }`; the body stays bytes until a reader asks for text, so a binary download survives `arrayBuffer()` unchanged. Requests send `User-Agent: gpui-shell/<version>` unless the script sets its own header, since some APIs refuse a request without one. Its grant is narrower than raw networking: every request and redirect must match a declared HTTP host, method, and exact path or path prefix; HTTPS never downgrades to HTTP, and authorization or caller-supplied headers never cross origins.
 
 `net.connect(host, port)` and the named `WebSocket.connect(url, { headers? })` export from `websocket` use `capabilities.network.hosts`. `WebSocket` is not installed as a browser global and is not a constructor. Raw TCP `read()` returns a `Uint8Array`, or `null` at EOF, so transport chunks never undergo lossy text decoding. WebSockets support text and `Uint8Array` messages and serialize writes through one actor. They do not follow redirects. Connect, handshake, and write operations have a 30-second timeout. A socket permits one outstanding `read()` at a time; a second is rejected immediately instead of competing for the next message. Credential and handshake-control headers are refused. Raw TCP and WebSocket access are intentionally broader than an HTTP request grant.
 
 DNS resolution is a bounded process-wide service: all applications share two resolver workers and a 64-request queue. Queueing observes each connection's existing deadline, so saturation fails as a timeout instead of growing memory or threads without limit. This is resource containment, not per-application quality-of-service; a host that runs mutually untrusted applications in one process does not get DNS fairness between them.
 
-The runtime also provides `buffer`, `path`, `url`, `crypto`, `zlib`, `console`, `process`, and `os`. These are the audited LLRT/host-backed subset declared in generated `gpui-kit.d.ts`; `node:` aliases and arbitrary Node built-ins are not part of the shell contract.
+The runtime also provides `buffer`, `path`, `url`, `crypto`, `zlib`, `console`, `process`, and `os`, plus UTF-8 `TextEncoder` and `TextDecoder` globals. These are the audited LLRT/host-backed subset declared in generated `gpui-kit.d.ts`; `node:` aliases and arbitrary Node built-ins are not part of the shell contract.
 
 ## Not there yet
 

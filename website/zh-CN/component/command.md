@@ -240,6 +240,14 @@ Command::new(&state)
     }))
 ```
 
+## 滚动回弹
+
+```rust
+Command::new(&state).scroll_bounce(true)
+```
+
+开启 `scroll_bounce(true)` 后，命令列表在精细像素滚动（例如 macOS 上的触控板或 Magic Mouse）到达两端时越过边缘并弹回，行为与 [List](./list.md#滚动回弹) 一致，搜索框和 footer 保持不动。iOS、Android 和 macOS 默认开启（与系统自带的滚动视图一致），其他平台默认关闭。
+
 ## Command
 
 | 方法 | 签名与说明 |

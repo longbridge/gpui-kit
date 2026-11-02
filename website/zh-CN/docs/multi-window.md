@@ -173,7 +173,7 @@ open_window(options, cx, |window, cx| cx.new(|cx| Workspace::new(shared, "Restor
 
 ## 测试窗口边界
 
-在 [`TestAppContext` 测试](./test)中，通过 `gpui_kit::open_window` 打开两个窗口，修改共享 Entity，断言两个 view 都更新，同时窗口局部状态保持独立。对第一个窗口调用 `window.remove_window()` 后，它的 handle 更新应返回错误；第二个窗口仍应能渲染和接收输入。运行 `cargo test -p gpui-kit --features test-support --test lifecycle closing_one_window_preserves_other_window_and_owned_snapshot` 可执行仓库现有的[多窗口生命周期测试](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/lifecycle.rs)，覆盖关闭边界。对于本示例，还应在新项目中运行 `cargo run`，目视检查两个计数和关闭行为。
+在 [`TestAppContext` 测试](./test)中，通过 `gpui_kit::open_window` 打开两个窗口，修改共享 Entity，断言两个 view 都更新，同时窗口局部状态保持独立。对第一个窗口调用 `window.remove_window()` 后，它的 handle 更新应返回错误；第二个窗口仍应能渲染和接收输入。运行 `cargo test -p gpui-kit --features test-support --test integration lifecycle::closing_one_window_preserves_other_window_and_owned_snapshot` 可执行仓库现有的[多窗口生命周期测试](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/integration/lifecycle.rs)，覆盖关闭边界。对于本示例，还应在新项目中运行 `cargo run`，目视检查两个计数和关闭行为。
 
 ## 排查示例问题
 

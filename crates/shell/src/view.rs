@@ -30,7 +30,7 @@ use crate::{
     engine::{ShellRuntime, ViewObject},
     materialize::materialize,
     policy::Policy,
-    runtime::{error_banner, error_overlay},
+    runtime::{ViewFailure, error_banner, error_overlay},
     snapshot::RenderSnapshot,
 };
 
@@ -68,6 +68,13 @@ pub struct ScriptView {
     /// every frame: a broken render is exactly as frame-coupled as a working one
     /// if the failure re-triggers the build.
     error: Option<String>,
+    /// Why the most recent source reload failed, if it did.
+    ///
+    /// Reported here rather than in a toast of its own: the view keeps running
+    /// its previous code, so this is a failure *of this view*, and it belongs on
+    /// the same surface as a render failure. Takes precedence over `error`,
+    /// which describes code the author has already edited away.
+    reload_error: Option<String>,
     /// Whose authority this view's script runs under.
     ///
     /// Captured when the view is constructed rather than read when it is used:
@@ -126,6 +133,7 @@ impl ScriptView {
             policy,
             theme: None,
             error: None,
+            reload_error: None,
             ownership,
             runtime,
         }
@@ -167,6 +175,14 @@ impl ScriptView {
     /// the element identities — and swaps only what the script produced. The
     /// description that the old instance built is now meaningless, so the view
     /// is invalidated with it.
+    /// Records, or clears, why the latest reload of this view's source failed.
+    pub(crate) fn set_reload_error(&mut self, message: Option<String>, cx: &mut Context<Self>) {
+        if self.reload_error != message {
+            self.reload_error = message;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn replace_object(&mut self, object: ViewObject) {
         self.object = object;
         self.dirty = true;
@@ -218,6 +234,7 @@ impl ScriptView {
         self.retired = true;
         self.dirty = false;
         self.error = None;
+        self.reload_error = None;
         self.previous = None;
         self.current = None;
     }
@@ -298,20 +315,25 @@ impl Render for ScriptView {
             self.rebuild(window, cx);
         }
 
-        match (self.error.as_deref(), self.current.as_ref()) {
+        let failure = match (self.reload_error.as_deref(), self.error.as_deref()) {
+            (Some(message), _) => Some((ViewFailure::Reload, message)),
+            (None, Some(message)) => Some((ViewFailure::Render, message)),
+            (None, None) => None,
+        };
+        match (failure, self.current.as_ref()) {
             (None, Some(snapshot)) => materialize(&self.runtime, snapshot, window, cx),
             // A build that failed left the last good snapshot in place, so the
             // interface is still there to show. Reporting over it beats
             // replacing it: the reader keeps their scroll, their focus and
             // whatever they were reading, and still learns what broke.
-            (Some(message), Some(snapshot)) => div()
+            (Some((failure, message)), Some(snapshot)) => div()
                 .relative()
                 .size_full()
                 .child(materialize(&self.runtime, snapshot, window, cx))
-                .child(error_banner(message, window, cx))
+                .child(error_banner(failure, message, window, cx))
                 .into_any_element(),
             // Nothing to keep: this view has never rendered successfully.
-            (Some(message), None) => error_overlay(message, window, cx),
+            (Some((failure, message)), None) => error_overlay(failure, message, window, cx),
             // Unreachable in practice: a build either publishes a snapshot or
             // records an error. An empty element is the honest answer if it ever
             // is reached, rather than a panic in a render.

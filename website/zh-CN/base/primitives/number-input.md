@@ -40,7 +40,7 @@ use gpui_kit::base::{Decrement, Increment, NumberInput, NumberInputText};
 
 ## 可访问性
 
-提供标签、范围与当前值语义，并让增减操作可通过键盘完成。
+提供标签、范围与当前值语义，并让增减操作可通过键盘完成。数值输入本身没有可见文字，用 `.accessibility_label(...)` 为它命名。
 
 ## 注意事项
 

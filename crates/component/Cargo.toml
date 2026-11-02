@@ -7,7 +7,7 @@ documentation = "https://docs.rs/gpui-component"
 homepage = "https://gpui-kit.com"
 repository = "https://github.com/longbridge/gpui-kit"
 readme = "../../README.md"
-version = "0.7.1"
+version = "0.8.1"
 publish = true
 edition.workspace = true
 
@@ -20,6 +20,12 @@ test-support = ["gpui/test-support", "gpui-base/test-support", "gpui-fast?/test-
 decimal = ["gpui-base/decimal"]
 inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector", "gpui-fast?/inspector"]
 tree-sitter = ["dep:tree-sitter", "dep:tree-sitter-json"]
+# Syntax highlighting for Markdown, Input and Diff from syntect and bat's
+# syntax collection: about 200 languages for a few megabytes, against tens for
+# the full tree-sitter set. Regex-based and line-oriented, so it has no syntax
+# tree: no structural folding and no syntax-aware editing. When both are
+# enabled, `tree-sitter` is used.
+syntect = ["dep:syntect", "dep:two-face"]
 # Speech input: microphone capture and the system speech recognizer.
 speech = [
     "dep:cpal",
@@ -150,6 +156,9 @@ chrono = "0.4.38"
 
 # Code Editor
 lsp-types.workspace = true
+# The `syntect` highlighter, portable to WASM.
+syntect = { workspace = true, optional = true }
+two-face = { workspace = true, optional = true }
 
 # Cross-platform time APIs (zero-cost on native, uses web APIs on WASM)
 instant.workspace = true

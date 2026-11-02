@@ -12,6 +12,10 @@ const EXPORTS: &[&str] = &[
     "unlink",
     "rmdir",
     "mkdir",
+    "stat",
+    "lstat",
+    "rename",
+    "readlink",
 ];
 
 pub(super) struct FsModule;
@@ -34,6 +38,10 @@ impl ModuleDef for FsModule {
         fs.set("unlink", Func::from(super::super::host::remove_file))?;
         fs.set("rmdir", Func::from(super::super::host::remove_dir))?;
         fs.set("mkdir", Func::from(super::super::host::mkdir))?;
+        fs.set("stat", Func::from(super::super::host::stat))?;
+        fs.set("lstat", Func::from(super::super::host::lstat))?;
+        fs.set("rename", Func::from(super::super::host::rename))?;
+        fs.set("readlink", Func::from(super::super::host::readlink))?;
         exports.export("default", Value::from_object(fs.clone()))?;
         for name in EXPORTS {
             exports.export(*name, fs.get::<_, Value>(*name)?)?;

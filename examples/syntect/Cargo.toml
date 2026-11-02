@@ -1,0 +1,14 @@
+[package]
+name = "example-syntect"
+version = "0.8.1"
+publish = false
+edition.workspace = true
+
+# Only `syntect`: with `tree-sitter` also enabled, tree-sitter would be used.
+# Build this package on its own (`cargo run -p example-syntect`) so no other
+# workspace member unifies tree-sitter into the build.
+[dependencies]
+gpui-kit = { workspace = true, features = ["syntect"] }
+
+[lints]
+workspace = true

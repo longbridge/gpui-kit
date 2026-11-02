@@ -340,7 +340,7 @@ new InputGroupInput(this.input).px(12).text_base();
 new InputGroupButton("clear").label("清空").icon("icons/x.svg").font_semibold();
 ```
 
-执行 `gpui-component-shell types <应用目录>` 可生成编辑器补全声明。
+执行 `gpui-shell types -d <应用目录>` 可生成编辑器补全声明。
 
 ## 行内引用
 

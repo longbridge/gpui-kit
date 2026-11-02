@@ -5,10 +5,11 @@
 // area with no chrome still docks, drags, resizes and persists; it simply
 // paints nothing but the panels. Everything you can see here is in `ui.js`.
 //
-//   cargo run -p gpui-shell -- examples/js_dock
+//   cargo run -p gpui-shell -- run examples/js_dock
 
 import { View, div } from "gpui-kit";
 import { DockArea, dock_area, dock_content, v_flex } from "gpui-base";
+import { TitleBar } from "gpui-component";
 /** @import { AsyncContext, Context } from "gpui-kit" */
 import {
   BAR,
@@ -156,6 +157,17 @@ export default class Workspace extends View {
     return v_flex()
       .size_full()
       .bg(cx.theme().colors.background)
+      // The window draws no title bar of its own; this one drags it, and
+      // sheets and notifications open below it.
+      .child(
+        new TitleBar().child(
+          div()
+            .text_size(13)
+            .font_medium()
+            .text_color(cx.theme().colors.foreground)
+            .child("Workspace"),
+        ),
+      )
       .child(this.toolbar(cx))
       .child(
         dock_area(this.dock)

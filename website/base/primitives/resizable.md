@@ -32,7 +32,7 @@ The authoritative module is [`components/resizable.rs`](https://github.com/longb
 
 ## State and events
 
-Panel sizes live in resizable state; dragging handles updates adjacent panels subject to minimums.
+Panel sizes live in resizable state; dragging handles updates adjacent panels subject to minimums. When the container resizes, the panels keep their proportions, except a panel marked `fixed()`, which keeps its size.
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.
 

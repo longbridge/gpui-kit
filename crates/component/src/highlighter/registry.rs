@@ -113,6 +113,7 @@ impl LanguageConfig {
 ///
 /// https://docs.rs/tree-sitter-highlight/0.26.8/tree_sitter_highlight/
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SyntaxColors {
     pub attribute: Option<ThemeStyle>,
     pub boolean: Option<ThemeStyle>,
@@ -346,6 +347,12 @@ pub struct StatusColors {
     hint_background: Option<Hsla>,
     #[serde(rename = "hint.border")]
     hint_border: Option<Hsla>,
+    #[serde(rename = "created")]
+    created: Option<Hsla>,
+    #[serde(rename = "modified")]
+    modified: Option<Hsla>,
+    #[serde(rename = "deleted")]
+    deleted: Option<Hsla>,
 }
 
 impl StatusColors {
@@ -433,9 +440,31 @@ impl StatusColors {
     pub fn hint_border(&self, cx: &App) -> Hsla {
         self.hint_border.unwrap_or(self.hint(cx))
     }
+
+    /// The color for something new, such as an added file or line in version
+    /// control. Uses `success` when the theme has no `created` value.
+    #[inline]
+    pub fn created(&self, cx: &App) -> Hsla {
+        self.created.unwrap_or_else(|| self.success(cx))
+    }
+
+    /// The color for something changed, such as a modified line in version
+    /// control. Uses `warning` when the theme has no `modified` value.
+    #[inline]
+    pub fn modified(&self, cx: &App) -> Hsla {
+        self.modified.unwrap_or_else(|| self.warning(cx))
+    }
+
+    /// The color for something removed, such as a deleted line in version
+    /// control. Uses `error` when the theme has no `deleted` value.
+    #[inline]
+    pub fn deleted(&self, cx: &App) -> Hsla {
+        self.deleted.unwrap_or_else(|| self.error(cx))
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightThemeStyle {
     #[serde(rename = "editor.background")]
     pub editor_background: Option<Hsla>,
@@ -465,6 +494,7 @@ pub struct HighlightThemeStyle {
 ///
 /// https://zed.dev/docs/extensions/languages#syntax-highlighting
 #[derive(Debug, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightTheme {
     pub name: String,
     #[serde(default)]

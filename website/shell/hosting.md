@@ -206,13 +206,13 @@ gpui_kit::shell::on_exit_request(|request, window, cx| {
 
 ## Hot-reload
 
-One call starts it, and it is the same one the `--watch` flag uses:
+One call starts it, and it is the same one the `dev` command uses:
 
 ```rust
 runtime.watch(&root, window, cx)?.forget();
 ```
 
-`runtime.watch` reads the resolved directory and manifest entry retained by the loaded root, so there is no second copy of that metadata to drift. It has no hidden build-mode policy: the CLI enables watching after `--watch`, while an embedded host can put the call behind `#[cfg(debug_assertions)]`. The returned `Watcher` owns the watch: dropping it stops the loop, which is what a host unmounting a panel wants, while `.forget()` lets it run for as long as the View does. The loop also ends on its own when the View, the runtime or the window goes away, because it holds all three weakly.
+`runtime.watch` reads the resolved directory and manifest entry retained by the loaded root, so there is no second copy of that metadata to drift. It has no hidden build-mode policy: the CLI enables watching for `dev` and `run --watch`, while an embedded host can put the call behind `#[cfg(debug_assertions)]`. The returned `Watcher` owns the watch: dropping it stops the loop, which is what a host unmounting a panel wants, while `.forget()` lets it run for as long as the View does. The loop also ends on its own when the View, the runtime or the window goes away, because it holds all three weakly.
 
 A reload re-reads **every** module, entry point included — a hot-reload that quietly served a stale import would be worse than none, because it looks like it worked. It does all of its fallible work before touching the live View: if the new code fails to load, the previous View keeps running, the error goes to `tracing`, and a toast with a stable id reports it in the window. The next successful reload retracts that toast.
 

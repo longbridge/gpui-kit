@@ -192,13 +192,13 @@ gpui_kit::shell::on_exit_request(|request, window, cx| {
 
 ## Hot-reload
 
-一个调用就能开起来，`--watch` 用的也是这一个：
+一个调用就能开起来，`dev` 命令用的也是这一个：
 
 ```rust
 runtime.watch(&root, window, cx)?.forget();
 ```
 
-`runtime.watch` 从已加载的 root 读取解析后的目录与 manifest entry，不再让 Host 维护第二份可能漂移的元数据。它不暗藏构建模式策略：CLI 在解析到 `--watch` 后启用监听，嵌入式 Host 则可以把调用放进 `#[cfg(debug_assertions)]`。返回的 `Watcher` 持有这次监听：把它 drop 掉，循环就停；`.forget()` 则让它跟随 View 继续运行。 View、运行时或窗口任意一个消失时，循环也会自己结束。
+`runtime.watch` 从已加载的 root 读取解析后的目录与 manifest entry，不再让 Host 维护第二份可能漂移的元数据。它不暗藏构建模式策略：CLI 只在 `dev` 命令或 `run --watch` 下启用监听，嵌入式 Host 则可以把调用放进 `#[cfg(debug_assertions)]`。返回的 `Watcher` 持有这次监听：把它 drop 掉，循环就停；`.forget()` 则让它跟随 View 继续运行。 View、运行时或窗口任意一个消失时，循环也会自己结束。
 
 一次重载会重新读取**每一个**模块，入口也在内——一个悄悄用了旧 import 的 hot-reload 比没有更糟，因为它看起来是成功的。它会先把所有可能失败的活干完，再去碰活着的那个 View：新代码加载失败时，上一个 View 继续运行，错误进 `tracing`，窗口里由一条固定 id 的 toast 报出来；下一次成功的重载会撤掉这条 toast。
 

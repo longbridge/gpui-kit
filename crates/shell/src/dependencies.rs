@@ -33,6 +33,19 @@ impl GitDependencyStore {
     fn for_user_with_environment(
         environment: impl Fn(&str) -> Option<std::ffi::OsString>,
     ) -> Result<Self> {
+        // `GPUI_SHELL_HOME` moves everything gpui-shell keeps under
+        // `~/.gpui-shell`, installed applications and this cache alike.
+        if let Some(shell_home) = environment(SHELL_HOME_VARIABLE).filter(|value| !value.is_empty())
+        {
+            let shell_home = PathBuf::from(shell_home);
+            if !shell_home.is_absolute() {
+                bail!(
+                    "cannot locate the Git dependency cache: {SHELL_HOME_VARIABLE} must be an absolute path, got `{}`",
+                    shell_home.display()
+                );
+            }
+            return Ok(Self::new(shell_home.join("cache").join("dependencies")));
+        }
         let Some((variable, home)) = ["HOME", "USERPROFILE"].into_iter().find_map(|variable| {
             environment(variable)
                 .filter(|value| !value.is_empty())
@@ -465,6 +478,10 @@ fn default_package_entry() -> String {
     "index.js".to_owned()
 }
 
+/// Overrides `~/.gpui-shell`, the directory gpui-shell keeps its installed
+/// applications and dependency cache in.
+pub(crate) const SHELL_HOME_VARIABLE: &str = "GPUI_SHELL_HOME";
+
 fn dependency_cache_root(home: &Path) -> PathBuf {
     home.join(".gpui-shell").join("cache").join("dependencies")
 }
@@ -618,6 +635,26 @@ mod tests {
         assert_eq!(
             dependency_cache_root(Path::new("/home/example")),
             PathBuf::from("/home/example/.gpui-shell/cache/dependencies")
+        );
+    }
+
+    #[test]
+    fn the_shell_home_variable_moves_the_cache() {
+        let store = GitDependencyStore::for_user_with_environment(|variable| match variable {
+            "GPUI_SHELL_HOME" => Some("/opt/shell".into()),
+            "HOME" => Some("/home/example".into()),
+            _ => None,
+        })
+        .expect("an absolute shell home");
+        assert_eq!(store.root, PathBuf::from("/opt/shell/cache/dependencies"));
+
+        assert!(
+            GitDependencyStore::for_user_with_environment(|variable| match variable {
+                "GPUI_SHELL_HOME" => Some("relative".into()),
+                _ => None,
+            })
+            .is_err(),
+            "a relative shell home is refused rather than resolved against the working directory"
         );
     }
 

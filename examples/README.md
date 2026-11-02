@@ -9,6 +9,7 @@ not enable the gallery's test-support development dependency.
 | Example | Command |
 | --- | --- |
 | Editor | `cargo run -p example-editor` |
+| Editor and Markdown highlighted by syntect | `cargo run -p example-syntect` |
 | Brush | `cargo run -p example-brush` |
 | Dock | `cargo run -p example-dock` |
 | HTML | `cargo run -p example-html` |

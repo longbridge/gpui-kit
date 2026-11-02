@@ -30,7 +30,7 @@ use gpui_kit::base::{ResizablePanel, ResizablePanelGroup, ResizableState, h_resi
 
 ## 状态与事件
 
-ResizableState 持久保存面板尺寸；拖动手柄时更新约束内的比例。
+ResizableState 持久保存面板尺寸；拖动手柄时更新约束内的比例。容器改变大小时各面板保持比例，标记为 `fixed()` 的面板则保持自身尺寸。
 
 受控状态应保存在父渲染类型或 GPUI entity 中；在回调中更新并调用 `cx.notify()`，不要在每次渲染时重建持久 entity。
 

@@ -146,6 +146,15 @@ Slider::new(&slider_state)
     .disabled(true)
 ```
 
+### Accessibility
+
+Use `.accessibility_label(...)` to name the existing Slider accessibility node. This does not add a visible label.
+
+```rust
+Slider::new(&slider_state)
+    .accessibility_label("Corner radius")
+```
+
 ### Custom Styling
 
 ```rust

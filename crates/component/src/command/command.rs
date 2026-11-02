@@ -20,6 +20,7 @@ pub(crate) struct CommandOptions {
     pub(crate) placeholder: Option<SharedString>,
     pub(crate) empty: Option<Rc<CommandSlot>>,
     pub(crate) max_h: DefiniteLength,
+    pub(crate) scroll_bounce: Option<bool>,
     pub(crate) bordered: bool,
     pub(crate) header: Option<Rc<CommandSlot>>,
     pub(crate) footer: Option<Rc<CommandSlot>>,
@@ -32,6 +33,7 @@ impl Default for CommandOptions {
             placeholder: None,
             empty: None,
             max_h: rems(18.75).into(),
+            scroll_bounce: None,
             bordered: true,
             header: None,
             footer: None,
@@ -194,6 +196,13 @@ impl Command {
     /// Set the max height of the list, default: 18.75rem (300px).
     pub fn max_h(mut self, height: impl Into<DefiniteLength>) -> Self {
         self.options.max_h = height.into();
+        self
+    }
+
+    /// Bounce the command list at its vertical boundaries. On by default on iOS,
+    /// Android and macOS, off elsewhere; reduced motion disables displacement.
+    pub fn scroll_bounce(mut self, enabled: bool) -> Self {
+        self.options.scroll_bounce = Some(enabled);
         self
     }
 

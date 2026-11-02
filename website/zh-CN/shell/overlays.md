@@ -134,7 +134,7 @@ Toast 是唯一**是数据而不是 View**的浮层——没有类、没有实�
 
 省略 `timeout` 使用默认值，显式写 `null` 让 toast 常驻，所以这两者不能合并成一个选项。
 
-`id` 是把“反复失败”变成“一条长期存在的信息”而不是一堆通知的关键。`--watch` 的循环用的正是这个：一次失败的重载会用固定 id 发一条常驻的错误 toast，于是把一份坏文件存五次是替换而不是叠出五条；下一次成功重载再用 `remove_toast` 撤回它。
+`id` 是把“反复失败”变成“一条长期存在的信息”而不是一堆通知的关键。`gpui-shell dev` 的重载循环用的正是这个：一次失败的重载会用固定 id 发一条常驻的错误 toast，于是把一份坏文件存五次是替换而不是叠出五条；下一次成功重载再用 `remove_toast` 撤回它。
 
 ```text
 unknown toast level `fatal`; expected info, success, warning or error
@@ -215,14 +215,17 @@ overlays may only be opened or closed while handling an event or a task
 
 ## 浮层需要 `ShellRoot`
 
-上述每一个调用最终都会到达窗口的根 View。第一层 View 不是 `ShellRoot` 的窗口会拒绝它们，并指明这是哪一类错误——Host 接线问题，不是脚本问题：
+上述每一个调用最终都会到达窗口的 `ShellRoot`：它可以是第一层 View，也可以是 `gpui-shell` 命令打开窗口时所用的 `gpui-component` `Root` 里紧挨着的那一层 View。两者都没有的窗口会拒绝这些调用：
 
 ```text
-window.open_dialog(content, options) needs a ShellRoot as the window's first view;
-this window was opened with another view
+window.open_dialog(content, options) found no ShellRoot in this window. A view's
+init() runs before its window has one, so open overlays from an event handler or
+a task; otherwise the host opened the window with another root view
 ```
 
-见 [Getting Started](./getting-started.md#把运行时接进-rust-应用)。
+第一种情况出在脚本：`init` 运行时窗口还在构建，还没有能承载浮层的根，所以请在事件处理函数里，或在 View 启动的 task 里打开浮层。第二种情况是 Host 接线问题。
+
+见 [Getting Started](./getting-started.md#自己构建运行时)。
 
 ## 还没有的东西
 

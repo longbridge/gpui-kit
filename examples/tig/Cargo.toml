@@ -1,7 +1,7 @@
 [package]
 name = "example-tig"
 description = "A small desktop Git history browser built with GPUI Kit's Diff."
-version = "0.7.1"
+version = "0.8.1"
 publish = false
 edition.workspace = true
 

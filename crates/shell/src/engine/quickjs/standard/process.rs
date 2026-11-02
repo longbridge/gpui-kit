@@ -3,7 +3,7 @@ use rquickjs::{
     module::{Declarations, Exports, ModuleDef},
 };
 
-const EXPORTS: &[&str] = &["run", "exit", "nextTick", "platform", "arch"];
+const EXPORTS: &[&str] = &["run", "spawn", "exit", "nextTick", "platform", "arch"];
 
 pub(super) struct ProcessModule;
 

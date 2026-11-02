@@ -54,11 +54,12 @@
 //! are distinct to the compiler. Both directions are therefore expressed as
 //! conversions on `'static` wrapper types, where `'js` appears once.
 
+use crate::engine::quickjs::js_error;
 use std::fmt::Write as _;
 
 use rquickjs::{
-    Array, Ctx, Error as JsError, Exception, FromJs, IntoJs, Module, Object, Promise,
-    Result as JsResult, Value,
+    Array, Ctx, Error as JsError, FromJs, IntoJs, Module, Object, Promise, Result as JsResult,
+    Value,
     function::{Func, Rest},
     loader::{ImportAttributes, Loader, Resolver},
     module::Declared,
@@ -97,16 +98,16 @@ pub(super) fn bridge_array_len(ctx: &Ctx<'_>, array: &Array<'_>) -> JsResult<usi
     // QuickJS represents those as floating-point values.
     let length: Value = array.as_object().get("length")?;
     let Some(length) = length.as_number() else {
-        return Err(Exception::throw_type(ctx, "array length is not a number"));
+        return Err(js_error::type_error(ctx, "array length is not a number"));
     };
     if !length.is_finite() || length < 0.0 || length.fract() != 0.0 {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "array length must be a finite non-negative integer",
         ));
     }
     if length > MAX_BRIDGE_ARRAY_ITEMS as f64 {
-        return Err(Exception::throw_range(
+        return Err(js_error::range_error(
             ctx,
             &format!(
                 "array has {length:.0} items, over the {MAX_BRIDGE_ARRAY_ITEMS}-item bridge limit"
@@ -146,9 +147,8 @@ fn host_async_call<'js>(
     // Argument checking happens here, on the main thread and inside the calling
     // script's scope, so a refusal is a thrown `TypeError` at the call site
     // rather than a rejected promise the script has to await to hear about.
-    let work = host_modules::dispatch_async(&module, &function, &arguments).map_err(|error| {
-        Exception::throw_message(&ctx, &format!("`{module}.{function}`: {error}"))
-    })?;
+    let work = host_modules::dispatch_async(&module, &function, &arguments)
+        .map_err(|error| js_error::error(&ctx, &format!("`{module}.{function}`: {error}")))?;
 
     scheduler::awaiting(&ctx, ASYNC_API, async move {
         work.await
@@ -228,7 +228,7 @@ impl Loader for HostModuleLoader {
         // swapped its registry in between. Saying so beats declaring a module
         // whose exports describe a set that is already gone.
         if registry.generation() != generation {
-            return Err(Exception::throw_message(
+            return Err(js_error::error(
                 ctx,
                 &format!(
                     "the HostModule registry changed while `{module}` was being imported; \
@@ -239,7 +239,7 @@ impl Loader for HostModuleLoader {
 
         let found = registry
             .get(module)
-            .map_err(|error| Exception::throw_message(ctx, error.message()))?;
+            .map_err(|error| js_error::error(ctx, error.message()))?;
 
         let mut source = String::new();
         for function in found.function_names() {
@@ -248,7 +248,7 @@ impl Loader for HostModuleLoader {
             // name. Refusing here rather than emitting broken source turns a
             // host's typo into a sentence naming it.
             if !is_identifier(function) {
-                return Err(Exception::throw_message(
+                return Err(js_error::error(
                     ctx,
                     &format!(
                         "HostModule `{module}` registered `{function}`, which is not a \
@@ -271,7 +271,7 @@ impl Loader for HostModuleLoader {
         }
         for component in found.component_names() {
             if !is_identifier(component) {
-                return Err(Exception::throw_message(
+                return Err(js_error::error(
                     ctx,
                     &format!(
                         "HostModule `{module}` component `{component}` is not a JavaScript identifier"
@@ -331,7 +331,7 @@ impl<'js> IntoJs<'js> for Binding {
                     Ok(value) => Ok(Bridged(value)),
                     // The registry's messages never name their own function, so
                     // the call site is named exactly once.
-                    Err(error) => Err(Exception::throw_message(
+                    Err(error) => Err(js_error::error(
                         &ctx,
                         &format!("`{module}.{function}`: {error}"),
                     )),
@@ -353,7 +353,7 @@ impl<'js> FromJs<'js> for Argument {
 
 pub(super) fn from_js<'js>(ctx: &Ctx<'js>, value: Value<'js>, depth: usize) -> JsResult<HostValue> {
     if depth > MAX_DEPTH {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("a host argument may not nest more than {MAX_DEPTH} levels deep"),
         ));
@@ -376,7 +376,7 @@ pub(super) fn from_js<'js>(ctx: &Ctx<'js>, value: Value<'js>, depth: usize) -> J
         let length = bridge_array_len(ctx, &array)?;
         let mut values = Vec::new();
         values.try_reserve_exact(length).map_err(|_| {
-            Exception::throw_range(ctx, "host array could not be reserved within memory limits")
+            js_error::range_error(ctx, "host array could not be reserved within memory limits")
         })?;
         for index in 0..length {
             values.push(from_js(ctx, array.get(index)?, depth + 1)?);
@@ -387,7 +387,7 @@ pub(super) fn from_js<'js>(ctx: &Ctx<'js>, value: Value<'js>, depth: usize) -> J
     // cross: the host could hold it past the call, and past the scope frame
     // that made the surrounding context valid.
     if value.as_function().is_some() {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "a host function cannot be passed a callback; host calls take and return \
              plain data only",
@@ -402,7 +402,7 @@ pub(super) fn from_js<'js>(ctx: &Ctx<'js>, value: Value<'js>, depth: usize) -> J
         return Ok(HostValue::Object(fields));
     }
 
-    Err(Exception::throw_type(
+    Err(js_error::type_error(
         ctx,
         "unsupported host argument; expected null, a boolean, a number, a string, \
          an array or a plain object",

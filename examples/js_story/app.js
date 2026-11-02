@@ -1,5 +1,6 @@
 import { View, div } from "gpui-kit";
 import { Input, InputState, h_flex, v_flex } from "gpui-base";
+import { TitleBar } from "gpui-component";
 import { catalog, filterCatalog, route } from "./catalog.js";
 import { createDockStory, renderDockStory } from "./stories/dock.js";
 import { initializeRegisteredExamples } from "./stories/registered.js";
@@ -90,44 +91,68 @@ export default class StoryGallery extends View {
     const active = route(this.activeId);
     const colors = cx.theme().colors;
 
-    return h_flex()
+    return v_flex()
       .size_full()
       .bg(colors.background)
-      .child(this.sidebar(cx))
+      // The window draws no title bar of its own: sheets and notifications
+      // open below this one, and it is what drags the window.
+      .child(
+        new TitleBar().child(
+          div()
+            .text_size(13)
+            .font_medium()
+            .text_color(colors.foreground)
+            .child("GPUI Component Story"),
+        ),
+      )
+      .child(
+        h_flex()
+          .flex_1()
+          .min_h_0()
+          .child(this.sidebar(cx))
+          .child(this.detail(active, cx)),
+      );
+  }
+
+  /**
+   * @param {import("./catalog.js").StoryRoute} active
+   * @param {import("gpui-kit").Context} cx
+   */
+  detail(active, cx) {
+    const colors = cx.theme().colors;
+
+    return v_flex()
+      .flex_1()
+      // A wide child — a table, a chart — would otherwise refuse to shrink
+      // and push the sidebar off screen. The vertical axis needs no such
+      // line: the scroll area clips the axis it scrolls, so it may shrink.
+      .min_w_0()
+      .overflow_y_scrollbar()
+      .p(28)
+      .gap(20)
       .child(
         v_flex()
-          .flex_1()
-          // A wide child — a table, a chart — would otherwise refuse to shrink
-          // and push the sidebar off screen. The vertical axis needs no such
-          // line: the scroll area clips the axis it scrolls, so it may shrink.
-          .min_w_0()
-          .overflow_y_scrollbar()
-          .p(28)
-          .gap(20)
+          .gap(6)
           .child(
-            v_flex()
-              .gap(6)
-              .child(
-                div()
-                  .text_size(24)
-                  .font_semibold()
-                  .text_color(colors.foreground)
-                  .child(active.title),
-              )
-              .child(
-                div()
-                  .text_size(13)
-                  .text_color(colors.muted_foreground)
-                  .child(active.description),
-              ),
+            div()
+              .text_size(24)
+              .font_semibold()
+              .text_color(colors.foreground)
+              .child(active.title),
           )
           .child(
-            active.id === "dock"
-              ? renderDockStory(this.dockStory, cx)
-              : active.id === "virtual-list"
-                ? renderVirtualListStory(this.virtualListStory, cx)
-                : active.render(cx),
+            div()
+              .text_size(13)
+              .text_color(colors.muted_foreground)
+              .child(active.description),
           ),
+      )
+      .child(
+        active.id === "dock"
+          ? renderDockStory(this.dockStory, cx)
+          : active.id === "virtual-list"
+            ? renderVirtualListStory(this.virtualListStory, cx)
+            : active.render(cx),
       );
   }
 
@@ -160,13 +185,6 @@ export default class StoryGallery extends View {
           .p(16)
           .border_b(1)
           .border_color(colors.border)
-          .child(
-            div()
-              .text_size(16)
-              .font_semibold()
-              .text_color(colors.foreground)
-              .child("GPUI Component Story"),
-          )
           .child(
             Input.new(this.search)
               .h(30)

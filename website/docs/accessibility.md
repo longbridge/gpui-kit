@@ -167,7 +167,7 @@ The following controls expose useful semantics from their actual state:
 | Input | Text input role chosen from its content type, name, non-sensitive value, and an accessible `SetValue` action when not disabled. Masked and password values are withheld. |
 | Select | ComboBox role, name, committed value, expanded state, and an accessible activation path. |
 | Tab, tab list | Tab and TabList roles; tabs report selection and, when supplied, position in the set. |
-| Slider, Progress | Numeric value and range; Slider handles accessible Increment and Decrement. Indeterminate Progress omits its value. |
+| Slider, Progress | Name, numeric value and range; Slider handles accessible Increment and Decrement. Indeterminate Progress omits its value. |
 | Table | Table, row, header and cell roles with indices and optional counts. Name the Table root. |
 
 For a labeled button, the visible label is the accessible name by default. Name an icon-only button explicitly:
@@ -324,7 +324,7 @@ This is a narrowly scoped semantics exercise. `EventSurface` still responds only
 
 ## Test the contract
 
-Enable GPUI Kit's `test-support` feature for UI integration tests and import `gpui_kit::test::TestWindowExt`; import `TestSupportExt` when observing a custom `div`. Query the **painted** element after `window.render_frame(cx)`. `ElementSnapshot` exposes `role()`, `label()`, `value()`, `focused()`, `checked()`, `indeterminate()`, `selected()`, and `expanded()`. Re-query after each interaction because a snapshot describes one completed frame. Use the runnable Profile test above as the assertion example; it checks role, name, value, focus, geometry, and the saved model value.
+Enable GPUI Kit's `test-support` feature for UI integration tests and import `gpui_kit::test::TestWindowExt`; import `TestSupportExt` when observing a custom `div`. Query the **painted** element after `window.render_frame(cx)`. `ElementSnapshot` exposes `role()`, `label()`, `description()`, `placeholder()`, `value()`, `focused()`, `checked()`, `indeterminate()`, `selected()`, and `expanded()`. Re-query after each interaction because a snapshot describes one completed frame. Use the runnable Profile test above as the assertion example; it checks role, name, value, focus, geometry, and the saved model value.
 
 `None` from a snapshot state reader means the property is unavailable, not `false`. In particular, `.disabled()` is `Some(true)` only if the node exposes that flag; test disabled behavior by attempting activation and checking that the result did not change. `ElementSnapshot::value()` reads a string accessibility value, not Slider's numeric value or painted text. Masked and password inputs intentionally expose no accessibility value. The current Input implementation registers `SetValue` when it is not disabled, including in read-only mode; its handler uses a programmatic replacement path. Do not treat `readonly(true)` as protection against this accessible write path without verifying the behavior you need. See [Testing](./test) for test setup, frame, and focus details.
 

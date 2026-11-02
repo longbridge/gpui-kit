@@ -35,6 +35,31 @@ pub trait TableDelegate: Sized + 'static {
     ) {
     }
 
+    /// Return the width the content of column `col_ix` needs to be read
+    /// whole, or `None` to leave the column as it is.
+    ///
+    /// Called when the column's resize handle is double-clicked. Measure the
+    /// widest of the column's cells and its header as drawn; the table adds
+    /// the cell padding, clamps the sum to the column's `min_width` and
+    /// `max_width`, and emits [`TableEvent::ColumnWidthsChanged`]. A sortable
+    /// column's header also holds the table's sort icon (a 0.75rem icon with
+    /// 2 px of padding on each side), which a header measurement must count.
+    ///
+    /// This is called from inside the table's own update, so an
+    /// implementation must not update the table's entity again.
+    ///
+    /// Returns `None` by default, so a double-click changes nothing.
+    ///
+    /// [`TableEvent::ColumnWidthsChanged`]: crate::table::TableEvent::ColumnWidthsChanged
+    fn fit_column(
+        &mut self,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> Option<Pixels> {
+        None
+    }
+
     /// Render the table head row.
     fn render_header(
         &mut self,
@@ -116,6 +141,16 @@ pub trait TableDelegate: Sized + 'static {
         window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement;
+
+    /// Return the text a screen reader should read for the cell at the given
+    /// row and column, usually the text [`render_td`](Self::render_td) draws.
+    ///
+    /// Plain text drawn by a cell is not exposed to assistive technology, so
+    /// without this a cell is announced with no content. Returns `None` by
+    /// default.
+    fn cell_label(&self, row_ix: usize, col_ix: usize, cx: &App) -> Option<SharedString> {
+        None
+    }
 
     /// Move the column at the given `col_ix` so that it ends up at the index `to_ix`.
     ///

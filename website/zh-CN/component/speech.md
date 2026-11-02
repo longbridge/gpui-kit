@@ -79,6 +79,16 @@ Input::new(&self.input).suffix(
 
 把订阅保存在拥有该输入框的视图上，例如放进它的 `_subscriptions` 列表。
 
+横跨整行的波形，例如用户语音输入时显示在对话输入框下方的那种，可以用 `.liquid()` 把音量画成一片水面，而不是竖条。说话声让水面中间起伏，波纹向两边扩散；静音时水面归平，开启减弱动态效果时显示一个静止的波纹。波纹需要足够的宽度才能扩散开，所以按钮旁边那种紧凑的波形仍然用竖条。
+
+```rust
+v_flex()
+    .child(Input::new(&self.input))
+    .when(capturing, |this| {
+        this.child(SpeechWaveform::new(&self.speech).liquid().w_full().large())
+    })
+```
+
 ### 事件
 
 | 事件 | 触发时机 |
@@ -135,7 +145,7 @@ let speech = cx.new(|cx| SpeechState::new(cx).stop_timeout(Duration::from_secs(5
 
 ### 按钮状态
 
-`SpeechButton` 是一个 ghost 样式的图标 `Button`，带有本地化的 tooltip 和无障碍名称：空闲时显示麦克风，采集时显示按下状态的停止图标。
+`SpeechButton` 是一个 ghost 样式的图标 `Button`，带有本地化的 tooltip 和无障碍名称：空闲时显示麦克风；采集时按钮呈按下状态，里面的竖条随说话声起伏。鼠标悬停或按钮获得键盘焦点时，竖条换成停止图标，让停止操作始终可见。静音时竖条缩成圆点，开启减弱动态效果时保持静止。
 
 - 当状态在当前平台上没有识别器或没有输入（`has_recognizer()` 为 `false`）时，按钮**不渲染任何内容**，应用可以无条件放置它。使用 `.show_when_unsupported(true)` 可以改为渲染禁用的按钮。
 - 当识别器报告自己不可用（`is_available(cx)` 为 `false`），例如语言未安装时，按钮会禁用，tooltip 提示不可用。
@@ -146,6 +156,18 @@ SpeechButton::new(&speech)
     .small()
     .show_when_unsupported(true)
     .disabled(readonly)
+```
+
+如果应用要用自己的停止按钮，例如换一种 variant 或带文字的按钮，可以把 `SpeechIndicator` 作为按钮唯一的子元素，并去掉按钮的 padding。指示条的尺寸按它替换的图标来设置，按钮的无障碍名称要说明它用于停止；按钮获得键盘焦点时，改为显示停止图标。
+
+```rust
+Button::new("stop-dictation")
+    .ghost()
+    .size(px(32.))
+    .p_0()
+    .selected(true)
+    .accessibility_label("停止语音输入")
+    .child(SpeechIndicator::new(&speech))
 ```
 
 ## 选择识别器

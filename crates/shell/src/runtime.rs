@@ -17,8 +17,9 @@ use anyhow::{Result, anyhow};
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, ClipboardItem, Corners, Edges, Element, ElementId,
     Entity, GlobalElementId, Hitbox, Hsla, InspectorElementId, InteractiveElement, IntoElement,
-    LayoutId, PaintQuad, ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement,
-    Styled, StyledText, WeakEntity, Window, div, px, relative, rems, transparent_black,
+    LayoutId, PaintQuad, ParentElement, PathBuilder, Pixels, Point, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, WeakEntity, Window, canvas, div, point,
+    prelude::FluentBuilder as _, relative, rems, transparent_black,
 };
 use gpui_base::{
     Button, ColorTokens, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
@@ -85,16 +86,24 @@ pub(crate) fn path_identity(root: &Path) -> String {
     format!("{name}-{:016x}", path_digest(root))
 }
 
+/// The user's home directory: `HOME`, or `USERPROFILE` on Windows. `None` when
+/// neither names an absolute directory, rather than a relative path that would
+/// quietly resolve against wherever the process happened to start.
+pub(crate) fn home_dir() -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|home| home.is_absolute())
+}
+
 /// The platform's per-user data directory, honouring the usual overrides.
 pub(crate) fn data_home() -> PathBuf {
     if let Some(explicit) = std::env::var_os("XDG_DATA_HOME").filter(|it| !it.is_empty()) {
         return PathBuf::from(explicit);
     }
 
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    let home = home_dir().unwrap_or_else(std::env::temp_dir);
 
     if cfg!(target_os = "macos") {
         home.join("Library").join("Application Support")
@@ -151,7 +160,7 @@ fn missing_entry_message(root: &Path, entry: &str) -> String {
     let mut message = format!(
         "no `{entry}` in {}
 
-An application directory must contain {entry},          which default-exports a view class.",
+An application directory must contain {entry}, which default-exports a view class.",
         root.display()
     );
 
@@ -342,6 +351,13 @@ impl<T: Clone> CallbackArena<T> {
         }
     }
 
+    /// Whether the open generation has registered any handler yet.
+    pub(crate) fn has_staged(&self) -> bool {
+        self.building
+            .as_ref()
+            .is_some_and(|(_, entries)| !entries.is_empty())
+    }
+
     /// Drops the open generation. A failed script render must not leave
     /// callable handlers behind.
     pub(crate) fn abort(&mut self) {
@@ -501,22 +517,32 @@ pub fn clear_exit_handler() {
 /// position, their focus, and whatever they were reading, in exchange for a
 /// message that fits in a strip.
 ///
-/// So the strip is what they get: it sits over the interface, says what broke
-/// and what to do, and hands over the detail for pasting elsewhere. The
-/// interface underneath is one render behind, which the banner says out loud
-/// rather than leaving the reader to discover.
-pub fn error_banner(message: &str, window: &mut Window, cx: &mut App) -> AnyElement {
-    let defaults = ColorTokens::default();
-    let surface = token("surface", defaults.surface);
-    let foreground = token("foreground", defaults.foreground);
-    let muted = token("muted_foreground", defaults.muted_foreground);
-    let border = token("border", defaults.border);
-    let accent = token("destructive", defaults.destructive);
-
+/// So the strip is what they get: one line over the interface that says what
+/// broke, with the stack folded behind `Details` and a copy action for pasting
+/// elsewhere. A banner that grows with the stack would cover the very interface
+/// it exists to keep; the reader opens it when they want it.
+pub fn error_banner(
+    failure: ViewFailure,
+    message: &str,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let colors = FailureColors::resolve();
+    let text = FailureText::parse(message);
     let copied =
         window.use_keyed_state(SharedString::from("shell-banner-copied"), cx, |_, _| false);
-    let is_copied = copied.read(cx).to_owned();
-    let payload = format!("This view could not be re-rendered\n\n{message}");
+    let is_copied = *copied.read(cx);
+    let expanded =
+        window.use_keyed_state(SharedString::from("shell-banner-expanded"), cx, |_, _| {
+            false
+        });
+    let is_expanded = *expanded.read(cx);
+    let payload = format!("{}\n\n{message}", failure.heading());
+    let detail = text
+        .detail
+        .clone()
+        .filter(|_| is_expanded)
+        .map(|detail| failure_detail("shell-banner", detail, colors, window, cx));
 
     div()
         .absolute()
@@ -525,52 +551,107 @@ pub fn error_banner(message: &str, window: &mut Window, cx: &mut App) -> AnyElem
         .right_0()
         .flex()
         .flex_col()
-        .bg(surface)
+        .bg(colors.surface)
         .border_b_1()
-        .border_color(border)
-        .child(div().h(px(2.)).w_full().bg(accent))
+        .border_color(colors.border)
+        .shadow_sm()
         .child(
             div()
                 .flex()
                 .items_center()
-                .justify_between()
-                .gap(rems(1.))
-                .px(rems(1.))
-                .py(rems(0.625))
+                .gap(rems(0.75))
+                .pl(rems(1.))
+                .pr(rems(0.5))
+                .py(rems(0.375))
+                .text_size(rems(0.75))
+                .line_height(relative(1.5))
                 .child(
                     div()
                         .flex()
-                        .flex_col()
-                        .gap(rems(0.125))
-                        .child(
-                            div()
-                                .text_size(rems(0.75))
-                                .line_height(relative(1.4))
-                                .text_color(foreground)
-                                .child(SharedString::from(
-                                    "This view could not be re-rendered; showing the last \
-                                     version that worked",
-                                )),
-                        )
-                        .child(
-                            div()
-                                .text_size(rems(0.6875))
-                                .line_height(relative(1.45))
-                                .text_color(muted)
-                                .child(SharedString::from(first_line(message))),
-                        ),
+                        .flex_none()
+                        .items_center()
+                        .gap(rems(0.5))
+                        .text_color(colors.foreground)
+                        .child(status_dot(colors))
+                        .child(SharedString::from(failure.label())),
                 )
-                .child(copy_button(
-                    copied, is_copied, payload, foreground, border, muted,
-                )),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(colors.muted)
+                        .when(is_expanded, |this| this.whitespace_normal())
+                        .when(!is_expanded, |this| this.truncate())
+                        .child(SharedString::from(text.summary.clone())),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(rems(0.25))
+                        .when(text.is_expandable(), |this| {
+                            this.child(details_button(
+                                "shell-banner-details",
+                                expanded,
+                                is_expanded,
+                                colors,
+                            ))
+                        })
+                        .child(copy_button(copied, is_copied, payload, colors)),
+                ),
         )
+        .when(is_expanded, |this| {
+            this.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(rems(0.5))
+                    .px(rems(1.))
+                    .pt(rems(0.25))
+                    .pb(rems(0.75))
+                    .children(detail)
+                    .child(
+                        div()
+                            .text_size(rems(0.75))
+                            .line_height(relative(1.5))
+                            .text_color(colors.muted)
+                            .child(SharedString::from(failure.kept_note())),
+                    ),
+            )
+        })
         .into_any_element()
 }
 
-/// A banner has one line for the detail, so it shows the first one and the copy
-/// action carries the rest. A stack trace truncated mid-frame reads as noise.
-fn first_line(message: &str) -> String {
-    relative_error_paths(message.lines().next().unwrap_or(message))
+/// A failure message split into what fits in one line and what does not.
+///
+/// The first line of a message is the sentence that says what happened — the
+/// engine guarantees that much — and the rest is the stack or a recovery hint.
+/// Collapsed, a surface shows only the first; the rest waits behind `Details`.
+struct FailureText {
+    summary: String,
+    detail: Option<String>,
+}
+
+impl FailureText {
+    /// A single line this long will almost certainly be cut off, so it earns a
+    /// disclosure even with nothing below it. GPUI does not report whether text
+    /// was truncated, so the length stands in for that.
+    const LONG_SUMMARY: usize = 96;
+
+    fn parse(message: &str) -> Self {
+        let message = relative_error_paths(message.trim());
+        let (summary, detail) = message.split_once('\n').unwrap_or((&message, ""));
+        let detail = detail.trim_matches('\n');
+        Self {
+            summary: summary.trim_end().to_owned(),
+            detail: (!detail.trim().is_empty()).then(|| detail.to_owned()),
+        }
+    }
+
+    fn is_expandable(&self) -> bool {
+        self.detail.is_some() || self.summary.chars().count() > Self::LONG_SUMMARY
+    }
 }
 
 /// Shortens paths owned by the process working directory while leaving every
@@ -599,14 +680,67 @@ fn system_monospace_font() -> &'static str {
 /// Used when there is nothing to keep — a view whose very first render failed
 /// has no last good interface to put a banner over. The message belongs where
 /// the interface was supposed to be.
-pub fn error_overlay(message: &str, window: &mut Window, cx: &mut App) -> AnyElement {
-    failure_surface(
-        "This view could not be rendered",
-        message,
-        "Fix the script and save; the view re-renders on the next change.",
-        window,
-        cx,
-    )
+pub fn error_overlay(
+    failure: ViewFailure,
+    message: &str,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let (heading, recovery) = match failure {
+        ViewFailure::Render => (
+            "This view could not be rendered",
+            "Fix the script and save; the view re-renders on the next change.",
+        ),
+        ViewFailure::Reload => (
+            "This application could not be reloaded",
+            "Fix the script and save; it reloads on the next change.",
+        ),
+    };
+    failure_surface(heading, message, recovery, window, cx)
+}
+
+/// What a view's failure surface is reporting.
+///
+/// A render that threw and a reload that failed are both "the interface on
+/// screen is not the one the source describes", so they share one surface —
+/// two stacked messages about one broken state read as two problems. They
+/// differ only in what is being kept and what brings it back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewFailure {
+    /// The script threw while building the view.
+    Render,
+    /// Edited source could not be loaded; the previous code keeps running.
+    Reload,
+}
+
+impl ViewFailure {
+    /// The banner's lead-in, ahead of the message's own first line.
+    fn label(self) -> &'static str {
+        match self {
+            ViewFailure::Render => "Render failed",
+            ViewFailure::Reload => "Reload failed",
+        }
+    }
+
+    /// The heading a copied report starts with.
+    fn heading(self) -> &'static str {
+        match self {
+            ViewFailure::Render => "This view could not be re-rendered",
+            ViewFailure::Reload => "This application could not be reloaded",
+        }
+    }
+
+    /// What the reader is looking at instead, said once they open the detail.
+    fn kept_note(self) -> &'static str {
+        match self {
+            ViewFailure::Render => {
+                "Showing the last version that rendered. Save a fix to re-render."
+            }
+            ViewFailure::Reload => {
+                "Still running the code from before this change. Save a fix to reload."
+            }
+        }
+    }
 }
 
 /// The one place a failure becomes an interface.
@@ -614,10 +748,14 @@ pub fn error_overlay(message: &str, window: &mut Window, cx: &mut App) -> AnyEle
 /// Design Guides asks an error to say what happened and what to do next, and to
 /// take its colors from semantic roles rather than literals — a failure surface
 /// that hardcodes red is unreadable in half the themes it will be seen in. So
-/// this is a normal composed surface: one heading, the detail, one recovery
-/// line, on the same tokens every other screen uses. `destructive` appears once,
-/// as a hairline rule, because emphasis is a budget and the message itself is
-/// already the focal point.
+/// this is a normal composed surface: one heading, one line of detail, one
+/// recovery line, on the same tokens every other screen uses. `destructive`
+/// appears once, as a status dot beside the heading, because emphasis is a
+/// budget and the message itself is already the focal point.
+///
+/// The message shows its first line only. A stack trace is long, and whatever
+/// the application looks like, a wall of monospace in the middle of it reads as
+/// a crash rather than as a message; `Details` opens it in place.
 ///
 /// The panel has square corners on purpose: it is not a card floating in the
 /// window, it *is* the window's content for as long as the failure lasts.
@@ -631,32 +769,29 @@ pub fn failure_surface(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let defaults = ColorTokens::default();
-    let background = token("background", defaults.background);
-    let surface = token("surface", defaults.surface);
-    let foreground = token("foreground", defaults.foreground);
-    let muted = token("muted_foreground", defaults.muted_foreground);
-    let border = token("border", defaults.border);
-    let accent = token("destructive", defaults.destructive);
-
+    let colors = FailureColors::resolve();
+    let text = FailureText::parse(message);
     let copied =
         window.use_keyed_state(SharedString::from("shell-failure-copied"), cx, |_, _| false);
-    let is_copied = copied.read(cx).to_owned();
+    let is_copied = *copied.read(cx);
+    let expanded =
+        window.use_keyed_state(SharedString::from("shell-failure-expanded"), cx, |_, _| {
+            false
+        });
+    let is_expanded = *expanded.read(cx);
     let payload = format!("{heading}\n\n{message}");
-    let displayed_message = relative_error_paths(message);
-    let selection = window.use_keyed_state(
-        SharedString::from("shell-failure-selection"),
-        cx,
-        |_, cx| TextSelectionHandle::new(displayed_message.clone(), cx),
-    );
-    let selection = selection.read(cx).clone();
+    let detail = text
+        .detail
+        .clone()
+        .filter(|_| is_expanded)
+        .map(|detail| failure_detail("shell-failure", detail, colors, window, cx));
 
     div()
         .size_full()
         .flex()
         .items_center()
         .justify_center()
-        .bg(background)
+        .bg(colors.background)
         .p(rems(2.))
         .child(
             div()
@@ -664,57 +799,208 @@ pub fn failure_surface(
                 .flex_col()
                 .w_full()
                 .max_w(rems(42.))
-                .bg(surface)
+                .bg(colors.surface)
                 .border_1()
-                .border_color(border)
-                .child(div().h(px(2.)).w_full().bg(accent))
+                .border_color(colors.border)
                 .child(
                     div()
                         .flex()
                         .flex_col()
-                        .gap(rems(0.625))
-                        .p(rems(1.25))
-                        .child(
-                            div()
-                                .text_size(rems(0.875))
-                                .line_height(relative(1.4))
-                                .text_color(foreground)
-                                .child(SharedString::from(heading.to_owned())),
-                        )
-                        .child(
-                            div()
-                                .id("shell-failure-detail")
-                                .max_h(rems(18.))
-                                .overflow_y_scroll()
-                                .font_family(system_monospace_font())
-                                .text_size(rems(0.75))
-                                .line_height(relative(1.5))
-                                .text_color(muted)
-                                .child(FailureDetailText::new(selection, displayed_message)),
-                        )
+                        .gap(rems(0.375))
+                        .px(rems(1.25))
+                        .pt(rems(1.))
+                        .pb(rems(0.75))
                         .child(
                             div()
                                 .flex()
                                 .items_center()
-                                .justify_between()
-                                .gap(rems(1.))
-                                .pt(rems(0.75))
-                                .border_t_1()
-                                .border_color(border)
-                                .child(
-                                    div()
-                                        .text_size(rems(0.75))
-                                        .line_height(relative(1.5))
-                                        .text_color(muted)
-                                        .child(SharedString::from(recovery.to_owned())),
-                                )
-                                .child(copy_button(
-                                    copied, is_copied, payload, foreground, border, muted,
-                                )),
+                                .gap(rems(0.5))
+                                .text_size(rems(0.875))
+                                .line_height(relative(1.4))
+                                .text_color(colors.foreground)
+                                .child(status_dot(colors))
+                                .child(SharedString::from(heading.to_owned())),
+                        )
+                        .child(
+                            div()
+                                .text_size(rems(0.75))
+                                .line_height(relative(1.5))
+                                .text_color(colors.muted)
+                                .when(!is_expanded, |this| this.truncate())
+                                .child(SharedString::from(text.summary.clone())),
+                        )
+                        .children(detail.map(|detail| div().pt(rems(0.25)).child(detail))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(rems(1.))
+                        .pl(rems(1.25))
+                        .pr(rems(0.75))
+                        .py(rems(0.5))
+                        .border_t_1()
+                        .border_color(colors.border)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(rems(0.75))
+                                .line_height(relative(1.5))
+                                .text_color(colors.muted)
+                                .child(SharedString::from(recovery.to_owned())),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .gap(rems(0.25))
+                                .when(text.is_expandable(), |this| {
+                                    this.child(details_button(
+                                        "shell-failure-details",
+                                        expanded,
+                                        is_expanded,
+                                        colors,
+                                    ))
+                                })
+                                .child(copy_button(copied, is_copied, payload, colors)),
                         ),
                 ),
         )
         .into_any_element()
+}
+
+/// The semantic roles a failure surface draws with, resolved once per render.
+#[derive(Clone, Copy)]
+struct FailureColors {
+    background: Hsla,
+    surface: Hsla,
+    foreground: Hsla,
+    muted: Hsla,
+    border: Hsla,
+    accent: Hsla,
+    hover: Hsla,
+}
+
+impl FailureColors {
+    fn resolve() -> Self {
+        let defaults = ColorTokens::default();
+        Self {
+            background: token("background", defaults.background),
+            surface: token("surface", defaults.surface),
+            foreground: token("foreground", defaults.foreground),
+            muted: token("muted_foreground", defaults.muted_foreground),
+            border: token("border", defaults.border),
+            accent: token("destructive", defaults.destructive),
+            hover: token("muted", defaults.muted),
+        }
+    }
+}
+
+/// Marks the surface as a failure. A dot beside the words rather than a rule
+/// across the edge: a colored band reads as the window's own chrome and clashes
+/// with whatever the application drew beneath it, while a dot stays attached
+/// to the message it qualifies.
+fn status_dot(colors: FailureColors) -> impl IntoElement {
+    div()
+        .flex_none()
+        .size(rems(0.375))
+        .rounded_full()
+        .bg(colors.accent)
+}
+
+/// The folded part of a message: selectable monospace in a well of its own,
+/// scrolling past a height that keeps the surface's actions on screen.
+fn failure_detail(
+    key: &'static str,
+    detail: String,
+    colors: FailureColors,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let selection = window.use_keyed_state(
+        SharedString::from(format!("{key}-selection")),
+        cx,
+        |_, cx| TextSelectionHandle::new(detail.clone(), cx),
+    );
+    let selection = selection.read(cx).clone();
+
+    div()
+        .id(SharedString::from(format!("{key}-detail")))
+        .max_h(rems(16.))
+        .overflow_y_scroll()
+        .px(rems(0.75))
+        .py(rems(0.5))
+        .bg(colors.background)
+        .border_1()
+        .border_color(colors.border)
+        .font_family(system_monospace_font())
+        .text_size(rems(0.6875))
+        .line_height(relative(1.6))
+        .text_color(colors.muted)
+        .child(FailureDetailText::new(selection, detail))
+        .into_any_element()
+}
+
+/// Opens and closes the folded detail. Labelled rather than an icon alone,
+/// because a bare chevron beside a copy icon does not say what it reveals.
+fn details_button(
+    id: &'static str,
+    state: Entity<bool>,
+    expanded: bool,
+    colors: FailureColors,
+) -> AnyElement {
+    Button::new(id)
+        .accessibility_label(if expanded {
+            "Hide details"
+        } else {
+            "Show details"
+        })
+        .flex()
+        .items_center()
+        .gap(rems(0.25))
+        .h(rems(1.625))
+        .pl(rems(0.5))
+        .pr(rems(0.375))
+        .text_size(rems(0.75))
+        .text_color(colors.foreground)
+        .hover(move |style| style.bg(colors.hover))
+        .on_click(move |_, _, cx| {
+            state.update(cx, |expanded, cx| {
+                *expanded = !*expanded;
+                cx.notify();
+            });
+        })
+        .child(SharedString::from("Details"))
+        .child(
+            div()
+                .size(rems(0.75))
+                .child(chevron_icon(expanded, colors.muted)),
+        )
+        .into_any_element()
+}
+
+/// Lucide's `chevron-down` and `chevron-up`, stroked directly for the same
+/// reason as [`copy_icon`].
+fn chevron_icon(expanded: bool, color: Hsla) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, (), window, _| {
+            let side = bounds.size.width.min(bounds.size.height);
+            let unit = side / 24.;
+            let at = |x: f32, y: f32| point(bounds.origin.x + unit * x, bounds.origin.y + unit * y);
+            let mut path = PathBuilder::stroke(unit * 2.);
+            let (edge, tip) = if expanded { (15., 9.) } else { (9., 15.) };
+            path.move_to(at(6., edge));
+            path.line_to(at(12., tip));
+            path.line_to(at(18., edge));
+            if let Ok(path) = path.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .size_full()
 }
 
 /// The error detail's `StyledText` adapter for gpui-base selection geometry.
@@ -856,28 +1142,24 @@ fn paint_selection(layout: &gpui::TextLayout, range: Range<usize>, window: &mut 
     }
 }
 
-/// Copies the failure, and says so — a copy leaves no visible trace otherwise,
-/// which is exactly when confirmation is worth its space.
+/// Copies the heading and the full message, stack included. An icon rather
+/// than a caption, so the line beside it keeps the width and the button cannot
+/// be pushed out of the surface; the check mark confirms the copy in place,
+/// because a copy leaves no visible trace otherwise.
 fn copy_button(
     state: Entity<bool>,
     copied: bool,
     payload: String,
-    foreground: Hsla,
-    border: Hsla,
-    muted: Hsla,
+    colors: FailureColors,
 ) -> AnyElement {
     Button::new("shell-failure-copy")
+        .accessibility_label("Copy error")
         .flex()
+        .flex_none()
         .items_center()
         .justify_center()
-        .h(rems(1.625))
-        .px(rems(0.75))
-        .border_1()
-        .border_color(border)
-        .text_size(rems(0.75))
-        .line_height(relative(1.))
-        .text_color(if copied { muted } else { foreground })
-        .hover(|style| style.opacity(0.8))
+        .size(rems(1.625))
+        .hover(move |style| style.bg(colors.hover))
         .on_click(move |_, _, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(payload.clone()));
             state.update(cx, |copied, cx| {
@@ -885,12 +1167,57 @@ fn copy_button(
                 cx.notify();
             });
         })
-        .child(SharedString::from(if copied {
-            "Copied"
-        } else {
-            "Copy details"
-        }))
+        .child(div().size(rems(0.875)).child(copy_icon(
+            copied,
+            if copied {
+                colors.muted
+            } else {
+                colors.foreground
+            },
+        )))
         .into_any_element()
+}
+
+/// Lucide's `copy` and `check`, stroked directly.
+///
+/// Drawn rather than loaded because the asset source belongs to the
+/// application: an `svg()` here would be looked up in the very directory that
+/// just failed to load, or in an embedding host's own assets.
+fn copy_icon(copied: bool, color: Hsla) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, (), window, _| {
+            let side = if bounds.size.width < bounds.size.height {
+                bounds.size.width
+            } else {
+                bounds.size.height
+            };
+            // Lucide draws on a 24-unit grid with a 2-unit stroke.
+            let unit = side / 24.;
+            let at = |x: f32, y: f32| point(bounds.origin.x + unit * x, bounds.origin.y + unit * y);
+            let mut path = PathBuilder::stroke(unit * 2.);
+            if copied {
+                path.move_to(at(20., 6.));
+                path.line_to(at(9., 17.));
+                path.line_to(at(4., 12.));
+            } else {
+                path.move_to(at(8., 8.));
+                path.line_to(at(22., 8.));
+                path.line_to(at(22., 22.));
+                path.line_to(at(8., 22.));
+                path.close();
+                path.move_to(at(4., 16.));
+                path.line_to(at(2., 16.));
+                path.line_to(at(2., 2.));
+                path.line_to(at(16., 2.));
+                path.line_to(at(16., 4.));
+            }
+            if let Ok(path) = path.build() {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .size_full()
 }
 
 /// Semantic token with a fallback, because a failure surface must render even
@@ -989,6 +1316,19 @@ mod identity_tests {
 
         assert!(app_data_dir(&id).is_ok(), "{id}");
         assert!(!id.contains(".."), "{id}");
+    }
+
+    /// Collapsed, a surface shows one line; the stack waits behind `Details`.
+    #[test]
+    fn a_failure_message_splits_into_one_line_and_its_detail() {
+        let text = FailureText::parse("interrupted\n    at walk (scan.js:1:2)\n");
+        assert_eq!(text.summary, "interrupted");
+        assert_eq!(text.detail.as_deref(), Some("    at walk (scan.js:1:2)"));
+        assert!(text.is_expandable());
+
+        let text = FailureText::parse("a short message");
+        assert!(text.detail.is_none());
+        assert!(!text.is_expandable(), "nothing is folded away");
     }
 
     #[test]

@@ -85,12 +85,13 @@
 //! and an overlay built from a script rebuilds with it rather than
 //! re-materializing the description it was opened with.
 
+use crate::engine::quickjs::js_error;
 use std::time::Duration;
 
 use gpui::{AnyView, App, AppContext as _, Context, Window};
 use gpui_base::Placement;
 use rquickjs::{
-    Ctx, Exception, FromJs, Object, Persistent, Result as JsResult, Value,
+    Ctx, FromJs, Object, Persistent, Result as JsResult, Value,
     function::{Func, Opt},
 };
 
@@ -313,7 +314,7 @@ fn guard(ctx: &Ctx<'_>, api: &str) -> JsResult<()> {
         return Ok(());
     }
 
-    Err(Exception::throw_type(
+    Err(js_error::type_error(
         ctx,
         &format!(
             "{api} is not allowed during the `{}` phase; overlays may only be opened or \
@@ -333,9 +334,11 @@ fn guard(ctx: &Ctx<'_>, api: &str) -> JsResult<()> {
 ///
 /// Two ways this fails, and they are different mistakes. Outside any host call
 /// there is no window to reach, which is the script calling from somewhere it
-/// cannot. A window whose root view is not a [`ShellRoot`] is the *host's*
-/// mistake — it opened the window with something else — and the message says so
-/// rather than blaming the script.
+/// cannot. A window with no [`ShellRoot`] is either one still being opened —
+/// the application's own view is constructed, and its `init` run, before the
+/// root that will hold it — or the *host's* mistake of opening it with
+/// something else, and the message names both rather than only blaming the
+/// host.
 fn with_root<R>(
     ctx: &Ctx<'_>,
     api: &str,
@@ -343,7 +346,7 @@ fn with_root<R>(
 ) -> JsResult<R> {
     let Some(reached) = scope::with_current(|window, app| ShellRoot::update(window, app, body))
     else {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "{api} needs a live host call; call it from init(), an event handler or a task"
@@ -352,11 +355,12 @@ fn with_root<R>(
     };
 
     reached.unwrap_or_else(|| {
-        Err(Exception::throw_type(
+        Err(js_error::type_error(
             ctx,
             &format!(
-                "{api} needs a ShellRoot as the window's first view; this window was \
-                 opened with another view"
+                "{api} found no ShellRoot in this window. A view's init() runs before \
+                 its window has one, so open overlays from an event handler or a task; \
+                 otherwise the host opened the window with another root view"
             ),
         ))
     })
@@ -365,7 +369,7 @@ fn with_root<R>(
 /// Wraps a freshly constructed script instance as a view the root can mount.
 fn mount(ctx: &Ctx<'_>, object: ViewObject, cx: &mut App) -> JsResult<AnyView> {
     let Some(runtime) = scope::current_runtime().or_else(|| ShellRuntime::global(cx)) else {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "the shell runtime is not installed on this application",
         ));
@@ -391,7 +395,7 @@ impl<'js> FromJs<'js> for ViewInstance {
         // means the wrapper was bypassed, which is worth saying plainly rather
         // than failing later on a missing `render`.
         let Some(object) = value.into_object() else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "expected a function returning an element; open_dialog and open_sheet take \
                  a function, not an element and not a view class",
@@ -444,7 +448,7 @@ impl<'js> FromJs<'js> for FpsHudArgument {
             return Ok(Self(FpsHudRequest::default()));
         }
         let Some(object) = value.as_object() else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "{SHOW_FPS_MONITOR} expects an object, such as {{ anchor: \"bottom_left\" }}"
@@ -456,7 +460,7 @@ impl<'js> FromJs<'js> for FpsHudArgument {
         let mut request = FpsHudRequest::default();
         if let Some(anchor) = object.get::<_, Option<String>>("anchor")? {
             request.anchor = anchor_from_name(&anchor).ok_or_else(|| {
-                Exception::throw_type(
+                js_error::type_error(
                     ctx,
                     &format!(
                         "{SHOW_FPS_MONITOR}: unknown anchor `{anchor}`; expected one of {}",
@@ -467,7 +471,7 @@ impl<'js> FromJs<'js> for FpsHudArgument {
         }
         if let Some(millis) = object.get::<_, Option<f64>>("frame_budget")? {
             if !(millis.is_finite() && millis > 0.) {
-                return Err(Exception::throw_type(
+                return Err(js_error::type_error(
                     ctx,
                     &format!(
                         "{SHOW_FPS_MONITOR}: frame_budget must be a positive number of milliseconds"
@@ -488,7 +492,7 @@ const TOAST_KEYS: &[&str] = &["title", "description", "level", "timeout", "id"];
 impl<'js> FromJs<'js> for ToastArgument {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
         let Some(object) = value.as_object() else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!("{PUSH_TOAST} expects an object, such as {{ title: \"Saved\" }}"),
             ));
@@ -496,7 +500,7 @@ impl<'js> FromJs<'js> for ToastArgument {
         reject_unknown_keys(ctx, object, TOAST_KEYS, PUSH_TOAST)?;
 
         let Some(title) = object.get::<_, Option<String>>("title")? else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!("{PUSH_TOAST} requires a `title`; it is the sentence the user reads"),
             ));
@@ -540,7 +544,7 @@ fn options_object<'a, 'js>(
     }
     match value.as_object() {
         Some(object) => Ok(Some(object)),
-        None => Err(Exception::throw_type(
+        None => Err(js_error::type_error(
             ctx,
             &format!("{api} expects an options object"),
         )),
@@ -572,7 +576,7 @@ fn parse_placement(ctx: &Ctx<'_>, name: &str) -> JsResult<Placement> {
         _ => None,
     };
     placement.ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "unknown sheet placement `{name}`; expected {}",
@@ -593,7 +597,7 @@ fn placement_name(placement: Placement) -> &'static str {
 
 fn parse_level(ctx: &Ctx<'_>, name: &str) -> JsResult<ToastLevel> {
     ToastLevel::from_name(name).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "unknown toast level `{name}`; expected {}",
@@ -615,7 +619,7 @@ fn reject_unknown_keys(
     for key in object.keys::<String>() {
         let key = key?;
         if !known.contains(&key.as_str()) {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "unknown option `{key}` for {api}; expected {}",
@@ -634,7 +638,7 @@ fn parse_timeout(ctx: &Ctx<'_>, value: &Value<'_>) -> JsResult<Option<Duration>>
     }
 
     let refused = || {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "{PUSH_TOAST} expects `timeout` to be a number of milliseconds, or null to keep \
@@ -751,6 +755,62 @@ mod tests {
             eval(&runtime, cx, ScopePhase::Event, "window.close_dialog()").expect("close_dialog");
         assert!(closed);
         assert_eq!(root.read_with(cx, |root, _| root.dialog_count()), 1);
+    }
+
+    /// The `gpui-shell` command opens its window through the catalog's opener,
+    /// which roots it at `gpui_component::Root` with the `ShellRoot` one level
+    /// down. Every overlay call used to look only at the first view, so in
+    /// every window the command opened they threw "needs a ShellRoot".
+    #[cfg(feature = "components")]
+    #[gpui::test]
+    fn overlays_reach_the_root_inside_the_catalog_window(cx: &mut TestAppContext) {
+        cx.update(crate::components::init);
+        let runtime = cx.update(ShellRuntime::new).expect("runtime");
+        std::mem::forget(runtime.clone());
+
+        let open = crate::components::components()
+            .expect("catalog")
+            .window_opener()
+            .expect("the catalog opens its own window");
+        let built = Rc::new(std::cell::RefCell::new(None));
+        let sink = built.clone();
+        let handle = cx
+            .update(|cx| {
+                let options = gpui::WindowOptions {
+                    show: false,
+                    ..Default::default()
+                };
+                open(cx, options, &mut |window, cx| {
+                    let content = cx.new(|_| Empty).into();
+                    let root = cx.new(|cx| ShellRoot::new(content, window, cx));
+                    *sink.borrow_mut() = Some(root.clone());
+                    root.into()
+                })
+            })
+            .expect("window");
+        let root: Entity<ShellRoot> = built.borrow_mut().take().expect("root");
+        let cx = &mut VisualTestContext::from_window(handle, cx);
+
+        let depth: u32 = eval(
+            &runtime,
+            cx,
+            ScopePhase::Event,
+            "window.open_dialog(() => __gpui.text('confirm'))",
+        )
+        .expect("open_dialog");
+        assert_eq!(depth, 1);
+        eval::<()>(
+            &runtime,
+            cx,
+            ScopePhase::Event,
+            r#"window.push_toast({ title: "Saved" })"#,
+        )
+        .expect("push_toast");
+
+        root.read_with(cx, |root, _| {
+            assert_eq!(root.dialog_count(), 1);
+            assert_eq!(root.toast_count(), 1);
+        });
     }
 
     #[gpui::test]

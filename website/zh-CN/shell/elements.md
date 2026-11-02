@@ -61,6 +61,8 @@ div().relative().size_full().child(content).child(fps_monitor());
 
 JavaScript 的习惯写法是 `new Button(id)`。运行时不提供它，理由正是本页的主题：`new` 承诺的是一个有身份的对象——可以保存、可以挂在实例上、可以再次使用。而描述恰恰不是这种东西。`Button.new(id)` 读起来是“构造一段描述”，它做的也正是这件事，并且与 Rust 侧一字不差。
 
+`"gpui-component"` 也用同样的写法：`Button.new("save")`、`InputState.new("Name")`。它的导出同样接受 `new Button(...)`，那是 `.new` 出现之前的脚本写法；新代码请写 `.new`，让同一份文件只有一种构造形态。
+
 View 是相反的情形，用的就是标准写法：`class Counter extends View`。 View 确实有身份、有跨帧状态，并且由 GPUI 拥有。同一份文件里出现两种构造形态，是因为这两类东西的生命周期本来就不同。
 
 ### id
@@ -176,6 +178,7 @@ when(...) must return the element
 | `.on_mouse_up(button, handler)`   | [可接输入的元素](#哪些元素接了输入) | 松开                                               |
 | `.on_mouse_down_out(handler)`     | [可接输入的元素](#哪些元素接了输入) | 在该元素**之外**任意位置按下                       |
 | `.on_scroll_wheel(handler)`       | [可接输入的元素](#哪些元素接了输入) | 滚轮与触控板滚动                                   |
+| `.on_pinch(handler)`              | [可接输入的元素](#哪些元素接了输入) | 触控板或触摸屏上的双指缩放                         |
 | `.on_action(action, handler)`     | [可接输入的元素](#哪些元素接了输入) | 命名 action 被派发到它或它内部                     |
 | `.key_context(name)`              | [可接输入的元素](#哪些元素接了输入) | 该元素与其子树所处的按键绑定上下文                 |
 
@@ -260,9 +263,19 @@ Checkbox.new(`item-${item.id}`)
 });
 ```
 
+双指缩放按手势的每一步上报缩放变化，乘以 `1 + delta` 就能跟上手势。鼠标和不支持双指缩放的平台仍然要靠旁边的滚轮处理器：
+
+```js
+.on_pinch((event, cx) => {
+  this.zoom *= 1 + event.delta;      // 0.1 表示放大 10%
+  // event.phase                     —— "started"、"moved"、"ended" 或 "cancelled"
+  cx.notify();
+});
+```
+
 ### 哪些元素接了输入
 
-上面这八个方法是 GPUI 自己的 `InteractiveElement` 构建器，shell 把它们装在 `div`、`h_flex`、`v_flex`、`Button`、`Link`、`Checkbox`、`Switch`、`Radio`、`Toggle`、`Tabs` 与 `Tab` 上。
+上面这九个方法是 GPUI 自己的 `InteractiveElement` 构建器，shell 把它们装在 `div`、`h_flex`、`v_flex`、`Button`、`Link`、`Checkbox`、`Switch`、`Radio`、`Toggle`、`Tabs` 与 `Tab` 上。
 
 其余组件各自构建自己的 base 类型、挂自己的监听器，所以写在它们上面的处理器会被记进描述、但永远到不了 GPUI。日志里会说明，而不是留给你自己去发现：
 

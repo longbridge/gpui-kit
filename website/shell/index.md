@@ -1,6 +1,6 @@
 ---
 title: GPUI Shell
-description: Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Plugins first, standalone script applications second.
+description: Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Start as a gpui-shell standalone app in JavaScript, and bring in Rust when it needs more.
 order: 1
 maturity: [preview]
 ---
@@ -11,7 +11,7 @@ maturity: [preview]
 
 **The primary goal is plugin extension.** A host application compiles and ships once. After that, a new panel, a side tool or a piece of business logic arrives as a script loaded into the same process — no rebuild, no binary to redistribute, and no fork for a contributor who only wants to add a panel.
 
-**The secondary goal is writing a whole application in JavaScript.** The CLI runs an application directory on its own, which is a usable path in itself and also how a plugin is developed: get the script running standalone, then mount it in a host.
+**It is also how to write a gpui-shell standalone app — and the recommended way to start one.** A standalone app is written entirely in JavaScript, and `gpui-shell` runs its directory on its own: no Rust, no build step, hot reload on save, and a capability set that already covers files, storage, network, child processes and opening a file in its default application. That is enough for most of what a product needs early on. When it later needs something only Rust can do, the same scripts move under a Rust binary that embeds the crate, without being rewritten — see [Start as a standalone app, add Rust later](#start-as-a-standalone-app-add-rust-later).
 
 **It is not an Electron or a Tauri.** There is no WebView, no DOM, no HTML or CSS, no browser engine, and no Node.js. A script View describes an interface when invalidated; GPUI can reuse that description on later frames without rerunning its script `render`. Those frames use the same element model and renderer as a Rust application on `gpui-base`. This does not mean an idle window continuously draws, or that all frame work is free of JavaScript: virtual-list item and dock chrome callbacks are exceptions. Taking the whole runtime costs [+13.5 MiB of binary in the measured build](./engine.md#what-linking-it-costs).
 
@@ -58,6 +58,49 @@ export default class Counter extends View {
 }
 ```
 
+## Start as a standalone app, add Rust later
+
+Begin with a gpui-shell standalone app. `gpui-shell new` makes the application, `gpui-shell dev` runs it and reloads it on every save, and `gpui-shell bundle` ships it. Nothing is compiled, and nothing about the scripts assumes the binary they run on.
+
+When the product needs more than the scripts can reach — a native library, a parser or an index too heavy for JavaScript, a system API the runtime does not bind, business logic already written in Rust — write a Rust binary that embeds the `gpui-shell` crate. That step changes **who hosts the scripts**, not the scripts:
+
+| Stays the same                                             | Why                                                                                |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Every `.js` file, the entry and the imports                | The runtime underneath is the same crate the binary is built from                  |
+| `gpui-shell.json`: `id`, entry, capabilities, dependencies | The embedding binary can reuse the command's own host, which reads it the same way |
+| The application's stored data                              | It is kept under the manifest `id`, not under the binary that runs it              |
+| `dev`, `check`, `types` and `agents`                       | The embedding binary answers the same commands, under its own name                 |
+
+What the Rust side adds is a [`HostModule`](./host-module.md): functions the host writes in Rust and the script imports like any other module, typed in the generated `gpui-kit.d.ts`.
+
+```rust
+use gpui_shell::{HostModule, HostValue, host::HostBrand};
+
+fn main() {
+    gpui_shell::export_module(
+        HostModule::new("native")
+            .declarations("export function greet(name: string): string;")
+            .function("greet", |arguments| {
+                let name = arguments.string(0)?;
+                Ok(HostValue::from(format!("Hello, {name}")))
+            }),
+    )
+    .expect("register the native module");
+
+    let components = gpui_shell::components::components().expect("component catalog");
+    gpui_shell::host::main_with_brand_and_components(
+        HostBrand::new("clock", env!("CARGO_PKG_VERSION")),
+        components,
+    );
+}
+```
+
+```js
+import { greet } from "native";
+```
+
+`main_with_brand_and_components` is the whole `gpui-shell` command — the same parsing, manifest, grants, theming, window and diagnostics — under the name you give it, so `clock dev -d ./clock` and `clock check -d ./clock` work as before, now with `native` in reach. When the application needs to own more of the process — its own windows, a script View beside Rust views, several applications with different grants — it builds the runtime itself; [Getting Started](./getting-started.md#move-to-a-rust-host) shows both steps and [Hosting](./hosting.md) covers the full Rust surface.
+
 ## Why plugins come first
 
 `crates/base/src/dock` already holds half of what a plugin system needs: a layout that is pure data, a `PanelRegistry` that rebuilds a panel from a name in a persisted file, and a per-panel `serde_json::Value` that rides along with it. The missing half is that a panel's implementation has to be compiled into the host binary — nobody can contribute one without forking it. `gpui-shell` supplies that half.
@@ -70,11 +113,11 @@ Plugins-first is not a positioning statement. It is the reason behind decisions 
 | A separate `Policy` per plugin, and unload cancels every task carrying it | Several plugins share one runtime, so grants must not bleed between them                                                 |
 | A script fault is a recoverable exception, and the host process survives  | One broken plugin should not take the application with it                                                                |
 | A repaint replays a Snapshot and never enters the VM                      | The host answers for the frame budget, so a plugin's JavaScript cannot sit on it                                         |
-| `HostModule` lends the host's own Rust to a script                        | Only meaningful when the script runs inside a host — a standalone application has no host to borrow from                 |
+| `HostModule` lends the host's own Rust to a script                        | Only meaningful when the script runs inside a host — a standalone app has no host to borrow from                         |
 | Dock panels keep their place and state across an uninstall                | Plugins get installed and removed; a panel comes back where it was, with what it had                                     |
 | The foundation ships no presentation, so the script owns all of it        | A plugin has to look like part of its host, which takes control of every pixel                                           |
 
-A standalone script application uses few of these. What it gains is the iteration speed — hot reload, `check`, and a generated `gpui-kit.d.ts` — which is why it sits second: it is where a plugin is developed and proven, rather than the point of the runtime.
+A standalone script application uses few of these, and does not have to: what it gains is the iteration speed — hot reload, `check`, and a generated `gpui-kit.d.ts`. The two meet where a standalone app is no longer enough. Becoming its own Rust host is the same step a plugin's host took, so every decision above is already in place when it gets there.
 
 Text editing, syntax highlighting, LSP, virtualization and motion sampling stay in Rust. That line is a division of responsibility rather than a limit on the script: the host owns everything that has to sit close to the GPU and the system, so a plugin never becomes a variable in the application's performance or stability.
 
@@ -94,7 +137,7 @@ The engine is a parameter of the design rather than a part of it. QuickJS is the
 
 A script gets what a Rust application built on `gpui-base` gets: elements and layout, links and controls, a fluent style surface over semantic theme tokens, View state through `init` / `render` / `cx.notify()`, retained host state such as a text input's rope and selection, dialogs, a sheet and toasts, asynchronous tasks, native transitions and springs, and gated filesystem, storage, clipboard, process, HTTP, TCP and WebSocket surfaces.
 
-Around that: `--watch` hot-reloads on save, `gpui-shell.json` declares identity and least-privilege capabilities before code runs, a generated `gpui-kit.d.ts` describes the whole API to an editor or a model, and `check` reports mistakes before the application runs.
+Around that: `gpui-shell dev` hot-reloads on save, `gpui-shell.json` declares identity and least-privilege capabilities before code runs, a generated `gpui-kit.d.ts` describes the whole API to an editor or a model, and `check` reports mistakes before the application runs.
 
 ::: tip
 `gpui-kit.d.ts` can go in `.gitignore` — it is generated.
@@ -118,7 +161,7 @@ This is an illustrative interval in which 60 frames were requested, not an idle 
 
 The script description cost is paid when that View is invalidated, rather than on every frame. In the measured 443-node benchmark, running `render` and recording the interface into a Snapshot took 1.1 ms; a cached frame took 1.3 ms for GPUI work, with no script `render`. These are timings for that workload and machine, not a sustained FPS guarantee for a complex application.
 
-|                    | Cost per requested benchmark frame                                    |
+|                    | Cost per requested benchmark frame                                  |
 | ------------------ | ------------------------------------------------------------------- |
 | Without a Snapshot | 1.1 ms (JS render) + 1.3 ms (Rust render) = **2.4 ms/frame render** |
 | With a Snapshot    | **1.3 ms**                                                          |
@@ -212,6 +255,6 @@ What the script gains in exchange for the extra typing is the whole application 
 
 ## Status
 
-The crate is at milestone **M0**: a feasibility baseline, not a stable interface. It is not published to crates.io, and the script API is expected to change. What is documented here exists and works; what is missing is called out on the page where you would go looking for it.
+The crate is at milestone **M0**: a feasibility baseline, not a stable interface. The Rust crate is available on crates.io starting with 0.8.1; the script API remains experimental and is expected to change. What is documented here exists and works; what is missing is called out on the page where you would go looking for it.
 
 The design is specified in the [GPUI Shell design document](https://github.com/longbridge/gpui-kit/blob/main/docs/gpui-shell.md), and the crate lives at [`crates/shell`](https://github.com/longbridge/gpui-kit/tree/main/crates/shell).

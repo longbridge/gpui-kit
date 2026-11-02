@@ -1,6 +1,6 @@
 [package]
 name = "gpui-base-examples-wasm"
-version = "0.7.1"
+version = "0.8.1"
 publish = false
 edition.workspace = true
 
@@ -19,7 +19,7 @@ console_log = "1.0"
 log.workspace = true
 syntect.workspace = true
 tracing-wasm = "0.2"
-wasm-bindgen = "=0.2.121"
+wasm-bindgen = "=0.2.127"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 reqwest_client.workspace = true

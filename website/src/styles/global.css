@@ -1401,6 +1401,60 @@ html.dark .astro-code span {
   gap: 0.3rem;
 }
 
+/* Project switcher */
+.site-nav__projects { position: relative; flex-shrink: 0; margin-left: -0.35rem; }
+.site-nav__projects summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 2rem;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  list-style: none;
+}
+.site-nav__projects summary::-webkit-details-marker { display: none; }
+.site-nav__projects summary:hover,
+.site-nav__projects[open] summary { background: var(--secondary); color: var(--foreground); }
+.site-nav__projects summary svg { width: 0.8rem; height: 0.8rem; }
+.site-nav__projects-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 17rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--popover);
+  box-shadow: var(--shadow-panel);
+}
+.site-nav__projects-menu a {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  text-decoration: none;
+}
+.site-nav__projects-menu a:hover { background: var(--secondary); }
+.site-nav__project-logo { flex-shrink: 0; width: 1.75rem; height: 1.75rem; }
+.site-nav__project-copy { display: flex; flex-direction: column; gap: 0.1rem; }
+.site-nav__native-shell-top { stop-color: #b5df4d; }
+.site-nav__native-shell-bottom { stop-color: #7ea51f; }
+.dark .site-nav__native-shell-top { stop-color: #e2fb9f; }
+.dark .site-nav__native-shell-bottom { stop-color: #a9d63f; }
+.site-nav__projects-menu strong { font-size: 0.8125rem; font-weight: 600; }
+.site-nav__projects-menu span { color: var(--muted-foreground); font-size: 0.75rem; }
+.site-nav__projects-menu a.is-current { background: var(--secondary); }
+.site-nav__projects-menu a.is-current strong { color: var(--brand); }
+
 /* Resources dropdown */
 .site-nav__dropdown {
   position: relative;

@@ -116,6 +116,11 @@ pub use gpui_macros::{
 #[doc(hidden)]
 pub use crate as gpui;
 
+/// Whether this build selected GPUI Fast. Crates layered on the Kit that keep
+/// a backend feature of their own check it at compile time to stay in step.
+#[doc(hidden)]
+pub const GPUI_FAST: bool = cfg!(feature = "gpui-fast");
+
 /// UI integration testing: render real components in headless windows, dispatch
 /// pointer and keyboard events, and assert state, focus, layout and callbacks.
 /// Run tests with `#[gpui_kit::test]`; use this module to interact with their UI.

@@ -325,6 +325,20 @@ let state = cx.new(|cx| {
 });
 ```
 
+### Modified Clicks
+
+A row click with ⌘ (Ctrl on Windows and Linux) or Shift held selects the row,
+as a plain click does. A delegate that keeps its own multi-row selection
+handles those clicks itself, usually on mouse down. Turn the table's selection
+off for them, so it does not undo the delegate's:
+
+```rust
+let state = cx.new(|cx| {
+    TableState::new(delegate, window, cx)
+        .select_on_modifier_click(false)
+});
+```
+
 ### Reading and Writing the Selection
 
 A table holds one selection at a time: nothing, a row, a column, or a cell.
@@ -394,6 +408,35 @@ cx.subscribe_in(&state, window, |view, table, event, _, cx| {
 }).detach();
 ```
 
+#### Fitting a Column to Its Content
+
+A double-click on a column's resize handle fits the column to its widest
+content, as a spreadsheet does. This needs the delegate to measure the content:
+return its width from `TableDelegate::fit_column`. The table adds the cell
+padding, clamps to the column's `min_width` and `max_width`, and emits
+`TableEvent::ColumnWidthsChanged`. The default returns `None`, which leaves the
+column as it is. A sortable column's header also holds the table's sort icon
+(a 0.75rem icon with 2 px of padding on each side), which a header
+measurement must count.
+
+```rust
+impl TableDelegate for MyTableDelegate {
+    fn fit_column(
+        &mut self,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> Option<Pixels> {
+        // Measure the heading and every row's text in `col_ix` with
+        // `window.text_system().shape_line(..)` and return the widest.
+        Some(self.widest_text(col_ix, window, cx))
+    }
+}
+```
+
+`TableState::fit_col(col_ix, window, cx)` does the same from code, and
+`TableState::col_width(col_ix)` reads the width a column is drawn at now.
+
 ### Infinite Loading / Pagination
 
 Implement loading more data as user scrolls:
@@ -454,6 +497,7 @@ DataTable::new(&state)
     .header_row_height(px(48.))     // Taller header rows
     .stripe(true)                   // Alternating row colors
     .bordered(true)                 // Border around table
+    .fixed_cols_border(true)        // Border after the fixed columns
     .scrollbar_visible(true, true)  // Vertical, horizontal scrollbars
 ```
 
@@ -635,8 +679,8 @@ impl TableDelegate for MyTableDelegate {
 
 - `↑/↓` - Navigate rows
 - `←/→` - Navigate columns
-- `Home` - Jump to first row/column
-- `End` - Jump to last row/column
+- `Home` - Jump to the first row
+- `End` - Jump to the last row
 - `PageUp/PageDown` - Navigate by page
 - `Escape` - Clear selection
 
@@ -684,6 +728,8 @@ impl TableDelegate for MyTableDelegate {
 - `clear_selection(cx)` - Clear all selections
 - `scroll_to_row(row_ix, cx)` - Scroll to specific row
 - `scroll_to_col(col_ix, cx)` - Scroll to specific column
+- `col_width(col_ix)` - Get the width a column is drawn at now
+- `fit_col(col_ix, window, cx)` - Fit a column to its content
 
 #### Column
 
@@ -700,7 +746,7 @@ impl TableDelegate for MyTableDelegate {
 - `selectable(bool)` - Enable/disable column/cell selection
 - `paddings(edges)` - Set custom padding
 - `min_width(pixels)` - Set minimum width
-- `max_width(pixels)` - Set maximum width
+- `max_width(pixels)` - Set the maximum resize width (1200px by default); set a larger value explicitly to allow wider columns
 
 ### Events
 
@@ -722,3 +768,16 @@ impl TableDelegate for MyTableDelegate {
 [TableSelection]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableSelection.html
 [ColumnSort]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnSort.html
 [ColumnFixed]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnFixed.html
+
+## Scroll bounce
+
+```rust
+DataTable::new(&state).scroll_bounce(true)
+```
+
+`scroll_bounce(true)` lets overflowing vertical content stretch at its ends and
+spring back with precise pixel scrolling, such as a trackpad or Magic Mouse
+on macOS. Ordinary mouse wheels use line scrolling and do not bounce. A new
+precise gesture or reversed precise scroll takes over the return; ordinary
+wheel input cancels it and scrolls normally. The logical scroll position remains clamped,
+and scrollbars stay fixed, as do the table headers. Content that fits does not bounce. It is enabled by default on iOS, Android and macOS, whose own scroll views bounce, and disabled elsewhere. Reduced motion disables displacement.
