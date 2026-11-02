@@ -322,6 +322,21 @@ impl GridLayoutState {
         cx.notify();
     }
 
+    pub fn set_row_height(&mut self, row_height: Rems, cx: &mut Context<Self>) {
+        if self.row_height != row_height {
+            self.row_height = row_height;
+            cx.notify();
+        }
+    }
+
+    /// Set the space between items, or `None` for the theme's medium spacing.
+    pub fn set_gap(&mut self, gap: Option<Pixels>, cx: &mut Context<Self>) {
+        if self.gap != gap {
+            self.gap = gap;
+            cx.notify();
+        }
+    }
+
     pub fn set_prevent_collision(&mut self, prevent_collision: bool, cx: &mut Context<Self>) {
         self.prevent_collision = prevent_collision;
         cx.notify();
