@@ -23,9 +23,6 @@ use rust_i18n::t;
 
 use super::*;
 
-/// How far behind the pointer a resize drag trails the column edge.
-const HANDLE_SIZE: Pixels = px(2.);
-
 /// Grab room on each side of a resize handle's hairline, so the divider can be
 /// caught without pixel-hunting. Both halves of the band are this wide, so
 /// widening the grab area stays symmetric about the boundary. `resizable`'s
@@ -146,6 +143,14 @@ impl TableVisibleRange {
     pub fn cols(&self) -> &Range<usize> {
         &self.cols
     }
+}
+
+/// Where a column resize started: the pointer's x at the press on the
+/// resize handle, and the column's width then.
+#[derive(Clone, Copy)]
+struct ResizeOrigin {
+    x: Pixels,
+    width: Pixels,
 }
 
 /// The state for [`DataTable`].
@@ -277,6 +282,8 @@ pub struct TableState<D: TableDelegate> {
 
     /// The column index that is being resized.
     resizing_col: Option<usize>,
+    /// Where the press on a resize handle was, and the column's width then.
+    resize_origin: Option<ResizeOrigin>,
     /// The column a double-click on its resize handle just fitted.
     ///
     /// The double-click's second press also starts a drag on the handle, which
@@ -317,6 +324,7 @@ where
             selected_col: None,
             selected_cell: None,
             resizing_col: None,
+            resize_origin: None,
             fitted_col: None,
             col_drag_gap: None,
             bounds: Bounds::default(),
@@ -858,7 +866,7 @@ where
         }
 
         cx.stop_propagation();
-        if self.selects_row_on_click(e) {
+        if self.selects_row_on_click(e, cx) {
             self.set_selected_row(row_ix, cx);
         }
 
@@ -868,9 +876,9 @@ where
     }
 
     /// Whether a click on a row selects it, see `select_on_modifier_click`.
-    fn selects_row_on_click(&self, e: &ClickEvent) -> bool {
+    fn selects_row_on_click(&self, e: &ClickEvent, cx: &App) -> bool {
         let modifiers = e.modifiers();
-        self.select_on_modifier_click || !(modifiers.secondary() || modifiers.shift)
+        self.select_on_modifier_click || !(modifiers.secondary(cx) || modifiers.shift)
     }
 
     fn on_col_head_click(&mut self, col_ix: usize, _: &mut Window, cx: &mut Context<Self>) {
@@ -915,7 +923,7 @@ where
             && self.row_selectable
             && is_reselect
             && !is_double_click
-            && self.selects_row_on_click(e);
+            && self.selects_row_on_click(e, cx);
         if should_escalate_to_row {
             self.set_selected_row(row_ix, cx);
             return;
@@ -1551,8 +1559,15 @@ where
         E: gpui::StatefulInteractiveElement + FluentBuilder,
     {
         let cell = if self.cell_selectable {
+            let is_selected = self.selected_cell() == Some((row_ix, col_ix));
             cell.role(gpui::Role::GridCell)
-                .aria_selected(self.selected_cell() == Some((row_ix, col_ix)))
+                .aria_selected(is_selected)
+                // While the table has focus, the selected cell is the
+                // focused node for assistive technology.
+                .when(
+                    is_selected && self.focus_handle.is_focused(window),
+                    |this| this.aria_active_descendant(),
+                )
         } else {
             cell.role(gpui::Role::Cell)
         };
@@ -1710,9 +1725,17 @@ where
                                 .expect("BUG: invalid col index")
                                 .clone();
 
+                            // The width at the press, plus how far the pointer
+                            // has moved since. The column's left edge isn't a
+                            // fixed point: it moves when the table scrolls,
+                            // and the scroll offset clamps as the columns
+                            // narrow.
+                            let Some(origin) = view.resize_origin else {
+                                return;
+                            };
                             view.resize_cols(
                                 ix,
-                                e.event.position.x - HANDLE_SIZE - col_group.bounds.left(),
+                                origin.width + (e.event.position.x - origin.x),
                                 window,
                                 cx,
                             );
@@ -1729,17 +1752,22 @@ where
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(
-                    move |view, e: &MouseDownEvent, window, cx| match e.click_count {
-                        1 => view.fitted_col = None,
-                        2 if view.fit_col(ix, window, cx) => view.fitted_col = Some(ix),
-                        _ => {}
-                    },
-                ),
+                cx.listener(move |view, e: &MouseDownEvent, window, cx| {
+                    view.resize_origin = view.col_groups.get(ix).map(|col_group| ResizeOrigin {
+                        x: e.position.x,
+                        width: col_group.width,
+                    });
+                    if e.click_count == 1 {
+                        view.fitted_col = None;
+                    } else if e.click_count == 2 && view.fit_col(ix, window, cx) {
+                        view.fitted_col = Some(ix);
+                    }
+                }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|view, _, _, cx| {
+                    view.resize_origin = None;
                     if view.resizing_col.is_none() {
                         return;
                     }
@@ -1789,7 +1817,7 @@ where
                 this.when(self.row_selectable, |this| {
                     this.on_click(cx.listener(move |table, e: &ClickEvent, _window, cx| {
                         cx.stop_propagation();
-                        if table.selects_row_on_click(e) {
+                        if table.selects_row_on_click(e, cx) {
                             table.set_selected_row(row_ix, cx);
                         }
                     }))
@@ -2234,6 +2262,12 @@ where
                 // Row 0 is the header row.
                 .aria_row_index(row_ix + 1)
                 .aria_selected(is_selected)
+                // While the table has focus, the selected row is the focused
+                // node for assistive technology.
+                .when(
+                    is_selected && self.focus_handle.is_focused(window),
+                    |this| this.aria_active_descendant(),
+                )
                 .h_flex()
                 .w_full()
                 .h(row_height)
@@ -2694,15 +2728,6 @@ where
         let inner_table = v_flex()
             .id("table-inner")
             .test_support()
-            // A table that selects rows or cells is a grid. The counts cover
-            // every row, not just the rendered ones, plus the header row.
-            .role(if self.row_selectable || self.cell_selectable {
-                gpui::Role::Grid
-            } else {
-                gpui::Role::Table
-            })
-            .aria_row_count(rows_count + 1)
-            .aria_column_count(columns_count)
             .size_full()
             .overflow_hidden()
             .child(self.render_table_header(left_columns_count, window, cx))
@@ -2913,7 +2938,7 @@ mod tests {
         let state = view.read_with(cx, |view, _| view.0.clone());
         let header = state.read_with(cx, |state, _| state.col_groups[0].bounds);
         let wheel = |cx: &mut gpui::VisualTestContext, dy| {
-            cx.simulate_event(gpui::ScrollWheelEvent {
+            cx.simulate_event(gpui::ScrollEvent {
                 position: gpui::point(px(100.), px(100.)),
                 delta: gpui::ScrollDelta::Lines(gpui::point(0., dy)),
                 ..Default::default()
@@ -2923,7 +2948,7 @@ mod tests {
             (-10000., gpui::TouchPhase::Started),
             (0., gpui::TouchPhase::Ended),
         ] {
-            cx.simulate_event(gpui::ScrollWheelEvent {
+            cx.simulate_event(gpui::ScrollEvent {
                 position: gpui::point(px(100.), px(100.)),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(dy))),
                 touch_phase: phase,

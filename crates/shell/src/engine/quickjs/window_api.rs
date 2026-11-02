@@ -194,6 +194,8 @@ fn bind_keys(ctx: Ctx<'_>, bindings: Vec<Object<'_>>) -> JsResult<u32> {
         ));
     }
 
+    let os = scope::with_current_app(|cx| cx.platform_info().os)
+        .ok_or_else(|| js_error::type_error(&ctx, "cx.bind_keys() needs a live host call"))?;
     let mut parsed = Vec::with_capacity(bindings.len());
     for (index, binding) in bindings.iter().enumerate() {
         let keystroke: String = binding.get("keystroke").map_err(|_| {
@@ -219,7 +221,7 @@ fn bind_keys(ctx: Ctx<'_>, bindings: Vec<Object<'_>>) -> JsResult<u32> {
         // script typo must not take the process down, so both are parsed here
         // where the failure is a thrown error naming the entry.
         for source in keystroke.split_whitespace() {
-            gpui::Keystroke::parse(source).map_err(|error| {
+            gpui::Keystroke::parse_with_os(source, os).map_err(|error| {
                 js_error::type_error(
                     &ctx,
                     &format!("binding {index} has an unparsable keystroke `{source}`: {error:?}"),
@@ -245,9 +247,26 @@ fn bind_keys(ctx: Ctx<'_>, bindings: Vec<Object<'_>>) -> JsResult<u32> {
 
     let installed = parsed.len() as u32;
     scope::with_current(|_, app| {
-        app.bind_keys(parsed.into_iter().map(|(keystroke, action, context)| {
-            gpui::KeyBinding::new(&keystroke, ShellAction::new(action), context.as_deref())
-        }));
+        let bindings = parsed
+            .into_iter()
+            .map(|(keystroke, action, context)| {
+                let context = context.as_deref().map(|context| {
+                    gpui::KeyBindingContextPredicate::parse(context)
+                        .expect("binding contexts were validated before installation")
+                        .into()
+                });
+                gpui::KeyBinding::load(
+                    &keystroke,
+                    Box::new(ShellAction::new(action)),
+                    context,
+                    false,
+                    None,
+                    app,
+                )
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        app.bind_keys(bindings);
+        Ok::<_, gpui::InvalidKeystrokeError>(())
     })
     .ok_or_else(|| {
         js_error::type_error(
@@ -255,7 +274,8 @@ fn bind_keys(ctx: Ctx<'_>, bindings: Vec<Object<'_>>) -> JsResult<u32> {
             "cx.bind_keys() needs a live host call; call it from init(), an event \
              handler or a task",
         )
-    })?;
+    })?
+    .map_err(|error| js_error::type_error(&ctx, &format!("invalid keybinding: {error}")))?;
     Ok(installed)
 }
 

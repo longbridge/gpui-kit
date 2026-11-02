@@ -14,7 +14,7 @@ use gpui::{
 use super::{
     InlineElement, TextViewMultiClickKind, inline::point_in_text_selection, state::LineSpan,
 };
-use crate::GlobalState;
+use crate::{GlobalState, touch_selection::caret_line_box};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct InlineMetrics {
@@ -422,6 +422,7 @@ impl Element for InlineObject {
             let text = self.text.to_string();
             let current_view = window.current_view();
             let line_bounds = self.line_bounds;
+            let object_bounds = self.selection_bounds;
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if !phase.bubble()
                     || !hitbox.is_hovered(window)
@@ -443,6 +444,13 @@ impl Element for InlineObject {
                                 event.position,
                                 TextViewMultiClickKind::Word,
                                 text.clone(),
+                                (
+                                    caret_line_box(object_bounds.origin, object_bounds.size.height),
+                                    caret_line_box(
+                                        object_bounds.top_right(),
+                                        object_bounds.size.height,
+                                    ),
+                                ),
                                 cx,
                             );
                         }

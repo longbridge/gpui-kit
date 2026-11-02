@@ -234,7 +234,7 @@ fn render_scrollbar(
 mod tests {
     use super::*;
     use gpui::{
-        Bounds, Context, Pixels, Render, ScrollDelta, ScrollWheelEvent, TestAppContext,
+        Bounds, Context, Pixels, Render, ScrollDelta, ScrollEvent, TestAppContext,
         VisualTestContext, canvas, point, px,
     };
     use std::{cell::Cell, rc::Rc};
@@ -313,7 +313,7 @@ mod tests {
         );
 
         // Scrolled to the end, the last row ends where the footer starts.
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(50.), px(50.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(-1000.))),
             ..Default::default()
@@ -391,7 +391,7 @@ mod tests {
         );
 
         let mut scroll = |dy: f32| {
-            cx.simulate_event(ScrollWheelEvent {
+            cx.simulate_event(ScrollEvent {
                 position: point(first_row.center().x, top + px(10.)),
                 delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
                 ..Default::default()
@@ -461,7 +461,7 @@ mod tests {
             _ = window.draw(cx);
         });
 
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(10.), px(10.)),
             delta: ScrollDelta::Pixels(point(px(-40.), px(0.))),
             ..Default::default()

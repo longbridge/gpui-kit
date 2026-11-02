@@ -9,7 +9,7 @@ repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/webview"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.8.0"
+version = "0.8.1"
 
 [features]
 # Hosts the native view in GPUI Fast's window composition, so GPUI overlays render above the
@@ -23,7 +23,7 @@ doctest = false
 
 [dependencies]
 anyhow.workspace = true
-gpui-kit = { path = "../kit", version = "0.8.0", default-features = false }
+gpui-kit = { path = "../kit", version = "0.8.1", default-features = false }
 log = "0.4"
 wry = { version = "0.53.3", package = "lb-wry" }
 

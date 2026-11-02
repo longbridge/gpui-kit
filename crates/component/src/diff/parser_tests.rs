@@ -1,4 +1,4 @@
-use super::{DiffFile, DiffSide};
+use super::{DiffFile, DiffParseOptions, DiffSide};
 
 #[test]
 fn sparse_hunks_preserve_source_numbers_and_available_copy() {
@@ -148,4 +148,117 @@ fn malformed_hunks_fail_without_partial_documents() {
         assert!(!error.message().is_empty());
     }
     assert!(DiffFile::parse("").unwrap().is_empty());
+}
+
+#[test]
+fn truncated_hunks_count_the_lines_present() {
+    let truncated = DiffParseOptions::new().truncated_hunks(true);
+    assert!(truncated.has_truncated_hunks());
+    assert!(!DiffParseOptions::new().has_truncated_hunks());
+    // Cut before the next file, before the next hunk, and at the end of the patch.
+    let patch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,9 +1,9 @@\n keep\n-old\n+new\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1,5 +1,5 @@\n-x\n+y\n@@ -10,5 +10,5 @@\n first\n\n-z\n+w\n";
+    assert!(DiffFile::parse(patch).is_err());
+    let files = DiffFile::parse_with(patch, truncated).unwrap();
+    assert_eq!(files.len(), 2);
+    assert!(files.iter().all(DiffFile::is_truncated));
+    assert_eq!((files[0].additions(), files[0].deletions()), (1, 1));
+    assert_eq!(files[0].source(DiffSide::Original), "keep\nold\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "keep\nnew\n");
+    let file = &files[1];
+    assert_eq!((file.additions(), file.deletions()), (2, 2));
+    // An empty line inside a short hunk is an empty context line.
+    assert_eq!(file.source(DiffSide::Original), "x\nfirst\n\nz\n");
+    assert_eq!(file.line_number(DiffSide::Original, 3), 12);
+    assert_eq!(file.line_number(DiffSide::Modified, 3), 12);
+    assert_eq!(file.hunks()[1].hidden_lines_before(file.hunks().first()), 8);
+    // Complete hunks parse the same either way.
+    let complete = "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n";
+    assert!(!DiffFile::parse_with(complete, truncated).unwrap()[0].is_truncated());
+    assert!(!DiffFile::parse(complete).unwrap()[0].is_truncated());
+}
+
+#[test]
+fn truncated_hunks_keep_structural_errors() {
+    let truncated = DiffParseOptions::new().truncated_hunks(true);
+    for patch in [
+        "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n+extra\n",
+        "--- a/a\n+++ b/a\n@@ -1 +1 @@\n same\n@@ -1 +2 @@\n again\n",
+        "--- a/a\n+++ b/a\n@@ -18446744073709551615,2 +1,2 @@\n a\n",
+        "--- a/a\n+++ b/a\n@@ -18446744073709551615,0 +1,2 @@\n",
+        "--- a/a\n+++ b/a\n@@ -x +1 @@\n a\n",
+        "--- \"a/\\q\"\n+++ b/a\n@@ -1,3 +1,3 @@\n a\n",
+        "--- /dev/null\n+++ b/a\n@@ -1,2 +1,2 @@\n a\n",
+    ] {
+        assert!(DiffFile::parse_with(patch, truncated).is_err(), "{patch}");
+    }
+    // Line numbers stay within the declared range when a hunk ends early.
+    let files = DiffFile::parse_with(
+        "--- a/a\n+++ b/a\n@@ -18446744073709551614,1 +18446744073709551614,1 @@\n",
+        truncated,
+    )
+    .unwrap();
+    assert!(files[0].is_truncated());
+    assert_eq!(files[0].lines_count(DiffSide::Original), 0);
+    let files = DiffFile::parse_with(
+        "--- a/a\n+++ b/a\n@@ -18446744073709551613,2 +18446744073709551613,2 @@\n same\n",
+        truncated,
+    )
+    .unwrap();
+    assert_eq!(
+        files[0].line_number(DiffSide::Modified, 0),
+        18446744073709551613
+    );
+}
+
+#[test]
+fn non_ascii_lines_after_a_short_hunk_do_not_panic() {
+    let patch = "--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n-old\n+new\n…\n";
+    assert!(DiffFile::parse(patch).is_err());
+    let files = DiffFile::parse_with(patch, DiffParseOptions::new().truncated_hunks(true)).unwrap();
+    assert!(files[0].is_truncated());
+    assert_eq!(files[0].source(DiffSide::Original), "old\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "new\n");
+}
+
+#[test]
+fn truncated_unified_hunks_stop_before_the_next_file_headers() {
+    let options = DiffParseOptions::new().truncated_hunks(true);
+    let patch =
+        "--- a/a\n+++ b/a\n@@ -1,9 +1,9 @@\n keep\n--- a/b\n+++ b/b\n@@ -10 +10 @@\n-old\n+new\n";
+    let files = DiffFile::parse_with(patch, options).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].path().as_str(), "a");
+    assert!(files[0].is_truncated());
+    assert_eq!(files[0].source(DiffSide::Original), "keep\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "keep\n");
+    assert_eq!(files[1].path().as_str(), "b");
+    assert!(!files[1].is_truncated());
+    assert_eq!(files[1].source(DiffSide::Original), "old\n");
+    assert_eq!(files[1].source(DiffSide::Modified), "new\n");
+
+    // Header-looking source remains source when it completes the declared hunk.
+    let patch = "--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n--- source\n+++ source\n tail\n";
+    let files = DiffFile::parse_with(patch, options).unwrap();
+    assert_eq!(files.len(), 1);
+    assert!(!files[0].is_truncated());
+    assert_eq!(files[0].source(DiffSide::Original), "-- source\ntail\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "++ source\ntail\n");
+}
+
+#[test]
+fn empty_truncated_hunks_preserve_order_on_both_sides() {
+    let options = DiffParseOptions::new().truncated_hunks(true);
+    for next in ["@@ -1 +1 @@", "@@ -10 +1 @@", "@@ -1 +10 @@"] {
+        let patch = format!("--- a/a\n+++ b/a\n@@ -10,2 +10,2 @@\n{next}\n same\n");
+        let error = DiffFile::parse_with(&patch, options).err().unwrap();
+        assert_eq!(error.line(), 4);
+        assert_eq!(error.message().as_str(), "overlapping or unordered hunks");
+    }
+    let files = DiffFile::parse_with(
+        "--- a/a\n+++ b/a\n@@ -10,2 +10,2 @@\n@@ -20 +20 @@\n same\n",
+        options,
+    )
+    .unwrap();
+    assert!(files[0].is_truncated());
+    assert_eq!(files[0].line_number(DiffSide::Original, 0), 20);
 }

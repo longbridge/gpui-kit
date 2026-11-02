@@ -78,8 +78,12 @@ fn plot_appear_easing(t: f32) -> f32 {
     1. - (1. - t).powi(4)
 }
 
+/// How long the scrollbar stays visible after the last scroll, drag, or hover.
+const SCROLLBAR_IDLE: Duration = Duration::from_secs(2);
 /// How long the scrollbar takes to appear.
 const SCROLLBAR_ENTER: Duration = Duration::from_millis(300);
+/// How long the scrollbar takes to fade away once the idle hold expires.
+const SCROLLBAR_EXIT: Duration = Duration::from_millis(500);
 /// How long the thumb takes to reach its hovered or resting width.
 const SCROLLBAR_EXPAND: Duration = Duration::from_millis(300);
 
@@ -125,13 +129,11 @@ fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
 ///
 /// Scrolling and track hover reveal a scrollbar by fading it in place. In hover
 /// mode, pointing at the thumb slides it in from the nearest edge as it fades.
-/// The idle hold and the fade-out come from [`MotionTokens`], so an application
-/// can tune them through [`Theme::update`].
-fn scrollbar_motion(mode: ScrollbarMode, motion: &MotionTokens) -> gpui_base::ScrollbarMotion {
+fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
     gpui_base::ScrollbarMotion::default()
-        .with_idle(motion.scrollbar_idle)
+        .with_idle(SCROLLBAR_IDLE)
         .with_enter(SCROLLBAR_ENTER)
-        .with_exit(motion.scrollbar_exit)
+        .with_exit(SCROLLBAR_EXIT)
         .with_expand(SCROLLBAR_EXPAND)
         .with_entrance(gpui_base::ScrollbarEntrance::Fade)
         .with_thumb_hover_entrance(match mode {
@@ -141,7 +143,11 @@ fn scrollbar_motion(mode: ScrollbarMode, motion: &MotionTokens) -> gpui_base::Sc
 }
 
 /// The global theme configuration.
+///
+/// Construct with [`Theme::default`] and assign fields; new fields may be
+/// added without a breaking change.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct Theme {
     pub colors: ThemeColor,
     /// Component-specific resolved tokens retained for legacy compatibility.
@@ -207,6 +213,9 @@ pub struct Theme {
     /// Semantic motion policy for styled components.
     #[serde(skip)]
     pub motion: MotionTokens,
+    /// Application-wide caret blink behavior.
+    #[serde(skip)]
+    pub cursor_blink: gpui_base::input::CursorBlink,
 }
 
 impl Default for Theme {
@@ -399,59 +408,58 @@ impl Theme {
     /// This theme projected onto the Base layer, which owns the scrollbar and
     /// resize handles and reads the semantic tokens.
     fn base_theme(&self) -> gpui_base::Theme {
-        gpui_base::Theme {
-            appearance: if self.mode.is_dark() {
-                gpui_base::ThemeAppearance::Dark
-            } else {
-                gpui_base::ThemeAppearance::Light
-            },
-            tokens: self.semantic_tokens(),
-            scrollbar: gpui_base::ScrollbarTheme::new()
-                .with_mode(self.scrollbar_mode)
-                .with_motion(scrollbar_motion(self.scrollbar_mode, &self.motion))
-                .with_styles(
-                    gpui_base::ScrollbarStyles::default()
-                        .track(|style| style.bg(self.scrollbar))
-                        .track_hover(|style| style.bg(self.scrollbar))
-                        .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
-                        .thumb(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb)
-                                .radius(self.radius)
-                                .when(gpui_base::is_mobile(), |style| {
-                                    style
-                                        .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
-                                        .inset(MOBILE_SCROLLBAR_THUMB_INSET)
-                                        .radius(RADIUS_FULL)
-                                })
-                        })
-                        .thumb_hover(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb_hover)
-                                .radius(self.radius)
-                                .when(gpui_base::is_mobile(), |style| {
-                                    style
-                                        .width(SCROLLBAR_THUMB_HOVER_WIDTH)
-                                        .inset(SCROLLBAR_THUMB_INSET)
-                                })
-                        })
-                        .thumb_active(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb_hover)
-                                .radius(self.radius)
-                                .when(gpui_base::is_mobile(), |style| {
-                                    style
-                                        .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
-                                        .inset(SCROLLBAR_THUMB_INSET)
-                                })
-                        }),
-                ),
-            resizable: gpui_base::ResizableTheme {
-                handle: Some(self.border),
-                active_handle: Some(self.drag_border),
-            },
-            plot: gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion)),
-        }
+        let mut theme = gpui_base::Theme::default();
+        theme.appearance = if self.mode.is_dark() {
+            gpui_base::ThemeAppearance::Dark
+        } else {
+            gpui_base::ThemeAppearance::Light
+        };
+        theme.tokens = self.semantic_tokens();
+        theme.scrollbar = gpui_base::ScrollbarTheme::new()
+            .with_mode(self.scrollbar_mode)
+            .with_motion(scrollbar_motion(self.scrollbar_mode))
+            .with_styles(
+                gpui_base::ScrollbarStyles::default()
+                    .track(|style| style.bg(self.scrollbar))
+                    .track_hover(|style| style.bg(self.scrollbar))
+                    .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
+                    .thumb(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
+                                    .inset(MOBILE_SCROLLBAR_THUMB_INSET)
+                                    .radius(RADIUS_FULL)
+                            })
+                    })
+                    .thumb_hover(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb_hover)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(SCROLLBAR_THUMB_HOVER_WIDTH)
+                                    .inset(SCROLLBAR_THUMB_INSET)
+                            })
+                    })
+                    .thumb_active(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb_hover)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
+                                    .inset(SCROLLBAR_THUMB_INSET)
+                            })
+                    }),
+            );
+        theme.resizable.handle = Some(self.border);
+        theme.resizable.active_handle = Some(self.drag_border);
+        theme.plot = gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion));
+        theme.cursor_blink = self.cursor_blink;
+        theme
     }
 
     /// Push the current theme down to the Base layer.
@@ -501,13 +509,13 @@ impl Theme {
     /// theme. The snapshot is computed from the legacy public fields so direct
     /// mutations of those fields are reflected immediately.
     pub fn semantic_tokens(&self) -> SemanticThemeTokens {
-        SemanticThemeTokens {
-            colors: self.color_tokens(),
-            radius: self.radius_tokens(),
-            spacing: self.spacing_tokens(),
-            typography: self.typography_tokens(),
-            shadow: self.shadow_tokens(),
-        }
+        let mut tokens = SemanticThemeTokens::default();
+        tokens.colors = self.color_tokens();
+        tokens.radius = self.radius_tokens();
+        tokens.spacing = self.spacing_tokens();
+        tokens.typography = self.typography_tokens();
+        tokens.shadow = self.shadow_tokens();
+        tokens
     }
 
     /// Returns the styled layer's semantic motion policy.
@@ -516,26 +524,26 @@ impl Theme {
     }
 
     pub fn color_tokens(&self) -> ColorTokens {
-        ColorTokens {
-            background: self.background,
-            foreground: self.foreground,
-            surface: self.popover,
-            surface_foreground: self.popover_foreground,
-            primary: self.primary,
-            primary_foreground: self.primary_foreground,
-            secondary: self.secondary,
-            secondary_foreground: self.secondary_foreground,
-            muted: self.muted,
-            muted_foreground: self.muted_foreground,
-            accent: self.accent,
-            accent_foreground: self.accent_foreground,
-            destructive: self.danger,
-            destructive_foreground: self.danger_foreground,
-            border: self.border,
-            input: self.input,
-            ring: self.ring,
-            selection: self.selection,
-        }
+        let mut colors = ColorTokens::default();
+        colors.background = self.background;
+        colors.foreground = self.foreground;
+        colors.surface = self.popover;
+        colors.surface_foreground = self.popover_foreground;
+        colors.primary = self.primary;
+        colors.primary_foreground = self.primary_foreground;
+        colors.secondary = self.secondary;
+        colors.secondary_foreground = self.secondary_foreground;
+        colors.muted = self.muted;
+        colors.muted_foreground = self.muted_foreground;
+        colors.accent = self.accent;
+        colors.accent_foreground = self.accent_foreground;
+        colors.destructive = self.danger;
+        colors.destructive_foreground = self.danger_foreground;
+        colors.border = self.border;
+        colors.input = self.input;
+        colors.ring = self.ring;
+        colors.selection = self.selection;
+        colors
     }
 
     /// The radius of a shape that reads as a circle or a pill — an avatar, a
@@ -573,14 +581,14 @@ impl Theme {
     }
 
     pub fn radius_tokens(&self) -> RadiusTokens {
-        RadiusTokens {
-            none: px(0.),
-            sm: self.radius / 2.,
-            md: self.radius,
-            lg: self.radius_lg,
-            xl: self.radius * 2.,
-            full: self.radius_full(),
-        }
+        let mut radius = RadiusTokens::default();
+        radius.none = px(0.);
+        radius.sm = self.radius / 2.;
+        radius.md = self.radius;
+        radius.lg = self.radius_lg;
+        radius.xl = self.radius * 2.;
+        radius.full = self.radius_full();
+        radius
     }
 
     pub fn spacing_tokens(&self) -> SpacingTokens {
@@ -783,6 +791,7 @@ impl From<&ThemeColor> for Theme {
             highlight_theme: HighlightTheme::default_light(),
             sheet: SheetSettings::default(),
             motion: MotionTokens::default(),
+            cursor_blink: gpui_base::input::CursorBlink::default(),
         }
     }
 }
@@ -1032,6 +1041,29 @@ mod base_theme_projection_tests {
     }
 
     #[gpui::test]
+    fn cursor_blink_survives_theme_updates_and_mode_changes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            Theme::update(cx, |theme| {
+                theme.cursor_blink = gpui_base::input::CursorBlink::steady();
+            });
+            assert_eq!(
+                gpui_base::Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::steady()
+            );
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert_eq!(
+                Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::steady()
+            );
+            assert_eq!(
+                gpui_base::Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::steady()
+            );
+        });
+    }
+
+    #[gpui::test]
     fn scrollbar_motion_is_owned_here_and_projected_onto_base(cx: &mut TestAppContext) {
         cx.update(|cx| {
             init(cx);
@@ -1044,9 +1076,9 @@ mod base_theme_projection_tests {
 
             Theme::set_scrollbar_mode(ScrollbarMode::Scrolling, cx);
             let motion = gpui_base::Theme::global(cx).scrollbar.motion();
-            assert_eq!(motion.idle(), Duration::from_secs(2));
+            assert_eq!(motion.idle(), SCROLLBAR_IDLE);
             assert_eq!(motion.enter(), SCROLLBAR_ENTER);
-            assert_eq!(motion.exit(), Duration::from_millis(500));
+            assert_eq!(motion.exit(), SCROLLBAR_EXIT);
             assert_eq!(motion.expand(), SCROLLBAR_EXPAND);
             assert_eq!(
                 motion.entrance(),
@@ -1061,32 +1093,6 @@ mod base_theme_projection_tests {
                 motion.thumb_hover_entrance(),
                 gpui_base::ScrollbarEntrance::SlideAndFade
             );
-        });
-    }
-
-    #[gpui::test]
-    fn scrollbar_idle_and_exit_follow_the_motion_tokens(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            init(cx);
-
-            Theme::update(cx, |theme| {
-                theme.motion.scrollbar_idle = Duration::from_millis(700);
-                theme.motion.scrollbar_exit = Duration::from_millis(150);
-            });
-            let motion = gpui_base::Theme::global(cx).scrollbar.motion();
-            assert_eq!(motion.idle(), Duration::from_millis(700));
-            assert_eq!(motion.exit(), Duration::from_millis(150));
-            assert_eq!(motion.enter(), SCROLLBAR_ENTER);
-            assert_eq!(motion.expand(), SCROLLBAR_EXPAND);
-
-            // Mode and theme changes re-project the scrollbar; the tuned
-            // timing must survive them.
-            Theme::set_scrollbar_mode(ScrollbarMode::Hover, cx);
-            Theme::change(ThemeMode::Dark, None, cx);
-            let motion = gpui_base::Theme::global(cx).scrollbar.motion();
-            assert_eq!(motion.idle(), Duration::from_millis(700));
-            assert_eq!(motion.exit(), Duration::from_millis(150));
-            assert_styled_projection(cx);
         });
     }
 
@@ -1111,7 +1117,7 @@ mod base_theme_projection_tests {
         assert_eq!(base.scrollbar.mode(), theme.scrollbar_mode);
         assert_eq!(
             base.scrollbar.motion(),
-            scrollbar_motion(theme.scrollbar_mode, &theme.motion)
+            scrollbar_motion(theme.scrollbar_mode)
         );
         assert_eq!(base.resizable.handle, Some(theme.border));
         assert_eq!(base.resizable.active_handle, Some(theme.drag_border));

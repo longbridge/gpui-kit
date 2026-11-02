@@ -2,7 +2,7 @@ use gpui::{
     App, Hsla, ImageSource, InteractiveElement, Interactivity, IntoElement, ParentElement as _,
     RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
-use gpui_base::{Avatar as BaseAvatar, AvatarFallback, AvatarImage};
+use gpui_base::{Avatar as BaseAvatar, AvatarFallback, AvatarImage, TestTextExt as _};
 
 use crate::{
     ActiveTheme, Icon, IconName, Sizable, Size, StyledExt, ThemeStyled as _,
@@ -115,6 +115,8 @@ impl RenderOnce for Avatar {
             })
             .refine_style(&inner_style);
 
+        // The name is the avatar's alternative text, as an `<img alt>` is.
+        let name = self.name.clone();
         self.base
             .size(avatar_size(self.size))
             .flex_shrink_0()
@@ -134,6 +136,10 @@ impl RenderOnce for Avatar {
                 )
             })
             .refine_style(&self.style)
+            .map(|this| match name {
+                Some(name) => this.test_alt_text(name).into_any_element(),
+                None => this.into_any_element(),
+            })
     }
 }
 

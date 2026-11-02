@@ -140,12 +140,3 @@ to show a tooltip or preview without selecting or editing; disabled tokens never
 report hover entry; disabling a hovered token sends its exit. See
 [Input: atomic inline tokens](./input.md#atomic-inline-tokens) for editing,
 activation, draft persistence, mode restrictions and JavaScript APIs.
-
-## Text decorations
-
-`TextareaState::create_decorations_collection` returns an independently managed
-`TextDecorationCollection`, using the same `TextDecoration` types as Editor.
-Ranges use UTF-8 byte offsets and follow text edits. Use the handle's `set`,
-`append`, `clear`, and `get_ranges` methods to manage one owner's decorations.
-Whole-value replacement clears decorations. Dropping a handle does not remove
-the collection; call `clear` when its styling is no longer needed.

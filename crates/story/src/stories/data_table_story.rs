@@ -688,7 +688,7 @@ impl TableDelegate for StockTableDelegate {
             .on_click(cx.listener(move |table, ev: &ClickEvent, _window, cx| {
                 println!(
                     "You have clicked row with secondary: {}",
-                    ev.modifiers().secondary()
+                    ev.modifiers().secondary(cx)
                 );
 
                 table.delegate_mut().clicked_row = Some(row_ix);

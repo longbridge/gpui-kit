@@ -269,7 +269,8 @@ impl Fixture {
         // Dispatch native input without the test helper's automatic draw. The
         // provider must finish before rendering the updated completion menu.
         cx.update_window(self.handle.into(), |_, window, cx| {
-            let mut key = Keystroke::parse(text).expect("valid test keystroke");
+            let mut key = Keystroke::parse_with_os(text, cx.platform_info().os)
+                .expect("valid test keystroke");
             key.key_char = Some(text.into());
             window.dispatch_keystroke(key, cx);
         })

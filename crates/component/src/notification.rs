@@ -462,6 +462,7 @@ impl Render for Notification {
                     .child(
                         Button::new("close")
                             .icon(IconName::Close)
+                            .accessibility_label("Close")
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -534,6 +535,7 @@ impl Render for Notification {
 
 /// The settings for notifications.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NotificationSettings {
     /// The placement of the notifications, default: [`Anchor::TopRight`]
     ///

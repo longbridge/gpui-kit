@@ -31,7 +31,6 @@ pub(super) struct InlineFlow {
     id: ElementId,
     items: Vec<InlineFlowItem>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
-    hover_underline: Option<gpui::UnderlineStyle>,
     /// The block editor leaf this flow renders (design D3): its fragments
     /// and atoms are reported to the editor sink as pieces.
     editor_key: Option<u64>,
@@ -284,14 +283,8 @@ impl InlineFlow {
             id: id.into(),
             items,
             link_click_handler,
-            hover_underline: None,
             editor_key: None,
         }
-    }
-
-    pub(super) fn hover_underline(mut self, underline: Option<gpui::UnderlineStyle>) -> Self {
-        self.hover_underline = underline;
-        self
     }
 
     pub(super) fn editor_key(mut self, key: Option<u64>) -> Self {
@@ -513,9 +506,7 @@ impl Element for InlineFlow {
 
         // Editor leaf byte offset where each item starts: text items count
         // their bytes, images and custom nodes one U+FFFC.
-        let editor = self
-            .editor_key
-            .and_then(|key| super::editor_seam::current().map(|sink| (key, sink)));
+        let editor = self.editor_key.zip(super::editor_seam::current());
         // Ordinary TextViews do not allocate editor bookkeeping.
         let item_starts: Vec<usize> = if let Some((key, sink)) = &editor {
             sink.begin_pieces(*key);
@@ -678,7 +669,6 @@ impl Element for InlineFlow {
                         highlights.clone(),
                         self.link_click_handler.clone(),
                     )
-                    .hover_underline(self.hover_underline)
                     .selection_source(source_state.clone(), source_range.clone())
                     .range_backgrounds(slice_ranges(
                         backgrounds,

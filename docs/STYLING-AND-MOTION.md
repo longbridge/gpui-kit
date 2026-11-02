@@ -440,8 +440,8 @@ let offset = Sequence::new(("row", index), px(12.))
 ## Product Motion Tokens
 
 `gpui-component::MotionTokens` centralizes styled policy. It contains four
-semantic duration tiers, enter/exit/move easing, control/movement springs,
-short/medium travel distances, and the scrollbar's idle hold and fade-out. Styled controls read these tokens instead of
+semantic duration tiers, enter/exit/move easing, control/movement springs, and
+short/medium travel distances. Styled controls read these tokens instead of
 defining local constants. Base remains presentation-neutral and can be used by
 another design system with different policy.
 

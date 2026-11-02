@@ -6,6 +6,8 @@
 //! prints the same checks to the terminal and exits.
 
 mod demo;
+#[cfg(target_os = "macos")]
+mod responsibility;
 
 use std::{
     borrow::Cow,
@@ -57,7 +59,13 @@ impl AssetSource for AppAssets {
 
 actions!(speech, [ToggleSpeech]);
 
-const TOGGLE_KEYS: &str = "secondary-shift-d";
+fn toggle_keys(cx: &App) -> &'static str {
+    if cx.platform_info().is_mac() {
+        "cmd-shift-d"
+    } else {
+        "ctrl-shift-d"
+    }
+}
 /// Most log entries kept; older ones scroll away.
 const LOG_LIMIT: usize = 200;
 
@@ -509,7 +517,7 @@ impl SpeechApp {
             ),
         };
         let capturing = status.is_capturing();
-        let toggle_keys = Keystroke::parse(TOGGLE_KEYS).ok().map(Kbd::new);
+        let toggle_keys = Keystroke::parse(toggle_keys(cx)).ok().map(Kbd::new);
 
         h_flex()
             .gap_3()
@@ -826,6 +834,9 @@ fn print_checks(cx: &mut App) {
 }
 
 fn main() {
+    #[cfg(target_os = "macos")]
+    responsibility::disclaim();
+
     let check = std::env::args().any(|arg| arg == "--check");
     let app = gpui_kit::application().with_assets(AppAssets);
 
@@ -837,7 +848,7 @@ fn main() {
             return;
         }
 
-        cx.bind_keys([KeyBinding::new(TOGGLE_KEYS, ToggleSpeech, None)]);
+        cx.bind_keys([KeyBinding::new(toggle_keys(cx), ToggleSpeech, None)]);
         cx.activate(true);
 
         let window_options = WindowOptions {

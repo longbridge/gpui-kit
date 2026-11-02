@@ -220,20 +220,6 @@ Theme::set_scrollbar_mode(ScrollbarMode::Hover, cx);
 Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
 ```
 
-### 滚动条时长
-
-在 `Scrolling` 和 `Hover` 模式下，最后一次滚动、拖动或悬停后，滚动条会保持显示 2 秒，再用 500ms 淡出。可以通过主题的 motion tokens 调整这两个时长：
-
-```rust
-use std::time::Duration;
-use gpui_kit::component::Theme;
-
-Theme::update(cx, |theme| {
-    theme.motion.scrollbar_idle = Duration::from_millis(700);
-    theme.motion.scrollbar_exit = Duration::from_millis(150);
-});
-```
-
 ### 跟随系统设置
 
 ```rust

@@ -29,6 +29,14 @@ curl -fsSL https://gpui-kit.com/shell/install.sh | sh
 
 想在发版之前跟上 `main`——比如一个已经合并但还没发布的修复，或者 Rust Host 依赖的是仓库而不是某个 tag——就用 Cargo 从 Git 构建：
 
+从 crates.io 安装本次发布的版本：
+
+```bash
+cargo install gpui-shell --version 0.8.1 --locked
+```
+
+也可以从 Git 构建开发版本：
+
 ```bash
 cargo install --git https://github.com/longbridge/gpui-kit gpui-shell --locked
 ```
@@ -220,11 +228,11 @@ gpui-shell run ./hello --watch    # 只重载
 
 ### 保留命令，加上 Rust
 
-`gpui-shell` 命令本身就在库里，所以你自己的 Rust 程序可以就是这个命令：换成自己的名字，再给脚本注册一些 Rust 函数。从 Git 依赖这个 crate：
+`gpui-shell` 命令本身就在库里，所以你自己的 Rust 程序可以就是这个命令：换成自己的名字，再给脚本注册一些 Rust 函数。依赖已发布的 crate：
 
 ```toml
 [dependencies]
-gpui-shell = { git = "https://github.com/longbridge/gpui-kit" }
+gpui-shell = "0.8.1"
 ```
 
 ```rust

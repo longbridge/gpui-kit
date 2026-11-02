@@ -10371,7 +10371,7 @@ fn mount_virtual_list(
 }
 
 fn scroll_by(context: &mut VisualTestContext, dy: f32) {
-    context.simulate_event(gpui::ScrollWheelEvent {
+    context.simulate_event(gpui::ScrollEvent {
         position: point(px(150.), px(100.)),
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(dy))),
         ..Default::default()

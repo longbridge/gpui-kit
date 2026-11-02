@@ -40,7 +40,6 @@ members = [
     "examples/ai_recipes",
     "examples/speech",
     "crates/shell",
-    "crates/shell/rquickjs-compat",
 ]
 resolver = "2"
 
@@ -49,14 +48,14 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
-gpui-kit = { path = "crates/kit", version = "0.8.0" }
-gpui-component = { path = "crates/component", version = "0.8.0" }
-gpui-base = { path = "crates/base", version = "0.8.0" }
-gpui-component-macros = { path = "crates/component-macros", version = "0.8.0" }
-gpui-kit-assets = { path = "crates/assets", version = "0.8.0" }
-gpui-fps = { path = "crates/fps", version = "0.8.0" }
-gpui-shell = { path = "crates/shell", version = "0.8.0" }
-gpui-webview = { path = "crates/webview", version = "0.8.0" }
+gpui-kit = { path = "crates/kit", version = "0.8.1" }
+gpui-component = { path = "crates/component", version = "0.8.1" }
+gpui-base = { path = "crates/base", version = "0.8.1" }
+gpui-component-macros = { path = "crates/component-macros", version = "0.8.1" }
+gpui-kit-assets = { path = "crates/assets", version = "0.8.1" }
+gpui-fps = { path = "crates/fps", version = "0.8.1" }
+gpui-shell = { path = "crates/shell", version = "0.8.1" }
+gpui-webview = { path = "crates/webview", version = "0.8.1" }
 story = { path = "crates/story" }
 
 # GPUI comes from the `gpui-pre-*` snapshots of Zed's crates, and any snapshot
@@ -66,18 +65,18 @@ story = { path = "crates/story" }
 # onto a newer snapshot that gpui-component did not compile with (#3156). Bump
 # every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
 # fails CI when a pin is not exact.
-gpui = { package = "gpui-pre", version = "=0.3.9" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "=0.3.9" }
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "=0.3.10" }
 # Fast is optional; existing crates select it through their gpui-fast feature.
 # Explicit package fields make Cargo use these dependency keys as Rust crate names;
 # the packages declare the same library names as the pre backend.
-gpui-fast = { package = "gpui-fast", version = "0.1.10", features = ["windows-manifest-provided-by-host"] }
-gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.10", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui-fast-web = { package = "gpui-fast-web", version = "0.1.10" }
-gpui_macros = { package = "gpui-pre-macros", version = "=0.3.9" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.9" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.9" }
+gpui-fast = { package = "gpui-fast", version = "0.1.12", features = ["windows-manifest-provided-by-host"] }
+gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-fast-web = { package = "gpui-fast-web", version = "0.1.12" }
+gpui_macros = { package = "gpui-pre-macros", version = "=0.3.10" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
+sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.10" }
 reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",
@@ -185,12 +184,6 @@ cap-std = { opt-level = 3 }
 # a release binary (`gpui-shell`: 106 MB to 78 MB on Linux x86_64).
 [profile.release]
 strip = "symbols"
-
-[patch.crates-io]
-# LLRT's public modules still name their compatible binding dependency
-# `rquickjs`. Route those dependencies through a source-compatible facade so
-# the shell and LLRT share the exact same quickjs-jit types and VM.
-rquickjs = { path = "crates/shell/rquickjs-compat" }
 
 [workspace.metadata.typos]
 files.extend-exclude = ["**/fixtures/*"]

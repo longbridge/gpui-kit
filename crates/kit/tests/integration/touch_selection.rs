@@ -11,7 +11,7 @@ use gpui_component::{
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, DispatchPhase, Entity, InputEvent as _, LongPressEvent, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
+    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
     StyleRefinement, TestAppContext, TouchDragEvent, TouchPhase, Window, WindowHandle, canvas, div,
     prelude::*, px,
 };
@@ -170,7 +170,7 @@ impl Render for SwallowingScreen {
                 canvas(
                     |_, _, _| (),
                     |_, _, window, _| {
-                        window.on_mouse_event(|_: &ScrollWheelEvent, phase, _, cx| {
+                        window.on_mouse_event(|_: &ScrollEvent, phase, _, cx| {
                             if phase == DispatchPhase::Capture {
                                 cx.stop_propagation();
                             }
@@ -750,11 +750,12 @@ fn the_menu_comes_back_after_a_scroll_the_container_swallowed(cx: &mut TestAppCo
             (TouchPhase::Ended, 0.),
         ] {
             window.dispatch_event(
-                ScrollWheelEvent {
+                ScrollEvent {
                     position,
                     delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
                     modifiers: Modifiers::default(),
                     touch_phase,
+                    ..Default::default()
                 }
                 .to_platform_input(),
                 cx,

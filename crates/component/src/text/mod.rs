@@ -11,8 +11,8 @@ pub use frontmatter::FrontmatterPlugin;
 pub use gpui_base::text::{
     InlineElement, InlineRenderContext, MarkdownBlockParserFn, MarkdownBlockRenderFn,
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, RangeHighlight,
-    RangeHighlightError, RenderedText, SelectionFormat, TableData, TextViewLink, TextViewMotion,
-    TextViewState, markdown_ast,
+    RangeHighlightError, RenderedText, SelectionFormat, TableData, TextViewMotion, TextViewState,
+    markdown_ast,
 };
 pub use style::TextViewStyle;
 
@@ -410,14 +410,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_text_paths_reexport_base_implementation() {
+    fn test_text_view_builder() {
         let mut style = super::TextViewStyle::default();
         style.highlight_theme = crate::highlighter::HighlightTheme::default_dark();
 
         let _: super::TextView = super::markdown("# compatible")
             .style(style)
             .selectable(true)
-            .scrollable(true);
+            .scrollable(true)
+            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())));
     }
 
     #[test]

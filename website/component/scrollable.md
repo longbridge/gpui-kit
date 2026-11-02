@@ -226,20 +226,6 @@ Theme::set_scrollbar_mode(ScrollbarMode::Hover, cx);     // On hover
 Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);    // Always visible
 ```
 
-### Scrollbar Timing
-
-In the `Scrolling` and `Hover` modes, a scrollbar stays visible for 2 seconds after the last scroll, drag, or hover, then fades out over 500ms. Tune both through the theme's motion tokens:
-
-```rust
-use std::time::Duration;
-use gpui_kit::component::Theme;
-
-Theme::update(cx, |theme| {
-    theme.motion.scrollbar_idle = Duration::from_millis(700);
-    theme.motion.scrollbar_exit = Duration::from_millis(150);
-});
-```
-
 ### System Integration
 
 Sync scrollbar behavior with system preferences:

@@ -25,6 +25,12 @@ Each release also carries the same script, so `https://github.com/longbridge/gpu
 
 The script installs the binary to `~/.local/bin` and creates `~/.gpui-shell/apps`. `GPUI_SHELL_VERSION=v0.7.1` pins a release. `GPUI_SHELL_HOME` moves the `~/.gpui-shell` directory — installed applications and the Git dependency cache; `gpui-shell` reads it as well, so keep it exported. Asset names carry no version (`gpui-shell-aarch64-apple-darwin.tar.gz`, with a `.sha256` beside it), so a Homebrew formula or a mise `ubi` backend can download `releases/latest/download/<asset>` too.
 
+### Build from crates.io
+
+```bash
+cargo install gpui-shell --version 0.8.1 --locked
+```
+
 ### The latest from Git
 
 To follow `main` ahead of a release — a fix that has landed but not shipped, or a Rust host built against the repository rather than a tagged version — build the binary from Git with Cargo:
@@ -220,11 +226,11 @@ When the application needs more than the scripts can reach, it gets a Rust binar
 
 ### Keep the command, add Rust
 
-The `gpui-shell` command lives in the library, so a binary of your own can be that command, under its own name, with Rust functions registered for the scripts. Depend on the crate from Git:
+The `gpui-shell` command lives in the library, so a binary of your own can be that command, under its own name, with Rust functions registered for the scripts. Depend on the published crate:
 
 ```toml
 [dependencies]
-gpui-shell = { git = "https://github.com/longbridge/gpui-kit" }
+gpui-shell = "0.8.1"
 ```
 
 ```rust

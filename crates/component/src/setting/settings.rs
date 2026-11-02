@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use crate::{
-    IconName, Sizable, Size, StyledExt,
-    empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle},
+    Icon, IconName, Sizable, Size, StyledExt,
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
     input::{Input, InputState},
@@ -127,30 +127,28 @@ impl Settings {
                 .into_any_element();
         }
 
-        div()
-            .v_flex()
-            .size_full()
-            .when(
-                !state.read(cx).search_input.read(cx).value().is_empty(),
-                |this| {
-                    this.child(
-                        Empty::new().header(
-                            EmptyHeader::new()
-                                .title(
-                                    EmptyTitle::new().child(
-                                        div()
-                                            .debug_selector(|| "settings-no-results".into())
-                                            .child(t!("Settings.no_results")),
-                                    ),
-                                )
-                                .description(
-                                    EmptyDescription::new().child(t!("Settings.no_results_hint")),
-                                ),
-                        ),
-                    )
-                },
-            )
-            .into_any_element()
+        if filter.visible_pages().next().is_none() {
+            return div()
+                .size_full()
+                .debug_selector(|| "settings-no-results".into())
+                .child(Self::render_no_results())
+                .into_any_element();
+        }
+
+        div().into_any_element()
+    }
+
+    fn render_no_results() -> impl IntoElement {
+        Empty::new().size_full().header(
+            EmptyHeader::new()
+                .media(
+                    EmptyMedia::new()
+                        .with_variant(EmptyMediaVariant::Icon)
+                        .child(Icon::new(IconName::Search)),
+                )
+                .title(EmptyTitle::new().child(t!("Settings.no_results")))
+                .description(EmptyDescription::new().child(t!("Settings.no_results_description"))),
+        )
     }
 
     fn render_sidebar(

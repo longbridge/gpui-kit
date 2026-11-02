@@ -1,10 +1,10 @@
 [package]
 name = "gpui-shell"
 description = "A scriptable application runtime for GPUI, built on gpui-base."
-version = "0.8.0"
+version = "0.8.1"
 keywords = ["desktop", "gpui", "javascript", "runtime"]
 license = "Apache-2.0"
-publish = false
+publish = true
 edition.workspace = true
 repository = "https://github.com/longbridge/gpui-kit"
 homepage = "https://gpui-kit.com"
@@ -60,18 +60,18 @@ gpui-webview = { workspace = true, optional = true }
 # Not named in the source: `gpui-webview` takes its GPUI types from the Kit, whose backend
 # follows the runtime's `gpui-fast`. It stays non-optional because GPUI's macros route their
 # paths through `gpui_kit` whenever the manifest lists it, enabled or not.
-gpui-kit = { path = "../kit", version = "0.8.0", default-features = false }
+gpui-kit = { path = "../kit", version = "0.8.1", default-features = false }
 wry = { version = "0.53.3", package = "lb-wry", optional = true }
 
-# Keep the bindings, runtime, and LLRT compatibility facade on the same release.
-rquickjs = { package = "quickjs-jit", version = "0.12.11", git = "https://github.com/longbridge/quickjs-jit", rev = "96593cd7a54440ac060a391b8baea7e9a3cf1393", features = [
+# Keep bindings, JIT runtime and vendored standard modules on the same crates.io release.
+rquickjs = { package = "quickjs-jit", version = "=0.14.1", features = [
     "macro",
     "loader",
     "jit-abi",
 ], optional = true }
-rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.11", git = "https://github.com/longbridge/quickjs-jit", rev = "96593cd7a54440ac060a391b8baea7e9a3cf1393", features = ["compiler"], optional = true }
-# The stdlib facade pins LLRT modules and shares our VM through rquickjs-compat.
-quickjs-jit-stdlib = { version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "605da483611a3548edb8c33fdff602e3f5f42076", optional = true }
+rquickjs-jit = { package = "quickjs-jit-runtime", version = "=0.14.1", features = ["compiler"], optional = true }
+# Standard modules are vendored and use the same QuickJS VM as the bindings.
+quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "crypto", "path", "url", "zlib"], optional = true }
 # The date type `gpui_base::Date` is built from, for the calendar binding. Same
 # version as `gpui-base`'s, because the two exchange `NaiveDate` values.
 chrono = "0.4.38"

@@ -4,7 +4,10 @@ use crate::{
     group_box::GroupBoxVariant,
     setting::{SettingGroup, SettingItem},
 };
-use gpui::{Context, Focusable as _, Render, TestAppContext, VisualTestContext, point, size};
+use gpui::{
+    Context, Focusable as _, Render, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
+    point, size,
+};
 
 struct SettingsHost {
     pages: Vec<SettingPage>,
@@ -143,7 +146,40 @@ fn search_preserves_the_page_and_clicks_use_original_indices(cx: &mut TestAppCon
     search(&host, "no matching setting", cx);
     assert_eq!(selection(&host, cx), (1, None));
     assert!(cx.debug_bounds("setting-1-2-1").is_none());
+    assert!(cx.debug_bounds("settings-no-results").is_some());
     search(&host, "", cx);
+    assert_eq!(selection(&host, cx), (1, None));
+    assert!(cx.debug_bounds("settings-no-results").is_none());
+}
+
+#[gpui::test]
+fn scrolling_marks_the_group_at_the_top(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    cx.update(|_, cx| {
+        host.update(cx, |host, cx| {
+            host.pages[1].groups[1].items = vec![item_with_height("theme colors", 900.)];
+            cx.notify();
+        });
+    });
+    draw(cx);
+    assert_eq!(selection(&host, cx), (1, None));
+
+    let scroll = |delta: f32, cx: &mut VisualTestContext| {
+        cx.simulate_event(ScrollEvent {
+            position: point(px(600.), px(400.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
+            ..Default::default()
+        });
+        draw(cx);
+    };
+    // Past the untitled first group, Colors reaches the top.
+    scroll(-200., cx);
+    assert_eq!(selection(&host, cx), (1, Some(1)));
+    // At the end of the list, the last group is marked.
+    scroll(-2000., cx);
+    assert_eq!(selection(&host, cx), (1, Some(2)));
+    // Back at the top, the untitled group marks the page itself.
+    scroll(4000., cx);
     assert_eq!(selection(&host, cx), (1, None));
 }
 

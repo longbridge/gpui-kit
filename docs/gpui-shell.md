@@ -75,9 +75,11 @@ gpui_shell::init(cx);
 let runtime = gpui_shell::ShellRuntime::new(cx)?;
 ```
 
-The shell pins every LLRT crate to commit
-`7b95c82a9b15e7ddfb2778eca4b5a63111e74f51`, whose modules share
-`rquickjs 0.12`. LLRT supplies Standard Runtime implementations and data types;
+The shell uses the matching crates.io releases of `quickjs-jit`,
+`quickjs-jit-runtime` and `quickjs-jit-stdlib` (0.14.1). The standard modules
+are vendored into `quickjs-jit-stdlib` and share the same VM and binding types,
+without Git-only LLRT dependencies or a local compatibility facade. LLRT supplies
+Standard Runtime implementations and data types;
 GPUI Shell remains responsible for the VM, scheduler, Policy and OS authority.
 
 Scripts import bare GPUI Shell module names:

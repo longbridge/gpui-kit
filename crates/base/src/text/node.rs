@@ -1039,7 +1039,6 @@ fn set_leaf_key(state: &mut Arc<Mutex<InlineState>>, key: u64) {
     *state = Arc::new(Mutex::new(InlineState {
         text,
         editor_key: Some(key),
-        hovered_link: None,
         cleanup_senders: Vec::new(),
         ..Default::default()
     }));
@@ -1591,6 +1590,7 @@ impl std::fmt::Debug for ParagraphRenderCache {
 struct ParagraphRender {
     style: Arc<TextViewStyle>,
     mono_font: SharedString,
+    background: Hsla,
     text: SharedString,
     highlights: Vec<(Range<usize>, InlineHighlight)>,
     /// Links as written, before reference resolution.
@@ -1628,10 +1628,12 @@ impl Paragraph {
         Vec<(Range<usize>, LinkMark)>,
     ) {
         let mono_font = cx.theme().tokens.typography.mono.clone();
+        let background = cx.theme().tokens.colors.background;
         if let Ok(cache) = self.render_cache.0.lock()
             && let Some(cached) = cache.as_ref()
             && (Arc::ptr_eq(&cached.style, &node_cx.style) || *cached.style == *node_cx.style)
             && cached.mono_font == mono_font
+            && cached.background == background
         {
             return (
                 cached.text.clone(),
@@ -1653,9 +1655,7 @@ impl Paragraph {
                 let mut highlight = mark_highlight(style, node_cx, cx);
                 if let Some(link_mark) = style.link.clone() {
                     highlight.style.color = Some(node_cx.style.link());
-                    if node_cx.style.is_link_underlined() {
-                        highlight.style.underline = Some(link_underline(&node_cx.style));
-                    }
+                    highlight.style.underline = Some(link_underline(&node_cx.style));
                     links.push((inner_range.clone(), link_mark));
                 }
                 node_highlights.push((inner_range, highlight));
@@ -1668,6 +1668,7 @@ impl Paragraph {
             *cache = Some(Arc::new(ParagraphRender {
                 style: node_cx.style.clone(),
                 mono_font,
+                background,
                 text: text.clone(),
                 highlights: highlights.clone(),
                 links: links.clone(),
@@ -2726,6 +2727,27 @@ impl PartialEq for NodeContext {
     }
 }
 
+/// The text color with more contrast against a highlight composited over the
+/// theme background (WCAG relative luminance).
+fn mark_text_color(highlight: Hsla, background: Hsla) -> Hsla {
+    fn channel(value: f32) -> f32 {
+        if value <= 0.04045 {
+            value / 12.92
+        } else {
+            ((value + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    let rgb = background.to_rgb().blend(highlight.to_rgb());
+    let luminance = 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b);
+    // Contrast with black is (L + 0.05) / 0.05 and with white 1.05 / (L + 0.05);
+    // they are equal where (L + 0.05)^2 = 0.0525.
+    if (luminance + 0.05) * (luminance + 0.05) > 0.0525 {
+        gpui::black()
+    } else {
+        gpui::white()
+    }
+}
+
 /// The highlight a text mark renders with. The link decoration is applied by
 /// the caller, which also has to record the link range.
 fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHighlight {
@@ -2770,6 +2792,14 @@ fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHig
     }
     if let Some(color) = mark.highlight {
         highlight.background_color = Some(color);
+        // Set the text color with the background, as the HTML standard's
+        // `mark { background: yellow; color: black }` does, so a light
+        // highlight stays readable in a dark theme.
+        // A transparent mark leaves the underlying surface unchanged. Keep
+        // its inherited foreground, including on custom-colored surfaces.
+        if color.a > 0.0 {
+            highlight.color = Some(mark_text_color(color, cx.theme().tokens.colors.background));
+        }
     }
     InlineHighlight {
         style: highlight,
@@ -2827,7 +2857,6 @@ impl Paragraph {
                 self.inline_flow_items(fade_key, fades, backgrounds, node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
-            .hover_underline(hover_link_underline(&node_cx.style))
             .editor_key(self.leaf_key())
             .into_any_element();
         }
@@ -2861,7 +2890,6 @@ impl Paragraph {
                 highlights,
                 node_cx.link_click_handler.clone(),
             )
-            .hover_underline(hover_link_underline(&node_cx.style))
             .range_backgrounds(backgrounds)
             .reveal(reveal)
             .into_any_element();
@@ -2896,7 +2924,6 @@ impl Paragraph {
                             ),
                             node_cx.link_click_handler.clone(),
                         )
-                        .hover_underline(hover_link_underline(&node_cx.style))
                         .range_backgrounds(slice_backgrounds(
                             backgrounds,
                             consumed,
@@ -2957,9 +2984,7 @@ impl Paragraph {
 
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.style.color = Some(node_cx.style.link());
-                        if node_cx.style.is_link_underlined() {
-                            highlight.style.underline = Some(link_underline(&node_cx.style));
-                        }
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
 
                         // convert link references, replace link
                         if let Some(identifier) = link_mark.identifier.as_ref() {
@@ -2993,7 +3018,6 @@ impl Paragraph {
                     highlights,
                     node_cx.link_click_handler.clone(),
                 )
-                .hover_underline(hover_link_underline(&node_cx.style))
                 .range_backgrounds(slice_backgrounds(backgrounds, consumed, text_end))
                 .reveal(node_cx.reveal_at(fade_key, consumed, text_end))
                 .into_any_element(),
@@ -3087,9 +3111,7 @@ impl Paragraph {
                                 .clone(),
                         );
                         object_style.color = Some(node_cx.style.link());
-                        if node_cx.style.is_link_underlined() {
-                            object_style.underline = Some(link_underline(&node_cx.style));
-                        }
+                        object_style.underline = Some(link_underline(&node_cx.style));
                     }
                 }
                 let rendered_node = node.clone();
@@ -3155,9 +3177,7 @@ impl Paragraph {
 
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.style.color = Some(node_cx.style.link());
-                        if node_cx.style.is_link_underlined() {
-                            highlight.style.underline = Some(link_underline(&node_cx.style));
-                        }
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
 
                         if let Some(identifier) = link_mark.identifier.as_ref()
                             && let Some(mark) = node_cx.link_refs.get(identifier)
@@ -3214,12 +3234,6 @@ fn block_element_id(kind: &'static str, span: Option<Span>, ix: usize) -> Elemen
 /// document; the HTML parser records no spans, so its paragraphs share one.
 fn leaf_element_id(fade_key: Option<TextLeafKey>) -> ElementId {
     fade_key.map_or_else(|| ElementId::from("p"), ElementId::from)
-}
-
-fn hover_link_underline(style: &TextViewStyle) -> Option<gpui::UnderlineStyle> {
-    style
-        .is_link_underlined_on_hover()
-        .then(|| link_underline(style))
 }
 
 /// A link's underline: a hairline in a translucent link color, so a run of
@@ -3690,6 +3704,7 @@ impl BlockNode {
                         .pr(indent * 0.3)
                         .text_right()
                         .text_color(style.muted_foreground())
+                        .refine_style(style.list_style())
                         .child(
                             list_item_prefix(
                                 ix,
@@ -3725,7 +3740,13 @@ impl BlockNode {
                                 .justify_center()
                                 .rounded(px(4.))
                                 .border(px(1.5))
-                                .border_color(style.muted_foreground())
+                                .border_color(
+                                    style
+                                        .list_style()
+                                        .text
+                                        .color
+                                        .unwrap_or(style.muted_foreground()),
+                                )
                                 .when(checked, |this| {
                                     this.bg(style.link()).border_color(style.link()).child(
                                         img(Arc::new(Image::from_bytes(
@@ -3740,7 +3761,9 @@ impl BlockNode {
             })
             .child(
                 div()
-                    .flex_1()
+                    // Include the body in intrinsic width measurement, while
+                    // still letting it shrink and wrap in a constrained row.
+                    .flex_auto()
                     .min_w_0()
                     .overflow_hidden()
                     // A done task steps back so the open ones stand out.
@@ -4310,20 +4333,27 @@ impl BlockNode {
                     .border_l_2()
                     .border_color(node_cx.style.border())
                     .pl(body_font_size(node_cx, window) * 0.9)
+                    .refine_style(node_cx.style.blockquote_style())
+                    // Nested tables measure while rendering, before this div applies its text style.
                     .children({
                         let children_len = children.len();
                         children.into_iter().enumerate().map(move |(index, c)| {
                             let is_last = index == children_len - 1;
                             let (is_first, prev) = flow_position(children, index);
-                            c.render_block(
-                                NodeRenderOptions {
-                                    is_first,
-                                    prev,
-                                    ..options.is_last(is_last)
+                            window.with_text_style(
+                                Some(node_cx.style.blockquote_style().text.clone()),
+                                |window| {
+                                    c.render_block(
+                                        NodeRenderOptions {
+                                            is_first,
+                                            prev,
+                                            ..options.is_last(is_last)
+                                        },
+                                        node_cx,
+                                        window,
+                                        cx,
+                                    )
                                 },
-                                node_cx,
-                                window,
-                                cx,
                             )
                         })
                     })
@@ -4624,6 +4654,74 @@ mod tests {
     }
 
     #[test]
+    fn mark_sets_a_readable_text_color_with_its_background() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let node_cx = NodeContext::default();
+
+            // The default `<mark>` yellow needs dark text, whatever the theme's
+            // text color is (light in a dark theme).
+            let yellow: Hsla = gpui::rgb(0xfef08a).into();
+            let style = mark_highlight(&TextMark::default().highlight(yellow), &node_cx, cx).style;
+            assert_eq!(style.background_color, Some(yellow));
+            assert_eq!(style.color, Some(gpui::black()));
+
+            // A dark custom highlight gets light text instead.
+            let navy: Hsla = gpui::rgb(0x1e3a8a).into();
+            let style = mark_highlight(&TextMark::default().highlight(navy), &node_cx, cx).style;
+            assert_eq!(style.color, Some(gpui::white()));
+
+            // A translucent mark is composited with the theme surface before
+            // choosing the text color. Fully transparent marks keep inherited ink.
+            let translucent_black: Hsla = gpui::rgba(0x00000080).into();
+            let translucent_white: Hsla = gpui::rgba(0xffffff4d).into();
+            assert_eq!(
+                mark_text_color(translucent_black, gpui::white()),
+                gpui::black()
+            );
+            assert_eq!(
+                mark_text_color(translucent_white, gpui::black()),
+                gpui::white()
+            );
+            let transparent: Hsla = gpui::rgba(0x00000000).into();
+            let style =
+                mark_highlight(&TextMark::default().highlight(transparent), &node_cx, cx).style;
+            assert_eq!(style.color, None);
+
+            // Text that is not marked keeps the inherited color.
+            let style = mark_highlight(&TextMark::default().bold(), &node_cx, cx).style;
+            assert_eq!(style.color, None);
+        });
+    }
+
+    #[test]
+    fn translucent_mark_cache_tracks_theme_background() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let paragraph = Paragraph {
+                children: vec![InlineNode::new("mark").marks(vec![(
+                    0..4,
+                    TextMark::default().highlight(gpui::rgba(0x00000033).into()),
+                )])],
+                ..Default::default()
+            };
+            let context = NodeContext::default();
+            crate::Theme::global_mut(cx).tokens.colors.background = gpui::white();
+            let (_, light, _) = paragraph.plain_render(&context, cx);
+            assert_eq!(light[0].1.style.color, Some(gpui::black()));
+            crate::Theme::global_mut(cx).tokens.colors.background = gpui::black();
+            let (_, dark, _) = paragraph.plain_render(&context, cx);
+            assert_eq!(dark[0].1.style.color, Some(gpui::white()));
+        });
+    }
+
+    #[test]
     fn custom_inline_inherits_marks_and_resolves_link_references() {
         use gpui::{Empty, TestApp};
         let mut app = TestApp::new();
@@ -4724,6 +4822,62 @@ mod tests {
 
     fn cached_column_widths(table: &Table) -> Arc<TableColumnWidths> {
         table.column_widths_cache.0.lock().unwrap().clone().unwrap()
+    }
+
+    #[test]
+    fn blockquote_typography_reaches_nested_table_measurement() {
+        use crate::text::inline::test_draw::in_prepaint;
+        use crate::text::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::TestApp;
+
+        let quote = BlockNode::Blockquote {
+            children: vec![BlockNode::Table(table_of(
+                vec![vec![plain_cell("0123456789")]],
+                vec![],
+            ))],
+            span: None,
+        };
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            cx.set_global(crate::Theme::default());
+            window.with_text_style(
+                Some(
+                    StyleRefinement::default()
+                        .font_family(BODY)
+                        .text_size(px(15.))
+                        .text,
+                ),
+                |window| {
+                    for (refinement, expected_width) in [
+                        (StyleRefinement::default(), 94.),
+                        (
+                            StyleRefinement::default()
+                                .font_family(MONO)
+                                .text_size(px(30.))
+                                .font_weight(FontWeight::BOLD),
+                            199.,
+                        ),
+                    ] {
+                        let node_cx = NodeContext {
+                            style: Arc::new(
+                                TextViewStyle::default().with_blockquote_style(refinement),
+                            ),
+                            body_font_size: px(15.),
+                            ..Default::default()
+                        };
+                        quote.render_block(NodeRenderOptions::default(), &node_cx, window, cx);
+                        let BlockNode::Blockquote { children, .. } = &quote else {
+                            unreachable!()
+                        };
+                        let BlockNode::Table(table) = &children[0] else {
+                            unreachable!()
+                        };
+                        // Ten glyphs at the table's 14px size, plus 24px cell padding.
+                        assert_eq!(cached_column_widths(table).widths, vec![expected_width]);
+                    }
+                },
+            );
+        });
     }
 
     #[test]

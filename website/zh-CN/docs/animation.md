@@ -284,7 +284,7 @@ Base 还提供以下选择：
 
 ## GPUI Component：语义化动效策略
 
-样式化组件通过 `cx.theme().motion_tokens()` 共享策略。`MotionTokens` 包含 `duration_instant`、`duration_fast`、`duration_normal`、`duration_slow`；`easing_enter`、`easing_exit`、`easing_move`；`spring_control`、`spring_move`；`distance_short`、`distance_medium`；以及滚动条的空闲保持与淡出时长 `scrollbar_idle`、`scrollbar_exit`。默认值构成协调的尺度，并不意味着所有控件都必须动画。从当前主题读取 token，产品才能集中调整。
+样式化组件通过 `cx.theme().motion_tokens()` 共享策略。`MotionTokens` 包含 `duration_instant`、`duration_fast`、`duration_normal`、`duration_slow`；`easing_enter`、`easing_exit`、`easing_move`；`spring_control`、`spring_move`；以及 `distance_short`、`distance_medium`。默认值构成协调的尺度，并不意味着所有控件都必须动画。从当前主题读取 token，产品才能集中调整。
 
 运行现有样式化控件：`cargo run -p gpui-component-story -- SwitchStory`。快速点击可用的开关两次：每次点击都改变 checked 状态，滑块会在运动途中改变方向。同页的禁用开关不会响应。打开 [`crates/component/src/switch.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/switch.rs)，沿着 `checked` 找到滑块的目标偏移，并沿着 `cx.theme().motion_tokens().spring_move` 找到 Base `spring` 调用。再到 [`crates/component/src/theme/motion.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/theme/motion.rs)，暂时将默认 `spring_move` 时长从 280 ms 改为 600 ms，重新运行 story：checked 状态相同，滑块收敛更慢。练习后恢复 280 ms。story 持有 checked 布尔值，组件将其映射成视觉目标，主题提供动效策略。
 
