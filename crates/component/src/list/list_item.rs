@@ -255,13 +255,12 @@ impl RenderOnce for ListItem {
             )
             .when_some(self.suffix, |this, suffix| this.child(suffix(window, cx)))
             .when(is_selectable && self.selected, |this| {
-                let bg = if cx.theme().list.active_highlight {
-                    cx.theme().list_active
+                if cx.theme().list.active_highlight {
+                    this.bg(cx.theme().list_active)
                 } else {
-                    cx.theme().accent
-                };
-
-                this.bg(bg)
+                    this.bg(cx.theme().accent)
+                        .text_color(cx.theme().accent_foreground)
+                }
             })
             .when(is_selectable && self.secondary_selected, |this| {
                 this.child(
