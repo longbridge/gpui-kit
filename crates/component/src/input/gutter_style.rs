@@ -24,8 +24,7 @@ impl EditorLineNumberRenderer for GutterStyle {
         &self,
         digit_count: usize,
         body_style: &TextStyle,
-        window: &mut Window,
-        _: &App,
+        window: &Window,
     ) -> (Pixels, Pixels) {
         let gap = self.resolve_gap(window.rem_size());
         // Hidden line numbers need spacing but no font resolution or glyph metrics.
@@ -50,7 +49,7 @@ impl EditorLineNumberRenderer for GutterStyle {
         number: usize,
         is_active: bool,
         body_style: &TextStyle,
-        window: &mut Window,
+        window: &Window,
         cx: &App,
     ) -> ShapedLine {
         let color = if is_active {

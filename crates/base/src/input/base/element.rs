@@ -1437,8 +1437,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         state: &InputBaseState<M>,
         text: &Rope,
         style: &TextStyle,
-        window: &mut Window,
-        cx: &App,
+        window: &Window,
     ) -> (Pixels, Pixels) {
         // Reserve three digits for small documents, then follow the actual
         // line count up to seven digits.
@@ -1449,7 +1448,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         };
         let (number_width, gap) =
             self.line_number_renderer
-                .measure_line_numbers(line_number_len, style, window, cx);
+                .measure_line_numbers(line_number_len, style, window);
 
         let mut line_number_width = if state.mode.line_number() {
             number_width + gap
@@ -1701,7 +1700,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         origin_x: Pixels,
         bounds: &Bounds<Pixels>,
         last_layout: &LastLayout,
-        line_number_right: Pixels,
+        line_number_right_edge_offset: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) -> FoldIconLayout {
@@ -1768,7 +1767,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             // Use origin_x (unscrolled) so icons stay fixed in the gutter during horizontal scroll.
             let fold_icon_bounds = Bounds::new(
                 point(
-                    origin_x + icon_relative_pos.x + line_number_right,
+                    origin_x + icon_relative_pos.x + line_number_right_edge_offset,
                     bounds.origin.y + icon_relative_pos.y + info.offset_y,
                 ),
                 size(FOLD_ICON_HITBOX_WIDTH, line_height),
@@ -2770,7 +2769,7 @@ pub(super) struct PrepaintState {
     ///
     /// The child is the soft lines.
     line_numbers: Option<Vec<SmallVec<[ShapedLine; 1]>>>,
-    line_number_right: Pixels,
+    line_number_right_edge_offset: Pixels,
     /// Size of the scrollable area by entire lines.
     scroll_size: Size<Pixels>,
     /// Caret bounds for every selection, active flagged.
@@ -3065,8 +3064,8 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
 
         // Wrapping and pointer mapping must share the gutter geometry used for painting.
         let (line_number_width, gutter_gap) =
-            self.layout_line_numbers(&state, &text, &text_style, window, cx);
-        let line_number_right = line_number_width
+            self.layout_line_numbers(&state, &text, &text_style, window);
+        let line_number_right_edge_offset = line_number_width
             - gutter_gap
             - if state.mode.is_folding() {
                 FOLD_ICON_HITBOX_WIDTH
@@ -3505,7 +3504,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             original_x,
             &bounds,
             &last_layout,
-            line_number_right,
+            line_number_right_edge_offset,
             window,
             cx,
         );
@@ -3542,7 +3541,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             last_layout,
             scroll_size,
             line_numbers,
-            line_number_right,
+            line_number_right_edge_offset,
             cursor_infos,
             cursor_scroll_offset,
             current_row,
@@ -3845,7 +3844,10 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 }
 
                 for line in lines {
-                    let number_origin = point(p.x + prepaint.line_number_right - line.width, p.y);
+                    let number_origin = point(
+                        p.x + prepaint.line_number_right_edge_offset - line.width,
+                        p.y,
+                    );
                     _ = line.paint(
                         number_origin,
                         line_height,
@@ -4202,13 +4204,7 @@ mod tests {
     struct MeasuredLineNumbers(Pixels);
 
     impl EditorLineNumberRenderer for MeasuredLineNumbers {
-        fn measure_line_numbers(
-            &self,
-            _: usize,
-            _: &TextStyle,
-            _: &mut Window,
-            _: &App,
-        ) -> (Pixels, Pixels) {
+        fn measure_line_numbers(&self, _: usize, _: &TextStyle, _: &Window) -> (Pixels, Pixels) {
             // Base must consume externally measured geometry without needing
             // the font or spacing configuration that produced it.
             (px(100.), self.0)
@@ -4219,7 +4215,7 @@ mod tests {
             number: usize,
             _: bool,
             _: &TextStyle,
-            window: &mut Window,
+            window: &Window,
             _: &App,
         ) -> ShapedLine {
             let mut style = TextStyle::default();

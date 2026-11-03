@@ -17,8 +17,7 @@ pub trait EditorLineNumberRenderer: 'static {
         &self,
         digit_count: usize,
         body_style: &TextStyle,
-        window: &mut Window,
-        cx: &App,
+        window: &Window,
     ) -> (Pixels, Pixels);
 
     /// Shapes one supported, one-based line number, without padding characters.
@@ -27,7 +26,7 @@ pub trait EditorLineNumberRenderer: 'static {
         number: usize,
         is_active: bool,
         body_style: &TextStyle,
-        window: &mut Window,
+        window: &Window,
         cx: &App,
     ) -> ShapedLine;
 }
@@ -37,8 +36,7 @@ impl EditorLineNumberRenderer for () {
         &self,
         digit_count: usize,
         body_style: &TextStyle,
-        window: &mut Window,
-        _: &App,
+        window: &Window,
     ) -> (Pixels, Pixels) {
         if digit_count == 0 {
             return (px(0.), LINE_NUMBER_RIGHT_MARGIN);
@@ -59,7 +57,7 @@ impl EditorLineNumberRenderer for () {
         number: usize,
         _: bool,
         body_style: &TextStyle,
-        window: &mut Window,
+        window: &Window,
         _: &App,
     ) -> ShapedLine {
         let label: SharedString = number.to_string().into();
