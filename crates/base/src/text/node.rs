@@ -3505,7 +3505,7 @@ fn measure_table_text_columns(
                 .children
                 .children
                 .iter()
-                .any(|node| node.custom.is_some())
+                .any(|node| node.custom.is_some() || node.image.is_some())
             {
                 custom_cells.push((row_ix, ix));
                 continue;
@@ -5330,6 +5330,53 @@ mod tests {
             mono_w,
             CELL_PAD_PX
         );
+    }
+
+    /// A column must fit the images in its cells, as a browser's column fits
+    /// its `<img>`: an image adds no text, so its cell is measured again
+    /// outside the cache, where its explicit size counts. Measured at a
+    /// fixed 100x50 so the test needs no image to load.
+    #[test]
+    fn table_column_of_an_image_cell_fits_the_image_width() {
+        use crate::text::inline::test_draw::in_prepaint;
+        use crate::text::inline::test_fonts::{BODY, WideMonoTextSystem};
+        use gpui::{Refineable as _, TestApp, TextStyle};
+
+        let mut paragraph = Paragraph::default();
+        paragraph.push(InlineNode::image(ImageNode {
+            url: "https://example.com/photo.png".into(),
+            width: Some(px(100.).into()),
+            height: Some(px(50.).into()),
+            ..Default::default()
+        }));
+        let table = Table {
+            children: vec![TableRow {
+                children: vec![TableCell {
+                    children: paragraph,
+                    width: None,
+                }],
+            }],
+            column_aligns: vec![],
+            span: None,
+            table_data_cache: TableDataCache::default(),
+            column_widths_cache: TableColumnWidthsCache::default(),
+        };
+        let node_cx = NodeContext::default();
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            let style = TextStyle {
+                font_family: BODY.into(),
+                font_size: px(20.).into(),
+                ..Default::default()
+            };
+            window.with_text_style(Some(style.subtract(&Default::default())), |window| {
+                assert_eq!(
+                    measure_table_columns(&table, 1, &node_cx, window, cx),
+                    vec![100. + CELL_PAD_PX]
+                );
+            });
+        });
     }
 
     #[test]
