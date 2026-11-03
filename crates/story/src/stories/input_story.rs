@@ -31,6 +31,7 @@ pub struct InputStory {
     custom_input: Entity<InputState>,
     custom_menu_input: Entity<InputState>,
     color_input: Entity<InputState>,
+    metric_input: Entity<InputState>,
     content_type_inputs: Vec<ContentTypeInput>,
     size: gpui_kit::component::Size,
 
@@ -125,6 +126,8 @@ impl InputStory {
         let custom_menu_input = cx
             .new(|cx| InputState::new(window, cx).placeholder("Input with custom context menu..."));
 
+        let metric_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Metric, such as cpu.load"));
         let color_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Type something...")
@@ -287,6 +290,7 @@ impl InputStory {
             custom_input,
             custom_menu_input,
             color_input,
+            metric_input,
             input_text_centered,
             input_text_right,
             content_type_inputs,
@@ -621,6 +625,28 @@ impl Render for InputStory {
             .child(section("Atomic inline tokens")
                 .description("References keep their identity through selection, deletion and undo. Copy returns the underlying text.")
                 .w_full().child(self.tokens.clone()))
+            .child(
+                section("Autocomplete")
+                    .description(
+                        "Suggestions help type a value without limiting it: any text is \
+                         accepted. Down and Up move through the suggestions, Enter accepts \
+                         the highlighted one, and Enter with none highlighted submits the text.",
+                    )
+                    .w_128()
+                    .child(
+                        Autocomplete::new(&self.metric_input)
+                            .with_size(self.size)
+                            .suggestions([
+                                "cpu.load",
+                                "cpu.temperature",
+                                "disk.cpu_wait",
+                                "disk.read_bytes",
+                                "memory.available",
+                                "memory.used",
+                                "network.received_bytes",
+                            ]),
+                    ),
+            )
             .child(
                 section("Completion")
                     .description("The application owns the candidates, the menu and the keys it captures; type $ to complete a variable.")
