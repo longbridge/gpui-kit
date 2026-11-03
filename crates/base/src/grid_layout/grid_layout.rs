@@ -1,48 +1,70 @@
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, App, AppContext as _, CursorStyle, ElementId, Empty, Entity,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Render, RenderOnce,
-    Role, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _, px, relative,
+    AbsoluteLength, AnyElement, App, AppContext as _, CursorStyle, DefiniteLength, Div, ElementId,
+    Empty, Entity, InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels,
+    Refineable as _, Rems, Render, RenderOnce, Role, SharedString, Size, Stateful,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder as _, px, relative, rems, size,
 };
-use gpui_base::{Transition, transition};
 use smallvec::SmallVec;
 
 use super::{
     CONTEXT, GrowHeight, GrowWidth, MoveDown, MoveLeft, MoveRight, MoveUp, SelectNextItem,
     SelectPreviousItem, ShrinkHeight, ShrinkWidth,
-    layout::{self, GridItem},
+    layout::{self, GridArea},
     state::{DragGridItem, GridDrag, GridGesture, GridLayoutState, GridMetrics},
 };
-use crate::{StyledExt as _, ThemeStyled as _, actions::Cancel, theme::ActiveTheme as _};
+use crate::{StyledExt as _, Transition, actions::Cancel, state_style::StateStyle, transition};
 
-/// A grid whose items the user can drag and resize, the way dashboards and
+/// The side of the square, at an item's trailing-bottom corner, that the
+/// pointer resizes the item by.
+const RESIZE_HANDLE_SIZE: Pixels = px(16.);
+
+/// Draws one part of a grid layout — the drop placeholder or a resize handle.
+type PartRenderer = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
+
+/// A grid whose items the user drags and resizes, the way dashboards and
 /// widget boards are arranged.
 ///
 /// The [`GridLayoutState`] owns where every item sits; this element pairs each
-/// [`GridLayoutItem`] with the layout entry of the same id and draws it there.
-/// An item without a layout entry is not drawn.
+/// [`GridItem`] with the [`GridArea`] of the same id and places it there. An
+/// item without an area is not drawn.
+///
+/// Like every Base control it paints nothing of its own. Gaps come from the
+/// element's own `gap`, `gap_x` and `gap_y`, as on a CSS grid; the look of the
+/// drop placeholder, the resize handle, and the dragged and selected items,
+/// and the motion items settle with, come from the builders below. GPUI
+/// Component's `grid_layout` supplies all of them from the theme.
+///
+/// ```ignore
+/// GridLayout::new("dashboard", &state)
+///     .row_height(rems(2.5))
+///     .gap_3()
+///     .item(GridItem::new("revenue").child(revenue_card))
+///     .item(GridItem::new("orders").child(orders_card))
+/// ```
 ///
 /// The grid is as wide as its container and as tall as its rows. Put it in a
 /// scrollable region when the rows can outgrow the window.
 ///
-/// ```ignore
-/// GridLayout::new("dashboard", &state)
-///     .item(GridLayoutItem::new("revenue").child(revenue_card))
-///     .item(GridLayoutItem::new("orders").child(orders_card))
-/// ```
-///
 /// Click an item to select it. With the grid focused, the arrow keys move the
 /// selected item, Shift with the arrow keys resizes it, Tab and Shift-Tab move
-/// the selection, and Escape cancels a drag.
+/// the selection — and out of the grid past either end — and Escape cancels a
+/// drag.
 #[derive(IntoElement)]
 pub struct GridLayout {
     id: ElementId,
     state: Entity<GridLayoutState>,
     accessibility_label: SharedString,
-    items: Vec<GridLayoutItem>,
+    items: Vec<GridItem>,
     style: StyleRefinement,
+    row_height: Rems,
+    transition: Option<Transition>,
+    dragging_item: StyleRefinement,
+    selected_item: StyleRefinement,
+    placeholder: Option<PartRenderer>,
+    resize_handle: Option<PartRenderer>,
 }
 
 impl GridLayout {
@@ -53,6 +75,12 @@ impl GridLayout {
             accessibility_label: "Grid layout".into(),
             items: Vec::new(),
             style: StyleRefinement::default(),
+            row_height: rems(2.5),
+            transition: None,
+            dragging_item: StyleRefinement::default(),
+            selected_item: StyleRefinement::default(),
+            placeholder: None,
+            resize_handle: None,
         }
     }
 
@@ -62,15 +90,62 @@ impl GridLayout {
         self
     }
 
-    /// Add an item, drawn where the layout entry with its id says.
-    pub fn item(mut self, item: GridLayoutItem) -> Self {
+    /// Add an item, placed where the area with its id says.
+    pub fn item(mut self, item: GridItem) -> Self {
         self.items.push(item);
         self
     }
 
     /// Add several items.
-    pub fn items(mut self, items: impl IntoIterator<Item = GridLayoutItem>) -> Self {
+    pub fn items(mut self, items: impl IntoIterator<Item = GridItem>) -> Self {
         self.items.extend(items);
+        self
+    }
+
+    /// The height of one row. Defaults to `2.5rem`, so rows follow the
+    /// application's zoom.
+    pub fn row_height(mut self, row_height: Rems) -> Self {
+        self.row_height = row_height;
+        self
+    }
+
+    /// How items ease into their cells when the layout changes. Without one
+    /// they move at once; the item under the pointer always tracks it exactly.
+    pub fn transition(mut self, transition: Transition) -> Self {
+        self.transition = Some(transition);
+        self
+    }
+
+    /// The style of the item under the pointer, layered over its own.
+    pub fn dragging_item(mut self, build: impl FnOnce(StateStyle) -> StateStyle) -> Self {
+        self.dragging_item = build(StateStyle::default()).into_refinement();
+        self
+    }
+
+    /// The style of the selected item while the grid has keyboard focus,
+    /// layered over its own. A pointer press selects without showing it.
+    pub fn selected_item(mut self, build: impl FnOnce(StateStyle) -> StateStyle) -> Self {
+        self.selected_item = build(StateStyle::default()).into_refinement();
+        self
+    }
+
+    /// What marks the cells the dragged item will land in. It fills those
+    /// cells; without one, nothing marks them.
+    pub fn placeholder(
+        mut self,
+        render: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+    ) -> Self {
+        self.placeholder = Some(Rc::new(render));
+        self
+    }
+
+    /// What a resizable item shows in the trailing-bottom corner the pointer
+    /// resizes it by. The corner works without one.
+    pub fn resize_handle(
+        mut self,
+        render: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+    ) -> Self {
+        self.resize_handle = Some(Rc::new(render));
         self
     }
 }
@@ -81,13 +156,12 @@ impl Styled for GridLayout {
     }
 }
 
-/// One item of a [`GridLayout`], paired with its layout entry by id.
+/// One item of a [`GridLayout`], paired with the [`GridArea`] of the same id.
 ///
-/// The item fills the cells its entry spans. It paints nothing of its own, so
-/// its content supplies the surface — usually a card or group box. Style the
-/// item to round it to match, so the drag placeholder and focus ring follow the
-/// same corners.
-pub struct GridLayoutItem {
+/// The item fills the cells its area covers. Style it to match its content —
+/// round it like the card inside it, say — so the dragged and selected styles
+/// follow the same corners.
+pub struct GridItem {
     id: SharedString,
     accessibility_label: Option<SharedString>,
     handle_only: bool,
@@ -95,7 +169,7 @@ pub struct GridLayoutItem {
     children: SmallVec<[AnyElement; 2]>,
 }
 
-impl GridLayoutItem {
+impl GridItem {
     pub fn new(id: impl Into<SharedString>) -> Self {
         Self {
             id: id.into(),
@@ -112,88 +186,49 @@ impl GridLayoutItem {
         self
     }
 
-    /// Move the item only from a [`GridDragHandle`] inside it, leaving the rest
-    /// of its content free for its own pointer interaction.
+    /// Move the item only from a [`grid_drag_handle`] inside it, leaving the
+    /// rest of its content free for its own pointer interaction.
     pub fn drag_handle_only(mut self, handle_only: bool) -> Self {
         self.handle_only = handle_only;
         self
     }
 }
 
-impl Styled for GridLayoutItem {
+impl Styled for GridItem {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }
 }
 
-impl ParentElement for GridLayoutItem {
+impl ParentElement for GridItem {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
     }
 }
 
 /// The part of an item the pointer moves it by, for an item built with
-/// [`GridLayoutItem::drag_handle_only`] — a card's header, say.
+/// [`GridItem::drag_handle_only`] — a card's header, say.
 ///
 /// ```ignore
-/// GridLayoutItem::new("orders")
+/// GridItem::new("orders")
 ///     .drag_handle_only(true)
-///     .child(GridDragHandle::new(&state, "orders").child("Orders"))
+///     .child(grid_drag_handle(&state, "orders").child("Orders"))
 ///     .child(orders_table)
 /// ```
-#[derive(IntoElement)]
-pub struct GridDragHandle {
-    state: Entity<GridLayoutState>,
-    item: SharedString,
-    style: StyleRefinement,
-    children: SmallVec<[AnyElement; 2]>,
-}
-
-impl GridDragHandle {
-    pub fn new(state: &Entity<GridLayoutState>, item: impl Into<SharedString>) -> Self {
-        Self {
-            state: state.clone(),
-            item: item.into(),
-            style: StyleRefinement::default(),
-            children: SmallVec::new(),
-        }
-    }
-}
-
-impl Styled for GridDragHandle {
-    fn style(&mut self) -> &mut StyleRefinement {
-        &mut self.style
-    }
-}
-
-impl ParentElement for GridDragHandle {
-    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.children.extend(elements);
-    }
-}
-
-impl RenderOnce for GridDragHandle {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let id = ElementId::NamedChild(
-            Arc::new(ElementId::from(self.item.clone())),
+pub fn grid_drag_handle(
+    state: &Entity<GridLayoutState>,
+    item: impl Into<SharedString>,
+) -> Stateful<Div> {
+    let item = item.into();
+    div()
+        .id(ElementId::NamedChild(
+            Arc::new(ElementId::from(item.clone())),
             "grid-drag-handle".into(),
-        );
-        div()
-            .id(id)
-            .refine_style(&self.style)
-            .children(self.children)
-            .when(
-                self.state
-                    .read(cx)
-                    .is_gesture_allowed(&self.item, GridGesture::Move),
-                |this| {
-                    this.on_drag(
-                        drag_payload(&self.state, &self.item, GridGesture::Move),
-                        start_drag(&self.state),
-                    )
-                },
-            )
-    }
+        ))
+        .on_drag(
+            drag_payload(state, &item, GridGesture::Move),
+            start_drag(state),
+        )
 }
 
 /// The view GPUI draws under the pointer during a drag. The dragged item
@@ -225,10 +260,26 @@ fn start_drag(
     let state = state.clone();
     move |drag, _, window, cx| {
         state.update(cx, |state, cx| {
-            state.begin_drag(drag.item.clone(), drag.gesture, window, cx)
+            // A handle may outlive the permission to move: then the drag
+            // carries nothing and the layout ignores it.
+            if state.is_gesture_allowed(&drag.item, drag.gesture) {
+                state.begin_drag(drag.item.clone(), drag.gesture, window, cx)
+            }
         });
         cx.new(|_| GridDragPreview)
     }
+}
+
+/// Resolve the grid's gap from its own style: the column gap across, the row
+/// gap down. A gap given as a fraction has nothing to be a fraction of here,
+/// so it counts as none.
+fn resolve_gap(style: &StyleRefinement, rem_size: Pixels) -> Size<Pixels> {
+    let resolve = |length: Option<DefiniteLength>| match length {
+        Some(DefiniteLength::Absolute(AbsoluteLength::Pixels(pixels))) => pixels,
+        Some(DefiniteLength::Absolute(AbsoluteLength::Rems(rems))) => rems.to_pixels(rem_size),
+        _ => px(0.),
+    };
+    size(resolve(style.gap.width), resolve(style.gap.height))
 }
 
 /// Where an item is drawn, as fractions of the column track for its
@@ -245,13 +296,14 @@ struct ItemFrame {
 }
 
 impl ItemFrame {
-    fn of(item: &GridItem, columns: usize, row_height: Pixels, gap: Pixels) -> Self {
+    fn of(area: &GridArea, columns: usize, row_height: Pixels, gap: Size<Pixels>) -> Self {
         let columns = columns.max(1) as f32;
         Self {
-            left: item.x as f32 / columns,
-            width: item.w as f32 / columns,
-            top: (row_height + gap) * item.y as f32,
-            height: (row_height * item.h as f32 + gap * item.h.saturating_sub(1) as f32)
+            left: area.col as f32 / columns,
+            width: area.col_span as f32 / columns,
+            top: (row_height + gap.height) * area.row as f32,
+            height: (row_height * area.row_span as f32
+                + gap.height * area.row_span.saturating_sub(1) as f32)
                 .max(px(0.)),
         }
     }
@@ -259,32 +311,35 @@ impl ItemFrame {
     /// The frame of an item under the pointer: its start position plus the
     /// pointer's travel, kept inside the grid.
     fn following(drag: &GridDrag, metrics: GridMetrics, columns: usize) -> Option<Self> {
-        let start = drag.start_item()?;
-        let track = metrics.width + metrics.gap;
+        let start = drag.start_area()?;
+        let track = metrics.width + metrics.gap.width;
         if track <= px(0.) {
             return None;
         }
-        let (mut left, mut top) = (metrics.left(start.x), metrics.top(start.y));
-        let (mut width, mut height) = (metrics.span_width(start.w), metrics.span_height(start.h));
+        let (mut left, mut top) = (metrics.left(start.col), metrics.top(start.row));
+        let (mut width, mut height) = (
+            metrics.span_width(start.col_span),
+            metrics.span_height(start.row_span),
+        );
         match drag.gesture {
             GridGesture::Move => {
                 left = (left + drag.delta.x).clamp(px(0.), (metrics.width - width).max(px(0.)));
                 top = (top + drag.delta.y).max(px(0.));
             }
             GridGesture::Resize => {
-                let (min_w, min_h) = start.clamp_size(1, 1, columns);
-                let (max_w, _) = start.clamp_size(usize::MAX, 1, columns);
+                let (min_cols, min_rows) = start.clamp_size(1, 1, columns);
+                let (max_cols, _) = start.clamp_size(usize::MAX, 1, columns);
                 width = (width + drag.delta.x)
-                    .clamp(metrics.span_width(min_w), metrics.span_width(max_w));
-                height = (height + drag.delta.y).max(metrics.span_height(min_h));
-                if let Some(max_h) = start.max_h {
-                    height = height.min(metrics.span_height(max_h));
+                    .clamp(metrics.span_width(min_cols), metrics.span_width(max_cols));
+                height = (height + drag.delta.y).max(metrics.span_height(min_rows));
+                if let Some(max_rows) = start.max_row_span {
+                    height = height.min(metrics.span_height(max_rows));
                 }
             }
         }
         Some(Self {
             left: left / track,
-            width: (width + metrics.gap) / track,
+            width: (width + metrics.gap.width) / track,
             top,
             height,
         })
@@ -295,10 +350,10 @@ impl RenderOnce for GridLayout {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.read(cx);
         let grid = state_id(&self.state);
-        let columns = state.columns();
-        let gap = state.resolved_gap(cx);
-        let row_height = state.resolved_row_height(window);
-        let displayed = state.displayed_items(cx).to_vec();
+        let columns = state.column_count();
+        let gap = resolve_gap(&self.style, window.rem_size());
+        let row_height = self.row_height.to_pixels(window.rem_size());
+        let displayed = state.displayed_areas(cx).to_vec();
         let drag = state.active_drag(cx);
         let active = drag.map(|drag| (drag.item.clone(), drag.gesture));
         let following = drag.and_then(|drag| ItemFrame::following(drag, drag.metrics?, columns));
@@ -306,10 +361,12 @@ impl RenderOnce for GridLayout {
         let show_selection = state.is_keyboard_active() && focus_handle.is_focused(window);
         let selected = state.selected_item().cloned();
         let rows = layout::rows(&displayed);
-        let height = (row_height * rows as f32 + gap * rows.saturating_sub(1) as f32).max(px(0.));
-
-        let motion = cx.theme().motion_tokens();
-        let settle = Transition::new(motion.duration_normal).easing(motion.easing_move.clone());
+        let height =
+            (row_height * rows as f32 + gap.height * rows.saturating_sub(1) as f32).max(px(0.));
+        let settle = self
+            .transition
+            .clone()
+            .unwrap_or_else(|| Transition::new(Duration::ZERO));
 
         let mut items = self.items;
         // The item under the pointer paints last, above the ones it displaces.
@@ -320,43 +377,44 @@ impl RenderOnce for GridLayout {
         let placeholder = active.as_ref().and_then(|(id, _)| {
             displayed
                 .iter()
-                .find(|item| &item.id == id)
-                .map(|item| ItemFrame::of(item, columns, row_height, gap))
+                .find(|area| &area.id == id)
+                .map(|area| ItemFrame::of(area, columns, row_height, gap))
         });
-        let placeholder_radius = items
-            .iter()
-            .find(|item| active.as_ref().is_some_and(|(id, _)| id == &item.id))
-            .and_then(|item| item.style.corner_radii.top_left)
-            .unwrap_or_else(|| cx.theme().radius_lg.into());
 
+        let parts = ItemParts {
+            state: &self.state,
+            gap,
+            dragging_item: &self.dragging_item,
+            selected_item: &self.selected_item,
+            resize_handle: self.resize_handle.as_ref(),
+        };
         let rendered = items
             .into_iter()
             .filter_map(|item| {
-                let entry = displayed.iter().find(|entry| entry.id == item.id)?;
+                let area = displayed.iter().find(|area| area.id == item.id)?;
                 let gesture = active
                     .as_ref()
                     .filter(|(id, _)| id == &item.id)
                     .map(|(_, gesture)| *gesture);
                 let target = match (gesture, following) {
                     (Some(_), Some(frame)) => frame,
-                    _ => ItemFrame::of(entry, columns, row_height, gap),
+                    _ => ItemFrame::of(area, columns, row_height, gap),
                 };
                 // The item under the pointer tracks it exactly; everything else,
                 // and that item once released, eases into its cells.
                 let policy = if gesture.is_some() {
-                    Transition::new(std::time::Duration::ZERO)
+                    Transition::new(Duration::ZERO)
                 } else {
                     settle.clone()
                 };
                 let frame = animate_frame(&grid, &item.id, target, policy, window, cx);
-                Some(render_item(
-                    &self.state,
+                let selected = selected.as_ref() == Some(&area.id);
+                Some(parts.render(
                     item,
-                    entry,
+                    area,
                     frame,
-                    gap,
                     gesture,
-                    selected.as_ref() == Some(&entry.id),
+                    selected,
                     show_selection,
                     window,
                     cx,
@@ -376,9 +434,9 @@ impl RenderOnce for GridLayout {
                 .h(height)
                 .on_drag_move(window.listener_for(
                     &self.state,
-                    |state, event: &gpui::DragMoveEvent<DragGridItem>, window, cx| {
+                    move |state, event: &gpui::DragMoveEvent<DragGridItem>, _, cx| {
                         if event.drag(cx).grid == cx.entity_id() {
-                            state.drag_to(event.event.position, event.bounds, window, cx);
+                            state.drag_to(event.event.position, event.bounds, row_height, gap, cx);
                         }
                     },
                 ))
@@ -441,41 +499,41 @@ impl RenderOnce for GridLayout {
                     window,
                     |state, _: &SelectPreviousItem, cx| state.select_adjacent(false, cx),
                 ))
-                // The column track: as wide as the grid plus one gap, so each
-                // column owns an equal fraction of it and every item reaches
-                // its cells with relative units alone. Each item gives the
-                // trailing gap back as padding.
+                // The column track: as wide as the grid plus one column gap, so
+                // each column owns an equal fraction of it and every item
+                // reaches its cells with relative units alone. Each item gives
+                // the trailing gap back as padding.
                 .child(
                     div()
                         .absolute()
                         .top_0()
                         .left_0()
                         .bottom_0()
-                        .right(-gap)
-                        .when_some(placeholder, |track, frame| {
-                            track.child(
-                                div()
-                                    .absolute()
-                                    .left(relative(frame.left))
-                                    .w(relative(frame.width))
-                                    .top(frame.top)
-                                    .h(frame.height)
-                                    .pr(gap)
-                                    .child(
-                                        div()
-                                            .size_full()
-                                            .rounded(placeholder_radius)
-                                            .bg(cx.theme().primary.opacity(0.08))
-                                            .border_1()
-                                            .border_dashed()
-                                            .border_color(cx.theme().primary.opacity(0.5)),
-                                    ),
-                            )
-                        })
+                        .right(-gap.width)
+                        .when_some(
+                            placeholder.zip(self.placeholder.as_ref()),
+                            |track, (frame, render)| {
+                                track.child(
+                                    place(div(), frame, gap)
+                                        .child(div().size_full().child(render(window, cx))),
+                                )
+                            },
+                        )
                         .children(rendered),
                 ),
         )
     }
+}
+
+/// Position an element over the cells `frame` describes.
+fn place<E: Styled>(element: E, frame: ItemFrame, gap: Size<Pixels>) -> E {
+    element
+        .absolute()
+        .left(relative(frame.left))
+        .w(relative(frame.width))
+        .top(frame.top)
+        .h(frame.height)
+        .pr(gap.width)
 }
 
 /// A keyboard command on the selected item, which passes the key on when it
@@ -528,127 +586,121 @@ fn animate_frame(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_item(
-    state: &Entity<GridLayoutState>,
-    item: GridLayoutItem,
-    entry: &GridItem,
-    frame: ItemFrame,
-    gap: Pixels,
-    gesture: Option<GridGesture>,
-    selected: bool,
-    show_selection: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    let snapshot = state.read(cx);
-    let movable = !item.handle_only && snapshot.is_gesture_allowed(&entry.id, GridGesture::Move);
-    let resizable = snapshot.is_gesture_allowed(&entry.id, GridGesture::Resize);
-    let group: SharedString = format!("grid-layout-item-{}", entry.id).into();
-    let item_id = ElementId::NamedChild(
-        Arc::new(ElementId::from(entry.id.clone())),
-        "grid-layout-item".into(),
-    );
-
-    div()
-        .id(item_id)
-        .role(Role::Group)
-        .when_some(item.accessibility_label, |this, label| {
-            this.aria_label(label)
-        })
-        .aria_selected(selected)
-        .absolute()
-        .left(relative(frame.left))
-        .w(relative(frame.width))
-        .top(frame.top)
-        .h(frame.height)
-        .pr(gap)
-        .on_mouse_down(MouseButton::Left, {
-            let state = state.clone();
-            let id = entry.id.clone();
-            move |event, window, cx| {
-                state.update(cx, |state, cx| state.press(&id, event.position, window, cx))
-            }
-        })
-        .when(movable, |this| {
-            this.on_drag(
-                drag_payload(state, &entry.id, GridGesture::Move),
-                start_drag(state),
-            )
-        })
-        .child(
-            div()
-                .group(group.clone())
-                .relative()
-                .size_full()
-                .refine_style(&item.style)
-                .when(gesture.is_some(), |this| this.shadow_lg())
-                .children(item.children)
-                .when(resizable, |this| {
-                    this.child(resize_grip(state, &entry.id, group, gesture.is_some(), cx))
-                })
-                .when(selected && show_selection, |this| {
-                    this.focus_ring_style(window, cx)
-                }),
-        )
-        .into_any_element()
+/// What every item of one grid is rendered with.
+struct ItemParts<'a> {
+    state: &'a Entity<GridLayoutState>,
+    gap: Size<Pixels>,
+    dragging_item: &'a StyleRefinement,
+    selected_item: &'a StyleRefinement,
+    resize_handle: Option<&'a PartRenderer>,
 }
 
-/// The trailing-bottom corner the pointer resizes an item by.
-fn resize_grip(
-    state: &Entity<GridLayoutState>,
-    item: &SharedString,
-    group: SharedString,
-    engaged: bool,
-    cx: &App,
-) -> impl IntoElement {
-    let color = cx.theme().muted_foreground;
-    div()
-        .id(ElementId::NamedChild(
-            Arc::new(ElementId::from(item.clone())),
-            "grid-layout-resize".into(),
-        ))
-        .absolute()
-        .right_0()
-        .bottom_0()
-        .size_4()
-        .cursor(CursorStyle::ResizeUpLeftDownRight)
-        // The press resizes; it must not also begin the item's move.
-        .on_mouse_down(MouseButton::Left, {
-            let state = state.clone();
-            let id = item.clone();
-            move |event, window, cx| {
-                cx.stop_propagation();
-                state.update(cx, |state, cx| state.press(&id, event.position, window, cx))
-            }
-        })
-        .on_drag(
-            drag_payload(state, item, GridGesture::Resize),
-            start_drag(state),
-        )
-        .child(
-            div()
-                .absolute()
-                .right(px(3.))
-                .bottom(px(3.))
-                .size(px(6.))
-                .border_r_2()
-                .border_b_2()
-                .border_color(color.opacity(if engaged { 0.9 } else { 0.35 }))
-                .group_hover(group, |this| this.border_color(color.opacity(0.9))),
-        )
+impl ItemParts<'_> {
+    #[allow(clippy::too_many_arguments)]
+    fn render(
+        &self,
+        item: GridItem,
+        area: &GridArea,
+        frame: ItemFrame,
+        gesture: Option<GridGesture>,
+        selected: bool,
+        show_selection: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let state = self.state;
+        let snapshot = state.read(cx);
+        let movable = !item.handle_only && snapshot.is_gesture_allowed(&area.id, GridGesture::Move);
+        let resizable = snapshot.is_gesture_allowed(&area.id, GridGesture::Resize);
+        let item_id = ElementId::NamedChild(
+            Arc::new(ElementId::from(area.id.clone())),
+            "grid-layout-item".into(),
+        );
+        let mut surface_style = item.style;
+        if selected && show_selection {
+            surface_style.refine(self.selected_item);
+        }
+        if gesture.is_some() {
+            surface_style.refine(self.dragging_item);
+        }
+
+        place(div().id(item_id), frame, self.gap)
+            .role(Role::Group)
+            .when_some(item.accessibility_label, |this, label| {
+                this.aria_label(label)
+            })
+            .aria_selected(selected)
+            .on_mouse_down(MouseButton::Left, {
+                let state = state.clone();
+                let id = area.id.clone();
+                move |event, window, cx| {
+                    state.update(cx, |state, cx| state.press(&id, event.position, window, cx))
+                }
+            })
+            .when(movable, |this| {
+                this.on_drag(
+                    drag_payload(state, &area.id, GridGesture::Move),
+                    start_drag(state),
+                )
+            })
+            .child(
+                div()
+                    .relative()
+                    .size_full()
+                    .refine_style(&surface_style)
+                    .children(item.children)
+                    .when(resizable, |this| {
+                        this.child(self.resize_corner(&area.id, window, cx))
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// The trailing-bottom corner the pointer resizes an item by.
+    fn resize_corner(
+        &self,
+        item: &SharedString,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
+        let state = self.state;
+        div()
+            .id(ElementId::NamedChild(
+                Arc::new(ElementId::from(item.clone())),
+                "grid-layout-resize".into(),
+            ))
+            .absolute()
+            .right_0()
+            .bottom_0()
+            .size(RESIZE_HANDLE_SIZE)
+            .cursor(CursorStyle::ResizeUpLeftDownRight)
+            // The press resizes; it must not also begin the item's move.
+            .on_mouse_down(MouseButton::Left, {
+                let state = state.clone();
+                let id = item.clone();
+                move |event, window, cx| {
+                    cx.stop_propagation();
+                    state.update(cx, |state, cx| state.press(&id, event.position, window, cx))
+                }
+            })
+            .on_drag(
+                drag_payload(state, item, GridGesture::Resize),
+                start_drag(state),
+            )
+            .when_some(self.resize_handle, |this, render| {
+                this.child(render(window, cx))
+            })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use gpui::{
-        Context, Modifiers, MouseButton, Point, TestAppContext, VisualTestContext, point, rems,
-    };
+    use gpui::{Context, Modifiers, Point, TestAppContext, VisualTestContext, point};
 
     use super::*;
-    use crate::grid_layout::GridLayoutEvent;
+    use crate::grid_layout::{GridLayoutEvent, layout::tests::area};
 
     /// Twelve 90px columns with 10px gaps: column `n` starts at `100 * n`.
     const WIDTH: Pixels = px(1190.);
@@ -661,8 +713,9 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().w(WIDTH).child(
                 GridLayout::new("grid", &self.state)
-                    .item(GridLayoutItem::new("a").child(div().size_full()))
-                    .item(GridLayoutItem::new("b").child(div().size_full())),
+                    .gap(px(10.))
+                    .item(GridItem::new("a").child(div().size_full()))
+                    .item(GridItem::new("b").child(div().size_full())),
             )
         }
     }
@@ -678,12 +731,7 @@ mod tests {
         let state = cx.update(|cx| {
             cx.new(|cx| {
                 GridLayoutState::new(cx)
-                    .with_gap(px(10.))
-                    .with_row_height(rems(2.5))
-                    .with_items([
-                        GridItem::new("a", 0, 0, 4, 2),
-                        GridItem::new("b", 4, 0, 4, 2),
-                    ])
+                    .default_areas([area("a", 0, 0, 4, 2), area("b", 4, 0, 4, 2)])
             })
         });
         let events = Rc::new(RefCell::new(Vec::new()));
@@ -720,8 +768,8 @@ mod tests {
         draw(cx);
     }
 
-    fn place(state: &Entity<GridLayoutState>, cx: &mut VisualTestContext, id: &str) -> GridItem {
-        state.read_with(cx, |state, _| state.item(id).unwrap().clone())
+    fn place_of(state: &Entity<GridLayoutState>, cx: &mut VisualTestContext, id: &str) -> GridArea {
+        state.read_with(cx, |state, _| state.area(id).unwrap().clone())
     }
 
     #[gpui::test]
@@ -734,13 +782,13 @@ mod tests {
             &[point(px(60.), px(30.)), point(px(450.), px(30.))],
         );
         // While the pointer is down, only the preview changes.
-        assert_eq!(place(&state, cx, "a").x, 0);
+        assert_eq!(place_of(&state, cx, "a").col, 0);
         assert!(events.borrow().is_empty());
 
         release(cx, point(px(450.), px(30.)));
-        let (a, b) = (place(&state, cx, "a"), place(&state, cx, "b"));
-        assert_eq!((a.x, a.y), (4, 0));
-        assert_eq!((b.x, b.y), (4, 2));
+        let (a, b) = (place_of(&state, cx, "a"), place_of(&state, cx, "b"));
+        assert_eq!((a.col, a.row), (4, 0));
+        assert_eq!((b.col, b.row), (4, 2));
         assert_eq!(events.borrow().len(), 1);
         assert!(state.read_with(cx, |state, _| state.active_item().is_none()));
     }
@@ -749,7 +797,7 @@ mod tests {
     fn dragging_the_corner_resizes_an_item(cx: &mut TestAppContext) {
         let (state, events, cx) = harness(cx);
         let row_height = cx.update(|window, _| rems(2.5).to_pixels(window.rem_size()));
-        // Item `b` spans 400..790 across and two rows down.
+        // Item `b` spans 400..790 across and two rows, with one gap, down.
         let corner = point(px(784.), row_height * 2. + px(4.));
 
         drag(
@@ -762,9 +810,9 @@ mod tests {
         );
         release(cx, corner + point(px(200.), px(0.)));
 
-        let b = place(&state, cx, "b");
-        assert_eq!((b.x, b.w, b.h), (4, 6, 2));
-        assert_eq!(place(&state, cx, "a").x, 0);
+        let b = place_of(&state, cx, "b");
+        assert_eq!((b.col, b.col_span, b.row_span), (4, 6, 2));
+        assert_eq!(place_of(&state, cx, "a").col, 0);
         assert_eq!(events.borrow().len(), 1);
     }
 
@@ -782,12 +830,12 @@ mod tests {
         draw(cx);
         release(cx, point(px(450.), px(30.)));
 
-        assert_eq!(place(&state, cx, "a").x, 0);
+        assert_eq!(place_of(&state, cx, "a").col, 0);
         assert!(events.borrow().is_empty());
     }
 
     #[gpui::test]
-    fn arrow_keys_move_the_clicked_item(cx: &mut TestAppContext) {
+    fn arrow_keys_move_the_clicked_item_and_tab_leaves_the_grid(cx: &mut TestAppContext) {
         let (state, events, cx) = harness(cx);
 
         cx.simulate_click(point(px(50.), px(30.)), Modifiers::default());
@@ -795,20 +843,42 @@ mod tests {
         cx.simulate_keystrokes("right shift-down");
         draw(cx);
 
-        let a = place(&state, cx, "a");
-        assert_eq!((a.x, a.h), (1, 3));
+        let a = place_of(&state, cx, "a");
+        assert_eq!((a.col, a.row_span), (1, 3));
         assert_eq!(events.borrow().len(), 2);
+
+        // Tab reaches `b`, and the next Tab is not the grid's to handle.
+        cx.simulate_keystrokes("tab");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_item().cloned()),
+            Some("b".into())
+        );
+        cx.simulate_keystrokes("tab");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_item().cloned()),
+            Some("b".into())
+        );
     }
 
     #[gpui::test]
     fn test_grid_layout_builder(cx: &mut TestAppContext) {
         let state = cx.update(|cx| cx.new(|cx| GridLayoutState::new(cx)));
         let grid = GridLayout::new("grid", &state)
-            .item(GridLayoutItem::new("a").drag_handle_only(true))
-            .items([GridLayoutItem::new("b"), GridLayoutItem::new("c")])
-            .p_2();
+            .row_height(rems(3.))
+            .gap_x(px(8.))
+            .gap_y(px(12.))
+            .dragging_item(|style| style.opacity(0.5))
+            .selected_item(|style| style.opacity(0.75))
+            .placeholder(|_, _| div().into_any_element())
+            .resize_handle(|_, _| div().into_any_element())
+            .item(GridItem::new("a").drag_handle_only(true))
+            .items([GridItem::new("b"), GridItem::new("c")]);
         assert_eq!(grid.items.len(), 3);
         assert!(grid.items[0].handle_only);
-        assert!(grid.style.padding.left.is_some());
+        assert_eq!(grid.row_height, rems(3.));
+        assert_eq!(grid.dragging_item.opacity, Some(0.5));
+        assert_eq!(grid.selected_item.opacity, Some(0.75));
+        assert!(grid.placeholder.is_some() && grid.resize_handle.is_some());
+        assert_eq!(resolve_gap(&grid.style, px(16.)), size(px(8.), px(12.)));
     }
 }

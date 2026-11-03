@@ -5,41 +5,45 @@
 use gpui::{Axis, SharedString};
 use serde::{Deserialize, Serialize};
 
-/// One item's place in a grid layout, measured in grid cells.
+/// Where one item sits in a grid layout, in zero-based grid cells.
 ///
-/// `x` counts columns from the leading edge and `y` counts rows from the top;
-/// `w` and `h` are the item's span. A layout is a list of these, one per item,
-/// keyed by `id`, which is what an application persists to restore a user's
-/// arrangement.
+/// `col` and `row` are the item's leading column and top row, counted from
+/// zero; `col_span` and `row_span` are how many columns and rows it covers.
+/// Unlike GPUI's `col_start`, which names a one-based CSS grid line, `col` is
+/// a cell index, so a layout reads the same in code and in its saved form.
+///
+/// A layout is a list of areas keyed by `id`, which is what an application
+/// persists to restore a user's arrangement. Every field after the place has a
+/// serde default, so a layout saved with only the place still loads.
 ///
 /// ```ignore
-/// GridItem::new("revenue", 0, 0, 6, 4).with_min_size(3, 2)
+/// GridArea::new("revenue").col_span(6).row_span(4).min_span(3, 2)
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct GridItem {
-    /// The stable identity that pairs this entry with its rendered item.
+pub struct GridArea {
+    /// The stable identity that pairs this area with its [`GridItem`](super::GridItem).
     pub id: SharedString,
-    /// The leading column.
-    pub x: usize,
-    /// The top row.
-    pub y: usize,
-    /// The number of columns spanned; at least 1.
-    pub w: usize,
-    /// The number of rows spanned; at least 1.
-    pub h: usize,
-    /// The narrowest a resize may make the item.
+    /// The leading column, from zero.
+    pub col: usize,
+    /// The top row, from zero.
+    pub row: usize,
+    /// The number of columns covered; at least 1.
+    pub col_span: usize,
+    /// The number of rows covered; at least 1.
+    pub row_span: usize,
+    /// The fewest columns a resize may leave the item.
     #[serde(default = "one")]
-    pub min_w: usize,
-    /// The shortest a resize may make the item.
+    pub min_col_span: usize,
+    /// The fewest rows a resize may leave the item.
     #[serde(default = "one")]
-    pub min_h: usize,
-    /// The widest a resize may make the item; `None` allows the full width.
+    pub min_row_span: usize,
+    /// The most columns a resize may give the item; `None` allows the full width.
     #[serde(default)]
-    pub max_w: Option<usize>,
-    /// The tallest a resize may make the item; `None` is unbounded.
+    pub max_col_span: Option<usize>,
+    /// The most rows a resize may give the item; `None` is unbounded.
     #[serde(default)]
-    pub max_h: Option<usize>,
+    pub max_row_span: Option<usize>,
     /// A locked item is neither dragged, resized nor pushed; other items flow
     /// around it.
     #[serde(default)]
@@ -50,91 +54,116 @@ fn one() -> usize {
     1
 }
 
-impl GridItem {
-    /// An item at column `x`, row `y`, spanning `w` columns and `h` rows.
-    pub fn new(id: impl Into<SharedString>, x: usize, y: usize, w: usize, h: usize) -> Self {
+impl GridArea {
+    /// A one-cell area at the top-leading corner; place and size it with the
+    /// builders.
+    pub fn new(id: impl Into<SharedString>) -> Self {
         Self {
             id: id.into(),
-            x,
-            y,
-            w: w.max(1),
-            h: h.max(1),
-            min_w: 1,
-            min_h: 1,
-            max_w: None,
-            max_h: None,
+            col: 0,
+            row: 0,
+            col_span: 1,
+            row_span: 1,
+            min_col_span: 1,
+            min_row_span: 1,
+            max_col_span: None,
+            max_row_span: None,
             locked: false,
         }
     }
 
-    /// The smallest span a resize may reach.
-    pub fn with_min_size(mut self, w: usize, h: usize) -> Self {
-        self.min_w = w.max(1);
-        self.min_h = h.max(1);
+    /// The leading column, from zero.
+    pub fn col(mut self, col: usize) -> Self {
+        self.col = col;
         self
     }
 
-    /// The largest span a resize may reach.
-    pub fn with_max_size(mut self, w: usize, h: usize) -> Self {
-        self.max_w = Some(w.max(1));
-        self.max_h = Some(h.max(1));
+    /// The top row, from zero.
+    pub fn row(mut self, row: usize) -> Self {
+        self.row = row;
         self
     }
 
-    /// Lock the item in place; see [`GridItem::locked`].
-    pub fn with_locked(mut self, locked: bool) -> Self {
+    /// How many columns the item covers.
+    pub fn col_span(mut self, col_span: usize) -> Self {
+        self.col_span = col_span.max(1);
+        self
+    }
+
+    /// How many rows the item covers.
+    pub fn row_span(mut self, row_span: usize) -> Self {
+        self.row_span = row_span.max(1);
+        self
+    }
+
+    /// The fewest columns and rows a resize may leave the item.
+    pub fn min_span(mut self, col_span: usize, row_span: usize) -> Self {
+        self.min_col_span = col_span.max(1);
+        self.min_row_span = row_span.max(1);
+        self
+    }
+
+    /// The most columns and rows a resize may give the item.
+    pub fn max_span(mut self, col_span: usize, row_span: usize) -> Self {
+        self.max_col_span = Some(col_span.max(1));
+        self.max_row_span = Some(row_span.max(1));
+        self
+    }
+
+    /// Lock the item in place; see [`GridArea::locked`].
+    pub fn locked(mut self, locked: bool) -> Self {
         self.locked = locked;
         self
     }
 
     /// The row just below the item.
-    pub fn bottom(&self) -> usize {
-        self.y + self.h
+    pub(crate) fn row_end(&self) -> usize {
+        self.row + self.row_span
     }
 
     /// The column just past the item's trailing edge.
-    pub fn right(&self) -> usize {
-        self.x + self.w
+    pub(crate) fn col_end(&self) -> usize {
+        self.col + self.col_span
     }
 
     fn rect(&self) -> Rect {
         Rect {
-            x: self.x,
-            y: self.y,
-            w: self.w,
-            h: self.h,
+            col: self.col,
+            row: self.row,
+            col_span: self.col_span,
+            row_span: self.row_span,
         }
     }
 
     /// Clamp a requested span to the item's limits and the grid's width.
     pub(crate) fn clamp_size(&self, w: usize, h: usize, columns: usize) -> (usize, usize) {
-        let max_w = self
-            .max_w
+        let max_col_span = self
+            .max_col_span
             .unwrap_or(usize::MAX)
-            .min(columns.saturating_sub(self.x))
+            .min(columns.saturating_sub(self.col))
             .max(1);
-        let max_h = self.max_h.unwrap_or(usize::MAX).max(1);
+        let max_row_span = self.max_row_span.unwrap_or(usize::MAX).max(1);
         (
-            w.clamp(self.min_w.min(max_w), max_w),
-            h.clamp(self.min_h.min(max_h), max_h),
+            w.clamp(self.min_col_span.min(max_col_span), max_col_span),
+            h.clamp(self.min_row_span.min(max_row_span), max_row_span),
         )
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Rect {
-    x: usize,
-    y: usize,
-    w: usize,
-    h: usize,
+    col: usize,
+    row: usize,
+    col_span: usize,
+    row_span: usize,
 }
 
 impl Rect {
     fn overlaps(&self, other: &Rect) -> bool {
-        self.x < other.x + other.w
-            && other.x < self.x + self.w
-            && self.y < other.y + other.h
-            && other.y < self.y + self.h
+        self.col < other.col + other.col_span
+            && other.col < self.col + self.col_span
+            && self.row < other.row + other.row_span
+            && other.row < self.row + self.row_span
     }
 }
 
@@ -150,25 +179,29 @@ pub(crate) struct LayoutRules {
 }
 
 /// The number of rows a layout occupies.
-pub(crate) fn rows(items: &[GridItem]) -> usize {
-    items.iter().map(GridItem::bottom).max().unwrap_or(0)
+pub(crate) fn rows(items: &[GridArea]) -> usize {
+    items.iter().map(GridArea::row_end).max().unwrap_or(0)
 }
 
 /// Bring a layout into a valid state: every item fits the columns, no locked
 /// items overlap, and the remainder are compacted around them.
-pub(crate) fn normalize(items: &mut [GridItem], rules: LayoutRules) {
+pub(crate) fn normalize(items: &mut [GridArea], rules: LayoutRules) {
     let columns = rules.columns.max(1);
     for item in items.iter_mut() {
         // An item's own limits first, which may have changed since it was
         // placed, then the grid's width.
-        let max_w = item.max_w.unwrap_or(usize::MAX).max(1);
-        let max_h = item.max_h.unwrap_or(usize::MAX).max(1);
-        item.w = item.w.clamp(item.min_w.min(max_w), max_w);
-        item.h = item.h.clamp(item.min_h.min(max_h), max_h);
-        item.w = item.w.clamp(1, columns);
-        item.h = item.h.max(1);
-        if item.right() > columns {
-            item.x = columns - item.w;
+        let max_col_span = item.max_col_span.unwrap_or(usize::MAX).max(1);
+        let max_row_span = item.max_row_span.unwrap_or(usize::MAX).max(1);
+        item.col_span = item
+            .col_span
+            .clamp(item.min_col_span.min(max_col_span), max_col_span);
+        item.row_span = item
+            .row_span
+            .clamp(item.min_row_span.min(max_row_span), max_row_span);
+        item.col_span = item.col_span.clamp(1, columns);
+        item.row_span = item.row_span.max(1);
+        if item.col_end() > columns {
+            item.col = columns - item.col_span;
         }
     }
 
@@ -180,7 +213,7 @@ pub(crate) fn normalize(items: &mut [GridItem], rules: LayoutRules) {
         .collect::<Vec<_>>();
     for (n, &ix) in locked.iter().enumerate() {
         while let Some(other) = first_collision(items, &locked[..n], items[ix].rect(), ix) {
-            items[ix].y = items[other].bottom();
+            items[ix].row = items[other].row_end();
         }
     }
 
@@ -190,7 +223,7 @@ pub(crate) fn normalize(items: &mut [GridItem], rules: LayoutRules) {
 /// Compact the layout, or without compaction just push overlapping items
 /// down. `priority` names an item that keeps its place when it overlaps
 /// another — the one the user is moving.
-fn settle(items: &mut [GridItem], rules: LayoutRules, priority: Option<usize>) {
+fn settle(items: &mut [GridArea], rules: LayoutRules, priority: Option<usize>) {
     if rules.compaction.is_some() {
         compact(items, rules);
         return;
@@ -206,14 +239,14 @@ fn settle(items: &mut [GridItem], rules: LayoutRules, priority: Option<usize>) {
             continue;
         }
         while let Some(other) = first_collision(items, &placed, items[ix].rect(), ix) {
-            items[ix].y = items[other].bottom();
+            items[ix].row = items[other].row_end();
         }
         placed.push(ix);
     }
 }
 
 /// Float every unlocked item toward `axis` as far as the others allow.
-pub(crate) fn compact(items: &mut [GridItem], rules: LayoutRules) {
+pub(crate) fn compact(items: &mut [GridArea], rules: LayoutRules) {
     let Some(axis) = rules.compaction else {
         return;
     };
@@ -230,50 +263,54 @@ pub(crate) fn compact(items: &mut [GridItem], rules: LayoutRules) {
     }
 }
 
-fn compact_item(items: &mut [GridItem], placed: &[usize], ix: usize, axis: Axis, columns: usize) {
+fn compact_item(items: &mut [GridArea], placed: &[usize], ix: usize, axis: Axis, columns: usize) {
     match axis {
         Axis::Vertical => {
             // Start no lower than the bottom of what is already placed, so a
             // tall gap closes in one step instead of row by row.
-            let floor = placed.iter().map(|&p| items[p].bottom()).max().unwrap_or(0);
-            items[ix].y = items[ix].y.min(floor);
+            let floor = placed
+                .iter()
+                .map(|&p| items[p].row_end())
+                .max()
+                .unwrap_or(0);
+            items[ix].row = items[ix].row.min(floor);
             loop {
-                while items[ix].y > 0 {
+                while items[ix].row > 0 {
                     let mut probe = items[ix].rect();
-                    probe.y -= 1;
+                    probe.row -= 1;
                     if first_collision(items, placed, probe, ix).is_some() {
                         break;
                     }
-                    items[ix].y -= 1;
+                    items[ix].row -= 1;
                 }
                 match first_collision(items, placed, items[ix].rect(), ix) {
-                    Some(other) => items[ix].y = items[other].bottom(),
+                    Some(other) => items[ix].row = items[other].row_end(),
                     None => break,
                 }
             }
         }
         Axis::Horizontal => loop {
-            while items[ix].x > 0 {
+            while items[ix].col > 0 {
                 let mut probe = items[ix].rect();
-                probe.x -= 1;
+                probe.col -= 1;
                 if first_collision(items, placed, probe, ix).is_some() {
                     break;
                 }
-                items[ix].x -= 1;
+                items[ix].col -= 1;
             }
             // Past the trailing edge, wrap to the next row and try again from
             // the leading edge.
-            if items[ix].right() > columns {
-                items[ix].x = 0;
-                items[ix].y += 1;
+            if items[ix].col_end() > columns {
+                items[ix].col = 0;
+                items[ix].row += 1;
                 continue;
             }
             match first_collision(items, placed, items[ix].rect(), ix) {
                 Some(other) => {
-                    items[ix].x = items[other].right();
-                    if items[ix].right() > columns {
-                        items[ix].x = 0;
-                        items[ix].y += 1;
+                    items[ix].col = items[other].col_end();
+                    if items[ix].col_end() > columns {
+                        items[ix].col = 0;
+                        items[ix].row += 1;
                     }
                 }
                 None => break,
@@ -289,22 +326,22 @@ fn compact_item(items: &mut [GridItem], placed: &[usize], ix: usize, axis: Axis,
 /// from the previous step of the gesture, so items the pointer merely passed
 /// over return to where they were.
 pub(crate) fn move_item(
-    items: &[GridItem],
+    items: &[GridArea],
     id: &str,
     x: usize,
     y: usize,
     rules: LayoutRules,
-) -> Option<Vec<GridItem>> {
+) -> Option<Vec<GridArea>> {
     let ix = items.iter().position(|item| item.id.as_ref() == id)?;
     if items[ix].locked {
         return None;
     }
     let mut next = items.to_vec();
-    let x = x.min(rules.columns.saturating_sub(next[ix].w));
+    let x = x.min(rules.columns.saturating_sub(next[ix].col_span));
     if rules.prevent_collision {
         let mut probe = next[ix].rect();
-        probe.x = x;
-        probe.y = y;
+        probe.col = x;
+        probe.row = y;
         if any_collision(&next, probe, ix) {
             return None;
         }
@@ -318,12 +355,12 @@ pub(crate) fn move_item(
 /// whatever it grows over, then compact. Returns `None` when the rules refuse
 /// the resize.
 pub(crate) fn resize_item(
-    items: &[GridItem],
+    items: &[GridArea],
     id: &str,
     w: usize,
     h: usize,
     rules: LayoutRules,
-) -> Option<Vec<GridItem>> {
+) -> Option<Vec<GridArea>> {
     let ix = items.iter().position(|item| item.id.as_ref() == id)?;
     if items[ix].locked {
         return None;
@@ -334,10 +371,10 @@ pub(crate) fn resize_item(
     // A locked neighbour is a wall. Rather than refuse the whole gesture, try
     // keeping the other dimension where it started.
     let start = next[ix].clone();
-    let fits = |w: usize, h: usize, next: &[GridItem]| {
+    let fits = |w: usize, h: usize, next: &[GridArea]| {
         let probe = Rect {
-            w,
-            h,
+            col_span: w,
+            row_span: h,
             ..start.rect()
         };
         !next
@@ -345,12 +382,12 @@ pub(crate) fn resize_item(
             .enumerate()
             .any(|(other, item)| other != ix && item.locked && probe.overlaps(&item.rect()))
     };
-    let (w, h) = [(w, h), (w, start.h), (start.w, h)]
+    let (w, h) = [(w, h), (w, start.row_span), (start.col_span, h)]
         .into_iter()
         .find(|&(w, h)| fits(w, h, &next))?;
 
-    next[ix].w = w;
-    next[ix].h = h;
+    next[ix].col_span = w;
+    next[ix].row_span = h;
     if rules.prevent_collision && any_collision(&next, next[ix].rect(), ix) {
         return None;
     }
@@ -358,7 +395,7 @@ pub(crate) fn resize_item(
     let mut push = Push::new(rules, next.len());
     push.moved[ix] = true;
     for other in collisions(&next, sorted_indices(&next, rules.compaction), ix) {
-        let below = next[ix].bottom();
+        let below = next[ix].row_end();
         push.move_element(&mut next, other, None, Some(below), false);
     }
     settle(&mut next, rules, Some(ix));
@@ -383,7 +420,7 @@ impl Push {
 
     fn move_element(
         &mut self,
-        items: &mut [GridItem],
+        items: &mut [GridArea],
         ix: usize,
         x: Option<usize>,
         y: Option<usize>,
@@ -392,14 +429,14 @@ impl Push {
         if items[ix].locked {
             return;
         }
-        let (old_x, old_y) = (items[ix].x, items[ix].y);
+        let (old_x, old_y) = (items[ix].col, items[ix].row);
         let x = x.unwrap_or(old_x);
         let y = y.unwrap_or(old_y);
         if (x, y) == (old_x, old_y) {
             return;
         }
-        items[ix].x = x;
-        items[ix].y = y;
+        items[ix].col = x;
+        items[ix].row = y;
         self.moved[ix] = true;
 
         // Moving toward the compaction direction, resolve the nearest
@@ -427,7 +464,7 @@ impl Push {
     }
 
     /// Move `mover` clear of `obstacle`.
-    fn away(&mut self, items: &mut [GridItem], obstacle: usize, mover: usize, user_action: bool) {
+    fn away(&mut self, items: &mut [GridArea], obstacle: usize, mover: usize, user_action: bool) {
         let horizontal = self.rules.compaction == Some(Axis::Horizontal);
         if user_action {
             // A dragged item that lands on another first tries to trade places
@@ -435,18 +472,18 @@ impl Push {
             // the pushed item goes there instead of being shoved further away.
             let (o, m) = (&items[obstacle], &items[mover]);
             let probe = Rect {
-                x: if horizontal {
-                    o.x.saturating_sub(m.w)
+                col: if horizontal {
+                    o.col.saturating_sub(m.col_span)
                 } else {
-                    m.x
+                    m.col
                 },
-                y: if horizontal {
-                    m.y
+                row: if horizontal {
+                    m.row
                 } else {
-                    o.y.saturating_sub(m.h)
+                    o.row.saturating_sub(m.row_span)
                 },
-                w: m.w,
-                h: m.h,
+                col_span: m.col_span,
+                row_span: m.row_span,
             };
             let blocker = (0..items.len()).find(|&other| {
                 other != mover && other != obstacle && probe.overlaps(&items[other].rect())
@@ -455,9 +492,9 @@ impl Push {
             match blocker {
                 None if !probe.overlaps(&obstacle_rect) => {
                     let (x, y) = if horizontal {
-                        (Some(probe.x), None)
+                        (Some(probe.col), None)
                     } else {
-                        (None, Some(probe.y))
+                        (None, Some(probe.row))
                     };
                     return self.move_element(items, mover, x, y, false);
                 }
@@ -467,9 +504,9 @@ impl Push {
 
         // Otherwise push it past the obstacle along the compaction axis.
         let (x, y) = if horizontal {
-            (Some(items[obstacle].right()), None)
+            (Some(items[obstacle].col_end()), None)
         } else {
-            (None, Some(items[obstacle].bottom()))
+            (None, Some(items[obstacle].row_end()))
         };
         self.move_element(items, mover, x, y, false);
     }
@@ -477,30 +514,30 @@ impl Push {
 
 /// Item indices in the order compaction visits them: row-major for vertical
 /// layouts and column-major for horizontal ones.
-fn sorted_indices(items: &[GridItem], compaction: Option<Axis>) -> Vec<usize> {
+fn sorted_indices(items: &[GridArea], compaction: Option<Axis>) -> Vec<usize> {
     let mut order = (0..items.len()).collect::<Vec<_>>();
     match compaction {
-        Some(Axis::Horizontal) => order.sort_by_key(|&ix| (items[ix].x, items[ix].y)),
-        _ => order.sort_by_key(|&ix| (items[ix].y, items[ix].x)),
+        Some(Axis::Horizontal) => order.sort_by_key(|&ix| (items[ix].col, items[ix].row)),
+        _ => order.sort_by_key(|&ix| (items[ix].row, items[ix].col)),
     }
     order
 }
 
-fn first_collision(items: &[GridItem], among: &[usize], rect: Rect, skip: usize) -> Option<usize> {
+fn first_collision(items: &[GridArea], among: &[usize], rect: Rect, skip: usize) -> Option<usize> {
     among
         .iter()
         .copied()
         .find(|&other| other != skip && rect.overlaps(&items[other].rect()))
 }
 
-fn any_collision(items: &[GridItem], rect: Rect, skip: usize) -> bool {
+fn any_collision(items: &[GridArea], rect: Rect, skip: usize) -> bool {
     items
         .iter()
         .enumerate()
         .any(|(other, item)| other != skip && rect.overlaps(&item.rect()))
 }
 
-fn collisions(items: &[GridItem], order: Vec<usize>, ix: usize) -> Vec<usize> {
+fn collisions(items: &[GridArea], order: Vec<usize>, ix: usize) -> Vec<usize> {
     let rect = items[ix].rect();
     order
         .into_iter()
@@ -509,8 +546,23 @@ fn collisions(items: &[GridItem], order: Vec<usize>, ix: usize) -> Vec<usize> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// An area at `col`, `row` covering `col_span` by `row_span` cells.
+    pub(crate) fn area(
+        id: impl Into<SharedString>,
+        col: usize,
+        row: usize,
+        col_span: usize,
+        row_span: usize,
+    ) -> GridArea {
+        GridArea::new(id)
+            .col(col)
+            .row(row)
+            .col_span(col_span)
+            .row_span(row_span)
+    }
 
     fn rules(compaction: Option<Axis>) -> LayoutRules {
         LayoutRules {
@@ -520,16 +572,16 @@ mod tests {
         }
     }
 
-    fn at<'a>(items: &'a [GridItem], id: &str) -> &'a GridItem {
+    fn at<'a>(items: &'a [GridArea], id: &str) -> &'a GridArea {
         items.iter().find(|item| item.id.as_ref() == id).unwrap()
     }
 
-    fn pos(items: &[GridItem], id: &str) -> (usize, usize) {
+    fn pos(items: &[GridArea], id: &str) -> (usize, usize) {
         let item = at(items, id);
-        (item.x, item.y)
+        (item.col, item.row)
     }
 
-    fn assert_no_overlaps(items: &[GridItem]) {
+    fn assert_no_overlaps(items: &[GridArea]) {
         for (a, first) in items.iter().enumerate() {
             for second in &items[a + 1..] {
                 assert!(
@@ -543,24 +595,31 @@ mod tests {
     }
 
     #[test]
-    fn test_grid_item_builder() {
-        let item = GridItem::new("a", 1, 2, 0, 3)
-            .with_min_size(2, 0)
-            .with_max_size(6, 4)
-            .with_locked(true);
-        assert_eq!((item.x, item.y, item.w, item.h), (1, 2, 1, 3));
-        assert_eq!((item.min_w, item.min_h), (2, 1));
-        assert_eq!((item.max_w, item.max_h), (Some(6), Some(4)));
+    fn test_grid_area_builder() {
+        let item = GridArea::new("a")
+            .col(1)
+            .row(2)
+            .col_span(0)
+            .row_span(3)
+            .min_span(2, 0)
+            .max_span(6, 4)
+            .locked(true);
+        assert_eq!(
+            (item.col, item.row, item.col_span, item.row_span),
+            (1, 2, 1, 3)
+        );
+        assert_eq!((item.min_col_span, item.min_row_span), (2, 1));
+        assert_eq!((item.max_col_span, item.max_row_span), (Some(6), Some(4)));
         assert!(item.locked);
-        assert_eq!((item.right(), item.bottom()), (2, 5));
+        assert_eq!((item.col_end(), item.row_end()), (2, 5));
     }
 
     #[test]
     fn vertical_compaction_floats_items_up() {
         let mut items = vec![
-            GridItem::new("a", 0, 3, 4, 2),
-            GridItem::new("b", 0, 9, 4, 2),
-            GridItem::new("c", 4, 7, 4, 1),
+            area("a", 0, 3, 4, 2),
+            area("b", 0, 9, 4, 2),
+            area("c", 4, 7, 4, 1),
         ];
         compact(&mut items, rules(Some(Axis::Vertical)));
         assert_eq!(pos(&items, "a"), (0, 0));
@@ -570,10 +629,7 @@ mod tests {
 
     #[test]
     fn horizontal_compaction_floats_items_leading() {
-        let mut items = vec![
-            GridItem::new("a", 5, 0, 2, 2),
-            GridItem::new("b", 9, 0, 2, 2),
-        ];
+        let mut items = vec![area("a", 5, 0, 2, 2), area("b", 9, 0, 2, 2)];
         compact(&mut items, rules(Some(Axis::Horizontal)));
         assert_eq!(pos(&items, "a"), (0, 0));
         assert_eq!(pos(&items, "b"), (2, 0));
@@ -582,8 +638,8 @@ mod tests {
     #[test]
     fn compaction_flows_around_locked_items() {
         let mut items = vec![
-            GridItem::new("wall", 0, 0, 12, 1).with_locked(true),
-            GridItem::new("a", 0, 0, 4, 2),
+            area("wall", 0, 0, 12, 1).locked(true),
+            area("a", 0, 0, 4, 2),
         ];
         normalize(&mut items, rules(Some(Axis::Vertical)));
         assert_eq!(pos(&items, "wall"), (0, 0));
@@ -593,50 +649,44 @@ mod tests {
     #[test]
     fn normalize_fits_items_to_the_columns_and_removes_overlaps() {
         let mut items = vec![
-            GridItem::new("wide", 4, 0, 20, 1),
-            GridItem::new("a", 0, 0, 2, 1),
-            GridItem::new("b", 0, 0, 2, 1),
+            area("wide", 4, 0, 20, 1),
+            area("a", 0, 0, 2, 1),
+            area("b", 0, 0, 2, 1),
         ];
         normalize(&mut items, rules(None));
-        assert_eq!(at(&items, "wide").w, 12);
-        assert_eq!(at(&items, "wide").x, 0);
+        assert_eq!(at(&items, "wide").col_span, 12);
+        assert_eq!(at(&items, "wide").col, 0);
         assert_no_overlaps(&items);
     }
 
     #[test]
     fn normalize_applies_changed_size_limits() {
-        let mut items = vec![
-            GridItem::new("a", 0, 0, 2, 6)
-                .with_min_size(4, 1)
-                .with_max_size(12, 3),
-        ];
+        let mut items = vec![area("a", 0, 0, 2, 6).min_span(4, 1).max_span(12, 3)];
         normalize(&mut items, rules(None));
-        assert_eq!((items[0].w, items[0].h), (4, 3));
+        assert_eq!((items[0].col_span, items[0].row_span), (4, 3));
     }
 
-    /// `GridItem` is what applications persist, so its JSON is a format
-    /// contract: field names stay put, and a layout saved before the limits
-    /// existed — only the place — still loads.
+    /// `GridArea` is what applications persist, so its JSON is a format
+    /// contract: field names stay put, and a layout saved with only the place
+    /// still loads.
     #[test]
-    fn grid_item_json_is_a_stable_format() {
-        let saved = r#"{"id":"a","x":1,"y":2,"w":3,"h":4}"#;
-        let item: GridItem = serde_json::from_str(saved).unwrap();
-        assert_eq!(item, GridItem::new("a", 1, 2, 3, 4));
+    fn grid_area_json_is_a_stable_format() {
+        let saved = r#"{"id":"a","col":1,"row":2,"col_span":3,"row_span":4}"#;
+        let item: GridArea = serde_json::from_str(saved).unwrap();
+        assert_eq!(item, area("a", 1, 2, 3, 4));
         assert_eq!(
-            serde_json::to_value(GridItem::new("a", 1, 2, 3, 4).with_locked(true)).unwrap(),
+            serde_json::to_value(area("a", 1, 2, 3, 4).locked(true)).unwrap(),
             serde_json::json!({
-                "id": "a", "x": 1, "y": 2, "w": 3, "h": 4,
-                "min_w": 1, "min_h": 1, "max_w": null, "max_h": null, "locked": true
+                "id": "a", "col": 1, "row": 2, "col_span": 3, "row_span": 4,
+                "min_col_span": 1, "min_row_span": 1,
+                "max_col_span": null, "max_row_span": null, "locked": true
             })
         );
     }
 
     #[test]
     fn moving_onto_an_item_pushes_it_down() {
-        let items = vec![
-            GridItem::new("a", 0, 0, 4, 2),
-            GridItem::new("b", 4, 0, 4, 2),
-        ];
+        let items = vec![area("a", 0, 0, 4, 2), area("b", 4, 0, 4, 2)];
         let next = move_item(&items, "a", 4, 1, rules(None)).unwrap();
         assert_eq!(pos(&next, "a"), (4, 1));
         assert_eq!(pos(&next, "b"), (4, 3));
@@ -645,10 +695,7 @@ mod tests {
 
     #[test]
     fn moving_up_onto_an_item_swaps_places() {
-        let items = vec![
-            GridItem::new("a", 0, 0, 4, 2),
-            GridItem::new("b", 0, 2, 4, 2),
-        ];
+        let items = vec![area("a", 0, 0, 4, 2), area("b", 0, 2, 4, 2)];
         let next = move_item(&items, "b", 0, 0, rules(Some(Axis::Vertical))).unwrap();
         assert_eq!(pos(&next, "b"), (0, 0));
         assert_eq!(pos(&next, "a"), (0, 2));
@@ -658,9 +705,9 @@ mod tests {
     #[test]
     fn moves_and_resizes_never_leave_overlaps() {
         let mut items = (0..7)
-            .map(|n| GridItem::new(format!("item-{n}"), (n % 3) * 4, (n / 3) * 2, 4, 2 + n % 2))
+            .map(|n| area(format!("item-{n}"), (n % 3) * 4, (n / 3) * 2, 4, 2 + n % 2))
             .collect::<Vec<_>>();
-        items.push(GridItem::new("wall", 5, 5, 2, 1).with_locked(true));
+        items.push(area("wall", 5, 5, 2, 1).locked(true));
         for compaction in [None, Some(Axis::Vertical), Some(Axis::Horizontal)] {
             let rules = rules(compaction);
             let mut start = items.clone();
@@ -682,17 +729,14 @@ mod tests {
 
     #[test]
     fn a_move_is_clamped_to_the_columns() {
-        let items = vec![GridItem::new("a", 0, 0, 4, 2)];
+        let items = vec![area("a", 0, 0, 4, 2)];
         let next = move_item(&items, "a", 11, 0, rules(None)).unwrap();
         assert_eq!(pos(&next, "a"), (8, 0));
     }
 
     #[test]
     fn locked_items_neither_move_nor_get_pushed() {
-        let items = vec![
-            GridItem::new("wall", 4, 0, 4, 2).with_locked(true),
-            GridItem::new("a", 0, 0, 4, 2),
-        ];
+        let items = vec![area("wall", 4, 0, 4, 2).locked(true), area("a", 0, 0, 4, 2)];
         assert!(move_item(&items, "wall", 0, 4, rules(None)).is_none());
         let next = move_item(&items, "a", 4, 0, rules(Some(Axis::Vertical))).unwrap();
         assert_eq!(pos(&next, "wall"), (4, 0));
@@ -701,10 +745,7 @@ mod tests {
 
     #[test]
     fn prevent_collision_refuses_overlapping_moves() {
-        let items = vec![
-            GridItem::new("a", 0, 0, 4, 2),
-            GridItem::new("b", 4, 0, 4, 2),
-        ];
+        let items = vec![area("a", 0, 0, 4, 2), area("b", 4, 0, 4, 2)];
         let rules = LayoutRules {
             prevent_collision: true,
             ..rules(None)
@@ -719,25 +760,20 @@ mod tests {
     #[test]
     fn resize_respects_limits_and_pushes_neighbours() {
         let items = vec![
-            GridItem::new("a", 0, 0, 4, 2)
-                .with_min_size(2, 2)
-                .with_max_size(8, 4),
-            GridItem::new("b", 4, 0, 4, 2),
+            area("a", 0, 0, 4, 2).min_span(2, 2).max_span(8, 4),
+            area("b", 4, 0, 4, 2),
         ];
         let next = resize_item(&items, "a", 20, 1, rules(Some(Axis::Vertical))).unwrap();
-        assert_eq!((at(&next, "a").w, at(&next, "a").h), (8, 2));
+        assert_eq!((at(&next, "a").col_span, at(&next, "a").row_span), (8, 2));
         assert_eq!(pos(&next, "b"), (4, 2));
         assert_no_overlaps(&next);
     }
 
     #[test]
     fn resize_stops_at_locked_items() {
-        let items = vec![
-            GridItem::new("a", 0, 0, 4, 2),
-            GridItem::new("wall", 4, 0, 4, 2).with_locked(true),
-        ];
+        let items = vec![area("a", 0, 0, 4, 2), area("wall", 4, 0, 4, 2).locked(true)];
         let next = resize_item(&items, "a", 6, 3, rules(None)).unwrap();
-        assert_eq!((at(&next, "a").w, at(&next, "a").h), (4, 3));
+        assert_eq!((at(&next, "a").col_span, at(&next, "a").row_span), (4, 3));
         assert_no_overlaps(&next);
     }
 }

@@ -58,10 +58,6 @@ import {
   EmptyTitle,
   Field,
   Form,
-  GridDragHandle,
-  GridLayout,
-  GridLayoutItem,
-  GridLayoutState,
   GroupBox,
   HoverCard,
   Icon,
@@ -298,7 +294,6 @@ export function initializeRegisteredExamples() {
   retained("calendar-one", () => CalendarState());
   retained("calendar-two", () => CalendarState());
   retained("carousel-basic", () => CarouselState(3));
-  retained("grid-layout-dashboard", () => GridLayoutState());
   retained("message-scroller", () => MessageScrollerState(3));
   retained("form-account", () => InputState("Acme Cloud"));
   retained("form-region", () => InputState("us-east-1"));
@@ -2014,99 +2009,6 @@ export function registeredExamples(surface, cx) {
                   .child(new CarouselPaginationItem("story-page-1", 0, carouselState).child("1"))
                   .child(new CarouselPaginationItem("story-page-2", 1, carouselState).child("2"))
                   .child(new CarouselPaginationItem("story-page-3", 2, carouselState).child("3")),
-              ),
-          ),
-        },
-      ];
-    }
-    case "GridLayout": {
-      const gridState = retained("grid-layout-dashboard", () => GridLayoutState());
-      const tile = (title, value) =>
-        v_flex()
-          .size_full()
-          .p(12)
-          .gap(4)
-          .rounded(8)
-          .border(1)
-          .border_color(cx.theme().colors.border)
-          .bg(cx.theme().colors.background)
-          .child(div().text_sm().text_color(cx.theme().colors.muted_foreground).child(title))
-          .child(div().text_size(20).font_semibold().child(value));
-      const layout = /** @type {string} */ (state("grid-layout-saved", ""));
-      return [
-        {
-          label: "Dashboard",
-          description:
-            "Drag a tile to move it and its corner to resize it. Notes is locked; the others flow around it.",
-          element: asElement(
-            v_flex()
-              .w_full()
-              .gap(8)
-              .child(
-                new GridLayout("story-grid-layout", gridState)
-                  .accessibility_label("Dashboard")
-                  .columns(6)
-                  .row_height(2.5)
-                  .on_change((items, cx) =>
-                    setState(
-                      "grid-layout-saved",
-                      items.map(([id, x, y, w, h]) => `${id} (${x}, ${y}) ${w}×${h}`).join("  ·  "),
-                      cx,
-                    ),
-                  )
-                  .child(
-                    new GridLayoutItem("revenue", gridState)
-                      .accessibility_label("Revenue")
-                      .cell(0, 0, 4, 3)
-                      .min_size(2, 2)
-                      .child(tile("Revenue", "$48,210")),
-                  )
-                  .child(
-                    new GridLayoutItem("orders", gridState)
-                      .accessibility_label("Orders")
-                      .cell(4, 0, 2, 2)
-                      .child(tile("Orders", "1,284")),
-                  )
-                  .child(
-                    new GridLayoutItem("visitors", gridState)
-                      .accessibility_label("Visitors")
-                      .cell(0, 3, 3, 2)
-                      .drag_handle_only(true)
-                      .child(
-                        v_flex()
-                          .size_full()
-                          .overflow_hidden()
-                          .rounded(8)
-                          .border(1)
-                          .border_color(cx.theme().colors.border)
-                          .bg(cx.theme().colors.background)
-                          .child(
-                            new GridDragHandle(gridState, "visitors")
-                              .px(12)
-                              .py(6)
-                              .border_b(1)
-                              .border_color(cx.theme().colors.border)
-                              .bg(cx.theme().colors.muted)
-                              .text_sm()
-                              .text_color(cx.theme().colors.muted_foreground)
-                              .child("Visitors"),
-                          )
-                          .child(div().p(12).text_size(20).font_semibold().child("23,906")),
-                      ),
-                  )
-                  .child(
-                    new GridLayoutItem("notes", gridState)
-                      .accessibility_label("Notes")
-                      .cell(4, 2, 2, 3)
-                      .locked(true)
-                      .child(tile("Notes", "Pinned")),
-                  ),
-              )
-              .child(
-                div()
-                  .text_xs()
-                  .text_color(cx.theme().colors.muted_foreground)
-                  .child(layout || "Rearrange a tile to see the saved layout."),
               ),
           ),
         },

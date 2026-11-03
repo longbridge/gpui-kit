@@ -1,19 +1,19 @@
 use gpui::{
-    App, Axis, Bounds, Context, EntityId, EventEmitter, FocusHandle, Pixels, Point, Rems,
-    SharedString, Window, px, rems,
+    App, Axis, Bounds, Context, EntityId, EventEmitter, FocusHandle, Pixels, Point, SharedString,
+    Size, Window, px,
 };
 
-use super::layout::{self, GridItem, LayoutRules};
-use crate::theme::ActiveTheme as _;
+use super::layout::{self, GridArea, LayoutRules};
 
 /// Emitted by [`GridLayoutState`] when the layout changes.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum GridLayoutEvent {
     /// A drag, a resize, a keyboard command, or [`GridLayoutState::move_item`]
     /// or [`GridLayoutState::resize_item`] produced a new layout, carried here
-    /// so the application can persist it. [`GridLayoutState::set_items`] does
+    /// so the application can persist it. [`GridLayoutState::set_areas`] does
     /// not emit this: the application already holds the layout it set.
-    Change(Vec<GridItem>),
+    Change(Vec<GridArea>),
 }
 
 /// What a pointer gesture on an item is doing to it.
@@ -33,61 +33,70 @@ pub(crate) struct DragGridItem {
 
 /// Pixel geometry of a grid at one container width.
 ///
-/// Columns share the width left over by the gaps between them, so an item
-/// spanning `w` columns is `w` column widths plus the `w - 1` gaps it covers.
+/// Columns share the width left over by the column gaps between them, so an
+/// item spanning `n` columns is `n` column widths plus the `n - 1` gaps it
+/// covers; rows work the same way with the row gap.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GridMetrics {
     pub(crate) width: Pixels,
     pub(crate) column_width: Pixels,
     pub(crate) row_height: Pixels,
-    pub(crate) gap: Pixels,
+    /// The column gap across, the row gap down.
+    pub(crate) gap: Size<Pixels>,
 }
 
 impl GridMetrics {
-    pub(crate) fn new(width: Pixels, columns: usize, row_height: Pixels, gap: Pixels) -> Self {
+    pub(crate) fn new(
+        width: Pixels,
+        columns: usize,
+        row_height: Pixels,
+        gap: Size<Pixels>,
+    ) -> Self {
         let columns = columns.max(1) as f32;
         Self {
             width,
-            column_width: ((width - gap * (columns - 1.)) / columns).max(px(0.)),
+            column_width: ((width - gap.width * (columns - 1.)) / columns).max(px(0.)),
             row_height,
             gap,
         }
     }
 
-    pub(crate) fn left(&self, x: usize) -> Pixels {
-        (self.column_width + self.gap) * x as f32
+    pub(crate) fn left(&self, col: usize) -> Pixels {
+        (self.column_width + self.gap.width) * col as f32
     }
 
-    pub(crate) fn top(&self, y: usize) -> Pixels {
-        (self.row_height + self.gap) * y as f32
+    pub(crate) fn top(&self, row: usize) -> Pixels {
+        (self.row_height + self.gap.height) * row as f32
     }
 
-    pub(crate) fn span_width(&self, w: usize) -> Pixels {
-        (self.column_width * w as f32 + self.gap * w.saturating_sub(1) as f32).max(px(0.))
+    pub(crate) fn span_width(&self, col_span: usize) -> Pixels {
+        (self.column_width * col_span as f32 + self.gap.width * col_span.saturating_sub(1) as f32)
+            .max(px(0.))
     }
 
-    pub(crate) fn span_height(&self, h: usize) -> Pixels {
-        (self.row_height * h as f32 + self.gap * h.saturating_sub(1) as f32).max(px(0.))
+    pub(crate) fn span_height(&self, row_span: usize) -> Pixels {
+        (self.row_height * row_span as f32 + self.gap.height * row_span.saturating_sub(1) as f32)
+            .max(px(0.))
     }
 
     /// The column whose leading edge is nearest `left`.
     fn column_at(&self, left: Pixels) -> usize {
-        snap(left, self.column_width + self.gap)
+        snap(left, self.column_width + self.gap.width)
     }
 
     /// The row whose top edge is nearest `top`.
     fn row_at(&self, top: Pixels) -> usize {
-        snap(top, self.row_height + self.gap)
+        snap(top, self.row_height + self.gap.height)
     }
 
     /// The number of columns whose span is nearest `width`.
     fn columns_spanning(&self, width: Pixels) -> usize {
-        snap(width + self.gap, self.column_width + self.gap).max(1)
+        snap(width + self.gap.width, self.column_width + self.gap.width).max(1)
     }
 
     /// The number of rows whose span is nearest `height`.
     fn rows_spanning(&self, height: Pixels) -> usize {
-        snap(height + self.gap, self.row_height + self.gap).max(1)
+        snap(height + self.gap.height, self.row_height + self.gap.height).max(1)
     }
 }
 
@@ -105,9 +114,9 @@ pub(crate) struct GridDrag {
     /// The pointer where the gesture began, in window coordinates.
     origin: Point<Pixels>,
     /// The layout when the gesture began; every step is computed from it.
-    start: Vec<GridItem>,
+    start: Vec<GridArea>,
     /// Where the items would settle if the pointer were released now.
-    pub(crate) preview: Vec<GridItem>,
+    pub(crate) preview: Vec<GridArea>,
     /// The pointer's travel since `origin`.
     pub(crate) delta: Point<Pixels>,
     /// The grid's geometry, known once the pointer first moves.
@@ -116,33 +125,29 @@ pub(crate) struct GridDrag {
 
 impl GridDrag {
     /// The dragged item as it was when the gesture began.
-    pub(crate) fn start_item(&self) -> Option<&GridItem> {
-        self.start.iter().find(|item| item.id == self.item)
+    pub(crate) fn start_area(&self) -> Option<&GridArea> {
+        self.start.iter().find(|area| area.id == self.item)
     }
 }
 
-/// The state of a [`GridLayout`](super::GridLayout): the items' places, the
-/// grid's rules, and any gesture in progress.
+/// The state of a [`GridLayout`](super::GridLayout): the items' areas, the
+/// rules the layout settles under, and any gesture in progress.
 ///
 /// The application owns the layout. Create the state with the grid's rules,
-/// then its items, and subscribe to [`GridLayoutEvent::Change`] to persist what
-/// the user arranges.
+/// then its areas, and subscribe to [`GridLayoutEvent::Change`] to persist
+/// what the user arranges.
 ///
 /// ```ignore
 /// let state = cx.new(|cx| {
-///     GridLayoutState::new(cx)
-///         .with_columns(12)
-///         .with_items(vec![
-///             GridItem::new("revenue", 0, 0, 8, 4),
-///             GridItem::new("orders", 8, 0, 4, 4),
-///         ])
+///     GridLayoutState::new(cx).cols(12).default_areas([
+///         GridArea::new("revenue").col_span(8).row_span(4),
+///         GridArea::new("orders").col(8).col_span(4).row_span(4),
+///     ])
 /// });
 /// ```
 pub struct GridLayoutState {
-    items: Vec<GridItem>,
+    areas: Vec<GridArea>,
     columns: usize,
-    row_height: Rems,
-    gap: Option<Pixels>,
     compaction: Option<Axis>,
     prevent_collision: bool,
     draggable: bool,
@@ -150,7 +155,7 @@ pub struct GridLayoutState {
     focus_handle: FocusHandle,
     selected: Option<SharedString>,
     /// Whether the last interaction came from the keyboard, which is when the
-    /// selected item shows a focus ring.
+    /// selected item shows its selected style.
     keyboard_active: bool,
     /// Where the pointer last pressed an item, so a drag starts from the press
     /// rather than from wherever GPUI's drag threshold was crossed.
@@ -164,10 +169,8 @@ impl GridLayoutState {
     /// An empty, 12-column grid that compacts vertically.
     pub fn new(cx: &mut App) -> Self {
         Self {
-            items: Vec::new(),
+            areas: Vec::new(),
             columns: 12,
-            row_height: rems(2.5),
-            gap: None,
             compaction: Some(Axis::Vertical),
             prevent_collision: false,
             draggable: true,
@@ -180,38 +183,16 @@ impl GridLayoutState {
         }
     }
 
-    /// Set the items, settling them under the rules set so far: overlaps are
-    /// pushed apart and, with compaction on, gaps close. Set the rules first.
-    pub fn with_items(mut self, items: impl IntoIterator<Item = GridItem>) -> Self {
-        self.items = items.into_iter().collect();
+    /// The number of equal columns the width is divided into. Defaults to 12.
+    pub fn cols(mut self, cols: usize) -> Self {
+        self.columns = cols.max(1);
         self.normalize();
-        self
-    }
-
-    /// The number of columns the width is divided into. Defaults to 12.
-    pub fn with_columns(mut self, columns: usize) -> Self {
-        self.columns = columns.max(1);
-        self.normalize();
-        self
-    }
-
-    /// The height of one row. Defaults to `2.5rem`, so rows follow the
-    /// application's zoom.
-    pub fn with_row_height(mut self, row_height: Rems) -> Self {
-        self.row_height = row_height;
-        self
-    }
-
-    /// The space between neighbouring items. Defaults to the theme's medium
-    /// spacing.
-    pub fn with_gap(mut self, gap: Pixels) -> Self {
-        self.gap = Some(gap);
         self
     }
 
     /// The direction items float toward when space opens up, or `None` to
     /// leave them wherever they are put. Defaults to `Some(Axis::Vertical)`.
-    pub fn with_compaction(mut self, compaction: Option<Axis>) -> Self {
+    pub fn compaction(mut self, compaction: Option<Axis>) -> Self {
         self.compaction = compaction;
         self.normalize();
         self
@@ -219,60 +200,59 @@ impl GridLayoutState {
 
     /// Refuse a move or resize that would overlap another item, instead of
     /// pushing that item out of the way. Defaults to `false`.
-    pub fn with_prevent_collision(mut self, prevent_collision: bool) -> Self {
+    pub fn prevent_collision(mut self, prevent_collision: bool) -> Self {
         self.prevent_collision = prevent_collision;
         self
     }
 
     /// Whether items can be moved. Defaults to `true`.
-    pub fn with_draggable(mut self, draggable: bool) -> Self {
+    pub fn draggable(mut self, draggable: bool) -> Self {
         self.draggable = draggable;
         self
     }
 
     /// Whether items can be resized. Defaults to `true`.
-    pub fn with_resizable(mut self, resizable: bool) -> Self {
+    pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
     }
 
-    /// The committed layout, in the order the items were given.
-    pub fn items(&self) -> &[GridItem] {
-        &self.items
+    /// The areas the grid starts with, settled under the rules set so far:
+    /// overlaps are pushed apart and, with compaction on, gaps close. Set the
+    /// rules first.
+    pub fn default_areas(mut self, areas: impl IntoIterator<Item = GridArea>) -> Self {
+        self.areas = areas.into_iter().collect();
+        self.normalize();
+        self
     }
 
-    /// The layout entry for `id`.
-    pub fn item(&self, id: &str) -> Option<&GridItem> {
-        self.items.iter().find(|item| item.id.as_ref() == id)
+    /// The committed layout, in the order the areas were given.
+    pub fn areas(&self) -> &[GridArea] {
+        &self.areas
     }
 
-    pub fn columns(&self) -> usize {
+    /// The area of the item `id`.
+    pub fn area(&self, id: &str) -> Option<&GridArea> {
+        self.areas.iter().find(|area| area.id.as_ref() == id)
+    }
+
+    pub fn column_count(&self) -> usize {
         self.columns
     }
 
-    pub fn row_height(&self) -> Rems {
-        self.row_height
-    }
-
-    /// The gap set with [`GridLayoutState::with_gap`], or `None` for the
-    /// theme's.
-    pub fn gap(&self) -> Option<Pixels> {
-        self.gap
-    }
-
-    pub fn compaction(&self) -> Option<Axis> {
+    pub fn compaction_axis(&self) -> Option<Axis> {
         self.compaction
     }
 
-    pub fn prevent_collision(&self) -> bool {
+    pub fn is_collision_prevented(&self) -> bool {
         self.prevent_collision
     }
 
-    pub fn draggable(&self) -> bool {
+    pub fn is_draggable(&self) -> bool {
         self.draggable
     }
 
-    pub fn resizable(&self) -> bool {
+    pub fn is_resizable(&self) -> bool {
         self.resizable
     }
 
@@ -296,20 +276,20 @@ impl GridLayoutState {
 
     /// Replace the layout, settling it under the grid's rules. Cancels any
     /// gesture in progress, and does not emit [`GridLayoutEvent::Change`].
-    pub fn set_items(&mut self, items: impl IntoIterator<Item = GridItem>, cx: &mut Context<Self>) {
-        self.items = items.into_iter().collect();
+    pub fn set_areas(&mut self, areas: impl IntoIterator<Item = GridArea>, cx: &mut Context<Self>) {
+        self.areas = areas.into_iter().collect();
         self.drag = None;
         self.normalize();
         if let Some(selected) = &self.selected
-            && self.item(selected).is_none()
+            && self.area(selected).is_none()
         {
             self.selected = None;
         }
         cx.notify();
     }
 
-    pub fn set_columns(&mut self, columns: usize, cx: &mut Context<Self>) {
-        self.columns = columns.max(1);
+    pub fn set_cols(&mut self, cols: usize, cx: &mut Context<Self>) {
+        self.columns = cols.max(1);
         self.drag = None;
         self.normalize();
         cx.notify();
@@ -320,21 +300,6 @@ impl GridLayoutState {
         self.drag = None;
         self.normalize();
         cx.notify();
-    }
-
-    pub fn set_row_height(&mut self, row_height: Rems, cx: &mut Context<Self>) {
-        if self.row_height != row_height {
-            self.row_height = row_height;
-            cx.notify();
-        }
-    }
-
-    /// Set the space between items, or `None` for the theme's medium spacing.
-    pub fn set_gap(&mut self, gap: Option<Pixels>, cx: &mut Context<Self>) {
-        if self.gap != gap {
-            self.gap = gap;
-            cx.notify();
-        }
     }
 
     pub fn set_prevent_collision(&mut self, prevent_collision: bool, cx: &mut Context<Self>) {
@@ -354,25 +319,31 @@ impl GridLayoutState {
 
     /// Select the item keyboard commands act on.
     pub fn set_selected_item(&mut self, id: Option<SharedString>, cx: &mut Context<Self>) {
-        let id = id.filter(|id| self.item(id).is_some());
+        let id = id.filter(|id| self.area(id).is_some());
         if self.selected != id {
             self.selected = id;
             cx.notify();
         }
     }
 
-    /// Move the item `id` so its leading column is `x` and its top row `y`,
-    /// pushing whatever it lands on out of the way. Returns whether the layout
-    /// changed; a refused or no-op move returns `false`.
-    pub fn move_item(&mut self, id: &str, x: usize, y: usize, cx: &mut Context<Self>) -> bool {
-        let next = layout::move_item(&self.items, id, x, y, self.rules());
+    /// Move the item `id` so its leading column is `col` and its top row
+    /// `row`, pushing whatever it lands on out of the way. Returns whether the
+    /// layout changed; a refused or no-op move returns `false`.
+    pub fn move_item(&mut self, id: &str, col: usize, row: usize, cx: &mut Context<Self>) -> bool {
+        let next = layout::move_item(&self.areas, id, col, row, self.rules());
         self.commit(next, cx)
     }
 
-    /// Resize the item `id` to span `w` columns and `h` rows, clamped to its
-    /// limits. Returns whether the layout changed.
-    pub fn resize_item(&mut self, id: &str, w: usize, h: usize, cx: &mut Context<Self>) -> bool {
-        let next = layout::resize_item(&self.items, id, w, h, self.rules());
+    /// Resize the item `id` to cover `col_span` columns and `row_span` rows,
+    /// clamped to its limits. Returns whether the layout changed.
+    pub fn resize_item(
+        &mut self,
+        id: &str,
+        col_span: usize,
+        row_span: usize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let next = layout::resize_item(&self.areas, id, col_span, row_span, self.rules());
         self.commit(next, cx)
     }
 
@@ -386,14 +357,14 @@ impl GridLayoutState {
 
     fn normalize(&mut self) {
         let rules = self.rules();
-        layout::normalize(&mut self.items, rules);
+        layout::normalize(&mut self.areas, rules);
     }
 
-    fn commit(&mut self, next: Option<Vec<GridItem>>, cx: &mut Context<Self>) -> bool {
+    fn commit(&mut self, next: Option<Vec<GridArea>>, cx: &mut Context<Self>) -> bool {
         match next {
-            Some(next) if next != self.items => {
-                self.items = next;
-                cx.emit(GridLayoutEvent::Change(self.items.clone()));
+            Some(next) if next != self.areas => {
+                self.areas = next;
+                cx.emit(GridLayoutEvent::Change(self.areas.clone()));
                 cx.notify();
                 true
             }
@@ -402,10 +373,10 @@ impl GridLayoutState {
     }
 
     /// The layout to draw: a gesture's preview while one is in progress.
-    pub(crate) fn displayed_items(&self, cx: &App) -> &[GridItem] {
+    pub(crate) fn displayed_areas(&self, cx: &App) -> &[GridArea] {
         match &self.drag {
             Some(drag) if cx.has_active_drag() => &drag.preview,
-            _ => &self.items,
+            _ => &self.areas,
         }
     }
 
@@ -414,20 +385,12 @@ impl GridLayoutState {
         self.drag.as_ref().filter(|_| cx.has_active_drag())
     }
 
-    pub(crate) fn resolved_gap(&self, cx: &App) -> Pixels {
-        self.gap.unwrap_or_else(|| cx.theme().spacing_tokens().md)
-    }
-
-    pub(crate) fn resolved_row_height(&self, window: &Window) -> Pixels {
-        self.row_height.to_pixels(window.rem_size())
-    }
-
     pub(crate) fn is_gesture_allowed(&self, id: &str, gesture: GridGesture) -> bool {
         let allowed = match gesture {
             GridGesture::Move => self.draggable,
             GridGesture::Resize => self.resizable,
         };
-        allowed && self.item(id).is_some_and(|item| !item.locked)
+        allowed && self.area(id).is_some_and(|area| !area.locked)
     }
 
     /// The pointer pressed an item: select it and take focus.
@@ -461,33 +424,30 @@ impl GridLayoutState {
             item: id,
             gesture,
             origin,
-            start: self.items.clone(),
-            preview: self.items.clone(),
+            start: self.areas.clone(),
+            preview: self.areas.clone(),
             delta: Point::default(),
             metrics: None,
         });
         cx.notify();
     }
 
-    /// Follow the pointer to `position` over a grid laid out in `bounds`.
+    /// Follow the pointer to `position` over a grid laid out in `bounds`, with
+    /// rows `row_height` tall and `gap` between cells.
     pub(crate) fn drag_to(
         &mut self,
         position: Point<Pixels>,
         bounds: Bounds<Pixels>,
-        window: &mut Window,
+        row_height: Pixels,
+        gap: Size<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let metrics = GridMetrics::new(
-            bounds.size.width,
-            self.columns,
-            self.resolved_row_height(window),
-            self.resolved_gap(cx),
-        );
+        let metrics = GridMetrics::new(bounds.size.width, self.columns, row_height, gap);
         let rules = self.rules();
         let Some(drag) = self.drag.as_mut() else {
             return;
         };
-        let Some(start) = drag.start_item().cloned() else {
+        let Some(start) = drag.start_area().cloned() else {
             return;
         };
         drag.delta = position - drag.origin;
@@ -495,17 +455,19 @@ impl GridLayoutState {
 
         let next = match drag.gesture {
             GridGesture::Move => {
-                let left = metrics.left(start.x) + drag.delta.x;
-                let top = metrics.top(start.y) + drag.delta.y;
-                let x = metrics
+                let left = metrics.left(start.col) + drag.delta.x;
+                let top = metrics.top(start.row) + drag.delta.y;
+                let col = metrics
                     .column_at(left)
-                    .min(self.columns.saturating_sub(start.w));
-                layout::move_item(&drag.start, &start.id, x, metrics.row_at(top), rules)
+                    .min(self.columns.saturating_sub(start.col_span));
+                layout::move_item(&drag.start, &start.id, col, metrics.row_at(top), rules)
             }
             GridGesture::Resize => {
-                let w = metrics.columns_spanning(metrics.span_width(start.w) + drag.delta.x);
-                let h = metrics.rows_spanning(metrics.span_height(start.h) + drag.delta.y);
-                layout::resize_item(&drag.start, &start.id, w, h, rules)
+                let col_span =
+                    metrics.columns_spanning(metrics.span_width(start.col_span) + drag.delta.x);
+                let row_span =
+                    metrics.rows_spanning(metrics.span_height(start.row_span) + drag.delta.y);
+                layout::resize_item(&drag.start, &start.id, col_span, row_span, rules)
             }
         };
         // A refused step keeps the last accepted preview.
@@ -535,38 +497,52 @@ impl GridLayoutState {
         true
     }
 
-    /// Move the selected item one cell along `dx`, `dy`.
-    pub(crate) fn nudge_selected(&mut self, dx: isize, dy: isize, cx: &mut Context<Self>) -> bool {
-        let Some(item) = self.selected_entry() else {
+    /// Move the selected item one cell along `cols`, `rows`.
+    pub(crate) fn nudge_selected(
+        &mut self,
+        cols: isize,
+        rows: isize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(area) = self.selected_area() else {
             return false;
         };
-        if !self.is_gesture_allowed(&item.id, GridGesture::Move) {
+        if !self.is_gesture_allowed(&area.id, GridGesture::Move) {
             return false;
         }
-        let (Some(x), Some(y)) = (item.x.checked_add_signed(dx), item.y.checked_add_signed(dy))
-        else {
+        let (Some(col), Some(row)) = (
+            area.col.checked_add_signed(cols),
+            area.row.checked_add_signed(rows),
+        ) else {
             return false;
         };
         self.keyboard_active = true;
-        let moved = self.move_item(&item.id, x, y, cx);
+        let moved = self.move_item(&area.id, col, row, cx);
         cx.notify();
         moved
     }
 
-    /// Grow or shrink the selected item by one cell along `dw`, `dh`.
-    pub(crate) fn resize_selected(&mut self, dw: isize, dh: isize, cx: &mut Context<Self>) -> bool {
-        let Some(item) = self.selected_entry() else {
+    /// Grow or shrink the selected item by one cell along `cols`, `rows`.
+    pub(crate) fn resize_selected(
+        &mut self,
+        cols: isize,
+        rows: isize,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(area) = self.selected_area() else {
             return false;
         };
-        if !self.is_gesture_allowed(&item.id, GridGesture::Resize) {
+        if !self.is_gesture_allowed(&area.id, GridGesture::Resize) {
             return false;
         }
-        let (Some(w), Some(h)) = (item.w.checked_add_signed(dw), item.h.checked_add_signed(dh))
-        else {
+        let (Some(col_span), Some(row_span)) = (
+            area.col_span.checked_add_signed(cols),
+            area.row_span.checked_add_signed(rows),
+        ) else {
             return false;
         };
         self.keyboard_active = true;
-        let resized = self.resize_item(&item.id, w, h, cx);
+        let resized = self.resize_item(&area.id, col_span, row_span, cx);
         cx.notify();
         resized
     }
@@ -576,15 +552,15 @@ impl GridLayoutState {
     /// Returns `false` past the last or before the first item, leaving the
     /// selection as it is so Tab moves focus out of the grid.
     pub(crate) fn select_adjacent(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
-        let mut order = self.items.iter().collect::<Vec<_>>();
-        order.sort_by_key(|item| (item.y, item.x));
+        let mut order = self.areas.iter().collect::<Vec<_>>();
+        order.sort_by_key(|area| (area.row, area.col));
         if order.is_empty() {
             return false;
         }
         let current = self
             .selected
             .as_ref()
-            .and_then(|id| order.iter().position(|item| &item.id == id));
+            .and_then(|id| order.iter().position(|area| &area.id == id));
         let next = match (current, forward) {
             (None, true) => 0,
             (None, false) => order.len() - 1,
@@ -598,34 +574,35 @@ impl GridLayoutState {
         true
     }
 
-    fn selected_entry(&self) -> Option<GridItem> {
-        self.selected.as_ref().and_then(|id| self.item(id)).cloned()
+    fn selected_area(&self) -> Option<GridArea> {
+        self.selected.as_ref().and_then(|id| self.area(id)).cloned()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{AppContext as _, TestAppContext};
+    use crate::grid_layout::layout::tests::area;
+    use gpui::{AppContext as _, TestAppContext, size};
 
     fn state(cx: &mut TestAppContext) -> gpui::Entity<GridLayoutState> {
         cx.update(|cx| {
             cx.new(|cx| {
-                GridLayoutState::new(cx).with_items([
-                    GridItem::new("a", 0, 0, 4, 2),
-                    GridItem::new("b", 4, 0, 4, 2),
-                ])
+                GridLayoutState::new(cx)
+                    .default_areas([area("a", 0, 0, 4, 2), area("b", 4, 0, 4, 2)])
             })
         })
     }
 
     #[test]
     fn metrics_share_the_width_between_columns_and_gaps() {
-        let metrics = GridMetrics::new(px(1190.), 12, px(40.), px(10.));
+        let metrics = GridMetrics::new(px(1190.), 12, px(40.), size(px(10.), px(20.)));
         assert_eq!(metrics.column_width, px(90.));
         assert_eq!(metrics.left(1), px(100.));
         assert_eq!(metrics.span_width(12), px(1190.));
-        assert_eq!(metrics.span_height(2), px(90.));
+        // Rows use the row gap, not the column gap.
+        assert_eq!(metrics.top(1), px(60.));
+        assert_eq!(metrics.span_height(2), px(100.));
         assert_eq!(metrics.column_at(px(140.)), 1);
         assert_eq!(metrics.column_at(px(160.)), 2);
         assert_eq!(metrics.column_at(px(-50.)), 0);
@@ -638,27 +615,23 @@ mod tests {
         let state = cx.update(|cx| {
             cx.new(|cx| {
                 GridLayoutState::new(cx)
-                    .with_columns(6)
-                    .with_row_height(rems(3.))
-                    .with_gap(px(8.))
-                    .with_compaction(None)
-                    .with_prevent_collision(true)
-                    .with_draggable(false)
-                    .with_resizable(false)
-                    .with_items([GridItem::new("a", 4, 5, 4, 1)])
+                    .cols(6)
+                    .compaction(None)
+                    .prevent_collision(true)
+                    .draggable(false)
+                    .resizable(false)
+                    .default_areas([area("a", 4, 5, 4, 1)])
             })
         });
         state.read_with(cx, |state, _| {
-            assert_eq!(state.columns(), 6);
-            assert_eq!(state.row_height(), rems(3.));
-            assert_eq!(state.gap(), Some(px(8.)));
-            assert_eq!(state.compaction(), None);
-            assert!(state.prevent_collision());
-            assert!(!state.draggable());
-            assert!(!state.resizable());
+            assert_eq!(state.column_count(), 6);
+            assert_eq!(state.compaction_axis(), None);
+            assert!(state.is_collision_prevented());
+            assert!(!state.is_draggable());
+            assert!(!state.is_resizable());
             // Fitted to six columns, and left where it is without compaction.
-            let item = state.item("a").unwrap();
-            assert_eq!((item.x, item.y), (2, 5));
+            let area = state.area("a").unwrap();
+            assert_eq!((area.col, area.row), (2, 5));
         });
     }
 
@@ -679,16 +652,16 @@ mod tests {
             // Already there: nothing changes and nothing is emitted.
             assert!(!state.move_item("a", 8, 0, cx));
             assert!(state.resize_item("b", 2, 3, cx));
-            state.set_items([GridItem::new("c", 0, 0, 1, 1)], cx);
+            state.set_areas([area("c", 0, 0, 1, 1)], cx);
         });
 
         let events = events.borrow();
         assert_eq!(events.len(), 2);
-        let GridLayoutEvent::Change(items) = &events[1];
+        let GridLayoutEvent::Change(areas) = &events[1];
         assert!(
-            items
+            areas
                 .iter()
-                .any(|item| item.id == "b" && item.w == 2 && item.h == 3)
+                .any(|area| area.id == "b" && area.col_span == 2 && area.row_span == 3)
         );
     }
 
@@ -707,16 +680,20 @@ mod tests {
             assert_eq!(state.selected_item().map(|id| id.as_ref()), Some("b"));
 
             assert!(state.nudge_selected(1, 0, cx));
-            assert_eq!(state.item("b").unwrap().x, 5);
+            assert_eq!(state.area("b").unwrap().col, 5);
             // Cannot move past the leading edge or the top.
             assert!(!state.nudge_selected(0, -1, cx));
 
             assert!(state.resize_selected(0, 1, cx));
-            assert_eq!(state.item("b").unwrap().h, 3);
+            assert_eq!(state.area("b").unwrap().row_span, 3);
             assert!(state.is_keyboard_active());
 
             state.set_draggable(false, cx);
             assert!(!state.nudge_selected(-1, 0, cx));
+
+            // Before the first item, Shift-Tab is not handled either.
+            state.set_selected_item(Some("a".into()), cx);
+            assert!(!state.select_adjacent(false, cx));
         });
     }
 }

@@ -158,37 +158,8 @@
     {
       "source": "ui",
       "name": "grid_layout",
-      "classification": "component",
-      "registration": {
-        "status": "registered",
-        "descriptor": "GridLayout",
-        "exports": [
-          "GridLayout"
-        ],
-        "states": [
-          {
-            "export": "GridLayoutState",
-            "kind": "GridLayoutState",
-            "role": "retained-placement-and-gesture-state"
-          }
-        ],
-        "related": [
-          {
-            "descriptor": "GridLayoutItem",
-            "exports": [
-              "GridLayoutItem"
-            ],
-            "role": "typed-item"
-          },
-          {
-            "descriptor": "GridDragHandle",
-            "exports": [
-              "GridDragHandle"
-            ],
-            "role": "drag-handle-part"
-          }
-        ]
-      }
+      "classification": "infrastructure",
+      "explanation": "GridLayout lives in gpui-base and is re-exported by gpui-component. Its gpui-shell registration follows in a separate pull request once the base API settles."
     },
     {
       "source": "ui",
@@ -1411,37 +1382,8 @@
     {
       "source": "story",
       "name": "grid_layout",
-      "classification": "component",
-      "registration": {
-        "status": "registered",
-        "descriptor": "GridLayout",
-        "exports": [
-          "GridLayout"
-        ],
-        "states": [
-          {
-            "export": "GridLayoutState",
-            "kind": "GridLayoutState",
-            "role": "retained-placement-and-gesture-state"
-          }
-        ],
-        "related": [
-          {
-            "descriptor": "GridLayoutItem",
-            "exports": [
-              "GridLayoutItem"
-            ],
-            "role": "typed-item"
-          },
-          {
-            "descriptor": "GridDragHandle",
-            "exports": [
-              "GridDragHandle"
-            ],
-            "role": "drag-handle-part"
-          }
-        ]
-      }
+      "classification": "infrastructure",
+      "explanation": "GridLayout lives in gpui-base and is re-exported by gpui-component. Its gpui-shell registration follows in a separate pull request once the base API settles."
     },
     {
       "source": "story",

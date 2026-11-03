@@ -28,7 +28,7 @@ export const stories = [
     rustStory: "GridLayoutStory",
     description: "A grid whose items are dragged and resized into place.",
     states: ["arranged", "dragging", "resizing", "locked item"],
-    availability: "pending",
+    availability: "infrastructure",
     api: "GridLayout",
   }),
   pendingStory({

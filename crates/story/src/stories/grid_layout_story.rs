@@ -2,7 +2,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Selectable as _, Sizable as _, StyledExt as _,
     button::{Button, ButtonGroup},
     grid_layout::{
-        GridDragHandle, GridItem, GridLayout, GridLayoutEvent, GridLayoutItem, GridLayoutState,
+        GridArea, GridItem, GridLayoutEvent, GridLayoutState, grid_drag_handle, grid_layout,
     },
     h_flex,
     switch::Switch,
@@ -65,15 +65,32 @@ const TILES: [Tile; 7] = [
     },
 ];
 
-fn default_layout() -> Vec<GridItem> {
+fn default_layout() -> Vec<GridArea> {
     vec![
-        GridItem::new("revenue", 0, 0, 6, 4).with_min_size(3, 2),
-        GridItem::new("orders", 6, 0, 3, 2),
-        GridItem::new("visitors", 9, 0, 3, 2),
-        GridItem::new("conversion", 6, 2, 6, 2).with_max_size(8, 4),
-        GridItem::new("refunds", 0, 4, 4, 3),
-        GridItem::new("inventory", 4, 4, 4, 3),
-        GridItem::new("notes", 8, 4, 4, 3).with_locked(true),
+        GridArea::new("revenue")
+            .col_span(6)
+            .row_span(4)
+            .min_span(3, 2),
+        GridArea::new("orders").col(6).col_span(3).row_span(2),
+        GridArea::new("visitors").col(9).col_span(3).row_span(2),
+        GridArea::new("conversion")
+            .col(6)
+            .row(2)
+            .col_span(6)
+            .row_span(2)
+            .max_span(8, 4),
+        GridArea::new("refunds").row(4).col_span(4).row_span(3),
+        GridArea::new("inventory")
+            .col(4)
+            .row(4)
+            .col_span(4)
+            .row_span(3),
+        GridArea::new("notes")
+            .col(8)
+            .row(4)
+            .col_span(4)
+            .row_span(3)
+            .locked(true),
     ]
 }
 
@@ -111,27 +128,33 @@ impl GridLayoutStory {
     }
 
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-        let dashboard = cx.new(|cx| GridLayoutState::new(cx).with_items(default_layout()));
+        let dashboard = cx.new(|cx| GridLayoutState::new(cx).default_areas(default_layout()));
         let handles = cx.new(|cx| {
-            GridLayoutState::new(cx).with_columns(6).with_items([
-                GridItem::new("revenue", 0, 0, 3, 3),
-                GridItem::new("orders", 3, 0, 3, 3),
-                GridItem::new("visitors", 0, 3, 2, 2),
-                GridItem::new("conversion", 2, 3, 4, 2),
+            GridLayoutState::new(cx).cols(6).default_areas([
+                GridArea::new("revenue").col_span(3).row_span(3),
+                GridArea::new("orders").col(3).col_span(3).row_span(3),
+                GridArea::new("visitors").row(3).col_span(2).row_span(2),
+                GridArea::new("conversion")
+                    .col(2)
+                    .row(3)
+                    .col_span(4)
+                    .row_span(2),
             ])
         });
         let _subscriptions =
             vec![
                 cx.subscribe(&dashboard, |this, _, event: &GridLayoutEvent, cx| {
-                    let GridLayoutEvent::Change(items) = event;
+                    let GridLayoutEvent::Change(areas) = event else {
+                        return;
+                    };
                     // An application would persist this; the story shows it.
                     this.last_change = Some(
-                        items
+                        areas
                             .iter()
-                            .map(|item| {
+                            .map(|area| {
                                 format!(
                                     "{} ({}, {}) {}×{}",
-                                    item.id, item.x, item.y, item.w, item.h
+                                    area.id, area.col, area.row, area.col_span, area.row_span
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -153,9 +176,9 @@ impl GridLayoutStory {
 
     fn render_controls(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.dashboard.read(cx);
-        let compaction = state.compaction();
-        let prevent_collision = state.prevent_collision();
-        let editable = state.draggable() && state.resizable();
+        let compaction = state.compaction_axis();
+        let prevent_collision = state.is_collision_prevented();
+        let editable = state.is_draggable() && state.is_resizable();
 
         h_flex()
             .w_full()
@@ -218,7 +241,7 @@ impl GridLayoutStory {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.last_change = None;
                         this.dashboard
-                            .update(cx, |state, cx| state.set_items(default_layout(), cx));
+                            .update(cx, |state, cx| state.set_areas(default_layout(), cx));
                     })),
             )
     }
@@ -276,10 +299,10 @@ impl Render for GridLayoutStory {
                             .gap_3()
                             .child(self.render_controls(cx))
                             .child(
-                                GridLayout::new("dashboard-grid", &self.dashboard)
+                                grid_layout("dashboard-grid", &self.dashboard, cx)
                                     .accessibility_label("Dashboard")
                                     .items(TILES.iter().map(|tile| {
-                                        GridLayoutItem::new(tile.id)
+                                        GridItem::new(tile.id)
                                             .accessibility_label(tile.title)
                                             .rounded(radius)
                                             .child(
@@ -310,16 +333,16 @@ impl Render for GridLayoutStory {
                          pointer interaction.",
                     )
                     .w_full()
-                    .child(GridLayout::new("handle-grid", &self.handles).items(
+                    .child(grid_layout("handle-grid", &self.handles, cx).items(
                         TILES[..4].iter().map(|tile| {
-                            GridLayoutItem::new(tile.id)
+                            GridItem::new(tile.id)
                                 .accessibility_label(tile.title)
                                 .rounded(radius)
                                 .drag_handle_only(true)
                                 .child(
                                     tile_card(cx)
                                         .child(
-                                            GridDragHandle::new(&self.handles, tile.id)
+                                            grid_drag_handle(&self.handles, tile.id)
                                                 .px_4()
                                                 .py_2()
                                                 .border_b_1()

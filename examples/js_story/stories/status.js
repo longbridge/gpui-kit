@@ -28,7 +28,6 @@ export const REGISTERED_SURFACES = [
   "Editor",
   "Empty",
   "Form",
-  "GridLayout",
   "GroupBox",
   "HoverCard",
   "Icon",

@@ -1,15 +1,17 @@
 //! A grid whose items the user drags and resizes into place.
 //!
-//! [`GridLayoutState`] owns the layout — one [`GridItem`] per item, in grid
-//! cells — and the rules it settles under; [`GridLayout`] draws the items and
-//! turns pointer and keyboard input into layout changes.
+//! [`GridLayoutState`] owns the layout — one [`GridArea`] per item, in grid
+//! cells — and the rules it settles under; [`GridLayout`] places each
+//! [`GridItem`] in its area and turns pointer and keyboard input into layout
+//! changes. The pure layout arithmetic lives in `layout`, apart from pixels
+//! and entities.
 
 mod grid_layout;
 mod layout;
 mod state;
 
-pub use grid_layout::{GridDragHandle, GridLayout, GridLayoutItem};
-pub use layout::GridItem;
+pub use grid_layout::{GridItem, GridLayout, grid_drag_handle};
+pub use layout::GridArea;
 pub use state::{GridLayoutEvent, GridLayoutState};
 
 use gpui::{App, KeyBinding, actions};

@@ -7,103 +7,110 @@ description: A grid whose items the user drags and resizes into place.
 
 GridLayout arranges items on a grid of columns and rows and lets the user move and resize them with the pointer or the keyboard. Items push one another out of the way, float toward the top as space opens up, and flow around locked items. Use it for dashboards, widget boards, and other surfaces where the user owns the arrangement.
 
+The behavior and layout model are the [Grid Layout](../base/primitives/grid-layout.md) primitive from `gpui-base`; this module re-exports it and adds `grid_layout`, which dresses it in the theme.
+
 ## Import
 
 ```rust
 use gpui_kit::component::grid_layout::{
-    GridDragHandle, GridItem, GridLayout, GridLayoutEvent, GridLayoutItem, GridLayoutState,
+    GridArea, GridItem, GridLayoutEvent, GridLayoutState, grid_drag_handle, grid_layout,
 };
 ```
 
 ## Usage
 
-Create one `GridLayoutState` with the grid's rules and its items, then pair each `GridLayoutItem` with the layout entry of the same id.
+Create one `GridLayoutState` with the grid's rules and its areas, then pair each `GridItem` with the area of the same id.
 
 ```rust
 let state = cx.new(|cx| {
-    GridLayoutState::new(cx).with_items([
-        GridItem::new("revenue", 0, 0, 8, 4),
-        GridItem::new("orders", 8, 0, 4, 2),
-        GridItem::new("visitors", 8, 2, 4, 2),
+    GridLayoutState::new(cx).default_areas([
+        GridArea::new("revenue").col_span(8).row_span(4),
+        GridArea::new("orders").col(8).col_span(4).row_span(2),
+        GridArea::new("visitors").col(8).row(2).col_span(4).row_span(2),
     ])
 });
 
-GridLayout::new("dashboard", &state)
-    .item(GridLayoutItem::new("revenue").child(revenue_card))
-    .item(GridLayoutItem::new("orders").child(orders_card))
-    .item(GridLayoutItem::new("visitors").child(visitors_card))
+grid_layout("dashboard", &state, cx)
+    .item(GridItem::new("revenue").child(revenue_card))
+    .item(GridItem::new("orders").child(orders_card))
+    .item(GridItem::new("visitors").child(visitors_card))
 ```
 
-A `GridItem` places an item in grid cells: `x` is the leading column, `y` the top row, and `w` and `h` the number of columns and rows it spans. An item without a layout entry is not drawn.
+A `GridArea` places an item in zero-based grid cells: `col` is the leading column, `row` the top row, and `col_span` and `row_span` the number of columns and rows it covers. An item without an area is not drawn.
 
 The grid is as wide as its container and as tall as its rows. Place it inside a scrollable region when the rows can outgrow the window.
 
 ## Grid rules
 
-Set the rules before the items, because `with_items` settles the items under the rules set so far.
+Set the rules before the areas, because `default_areas` settles the areas under the rules set so far.
 
 ```rust
-use gpui_kit::{Axis, px, rems};
+use gpui_kit::Axis;
 
 let state = cx.new(|cx| {
     GridLayoutState::new(cx)
-        .with_columns(6)
-        .with_row_height(rems(3.))
-        .with_gap(px(8.))
-        .with_compaction(Some(Axis::Vertical))
-        .with_items(items)
+        .cols(6)
+        .compaction(Some(Axis::Vertical))
+        .default_areas(areas)
 });
 ```
 
 | Rule | Default | Description |
 | --- | --- | --- |
-| `with_columns` | `12` | The number of equal columns the width is divided into |
-| `with_row_height` | `2.5rem` | The height of one row; follows the application's zoom |
-| `with_gap` | theme spacing `md` | The space between neighbouring items |
-| `with_compaction` | `Some(Axis::Vertical)` | The direction items float toward, or `None` to leave them where they are put |
-| `with_prevent_collision` | `false` | Refuse a move or resize that would overlap another item instead of pushing it |
-| `with_draggable` | `true` | Whether items can be moved |
-| `with_resizable` | `true` | Whether items can be resized |
+| `cols` | `12` | The number of equal columns the width is divided into |
+| `compaction` | `Some(Axis::Vertical)` | The direction items float toward, or `None` to leave them where they are put |
+| `prevent_collision` | `false` | Refuse a move or resize that would overlap another item instead of pushing it |
+| `draggable` | `true` | Whether items can be moved |
+| `resizable` | `true` | Whether items can be resized |
 
-Each rule has a `set_*` counterpart for changing it later, such as `set_compaction` or `set_draggable` to switch a dashboard between viewing and editing.
+Each rule has a `set_*` counterpart for changing it later, such as `set_compaction`, or `set_draggable` to switch a dashboard between viewing and editing.
+
+The row height and the gaps belong to the element, as on a CSS grid:
+
+```rust
+grid_layout("dashboard", &state, cx)
+    .row_height(rems(3.))
+    .gap_4()
+```
+
+`grid_layout` uses the theme's medium spacing; `.gap(..)`, `.gap_x(..)` or `.gap_y(..)` override it. Rows default to `2.5rem`, so they follow the application's zoom.
 
 ## Item limits
 
 Limit how far an item can be resized, or lock it in place. A locked item is neither moved, resized, nor pushed; other items flow around it.
 
 ```rust
-GridItem::new("revenue", 0, 0, 6, 4)
-    .with_min_size(3, 2)
-    .with_max_size(8, 6);
+GridArea::new("revenue").col_span(6).row_span(4).min_span(3, 2).max_span(8, 6);
 
-GridItem::new("notes", 8, 0, 4, 3).with_locked(true);
+GridArea::new("notes").col(8).col_span(4).row_span(3).locked(true);
 ```
 
 ## Saving the layout
 
-`GridItem` implements `Serialize` and `Deserialize`. Subscribe to `GridLayoutEvent::Change` to persist the arrangement whenever the user changes it, and restore it with `with_items` or `set_items`.
+`GridArea` implements `Serialize` and `Deserialize`. Subscribe to `GridLayoutEvent::Change` to persist the arrangement whenever the user changes it, and restore it with `default_areas` or `set_areas`.
 
 ```rust
 cx.subscribe(&state, |this, _, event: &GridLayoutEvent, cx| {
-    let GridLayoutEvent::Change(items) = event;
-    this.save_dashboard_layout(items, cx);
+    if let GridLayoutEvent::Change(areas) = event {
+        this.save_dashboard_layout(areas, cx);
+    }
 })
 .detach();
 ```
 
-`Change` is emitted when a drag or resize ends, when a keyboard command changes the layout, and after `move_item` or `resize_item`. A drag reports one change on release, not one per pointer movement. `set_items` does not emit `Change`, because the application already holds the layout it set.
+`Change` is emitted when a drag or resize ends, when a keyboard command changes the layout, and after `move_item` or `resize_item`. A drag reports one change on release, not one per pointer movement. `set_areas` does not emit `Change`, because the application already holds the layout it set. `GridLayoutEvent` is `#[non_exhaustive]`, so match it with `if let` or a wildcard arm.
 
 ## Drag handle
 
 By default the whole item moves it. When an item's content has its own pointer interaction, such as a table or a chart, move the item only by a handle, usually its header:
 
 ```rust
-GridLayoutItem::new("orders")
+GridItem::new("orders")
     .drag_handle_only(true)
     .child(
         v_flex()
             .size_full()
-            .child(GridDragHandle::new(&state, "orders").p_2().child("Orders"))
+            .child(grid_drag_handle(&state, "orders").p_2().child("Orders"))
             .child(orders_table),
     )
 ```
@@ -121,15 +128,15 @@ Both apply the same pushing and compaction as the pointer and return whether the
 
 ## Appearance
 
-A `GridLayoutItem` paints nothing of its own: its content supplies the surface, usually a card or a GroupBox. Give the item the same corner radius as its content so that the drag placeholder and the focus ring follow the same corners.
+`grid_layout` adds a dashed placeholder where the dragged item will land, a resize grip in each resizable item's corner, a raised dragged item, a focus ring on the keyboard-selected item, and the theme's move motion, which follows the application's reduced-motion preference. Each can be replaced on the returned builder with `placeholder`, `resize_handle`, `dragging_item`, `selected_item` or `transition`.
+
+A `GridItem` paints nothing of its own: its content supplies the surface, usually a card or a GroupBox. Give the item the same corner radius as its content so that the raised shadow and the focus ring follow the same corners.
 
 ```rust
-GridLayoutItem::new("orders")
+GridItem::new("orders")
     .rounded(cx.theme().radius_lg)
     .child(orders_card)
 ```
-
-While an item is dragged it follows the pointer above the others, and a dashed placeholder shows where it will land. The other items ease into their new cells; the motion follows the application's reduced-motion preference.
 
 ## Keyboard
 
@@ -137,7 +144,7 @@ Clicking an item selects it and focuses the grid. With the grid focused:
 
 | Key | Action |
 | --- | --- |
-| `Tab` / `Shift-Tab` | Select the next or previous item in reading order |
+| `Tab` / `Shift-Tab` | Select the next or previous item in reading order; past either end, focus leaves the grid |
 | Arrow keys | Move the selected item one cell |
 | `Shift` + arrow keys | Resize the selected item by one cell |
 | `Escape` | Cancel the drag in progress |
@@ -146,4 +153,4 @@ When a command cannot apply, such as moving past the leading edge, the key passe
 
 ## Accessibility
 
-The grid is a labelled group, "Grid layout" by default; use `GridLayout::accessibility_label` to name what it contains. Each item is a group that reports whether it is selected. Name items with `GridLayoutItem::accessibility_label`, usually their visible title.
+The grid is a labelled group, "Grid layout" by default; use `accessibility_label` on the grid to name what it contains. Each item is a group that reports whether it is selected. Name items with `GridItem::accessibility_label`, usually their visible title.
