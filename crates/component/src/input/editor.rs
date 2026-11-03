@@ -57,10 +57,10 @@ impl Editor {
         }
     }
 
-    /// Overrides specified line-number properties over the active theme.
+    /// Overrides specified line-number properties for this editor.
     ///
-    /// Omitting this on a later render restores the theme defaults.
-    pub fn apply_gutter_style(mut self, style: GutterStyle) -> Self {
+    /// Omitting this on a later render restores the inherited defaults.
+    pub fn gutter_style(mut self, style: GutterStyle) -> Self {
         self.gutter_style.apply_overrides(&style);
         self
     }
@@ -158,7 +158,7 @@ impl Styled for Editor {
 impl RenderOnce for Editor {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         Input::from_state(self.state.clone())
-            .apply_gutter_style(self.gutter_style)
+            .gutter_style(self.gutter_style)
             // Source code wants a monospace font at a code size, and rows that
             // follow that size. These come first so that a text style set on
             // this editor refines over them: `.text_sm()` and `.font_family()`
@@ -192,7 +192,7 @@ mod tests {
     use crate::input::EditorState;
     use gpui::{
         AppContext as _, Context, InteractiveElement as _, ParentElement as _, Pixels, Render,
-        TestAppContext, VisualTestContext, div, px,
+        TestAppContext, VisualTestContext, div, px, rems,
     };
 
     #[gpui::test]
@@ -207,10 +207,13 @@ mod tests {
                 .with_line_number_font_family("Number Font")
                 .with_line_number_font_size(px(12.));
             let editor = Editor::new(&state)
-                .apply_gutter_style(defaults.clone())
-                .apply_gutter_style(GutterStyle::default().with_gap(px(0.)));
+                .gutter_style(defaults.clone())
+                .gutter_style(GutterStyle::default().with_gap(px(0.)));
             assert_eq!(editor.gutter_style, defaults.with_gap(px(0.)));
-            Harness { state, text_size: None }
+            Harness {
+                state,
+                text_size: None,
+            }
         });
     }
 
@@ -224,16 +227,16 @@ mod tests {
             div().size_full().child(
                 Editor::new(&self.state)
                     .font_family(".SystemUIFont")
-                    .text_size(px(16.))
+                    .text_size(rems(1.))
                     .when_some(self.overrides.clone(), |this, style| {
-                        this.apply_gutter_style(style)
+                        this.gutter_style(style)
                     }),
             )
         }
     }
 
     #[gpui::test]
-    fn gutter_theme_changes_and_override_removal_reach_the_rendered_editor(cx: &mut TestAppContext) {
+    fn gutter_overrides_and_removal_reach_the_rendered_editor(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|window, cx| GutterHarness {
             state: cx.new(|cx| EditorState::new(window, cx).default_value("hello\nworld")),
@@ -245,7 +248,9 @@ mod tests {
                 window.refresh();
                 window.draw(cx).clear(cx);
                 let state = state.read(cx);
-                let caret = state.prepaint_caret_geometry().expect("editor must prepaint");
+                let caret = state
+                    .prepaint_caret_geometry()
+                    .expect("editor must prepaint");
                 (
                     caret.cursor_bounds().left() - caret.input_bounds().left(),
                     caret.line_height(),
@@ -255,53 +260,53 @@ mod tests {
         };
         let baseline = measure(cx);
 
-        cx.update(|_, cx| {
-            crate::Theme::update(cx, |theme| {
-                theme.set_editor_gutter_style(
-                    GutterStyle::default()
-                        .with_gap(px(18.))
-                        .with_line_number_font_family(".SystemUIFont")
-                        .with_line_number_font_size(px(16.)),
-                );
-            });
+        view.update(cx, |view, cx| {
+            view.overrides = Some(
+                GutterStyle::default()
+                    .with_gap(px(18.))
+                    .with_line_number_font_family(".SystemUIFont")
+                    .with_line_number_font_size(px(16.)),
+            );
+            cx.notify();
         });
-        let themed = measure(cx);
-        assert_eq!(themed.0 - baseline.0, px(12.));
-        assert_eq!((themed.1, themed.2), (baseline.1, baseline.2));
+        let configured = measure(cx);
+        assert_eq!(configured.0 - baseline.0, px(12.));
+        assert_eq!((configured.1, configured.2), (baseline.1, baseline.2));
 
         view.update(cx, |view, cx| {
             view.overrides = Some(GutterStyle::default().with_gap(px(0.)));
             cx.notify();
         });
         let overridden = measure(cx);
-        assert_eq!(themed.0 - overridden.0, px(18.));
+        assert_eq!(configured.0 - overridden.0, px(18.));
 
-        cx.update(|_, cx| {
-            crate::Theme::update(cx, |theme| {
-                theme.set_editor_gutter_style(
-                    theme.get_editor_gutter_style().clone()
-                        .with_gap(px(24.))
-                        .with_line_number_font_size(px(24.)),
-                );
-            });
+        view.update(cx, |view, cx| {
+            view.overrides = Some(
+                GutterStyle::default()
+                    .with_gap(px(0.))
+                    .with_line_number_font_size(px(24.)),
+            );
+            cx.notify();
         });
         let changed = measure(cx);
-        // The local zero gap must survive a theme change, while the unset
-        // font size must follow it; body metrics must remain independent.
+        // Gutter typography must remain independent of the body metrics.
         assert!(changed.0 > overridden.0);
         assert_eq!((changed.1, changed.2), (baseline.1, baseline.2));
 
         view.update(cx, |view, cx| {
-            view.overrides = None;
+            view.overrides = Some(
+                GutterStyle::default()
+                    .with_gap(px(24.))
+                    .with_line_number_font_size(px(24.)),
+            );
             cx.notify();
         });
         let restored = measure(cx);
         assert_eq!(restored.0 - changed.0, px(24.));
 
-        cx.update(|_, cx| {
-            crate::Theme::update(cx, |theme| {
-                theme.set_editor_gutter_style(GutterStyle::default());
-            });
+        view.update(cx, |view, cx| {
+            view.overrides = None;
+            cx.notify();
         });
         assert_eq!(measure(cx), baseline);
     }
@@ -319,6 +324,120 @@ mod tests {
                     .when_some(self.text_size, |this, size| this.text_size(size)),
             )
         }
+    }
+
+    #[gpui::test]
+    fn gutter_and_body_follow_window_zoom_without_compounding(cx: &mut TestAppContext) {
+        use crate::ElementExt as _;
+        use std::cell::Cell;
+
+        struct ZoomHarness {
+            editor: Entity<GutterHarness>,
+            spacing_edges: Rc<Cell<(Pixels, Pixels)>>,
+        }
+
+        impl Render for ZoomHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let first = self.spacing_edges.clone();
+                let second = self.spacing_edges.clone();
+                div()
+                    .relative()
+                    .size_full()
+                    .child(self.editor.clone())
+                    .child(
+                        div()
+                            .absolute()
+                            .flex()
+                            .gap_2()
+                            .child(div().w(px(1.)).h(px(1.)).on_prepaint(move |bounds, _, _| {
+                                first.set((bounds.right(), first.get().1));
+                            }))
+                            .child(div().w(px(1.)).h(px(1.)).on_prepaint(move |bounds, _, _| {
+                                second.set((second.get().0, bounds.left()));
+                            })),
+                    )
+            }
+        }
+
+        cx.update(crate::init);
+        let spacing_edges = Rc::new(Cell::new((px(0.), px(0.))));
+        let mut view = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            window.set_rem_size(px(22.));
+            let editor = cx.new(|cx| GutterHarness {
+                state: cx.new(|cx| {
+                    EditorState::new(window, cx)
+                        .folding(false)
+                        .default_value("hello\nworld")
+                }),
+                overrides: Some(
+                    GutterStyle::default()
+                        .with_gap(rems(0.75))
+                        .with_line_number_font_size(rems(0.75)),
+                ),
+            });
+            view = Some(editor.clone());
+            let content = cx.new(|_| ZoomHarness {
+                editor,
+                spacing_edges: spacing_edges.clone(),
+            });
+            // Mount the production root so typography and spacing use the
+            // application's rem size throughout window preparation and layout.
+            crate::Root::new(content, window, cx)
+        });
+        let view = view.unwrap();
+        let state = view.read_with(cx, |view, _| view.state.clone());
+        let measure = |cx: &mut VisualTestContext, rem_size: Option<f32>| {
+            cx.update(|window, cx| {
+                if let Some(rem_size) = rem_size {
+                    window.set_rem_size(px(rem_size));
+                }
+                // Verify that window zoom survives independently rendered frames.
+                for _ in 0..2 {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                }
+                let caret = state.read(cx).prepaint_caret_geometry().unwrap();
+                let (first_right, second_left) = spacing_edges.get();
+                (
+                    caret.cursor_bounds().left() - caret.input_bounds().left(),
+                    caret.line_height(),
+                    second_left - first_right,
+                    window.rem_size(),
+                )
+            })
+        };
+        let initial = measure(cx, None);
+        assert_eq!(
+            (initial.1, initial.2, initial.3),
+            (px(33.), px(11.), px(22.))
+        );
+        let baseline = measure(cx, Some(16.));
+        for (rem_size, scale, expected_height) in [
+            (12., 0.75, 18.),
+            (24., 1.5, 36.),
+            (32., 2., 48.),
+            (16., 1., 24.),
+        ] {
+            let measured = measure(cx, Some(rem_size));
+            let expected_width = baseline.0 * scale;
+            // Shaping and gutter-coordinate subtraction round independently in
+            // f32; allow arithmetic roundoff rather than a visible pixel offset.
+            let tolerance = measured.0.abs().max(expected_width.abs()) * (4. * f32::EPSILON);
+            assert!((measured.0 - expected_width).abs() <= tolerance);
+            assert_eq!(measured.1, px(expected_height));
+            assert_eq!(measured.2, px(rem_size * 0.5));
+            assert_eq!(measured.3, px(rem_size));
+        }
+        assert_eq!(measure(cx, Some(16.)), baseline);
+        assert_eq!(measure(cx, None), baseline);
+        let zoomed = measure(cx, Some(24.));
+        assert_eq!(measure(cx, None), zoomed);
+        view.read_with(cx, |view, _| {
+            let style = view.overrides.as_ref().unwrap();
+            assert_eq!(style.gap(), Some(rems(0.75).into()));
+            assert_eq!(style.line_number_font_size(), Some(rems(0.75).into()));
+        });
     }
 
     /// The row height the editor laid out with, which follows its font size.

@@ -5101,6 +5101,17 @@ impl<M: InputModeKind> Focusable for InputBaseState<M> {
 
 impl<M: InputModeKind> Render for InputBaseState<M> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_with_line_numbers((), window, cx)
+    }
+}
+
+impl<M: InputModeKind> InputBaseState<M> {
+    pub(crate) fn render_with_line_numbers<R: crate::input::EditorLineNumberRenderer>(
+        &mut self,
+        line_number_renderer: R,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         // Before anything reads it: the element resolves this style during
         // layout and paint, and both happen after this call in the same frame.
         self.editor_style = self
@@ -5292,7 +5303,11 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                     .pb(self.editor_paddings.bottom)
                     .pl(self.editor_paddings.left)
             })
-            .child(TextElement::new(entity.clone()).placeholder(self.placeholder.clone()))
+            .child(
+                TextElement::new(entity.clone())
+                    .with_line_number_renderer(line_number_renderer)
+                    .placeholder(self.placeholder.clone()),
+            )
             .when(self.shows_scrollbar(), |this| {
                 this.child(EditorScrollbar::new(entity.clone()))
             });

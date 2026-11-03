@@ -84,7 +84,7 @@ impl LayoutMode {
     }
 }
 
-impl<M: InputModeKind> TextElement<M> {
+impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> TextElement<M, R> {
     /// Measure the indent width in pixels for given column count.
     fn measure_indent_width(&self, style: &TextStyle, column: usize, window: &Window) -> Pixels {
         let font_size = style.font_size.to_pixels(window.rem_size());

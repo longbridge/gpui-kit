@@ -67,8 +67,8 @@ Theme::update(cx, |theme| {
 });
 ```
 
-`font_size` 同时是应用缩放控制——`Root` 会调用
-`window.set_rem_size(cx.theme().font_size)`，因此基于 [`rem` 的间距](./geometry)会跟随缩放。详见[编码指南](./coding-guides.md)。
+窗口缩放由应用控制。调用 `window.set_rem_size(...)` 并刷新窗口，可同步缩放以 rem 指定的字体和[间距](./geometry)。
+`Root` 不设置或覆盖窗口的 rem 大小。
 
 ## 元素级覆盖
 

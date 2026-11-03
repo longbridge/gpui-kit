@@ -275,7 +275,7 @@ impl Input {
         }
     }
 
-    pub(crate) fn apply_gutter_style(mut self, style: super::GutterStyle) -> Self {
+    pub(crate) fn gutter_style(mut self, style: super::GutterStyle) -> Self {
         self.gutter_style = style;
         self
     }
@@ -527,14 +527,17 @@ impl Input {
     /// This method must after the refine_style.
     fn render_editor(
         input_state: TextInputState,
+        gutter_style: super::GutterStyle,
         search_panel: Option<AnyElement>,
         _: &Window,
     ) -> impl IntoElement {
         v_flex().size_full().children(search_panel).child(
-            div()
-                .relative()
-                .flex_1()
-                .child(input_state.into_any_element()),
+            div().relative().flex_1().child(match input_state {
+                TextInputState::Editor(state) => gpui_base::input::Editor::new(&state)
+                    .with_line_number_renderer(gutter_style)
+                    .into_any_element(),
+                state => state.into_any_element(),
+            }),
         )
     }
 }
@@ -566,9 +569,6 @@ impl RenderOnce for Input {
         sync_focused_input_registry(&state, window, cx);
 
         state.ensure_highlighter_factory(crate::highlighter::input_highlighter_factory(), cx);
-        let mut gutter_style = cx.theme().get_editor_gutter_style().clone();
-        gutter_style.apply_overrides(&self.gutter_style);
-        state.set_gutter_style(gutter_style, cx);
         state.set_editor_style(
             gpui_base::input::InputEditorStyle {
                 foreground: cx.theme().foreground,
@@ -826,7 +826,12 @@ impl RenderOnce for Input {
                     .child(p)
             }))
             .when(presentation.is_multi_line(), |this| {
-                this.child(Self::render_editor(state.clone(), overlays.search, window))
+                this.child(Self::render_editor(
+                    state.clone(),
+                    self.gutter_style,
+                    overlays.search,
+                    window,
+                ))
             })
             .when(!presentation.is_multi_line(), |this| {
                 this.child(state.clone().into_any_element())

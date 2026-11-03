@@ -71,6 +71,19 @@ fn displayed_line_number(number: usize) -> usize {
     number.min(MAX_DISPLAYED_LINE_NUMBER)
 }
 
+pub(super) fn measure_line_number_width(
+    digit_count: usize,
+    measure_character: impl FnMut(char) -> Pixels,
+) -> Pixels {
+    // Proportional fonts can give digits unequal advances. Reserve the widest
+    // digit for every position so multi-digit line numbers fit in their lane.
+    "0123456789"
+        .chars()
+        .map(measure_character)
+        .fold(px(0.), Pixels::max)
+        * digit_count
+}
+
 const FOLD_CHEVRON_RIGHT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
 const FOLD_CHEVRON_DOWN_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 
@@ -162,6 +175,7 @@ impl EditorScrollbarSnapshot {
         scroll_size: Size<Pixels>,
         cursor_scroll_offset: Point<Pixels>,
         state: &InputBaseState<M>,
+        gutter_gap: Pixels,
     ) -> Self {
         let mut layout = EditorScrollbarLayout::new(
             input_bounds,
@@ -169,11 +183,7 @@ impl EditorScrollbarSnapshot {
             scroll_size,
             state.editor_paddings,
         );
-        if last_layout.line_number_width != px(0.) {
-            if let Some(style) = state.extras.get_gutter_style() {
-                layout.set_gutter_gap(style.resolve_gap());
-            }
-        }
+        layout.set_gutter_gap(gutter_gap);
         Self {
             layout,
             cursor_scroll_offset,
@@ -715,9 +725,10 @@ struct FoldIconLayout {
     icons: Vec<(usize, bool, gpui::AnyElement)>,
 }
 
-pub(super) struct TextElement<M: InputModeKind> {
+pub(super) struct TextElement<M: InputModeKind, R = ()> {
     pub(crate) state: Entity<InputBaseState<M>>,
     placeholder: SharedString,
+    line_number_renderer: R,
 }
 
 impl<M: InputModeKind> TextElement<M> {
@@ -725,6 +736,20 @@ impl<M: InputModeKind> TextElement<M> {
         Self {
             state,
             placeholder: SharedString::default(),
+            line_number_renderer: (),
+        }
+    }
+}
+
+impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> TextElement<M, R> {
+    pub(super) fn with_line_number_renderer<T: crate::input::EditorLineNumberRenderer>(
+        self,
+        renderer: T,
+    ) -> TextElement<M, T> {
+        TextElement {
+            state: self.state,
+            placeholder: self.placeholder,
+            line_number_renderer: renderer,
         }
     }
 
@@ -1416,33 +1441,25 @@ impl<M: InputModeKind> TextElement<M> {
         (visible_range, visible_buffer_lines, visible_top)
     }
 
-    /// Return (line_number_width, line_number_len)
+    /// Return the complete gutter width and resolved gap for this frame.
     fn layout_line_numbers(
+        &self,
         state: &InputBaseState<M>,
         text: &Rope,
-        font_size: Pixels,
         style: &TextStyle,
         window: &mut Window,
-    ) -> (Pixels, usize) {
+        cx: &App,
+    ) -> (Pixels, Pixels) {
         let total_lines = text.lines_len();
         // Reserve three digits for small documents, then follow the actual
         // line count up to seven digits.
         let line_number_len = line_number_len(total_lines);
-        let gap = state
-            .extras
-            .get_gutter_style()
-            .map(|style| style.resolve_gap())
-            .unwrap_or(LINE_NUMBER_RIGHT_MARGIN);
+        let (number_width, gap) =
+            self.line_number_renderer
+                .measure_line_numbers(line_number_len, style, window, cx);
 
         let mut line_number_width = if state.mode.line_number() {
-            let width = window.text_system().shape_line(
-                "+".repeat(line_number_len).into(),
-                font_size,
-                &[style.to_run(line_number_len)],
-                None,
-            ).width;
-
-            width + gap
+            number_width + gap
         } else if state.is_code_editor() {
             gap
         } else {
@@ -1458,7 +1475,7 @@ impl<M: InputModeKind> TextElement<M> {
             line_number_width += width + GUTTER_DECORATION_GAP;
         }
 
-        (line_number_width, line_number_len)
+        (line_number_width, gap)
     }
 
     /// Layout shaped lines for whitespace indicators (space and tab).
@@ -2818,7 +2835,9 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
 }
 
-impl<M: InputModeKind> IntoElement for TextElement<M> {
+impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> IntoElement
+    for TextElement<M, R>
+{
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -2955,7 +2974,7 @@ fn clamp_frame_to_content_mask(
         .collect()
 }
 
-impl<M: InputModeKind> Element for TextElement<M> {
+impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> Element for TextElement<M, R> {
     type RequestLayoutState = ();
     type PrepaintState = PrepaintState;
 
@@ -3053,20 +3072,17 @@ impl<M: InputModeKind> Element for TextElement<M> {
             (&text, fg)
         };
 
-        // Resolve once so glyph measurement and painting never disagree when
-        // the gutter font differs from the body. Body metrics stay untouched.
-        let gutter_style = state.extras.get_gutter_style().cloned().unwrap_or_default();
-        let gutter_text_style = gutter_style.resolve_text_style(&text_style);
-        let gutter_font_size = gutter_text_style.font_size.to_pixels(window.rem_size());
-        let (line_number_width, line_number_len) = Self::layout_line_numbers(
-            &state,
-            &text,
-            gutter_font_size,
-            &gutter_text_style,
-            window,
-        );
-        let line_number_right = line_number_width - gutter_style.resolve_gap()
-            - if state.mode.is_folding() { FOLD_ICON_HITBOX_WIDTH } else { px(0.) };
+        // Wrapping and pointer mapping need resolved geometry from this frame,
+        // not presentation settings retained in the editing state.
+        let (line_number_width, gutter_gap) =
+            self.layout_line_numbers(&state, &text, &text_style, window, cx);
+        let line_number_right = line_number_width
+            - gutter_gap
+            - if state.mode.is_folding() {
+                FOLD_ICON_HITBOX_WIDTH
+            } else {
+                px(0.)
+            };
 
         let mut bounds = bounds;
         let wrap_width = if multi_line && state.soft_wrap {
@@ -3446,24 +3462,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let state = self.state.read(cx);
         let line_numbers = if state.mode.line_number() {
             let mut line_numbers = Vec::with_capacity(last_layout.visible_buffer_lines.len());
-            let other_line_runs = vec![TextRun {
-                len: line_number_len,
-                font: gutter_text_style.font(),
-                color: gutter_style.get_line_number_color()
-                    .unwrap_or(state.editor_style.muted_foreground),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            }];
-            let current_line_runs = vec![TextRun {
-                len: line_number_len,
-                font: gutter_text_style.font(),
-                color: gutter_style.get_active_line_number_color()
-                    .unwrap_or(state.editor_style.foreground),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            }];
+            let mut other_line_style = text_style.clone();
+            other_line_style.color = state.editor_style.muted_foreground;
+            let mut current_line_style = text_style.clone();
+            current_line_style.color = state.editor_style.foreground;
 
             // build line numbers
             for (line, &buffer_line) in last_layout
@@ -3471,25 +3473,21 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 .iter()
                 .zip(last_layout.visible_buffer_lines.iter())
             {
-                let line_no: SharedString = format!(
-                    "{:>width$}",
-                    displayed_line_number(buffer_line + 1),
-                    width = line_number_len
-                )
-                .into();
-
-                let runs = if current_row == Some(buffer_line) {
-                    &current_line_runs
+                let is_active = current_row == Some(buffer_line);
+                let number_style = if is_active {
+                    &current_line_style
                 } else {
-                    &other_line_runs
+                    &other_line_style
                 };
 
                 let mut sub_lines: SmallVec<[ShapedLine; 1]> = SmallVec::new();
-                sub_lines.push(
-                    window
-                        .text_system()
-                        .shape_line(line_no, gutter_font_size, &runs, None),
-                );
+                sub_lines.push(self.line_number_renderer.shape_line_number(
+                    displayed_line_number(buffer_line + 1),
+                    is_active,
+                    number_style,
+                    window,
+                    cx,
+                ));
                 for _ in 0..line.wrapped_lines.len().saturating_sub(1) {
                     sub_lines.push(ShapedLine::default());
                 }
@@ -3511,9 +3509,16 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 scroll_size,
                 cursor_scroll_offset,
                 state,
+                gutter_gap,
             )));
-        let fold_icon_layout =
-            self.layout_fold_icons(original_x, &bounds, &last_layout, line_number_right, window, cx);
+        let fold_icon_layout = self.layout_fold_icons(
+            original_x,
+            &bounds,
+            &last_layout,
+            line_number_right,
+            window,
+            cx,
+        );
         let ghost_rows = current_row.filter(|_| !ghost_lines.is_empty()).map(|row| {
             let display_map = &self.state.read(cx).display_map;
             let rows = display_map
@@ -3850,11 +3855,15 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 }
 
                 for line in lines {
-                    let number_origin = point(
-                        p.x + prepaint.line_number_right - line.width,
-                        p.y,
+                    let number_origin = point(p.x + prepaint.line_number_right - line.width, p.y);
+                    _ = line.paint(
+                        number_origin,
+                        line_height,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
                     );
-                    _ = line.paint(number_origin, line_height, TextAlign::Left, None, window, cx);
                     offset_y += line_height;
                 }
 
@@ -4198,11 +4207,76 @@ mod tests {
         assert_eq!(displayed_line_number(10_000_000), 9_999_999);
     }
 
-    struct DecorationHarness(Entity<EditorState>);
+    #[test]
+    fn line_number_lane_uses_the_widest_digit_only() {
+        // Synthetic font metrics make the regression independent of which
+        // font families happen to be installed on the host running the test.
+        let measure_character = |character| match character {
+            '+' => px(4.),
+            '8' => px(12.),
+            '0'..='9' => px(10.),
+            ' ' => px(6.),
+            _ => unreachable!(),
+        };
+        assert_eq!(measure_line_number_width(3, measure_character), px(36.));
+        assert_eq!(measure_line_number_width(7, measure_character), px(84.));
+        assert_eq!(
+            measure_line_number_width(3, |character| {
+                if matches!(character, ' ' | '+') {
+                    px(14.)
+                } else {
+                    measure_character(character)
+                }
+            }),
+            px(36.),
+        );
+    }
+
+    struct DecorationHarness(Entity<EditorState>, Option<Pixels>);
+
+    struct MeasuredLineNumbers(Pixels);
+
+    impl crate::input::EditorLineNumberRenderer for MeasuredLineNumbers {
+        fn measure_line_numbers(
+            &self,
+            _: usize,
+            _: &TextStyle,
+            _: &mut Window,
+            _: &App,
+        ) -> (Pixels, Pixels) {
+            // Base must consume externally measured geometry without needing
+            // the font or spacing configuration that produced it.
+            (px(100.), self.0)
+        }
+
+        fn shape_line_number(
+            &self,
+            number: usize,
+            _: bool,
+            _: &TextStyle,
+            window: &mut Window,
+            _: &App,
+        ) -> ShapedLine {
+            let mut style = TextStyle::default();
+            style.font_family = ".SystemUIFont".into();
+            let label: SharedString = number.to_string().into();
+            window.text_system().shape_line(
+                label.clone(),
+                px(32.),
+                &[style.to_run(label.len())],
+                None,
+            )
+        }
+    }
 
     impl Render for DecorationHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().child(self.0.clone())
+            div().size_full().child(match self.1 {
+                Some(gap) => crate::input::Editor::new(&self.0)
+                    .with_line_number_renderer(MeasuredLineNumbers(gap))
+                    .into_any_element(),
+                None => crate::input::Editor::new(&self.0).into_any_element(),
+            })
         }
     }
 
@@ -4221,7 +4295,7 @@ mod tests {
                     .default_value(text)
             });
             editor = Some(state.clone());
-            DecorationHarness(state)
+            DecorationHarness(state, None)
         });
         (editor.unwrap(), window)
     }
@@ -4885,15 +4959,16 @@ mod tests {
     }
 
     #[gpui::test]
-    fn gutter_typography_updates_wrapping_scrollbars_and_pointer_coordinates(cx: &mut TestAppContext) {
-        use crate::input::GutterStyle;
-
+    fn gutter_typography_updates_wrapping_scrollbars_and_pointer_coordinates(
+        cx: &mut TestAppContext,
+    ) {
         let assert_widths_match = |actual: Pixels, expected: Pixels| {
-            // Pixels stores f32: adding the gap/fold lane and subtracting them
-            // again can round even when the measured font width is unchanged.
-            // Allow roundoff from those four operations, not a visual-pixel gap.
-            let tolerance = actual.abs().max(expected.abs()).max(px(1.))
-                * (4. * f32::EPSILON);
+            // Bounds widths subtract absolute f32 coordinates, so moving the
+            // gutter can change rounding even when glyph metrics are unchanged.
+            // A 0.001px floor covers that cancellation while still rejecting
+            // changes large enough to affect the editor's visible geometry.
+            let tolerance =
+                (actual.abs().max(expected.abs()).max(px(1.)) * (4. * f32::EPSILON)).max(px(0.001));
             assert!(
                 (actual - expected).abs() <= tolerance,
                 "{actual:?} != {expected:?} (roundoff tolerance: {tolerance:?})",
@@ -4902,57 +4977,68 @@ mod tests {
 
         let (editor, window) = decoration_editor(cx, &"hello world ".repeat(40), true);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
-        let (baseline_width, baseline_wrap, body_height, body_glyph_width) = cx.update(|window, cx| {
-            editor.update(cx, |state, cx| state.set_selected_range(0..0, cx));
-            window.draw(cx).clear(cx);
-            let state = editor.read(cx);
-            let layout = state.last_layout.as_ref().unwrap();
-            (
-                layout.line_number_width,
-                layout.wrap_width.unwrap(),
-                layout.line_height,
-                state.range_to_bounds(&(0..1)).unwrap().size.width,
-            )
-        });
-
-        let mut previous: Option<(Pixels, Pixels, Pixels, Bounds<Pixels>)> = None;
-        for gap in [px(0.), px(12.), px(24.), px(0.)] {
-            let (column_width, wrap_width, scrollbar_bounds, click_position) = cx.update(|window, cx| {
-                editor.update(cx, |state, cx| {
-                    state.set_gutter_style(
-                        GutterStyle::default()
-                            .with_gap(gap)
-                            .with_line_number_font_family(".SystemUIFont")
-                            .with_line_number_font_size(px(32.)),
-                    );
-                    cx.notify();
-                });
+        let (baseline_width, baseline_wrap, body_height, body_glyph_width) =
+            cx.update(|window, cx| {
+                editor.update(cx, |state, cx| state.set_selected_range(0..0, cx));
                 window.draw(cx).clear(cx);
                 let state = editor.read(cx);
                 let layout = state.last_layout.as_ref().unwrap();
-                assert_eq!(layout.line_height, body_height);
-                assert_eq!(state.range_to_bounds(&(0..1)).unwrap().size.width, body_glyph_width);
-                assert!(layout.line_number_width > baseline_width);
-                assert!(layout.wrap_width.unwrap() < baseline_wrap);
-
-                let column_width = layout.line_number_width - gap - FOLD_ICON_HITBOX_WIDTH;
-                let mut number_style = TextStyle::default();
-                number_style.font_family = ".SystemUIFont".into();
-                let number = window.text_system().shape_line(
-                    "+++".into(), px(32.), &[number_style.to_run(3)], None,
-                );
-                assert_widths_match(column_width, number.width);
-
-                let caret = state.prepaint_caret_geometry().unwrap().cursor_bounds();
                 (
-                    column_width,
+                    layout.line_number_width,
                     layout.wrap_width.unwrap(),
-                    state.editor_scrollbar_snapshot.get().unwrap().layout.bounds,
-                    point(caret.left() + px(1.), caret.center().y),
+                    layout.line_height,
+                    state.range_to_bounds(&(0..1)).unwrap().size.width,
                 )
             });
 
-            if let Some((previous_gap, previous_column, previous_wrap, previous_scrollbar)) = previous {
+        let mut previous: Option<(Pixels, Pixels, Pixels, Bounds<Pixels>)> = None;
+        for gap in [px(0.), px(12.), px(24.), px(0.)] {
+            window
+                .update(&mut cx, |view, _, cx| {
+                    view.1 = Some(gap);
+                    cx.notify();
+                })
+                .unwrap();
+            let (column_width, wrap_width, scrollbar_bounds, click_position) =
+                cx.update(|window, cx| {
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.as_ref().unwrap();
+                    assert_eq!(layout.line_height, body_height);
+                    assert_widths_match(
+                        state.range_to_bounds(&(0..1)).unwrap().size.width,
+                        body_glyph_width,
+                    );
+                    assert!(layout.line_number_width > baseline_width);
+                    assert!(layout.wrap_width.unwrap() < baseline_wrap);
+
+                    let column_width = layout.line_number_width - gap - FOLD_ICON_HITBOX_WIDTH;
+                    let mut number_style = TextStyle::default();
+                    number_style.font_family = ".SystemUIFont".into();
+                    // Assert actual painted labels fit, rather than assuming a
+                    // punctuation glyph represents this font's digit advances.
+                    for number in ["1", "10", "123", "444", "888", "999"] {
+                        let number = window.text_system().shape_line(
+                            number.into(),
+                            px(32.),
+                            &[number_style.to_run(number.len())],
+                            None,
+                        );
+                        assert_widths_match(column_width.max(number.width), column_width);
+                    }
+
+                    let caret = state.prepaint_caret_geometry().unwrap().cursor_bounds();
+                    (
+                        column_width,
+                        layout.wrap_width.unwrap(),
+                        state.editor_scrollbar_snapshot.get().unwrap().layout.bounds,
+                        point(caret.left() + px(1.), caret.center().y),
+                    )
+                });
+
+            if let Some((previous_gap, previous_column, previous_wrap, previous_scrollbar)) =
+                previous
+            {
                 // A new gap changes wrapping, but the number/folding lane and
                 // scrollbar origin must not drift along with the blank space.
                 assert_widths_match(column_width, previous_column);
@@ -4968,19 +5054,37 @@ mod tests {
             editor.read_with(&cx, |state, _| assert_eq!(state.selected_range(), 0..0));
         }
 
+        window
+            .update(&mut cx, |view, _, cx| {
+                view.1 = Some(px(12.));
+                cx.notify();
+            })
+            .unwrap();
         cx.update(|window, cx| {
             editor.update(cx, |state, cx| {
-                state.set_gutter_style(GutterStyle::default().with_gap(px(12.)));
                 state.set_line_number(false, window, cx);
             });
             window.draw(cx).clear(cx);
             assert_eq!(
-                editor.read(cx).last_layout.as_ref().unwrap().line_number_width,
+                editor
+                    .read(cx)
+                    .last_layout
+                    .as_ref()
+                    .unwrap()
+                    .line_number_width,
                 px(12.) + FOLD_ICON_HITBOX_WIDTH,
             );
             editor.update(cx, |state, cx| state.set_folding(false, window, cx));
             window.draw(cx).clear(cx);
-            assert_eq!(editor.read(cx).last_layout.as_ref().unwrap().line_number_width, px(12.));
+            assert_eq!(
+                editor
+                    .read(cx)
+                    .last_layout
+                    .as_ref()
+                    .unwrap()
+                    .line_number_width,
+                px(12.)
+            );
         });
     }
 

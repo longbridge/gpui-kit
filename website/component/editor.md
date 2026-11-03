@@ -504,42 +504,58 @@ methods every element has, so `font_weight` and `line_height` work the same way.
 
 ### Line-number style
 
-Set application-wide defaults with `Theme::update`, then override only the
-properties needed by an individual editor:
+Set line-number presentation on each `Editor`, specifying only the properties
+that need to differ from its inherited defaults:
 
 ```rust
-use gpui_kit::{px, component::{Theme, input::{Editor, GutterStyle}}};
+use gpui_kit::{px, rems, component::{ActiveTheme as _, input::{Editor, GutterStyle}}};
 
-Theme::update(cx, |theme| {
-    theme.set_editor_gutter_style(
-        GutterStyle::default()
-            .with_gap(px(12.))
-            .with_line_number_color(theme.muted_foreground)
-            .with_active_line_number_color(theme.foreground)
-            .with_line_number_font_family("JetBrains Mono")
-            .with_line_number_font_size(px(12.)),
-    );
-});
+// Use rems so spacing and typography scale together with interface zoom.
+Editor::new(&editor).gutter_style(
+    GutterStyle::default()
+        .with_gap(rems(0.75))
+        .with_line_number_color(cx.theme().muted_foreground)
+        .with_active_line_number_color(cx.theme().foreground)
+        .with_line_number_font_family("JetBrains Mono")
+        .with_line_number_font_size(rems(0.875)),
+);
 
-Editor::new(&editor).apply_gutter_style(
-    GutterStyle::default().with_line_number_font_size(px(11.)),
+// Use pixels when the gutter must keep fixed logical-pixel dimensions.
+// These values do not scale with UI zoom.
+// GPUI resolves AbsoluteLength directly; the gutter adds no scaling logic.
+Editor::new(&editor).gutter_style(
+    GutterStyle::default()
+        .with_gap(px(12.))
+        .with_line_number_font_size(px(14.)),
 )
 ```
 
-Individual properties override the theme; unspecified theme properties use the
-existing editor defaults: a 6px gap, the editor's muted/normal foreground for
+Unspecified properties use the existing editor defaults: a fixed 6px gap,
+the editor's muted/normal foreground for
 normal/current line numbers, and the body font and size. Explicit transparent
 colors are preserved. The gap separates the number/folding lane from the body.
 Line-number typography controls both measurement and painting without changing
 body typography or row height.
 
-`Theme::get_editor_gutter_style()` returns the configured theme properties.
-These settings are runtime configuration and are not saved in theme JSON.
-Omitting `apply_gutter_style` on a later render restores the theme settings;
-setting the theme style to `GutterStyle::default()` clears its overrides.
-For Base-only editors, use `EditorState::set_gutter_style(style)` and notify the
-state afterwards. Styled editors project their theme and element settings on
-each render.
+`with_gap` and `with_line_number_font_size` accept `impl Into<AbsoluteLength>`,
+the same GPUI length type used for font sizes. `rems(...)` follows the window's
+current rem size; `px(...)` stays fixed. `rems(0.75)` matches `gap_3()` and resolves
+to 18px when the window's rem size is 24px. Readers return the configured
+`AbsoluteLength`, preserving its unit. Unspecified line-number typography
+inherits the body style directly. Use `text_size(rems(...))` or helpers such as
+`text_sm()` for body text that follows interface zoom.
+
+`GutterStyle` readers use property names, such as `gap()` and `line_number_color()`.
+Omitting `gutter_style` on a later render restores the inherited defaults.
+`GutterStyle` belongs to Component and is never stored in Base's editor state.
+Component measures the lane and shapes visible line numbers for each frame;
+Base uses those results for placement, wrapping, scrolling, and pointer mapping.
+Base-only applications can supply computed geometry and shaped labels through
+`Editor::with_line_number_renderer` and `EditorLineNumberRenderer`.
+
+Line numbers are right-aligned before the folding controls. Their lane reserves
+the widest digit in the configured font for each supported
+position, with a minimum of three positions and a maximum of seven.
 
 ## Sizes
 

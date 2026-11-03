@@ -26,8 +26,6 @@ mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
 mod editor;
-#[path = "editor/gutter_style.rs"]
-mod gutter_style;
 #[path = "base/element.rs"]
 mod element;
 #[path = "editor/highlighting.rs"]
@@ -99,8 +97,7 @@ pub use diagnostics::{
     DiagnosticSummary, DiagnosticTag, RelatedInformation,
 };
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
-pub use editor::{Editor, EditorState};
-pub use gutter_style::GutterStyle;
+pub use editor::{Editor, EditorLineNumberRenderer, EditorState};
 pub use highlighting::{
     DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,
     InputHighlighterFactory, SharedHighlightStyleResolver, SyntaxContext, SyntaxContextProvider,
