@@ -227,6 +227,38 @@ fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppCo
     .unwrap();
 }
 
+/// A row's text is in its cells, so each row is named after them, and a screen
+/// reader moving through the rows reads more than "row". A table whose cells
+/// have no labels leaves its rows unnamed.
+#[gpui_kit::test]
+fn table_rows_are_named_after_their_cells(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (labelled, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| LabelledRecords {
+            table: cx.new(|cx| TableState::new(LabelledRows, window, cx)),
+        })
+    });
+    let (plain, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| Records {
+            table: cx.new(|cx| TableState::new(Rows, window, cx)),
+        })
+    });
+    cx.update_window(labelled.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let row = window.find(("row", 3usize));
+        assert_eq!(row.role(), Some(gpui_kit::Role::Row));
+        assert_eq!(row.label(), Some("3:0, 3:1"));
+    })
+    .unwrap();
+    cx.update_window(plain.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let row = window.find(("row", 3usize));
+        assert_eq!(row.role(), Some(gpui_kit::Role::Row));
+        assert_eq!(row.label(), None);
+    })
+    .unwrap();
+}
+
 /// The grid is the element that holds the keyboard focus, so a screen reader
 /// is told the grid has the focus, not the window, and follows the arrows.
 #[gpui_kit::test]

@@ -2256,11 +2256,18 @@ where
 
             let mut tr = self.delegate.render_tr(row_ix, window, cx);
             let style = tr.style().clone();
+            // As with cell labels, only build the name when it can be read.
+            let label = if window.is_a11y_active() || cfg!(feature = "test-support") {
+                self.delegate.row_label(row_ix, cx)
+            } else {
+                None
+            };
 
             tr.test_support()
                 .role(gpui::Role::Row)
                 // Row 0 is the header row.
                 .aria_row_index(row_ix + 1)
+                .when_some(label, |this, label| this.aria_label(label))
                 .aria_selected(is_selected)
                 // While the table has focus, the selected row is the focused
                 // node for assistive technology.

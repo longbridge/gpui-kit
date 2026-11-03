@@ -295,6 +295,21 @@ impl TableDelegate for MyTableDelegate {
 }
 ```
 
+### Accessibility
+
+Text drawn by `render_td` is not read by screen readers. Return each cell's text from `cell_label` so a screen reader can read the cell:
+
+```rust
+impl TableDelegate for MyTableDelegate {
+    fn cell_label(&self, row_ix: usize, col_ix: usize, _: &App) -> Option<SharedString> {
+        let row = self.data.get(row_ix)?;
+        Some(row.get_field_value(self.columns.get(col_ix)?.key.as_ref()).into())
+    }
+}
+```
+
+Each row is then named after its cells' labels, joined with commas (for example "Alice, Active, 80%"). Override `row_label` to name a row differently, or return `None` to leave it unnamed.
+
 ### Selection Modes
 
 The table supports three distinct selection modes:
