@@ -45,6 +45,9 @@ struct PieHover {
 pub struct PieChart<T: 'static> {
     data: Vec<T>,
     inner_radius: f32,
+    /// The hole as a fraction of the ring's outer radius; replaces
+    /// `inner_radius` when set.
+    inner_radius_ratio: Option<f32>,
     inner_radius_fn: Option<Rc<dyn Fn(&ArcData<T>) -> f32 + 'static>>,
     outer_radius: f32,
     outer_radius_fn: Option<Rc<dyn Fn(&ArcData<T>) -> f32 + 'static>>,
@@ -73,6 +76,7 @@ impl<T> PieChart<T> {
         Self {
             data: data.into_iter().collect(),
             inner_radius: 0.,
+            inner_radius_ratio: None,
             inner_radius_fn: None,
             outer_radius: 0.,
             outer_radius_fn: None,
@@ -142,9 +146,27 @@ impl<T> PieChart<T> {
         self
     }
 
-    /// Set the inner radius of the pie chart.
+    /// Set the inner radius of the pie chart, in pixels.
+    ///
+    /// This and [`Self::inner_radius_ratio`] replace each other; the last one
+    /// set applies.
     pub fn inner_radius(mut self, inner_radius: f32) -> Self {
         self.inner_radius = inner_radius;
+        self.inner_radius_ratio = None;
+        self
+    }
+
+    /// Set the inner radius as a fraction of the ring's outer radius, from
+    /// `0.` (a pie) to `1.`: `0.6` cuts a donut whose hole is 60% of the
+    /// ring's radius, whatever size the chart is given.
+    ///
+    /// The outer radius is the one set with [`Self::outer_radius`], or 40% of
+    /// the chart's height when none is set, so a donut keeps its proportions
+    /// in a panel of unknown or changing size. This and
+    /// [`Self::inner_radius`] replace each other; the last one set applies,
+    /// and [`Self::inner_radius_fn`] overrides both.
+    pub fn inner_radius_ratio(mut self, ratio: f32) -> Self {
+        self.inner_radius_ratio = Some(ratio);
         self
     }
 
@@ -157,9 +179,18 @@ impl<T> PieChart<T> {
         self
     }
 
-    fn get_inner_radius(&self, arc: &ArcData<T>) -> f32 {
+    /// The inner radius of `arc`'s slice in a ring whose outer radius is
+    /// `ring`: the per-slice one, the ratio of `ring`, or the fixed one.
+    fn get_inner_radius(&self, arc: &ArcData<T>, ring: f32) -> f32 {
         if let Some(inner_radius_fn) = self.inner_radius_fn.as_ref() {
             inner_radius_fn(arc)
+        } else if let Some(ratio) = self.inner_radius_ratio {
+            // A NaN ratio is no hole rather than a NaN radius.
+            ring * if ratio.is_nan() {
+                0.
+            } else {
+                ratio.clamp(0., 1.)
+            }
         } else {
             self.inner_radius
         }
@@ -334,7 +365,7 @@ impl<T> Plot for PieChart<T> {
         };
         let caches = (appear >= 1.).then(|| PathCaches::for_paint("slices", window, cx));
         for (ix, a) in slices.iter().enumerate() {
-            let inner_radius = self.get_inner_radius(a);
+            let inner_radius = self.get_inner_radius(a, outer_radius);
             // The hovered slice lifts out of the ring while the others fade behind it.
             let (lift, opacity) = self.slice_emphasis(a.index);
             let slice_radius = self.get_outer_radius(a, outer_radius) + HOVER_LIFT * lift;
@@ -480,7 +511,7 @@ impl<T> Plot for PieChart<T> {
 
         let index = self.arcs().into_iter().find_map(|a| {
             Arc::new()
-                .inner_radius(self.get_inner_radius(&a))
+                .inner_radius(self.get_inner_radius(&a, outer_radius))
                 .outer_radius(self.get_outer_radius(&a, outer_radius))
                 .contains(&a, position, &bounds)
                 .then_some(a.index)
@@ -648,6 +679,67 @@ mod tests {
         let arcs = chart.arcs();
         assert_eq!(chart.get_outer_radius(&arcs[0], ring), 10.);
         assert_eq!(chart.get_outer_radius(&arcs[1], ring), 11.);
+    }
+
+    /// A ratio cuts the hole from the ring the chart actually lays out, so a
+    /// donut keeps its proportions at any size.
+    #[test]
+    fn test_pie_chart_inner_radius_ratio_follows_the_ring() {
+        let bounds = |height: f32| Bounds {
+            origin: point(px(0.), px(0.)),
+            size: size(px(300.), px(height)),
+        };
+
+        let chart = PieChart::new(vec![1f32, 3.])
+            .value(|d| *d)
+            .inner_radius_ratio(0.5);
+        let arcs = chart.arcs();
+        for height in [100., 250.] {
+            let ring = chart.resolve_outer_radius(&bounds(height));
+            assert_eq!(chart.get_inner_radius(&arcs[0], ring), ring * 0.5);
+        }
+
+        // Against an explicit outer radius, and clamped to the ring.
+        let inner = |ratio: f32| {
+            let chart = PieChart::new(vec![1f32])
+                .value(|d| *d)
+                .outer_radius(80.)
+                .inner_radius_ratio(ratio);
+            let ring = chart.resolve_outer_radius(&bounds(100.));
+            let arcs = chart.arcs();
+            chart.get_inner_radius(&arcs[0], ring)
+        };
+        assert_eq!(inner(0.25), 20.);
+        assert_eq!(inner(1.5), 80.);
+        assert_eq!(inner(-1.), 0.);
+        assert_eq!(inner(f32::NAN), 0.);
+    }
+
+    /// `inner_radius` and `inner_radius_ratio` replace each other, and a
+    /// per-slice function overrides both.
+    #[test]
+    fn test_pie_chart_inner_radius_last_setting_applies() {
+        let ring = 100.;
+        let fixed_after_ratio = PieChart::new(vec![1f32])
+            .value(|d| *d)
+            .inner_radius_ratio(0.5)
+            .inner_radius(30.);
+        let arc = &fixed_after_ratio.arcs()[0];
+        assert_eq!(fixed_after_ratio.get_inner_radius(arc, ring), 30.);
+
+        let ratio_after_fixed = PieChart::new(vec![1f32])
+            .value(|d| *d)
+            .inner_radius(30.)
+            .inner_radius_ratio(0.5);
+        let arc = &ratio_after_fixed.arcs()[0];
+        assert_eq!(ratio_after_fixed.get_inner_radius(arc, ring), 50.);
+
+        let per_slice = PieChart::new(vec![1f32])
+            .value(|d| *d)
+            .inner_radius_ratio(0.5)
+            .inner_radius_fn(|_| 12.);
+        let arc = &per_slice.arcs()[0];
+        assert_eq!(per_slice.get_inner_radius(arc, ring), 12.);
     }
 
     /// The row's name is the slice's own, and reaching it must not put labels
