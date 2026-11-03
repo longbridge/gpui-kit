@@ -144,12 +144,17 @@ impl ParentElement for WindowBorder {
 impl RenderOnce for WindowBorder {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let decorations = window.window_decorations();
-        let mut children = self.children;
+        let children = self.children;
         if !uses_client_border(decorations) {
-            return match children.len() {
-                1 => children.pop().unwrap(),
-                _ => div().size_full().children(children).into_any_element(),
-            };
+            // Keep the same `window-backdrop` id as the client-decorated frame below. The
+            // decorations can change at runtime (an app switching to server-side decorations,
+            // or a compositor granting a different mode), and without the shared id every
+            // element id path in the window would change, dropping all keyed element state.
+            return div()
+                .id("window-backdrop")
+                .size_full()
+                .children(children)
+                .into_any_element();
         }
         let Decorations::Client { tiling } = decorations else {
             unreachable!("client border requires client decorations");
