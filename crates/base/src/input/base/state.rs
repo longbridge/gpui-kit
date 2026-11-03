@@ -40,8 +40,8 @@ use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::{
-    InputEdit, EditorLineNumberRenderer, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN,
-    layout::LastLayout,
+    EditorLineNumberRenderer, InputEdit, InputExtras as _, Position, RopeExt as _,
+    element::RIGHT_MARGIN, layout::LastLayout,
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
