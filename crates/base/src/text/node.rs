@@ -2874,7 +2874,7 @@ impl Paragraph {
 
         if self.should_render_inline_flow() {
             return InlineFlow::new(
-                leaf_element_id(fade_key),
+                self.element_id(fade_key),
                 self.inline_flow_items(fade_key, fades, backgrounds, node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
@@ -3055,9 +3055,26 @@ impl Paragraph {
         }
 
         div()
-            .id(leaf_element_id(fade_key))
+            .id(self.element_id(fade_key))
             .children(child_nodes)
             .into_any_element()
+    }
+
+    /// The element id of this paragraph when it needs one: an inline flow,
+    /// whose objects are accessibility nodes, or an image, whose element
+    /// state is its animation. The leaf key is unique per paragraph in a
+    /// parsed Markdown document. The HTML parser records no spans, so its
+    /// paragraphs fall back to an id derived from their own render state:
+    /// sharing one name mounted every span-less flow under the same id, and
+    /// the flows read each other's cached layout.
+    fn element_id(&self, fade_key: Option<TextLeafKey>) -> ElementId {
+        match fade_key {
+            Some(key) => ElementId::from(key),
+            None => ElementId::NamedInteger(
+                "p".into(),
+                Arc::as_ptr(&self.state) as *const () as usize as u64,
+            ),
+        }
     }
 
     /// The key an external editor gave this leaf, if any.
@@ -3278,14 +3295,6 @@ impl Paragraph {
 /// their siblings: unique among them, though not across nesting levels.
 fn block_element_id(kind: &'static str, span: Option<Span>, ix: usize) -> ElementId {
     (kind, span.map_or(ix, |span| span.start)).into()
-}
-
-/// The element id of a paragraph that needs one: an inline flow, whose
-/// objects are accessibility nodes, or an image, whose element state is its
-/// animation. The leaf key is unique per paragraph in a parsed Markdown
-/// document; the HTML parser records no spans, so its paragraphs share one.
-fn leaf_element_id(fade_key: Option<TextLeafKey>) -> ElementId {
-    fade_key.map_or_else(|| ElementId::from("p"), ElementId::from)
 }
 
 /// A link's underline: a hairline in a translucent link color, so a run of
