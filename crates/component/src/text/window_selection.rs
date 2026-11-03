@@ -89,7 +89,8 @@ mod tests {
             self.selection.register(
                 TextSelectionRegistration::new(hitbox.clone(), bounds)
                     .with_document_order(self.document_order)
-                    .with_text_bounds(vec![bounds]),
+                    .with_text_bounds(vec![bounds])
+                    .with_rendered_element(&self.selection, window, cx),
                 window,
                 cx,
             );

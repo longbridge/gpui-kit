@@ -177,10 +177,8 @@ jobs:
         run: script/bootstrap
       - name: Test GPUI Fast facade and UI integration
         run: cargo test -p gpui-kit --features gpui-fast,test-support --locked
-      - name: Test Component tooltip lifecycle with GPUI Fast
-        run: >-
-          cargo test -p gpui-component --features gpui-fast,test-support
-          --lib tooltip::tests:: --locked
+      - name: Test Component with GPUI Fast
+        run: cargo test -p gpui-component --features gpui-fast,test-support --lib --locked
       - name: Test WebView
         run: cargo test -p gpui-webview --features gpui-fast,gpui-kit/gpui-fast --locked
 

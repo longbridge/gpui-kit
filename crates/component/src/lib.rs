@@ -169,3 +169,12 @@ pub(crate) fn measure_enable() -> bool {
     static MEASURE_ENABLED: LazyLock<bool> = LazyLock::new(gpui_base::measurement_enabled);
     *MEASURE_ENABLED
 }
+
+/// Draws a frame that re-renders every view. GPUI Fast replays retained
+/// subtrees when nothing was invalidated, so a bare `window.draw` in a test
+/// would skip `render`/`paint` and any side-channel recording they do.
+#[cfg(test)]
+pub(crate) fn test_redraw(window: &mut gpui::Window, cx: &mut gpui::App) {
+    window.refresh();
+    window.draw(cx).clear(cx);
+}
