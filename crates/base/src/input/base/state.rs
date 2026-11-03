@@ -40,7 +40,8 @@ use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::{
-    InputEdit, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    InputEdit, EditorLineNumberRenderer, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN,
+    layout::LastLayout,
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
@@ -5106,7 +5107,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
 }
 
 impl<M: InputModeKind> InputBaseState<M> {
-    pub(crate) fn render_with_line_numbers<R: crate::input::EditorLineNumberRenderer>(
+    pub(crate) fn render_with_line_numbers<R: EditorLineNumberRenderer>(
         &mut self,
         line_number_renderer: R,
         window: &mut Window,

@@ -90,9 +90,9 @@ Theme::update(cx, |theme| {
 });
 ```
 
-Window zoom is application-owned. Call `window.set_rem_size(...)` and refresh
-the window to scale rem-based fonts and [spacing](./geometry) together.
-`Root` does not set or overwrite the window rem size.
+`font_size` doubles as the application zoom control — `Root` calls
+`window.set_rem_size(cx.theme().font_size)`, so [`rem`-based spacing](./geometry)
+scales with it. See [Coding Guides](./coding-guides.md) for details.
 
 ## Per-element override
 

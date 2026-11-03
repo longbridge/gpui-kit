@@ -17,10 +17,11 @@ use crate::{IconName, Size};
 use crate::{RoleOverride, Selectable, StyledExt, h_flex};
 use crate::{Sizable, StyleSized};
 use gpui_base::InputBase as BaseInput;
+use gpui_base::input::Editor as BaseEditor;
 use rust_i18n::t;
 
 use super::state::{TextInputState, sync_focused_input_registry};
-use super::{InputContentType, InputState, sync_native_content_type};
+use super::{GutterStyle, InputContentType, InputState, sync_native_content_type};
 use crate::ThemeStyled as _;
 
 /// Set when the platform draws the touch selection UI of a focused input.
@@ -130,7 +131,7 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
-    gutter_style: super::GutterStyle,
+    gutter_style: GutterStyle,
     token_renderer: Option<gpui_base::input::InlineTokenRenderer>,
     token_click_listener: Option<gpui_base::input::InlineTokenClickListener>,
     token_hover_listener: Option<gpui_base::input::InlineTokenHoverListener>,
@@ -246,7 +247,7 @@ impl Input {
 
     fn with_state(state: TextInputState) -> Self {
         Self {
-            gutter_style: super::GutterStyle::default(),
+            gutter_style: GutterStyle::default(),
             id: None,
             state,
             size: Size::default(),
@@ -275,7 +276,7 @@ impl Input {
         }
     }
 
-    pub(crate) fn gutter_style(mut self, style: super::GutterStyle) -> Self {
+    pub(crate) fn gutter_style(mut self, style: GutterStyle) -> Self {
         self.gutter_style = style;
         self
     }
@@ -527,13 +528,13 @@ impl Input {
     /// This method must after the refine_style.
     fn render_editor(
         input_state: TextInputState,
-        gutter_style: super::GutterStyle,
+        gutter_style: GutterStyle,
         search_panel: Option<AnyElement>,
         _: &Window,
     ) -> impl IntoElement {
         v_flex().size_full().children(search_panel).child(
             div().relative().flex_1().child(match input_state {
-                TextInputState::Editor(state) => gpui_base::input::Editor::new(&state)
+                TextInputState::Editor(state) => BaseEditor::new(&state)
                     .with_line_number_renderer(gutter_style)
                     .into_any_element(),
                 state => state.into_any_element(),

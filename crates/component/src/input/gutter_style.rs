@@ -1,4 +1,10 @@
-use gpui::{AbsoluteLength, Hsla, Pixels, SharedString, TextStyle};
+use gpui::{
+    AbsoluteLength, App, Font, Hsla, Pixels, ShapedLine, SharedString, TextRun, TextStyle, Window,
+    px,
+};
+use gpui_base::input::EditorLineNumberRenderer;
+
+use crate::ActiveTheme as _;
 
 /// Optional line-number presentation supplied by the application or UI layer.
 ///
@@ -13,14 +19,19 @@ pub struct GutterStyle {
     line_number_font_size: Option<AbsoluteLength>,
 }
 
-impl gpui_base::input::EditorLineNumberRenderer for GutterStyle {
+impl EditorLineNumberRenderer for GutterStyle {
     fn measure_line_numbers(
         &self,
         digit_count: usize,
         body_style: &TextStyle,
-        window: &mut gpui::Window,
-        _: &gpui::App,
+        window: &mut Window,
+        _: &App,
     ) -> (Pixels, Pixels) {
+        let gap = self.resolve_gap(window.rem_size());
+        // Hidden line numbers need spacing but no font resolution or glyph metrics.
+        if digit_count == 0 {
+            return (px(0.), gap);
+        }
         let style = self.resolve_text_style(body_style);
         let font_size = style.font_size.to_pixels(window.rem_size());
         let font_id = window.text_system().resolve_font(&style.font());
@@ -29,9 +40,9 @@ impl gpui_base::input::EditorLineNumberRenderer for GutterStyle {
         let width = "0123456789"
             .chars()
             .map(|digit| window.text_system().layout_width(font_id, font_size, digit))
-            .fold(gpui::px(0.), Pixels::max)
+            .fold(px(0.), Pixels::max)
             * digit_count;
-        (width, self.resolve_gap(window.rem_size()))
+        (width, gap)
     }
 
     fn shape_line_number(
@@ -39,13 +50,10 @@ impl gpui_base::input::EditorLineNumberRenderer for GutterStyle {
         number: usize,
         is_active: bool,
         body_style: &TextStyle,
-        window: &mut gpui::Window,
-        cx: &gpui::App,
-    ) -> gpui::ShapedLine {
-        use crate::ActiveTheme as _;
-
-        let mut style = self.resolve_text_style(body_style);
-        style.color = if is_active {
+        window: &mut Window,
+        cx: &App,
+    ) -> ShapedLine {
+        let color = if is_active {
             self.active_line_number_color
                 .unwrap_or(cx.theme().foreground)
         } else {
@@ -54,10 +62,32 @@ impl gpui_base::input::EditorLineNumberRenderer for GutterStyle {
         };
         // Base aligns shaped advances, so padding would distort the label width.
         let label: SharedString = number.to_string().into();
+        // Build only the shaping inputs; cloning TextStyle for every visible
+        // line would also copy unrelated layout settings and shared handles.
+        let run = TextRun {
+            len: label.len(),
+            font: Font {
+                family: self
+                    .line_number_font_family
+                    .as_ref()
+                    .unwrap_or(&body_style.font_family)
+                    .clone(),
+                features: body_style.font_features.clone(),
+                fallbacks: body_style.font_fallbacks.clone(),
+                weight: body_style.font_weight,
+                style: body_style.font_style,
+            },
+            color,
+            background_color: body_style.background_color,
+            underline: body_style.underline,
+            strikethrough: body_style.strikethrough,
+        };
         window.text_system().shape_line(
-            label.clone(),
-            style.font_size.to_pixels(window.rem_size()),
-            &[style.to_run(label.len())],
+            label,
+            self.line_number_font_size
+                .unwrap_or(body_style.font_size)
+                .to_pixels(window.rem_size()),
+            &[run],
             None,
         )
     }
@@ -124,14 +154,14 @@ impl GutterStyle {
     }
 
     /// Applies only explicitly specified properties, including transparent colors.
-    pub(crate) fn apply_overrides(&mut self, overrides: &Self) {
+    pub(crate) fn apply_overrides(&mut self, overrides: Self) {
         self.gap = overrides.gap.or(self.gap);
         self.line_number_color = overrides.line_number_color.or(self.line_number_color);
         self.active_line_number_color = overrides
             .active_line_number_color
             .or(self.active_line_number_color);
-        if let Some(family) = &overrides.line_number_font_family {
-            self.line_number_font_family = Some(family.clone());
+        if let Some(family) = overrides.line_number_font_family {
+            self.line_number_font_family = Some(family);
         }
         self.line_number_font_size = overrides
             .line_number_font_size
@@ -140,7 +170,7 @@ impl GutterStyle {
 
     pub(crate) fn resolve_gap(&self, rem_size: Pixels) -> Pixels {
         // Preserve each length's unit so GPUI controls pixel and rem behavior.
-        self.gap.unwrap_or(gpui::px(6.).into()).to_pixels(rem_size)
+        self.gap.unwrap_or(px(6.).into()).to_pixels(rem_size)
     }
 
     pub(crate) fn resolve_text_style(&self, body: &TextStyle) -> TextStyle {
@@ -158,12 +188,12 @@ impl GutterStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Styled as _, div, px, rems};
+    use gpui::{Styled as _, div, px, rems, rgb};
 
     #[test]
     fn test_gutter_style_builder_and_partial_overrides() {
-        let normal = gpui::rgb(0x808080).into();
-        let active = gpui::rgb(0xeeeeee).into();
+        let normal = rgb(0x808080).into();
+        let active = rgb(0xeeeeee).into();
         let mut style = GutterStyle::default()
             .with_gap(px(12.))
             .with_line_number_color(normal)
@@ -172,13 +202,13 @@ mod tests {
             .with_line_number_font_size(px(12.));
         let defaults = style.clone();
 
-        style.apply_overrides(&GutterStyle::default());
+        style.apply_overrides(GutterStyle::default());
         assert_eq!(style, defaults);
 
         // Zero spacing and transparent ink are explicit values, so treating
         // either as an unset sentinel would lose an application's override.
         style.apply_overrides(
-            &GutterStyle::default()
+            GutterStyle::default()
                 .with_gap(px(0.))
                 .with_line_number_color(Hsla::transparent_black())
                 .with_line_number_font_size(px(10.)),
@@ -192,7 +222,7 @@ mod tests {
         );
         assert_eq!(style.line_number_font_size(), Some(px(10.).into()));
 
-        style.apply_overrides(&GutterStyle::default().with_active_line_number_color(normal));
+        style.apply_overrides(GutterStyle::default().with_active_line_number_color(normal));
         assert_eq!(style.active_line_number_color(), Some(normal));
         assert_eq!(style.line_number_color(), Some(Hsla::transparent_black()));
     }

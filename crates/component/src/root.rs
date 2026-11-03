@@ -711,8 +711,7 @@ impl WindowState {
 impl gpui_base::RootPlugin for WindowState {
     fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss_removed_tooltip(window, cx);
-        // Window zoom belongs to the application; root rendering must preserve
-        // the rem size shared by typography and layout.
+        window.set_rem_size(cx.theme().font_size);
         TextSelection::activate_scope(self.active_text_selection_scope(), window, cx);
     }
 

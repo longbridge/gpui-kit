@@ -61,7 +61,7 @@ impl Editor {
     ///
     /// Omitting this on a later render restores the inherited defaults.
     pub fn gutter_style(mut self, style: GutterStyle) -> Self {
-        self.gutter_style.apply_overrides(&style);
+        self.gutter_style.apply_overrides(style);
         self
     }
 
@@ -328,7 +328,7 @@ mod tests {
 
     #[gpui::test]
     fn gutter_and_body_follow_window_zoom_without_compounding(cx: &mut TestAppContext) {
-        use crate::ElementExt as _;
+        use crate::{ElementExt as _, Root, Theme, init};
         use std::cell::Cell;
 
         struct ZoomHarness {
@@ -359,11 +359,13 @@ mod tests {
             }
         }
 
-        cx.update(crate::init);
+        cx.update(|cx| {
+            init(cx);
+            Theme::update(cx, |theme| theme.font_size = px(22.));
+        });
         let spacing_edges = Rc::new(Cell::new((px(0.), px(0.))));
         let mut view = None;
         let (_, cx) = cx.add_window_view(|window, cx| {
-            window.set_rem_size(px(22.));
             let editor = cx.new(|cx| GutterHarness {
                 state: cx.new(|cx| {
                     EditorState::new(window, cx)
@@ -381,16 +383,15 @@ mod tests {
                 editor,
                 spacing_edges: spacing_edges.clone(),
             });
-            // Mount the production root so typography and spacing use the
-            // application's rem size throughout window preparation and layout.
-            crate::Root::new(content, window, cx)
+            // Mount the production root to exercise Kit's theme-driven rem scale.
+            Root::new(content, window, cx)
         });
         let view = view.unwrap();
         let state = view.read_with(cx, |view, _| view.state.clone());
         let measure = |cx: &mut VisualTestContext, rem_size: Option<f32>| {
             cx.update(|window, cx| {
                 if let Some(rem_size) = rem_size {
-                    window.set_rem_size(px(rem_size));
+                    Theme::update(cx, |theme| theme.font_size = px(rem_size));
                 }
                 // Verify that window zoom survives independently rendered frames.
                 for _ in 0..2 {

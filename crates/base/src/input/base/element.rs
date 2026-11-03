@@ -1,4 +1,7 @@
-use crate::input::{DisplayMap, FoldRange, InputExtras as _, InputModeKind, OverviewRulerLane};
+use crate::input::{
+    DisplayMap, EditorLineNumberRenderer, FoldRange, InputExtras as _, InputModeKind,
+    OverviewRulerLane,
+};
 use gpui::Corners;
 use gpui::Half;
 use gpui::{
@@ -69,19 +72,6 @@ fn line_number_len(total_lines: usize) -> usize {
 
 fn displayed_line_number(number: usize) -> usize {
     number.min(MAX_DISPLAYED_LINE_NUMBER)
-}
-
-pub(super) fn measure_line_number_width(
-    digit_count: usize,
-    measure_character: impl FnMut(char) -> Pixels,
-) -> Pixels {
-    // Proportional fonts can give digits unequal advances. Reserve the widest
-    // digit for every position so multi-digit line numbers fit in their lane.
-    "0123456789"
-        .chars()
-        .map(measure_character)
-        .fold(px(0.), Pixels::max)
-        * digit_count
 }
 
 const FOLD_CHEVRON_RIGHT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
@@ -741,8 +731,8 @@ impl<M: InputModeKind> TextElement<M> {
     }
 }
 
-impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> TextElement<M, R> {
-    pub(super) fn with_line_number_renderer<T: crate::input::EditorLineNumberRenderer>(
+impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
+    pub(super) fn with_line_number_renderer<T: EditorLineNumberRenderer>(
         self,
         renderer: T,
     ) -> TextElement<M, T> {
@@ -1450,10 +1440,13 @@ impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> TextElement<M,
         window: &mut Window,
         cx: &App,
     ) -> (Pixels, Pixels) {
-        let total_lines = text.lines_len();
         // Reserve three digits for small documents, then follow the actual
         // line count up to seven digits.
-        let line_number_len = line_number_len(total_lines);
+        let line_number_len = if state.mode.line_number() {
+            line_number_len(text.lines_len())
+        } else {
+            0
+        };
         let (number_width, gap) =
             self.line_number_renderer
                 .measure_line_numbers(line_number_len, style, window, cx);
@@ -2835,9 +2828,7 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
 }
 
-impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> IntoElement
-    for TextElement<M, R>
-{
+impl<M: InputModeKind, R: EditorLineNumberRenderer> IntoElement for TextElement<M, R> {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -2974,7 +2965,7 @@ fn clamp_frame_to_content_mask(
         .collect()
 }
 
-impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> Element for TextElement<M, R> {
+impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R> {
     type RequestLayoutState = ();
     type PrepaintState = PrepaintState;
 
@@ -3072,8 +3063,7 @@ impl<M: InputModeKind, R: crate::input::EditorLineNumberRenderer> Element for Te
             (&text, fg)
         };
 
-        // Wrapping and pointer mapping need resolved geometry from this frame,
-        // not presentation settings retained in the editing state.
+        // Wrapping and pointer mapping must share the gutter geometry used for painting.
         let (line_number_width, gutter_gap) =
             self.layout_line_numbers(&state, &text, &text_style, window, cx);
         let line_number_right = line_number_width
@@ -4180,7 +4170,7 @@ fn split_runs_by_bg_segments(
 mod tests {
     use super::*;
     use crate::input::{
-        EditorMode, EditorState, FoldRange, GutterDecoration, GutterDecorationCollection,
+        Editor, EditorMode, EditorState, FoldRange, GutterDecoration, GutterDecorationCollection,
         OverviewRulerDecoration, OverviewRulerDecorationCollection, RangeDecoration, Redo, Undo,
     };
     use gpui::{
@@ -4207,36 +4197,11 @@ mod tests {
         assert_eq!(displayed_line_number(10_000_000), 9_999_999);
     }
 
-    #[test]
-    fn line_number_lane_uses_the_widest_digit_only() {
-        // Synthetic font metrics make the regression independent of which
-        // font families happen to be installed on the host running the test.
-        let measure_character = |character| match character {
-            '+' => px(4.),
-            '8' => px(12.),
-            '0'..='9' => px(10.),
-            ' ' => px(6.),
-            _ => unreachable!(),
-        };
-        assert_eq!(measure_line_number_width(3, measure_character), px(36.));
-        assert_eq!(measure_line_number_width(7, measure_character), px(84.));
-        assert_eq!(
-            measure_line_number_width(3, |character| {
-                if matches!(character, ' ' | '+') {
-                    px(14.)
-                } else {
-                    measure_character(character)
-                }
-            }),
-            px(36.),
-        );
-    }
-
     struct DecorationHarness(Entity<EditorState>, Option<Pixels>);
 
     struct MeasuredLineNumbers(Pixels);
 
-    impl crate::input::EditorLineNumberRenderer for MeasuredLineNumbers {
+    impl EditorLineNumberRenderer for MeasuredLineNumbers {
         fn measure_line_numbers(
             &self,
             _: usize,
@@ -4272,10 +4237,10 @@ mod tests {
     impl Render for DecorationHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().size_full().child(match self.1 {
-                Some(gap) => crate::input::Editor::new(&self.0)
+                Some(gap) => Editor::new(&self.0)
                     .with_line_number_renderer(MeasuredLineNumbers(gap))
                     .into_any_element(),
-                None => crate::input::Editor::new(&self.0).into_any_element(),
+                None => Editor::new(&self.0).into_any_element(),
             })
         }
     }

@@ -1,9 +1,9 @@
 use gpui::{
-    App, Div, Entity, InteractiveElement as _, IntoElement, Pixels, ShapedLine, Stateful,
-    TextStyle, View, ViewElement, Window,
+    App, Div, Entity, EntityId, InteractiveElement as _, IntoElement, Pixels, ShapedLine,
+    SharedString, Stateful, TextRun, TextStyle, View, ViewElement, Window, px,
 };
 
-use super::{EditorMode, InputBaseState, InputModeKind};
+use super::{EditorMode, InputBaseState, InputModeKind, element::LINE_NUMBER_RIGHT_MARGIN};
 
 /// Supplies computed line-number geometry and glyphs for a single rendered frame.
 ///
@@ -12,6 +12,7 @@ use super::{EditorMode, InputBaseState, InputModeKind};
 /// runs only for visible buffer lines after wrapping and folding are resolved.
 pub trait EditorLineNumberRenderer: 'static {
     /// Returns the number lane width (excluding the gap) and resolved gap.
+    /// A zero digit count requests only the gap when line numbers are hidden.
     fn measure_line_numbers(
         &self,
         digit_count: usize,
@@ -39,14 +40,18 @@ impl EditorLineNumberRenderer for () {
         window: &mut Window,
         _: &App,
     ) -> (Pixels, Pixels) {
+        if digit_count == 0 {
+            return (px(0.), LINE_NUMBER_RIGHT_MARGIN);
+        }
         let font_size = body_style.font_size.to_pixels(window.rem_size());
         let font_id = window.text_system().resolve_font(&body_style.font());
-        let width = super::element::measure_line_number_width(digit_count, |character| {
-            window
-                .text_system()
-                .layout_width(font_id, font_size, character)
-        });
-        (width, super::element::LINE_NUMBER_RIGHT_MARGIN)
+        // Proportional digits can differ in width; every supported digit must fit.
+        let width = "0123456789"
+            .chars()
+            .map(|digit| window.text_system().layout_width(font_id, font_size, digit))
+            .fold(px(0.), Pixels::max)
+            * digit_count;
+        (width, LINE_NUMBER_RIGHT_MARGIN)
     }
 
     fn shape_line_number(
@@ -57,12 +62,10 @@ impl EditorLineNumberRenderer for () {
         window: &mut Window,
         _: &App,
     ) -> ShapedLine {
-        // The default renderer uses the body font and the editor's resolved ink;
-        // styled renderers supply their own presentation through the same seam.
-        let label: gpui::SharedString = number.to_string().into();
+        let label: SharedString = number.to_string().into();
         // Right alignment uses the shaped advance, so padding characters would
         // change the label's measured width rather than provide layout spacing.
-        let run = gpui::TextRun {
+        let run = TextRun {
             len: label.len(),
             font: body_style.font(),
             color: body_style.color,
@@ -318,8 +321,6 @@ impl Editor {
 impl<R: EditorLineNumberRenderer> Editor<R> {
     /// Supplies presentation for this element's frame without changing editor state.
     pub fn with_line_number_renderer<T: EditorLineNumberRenderer>(self, renderer: T) -> Editor<T> {
-        // Keep the concrete renderer in the frame so cross-crate dispatch needs
-        // neither a trait object nor a heap allocation for the renderer.
         Editor {
             state: self.state,
             line_number_renderer: renderer,
@@ -336,13 +337,12 @@ impl<R: EditorLineNumberRenderer> IntoElement for Editor<R> {
 }
 
 impl<R: EditorLineNumberRenderer> View for Editor<R> {
-    fn entity_id(&self) -> Option<gpui::EntityId> {
+    fn entity_id(&self) -> Option<EntityId> {
         Some(self.state.entity_id())
     }
 
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        // Preserve the entity's reactive identity while passing presentation
-        // directly into the frame, rather than installing it on EditorState.
+        // Preserve the entity's identity for invalidation and element-state scoping.
         self.state.update(cx, |state, cx| {
             state
                 .render_with_line_numbers(self.line_number_renderer, window, cx)
