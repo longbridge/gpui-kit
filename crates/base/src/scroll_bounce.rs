@@ -419,6 +419,7 @@ impl Element for ScrollBounce {
                     return;
                 }
                 let mut state = state.borrow_mut();
+                let vertical = delta.y;
                 // Lock the gesture to the axis it started on, so a diagonal
                 // swipe cannot wobble out of the stretch from one packet to
                 // the next. Both dispatch phases see the same packet, and the
@@ -427,7 +428,12 @@ impl Element for ScrollBounce {
                     .ongoing_scroll
                     .lock_axis(&mut delta, event.touch_phase);
                 if delta.x.abs() > delta.y.abs() {
-                    return;
+                    // The child scrolls by the vertical part of a sideways
+                    // swipe all the same, so the edge stretches by it too.
+                    if vertical == px(0.) && event.touch_phase == TouchPhase::Moved {
+                        return;
+                    }
+                    delta.y = vertical;
                 }
                 let ended = matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled);
                 let mut scrolled = false;
@@ -562,6 +568,7 @@ impl Element for ScrollBounce {
                     return;
                 }
                 let mut delta = event.delta.pixel_delta(window.line_height());
+                let vertical = delta.y;
                 let mut state = state.borrow_mut();
                 state
                     .ongoing_scroll
@@ -572,7 +579,17 @@ impl Element for ScrollBounce {
                     return;
                 }
                 if delta.x.abs() > delta.y.abs() {
-                    return;
+                    // A sideways swipe passes on, and the area under it scrolls
+                    // by its vertical part. Only where that part runs past an
+                    // end, or into a stretched edge, does it stretch the edge.
+                    let past_end = (vertical > px(0.) && handle.offset().y >= px(0.))
+                        || (vertical < px(0.) && handle.offset().y <= -max);
+                    if event.touch_phase == TouchPhase::Moved
+                        && (vertical == px(0.) || !past_end && state.overscroll.offset() == 0.)
+                    {
+                        return;
+                    }
+                    delta.y = vertical;
                 }
                 let before = handle.offset();
                 let changed = if !bounces || matches!(event.delta, ScrollDelta::Lines(_)) {
@@ -1420,6 +1437,66 @@ mod tests {
         assert!(handle.bounds().origin.y < stretched);
         assert!(handle.bounds().origin.y > origin);
         assert_eq!(handle.offset(), point(px(0.), px(0.)));
+    }
+
+    /// A trackpad swipe leaning sideways from its first packet, so the axis
+    /// lock takes it as horizontal.
+    fn sideways_swipe(cx: &mut VisualTestContext, dy: f32) {
+        cx.update(|window, cx| {
+            for (x, y, touch_phase) in [
+                (-6., 0., TouchPhase::Started),
+                (-12., dy, TouchPhase::Moved),
+                (-12., dy, TouchPhase::Moved),
+            ] {
+                window.dispatch_event(
+                    gpui::PlatformInput::Scroll(ScrollEvent {
+                        position: point(px(100.), px(100.)),
+                        delta: ScrollDelta::Pixels(point(px(x), px(y))),
+                        touch_phase,
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+            }
+        });
+        draw(cx);
+    }
+
+    #[gpui::test]
+    fn a_sideways_swipe_stretches_the_edge_it_runs_past(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollTest {
+                handle,
+                enabled: true,
+            }
+        });
+        draw(cx);
+        let origin = handle.bounds().origin.y;
+        sideways_swipe(cx, 8.);
+        assert!(handle.bounds().origin.y > origin);
+    }
+
+    #[gpui::test]
+    fn a_sideways_swipe_stretches_the_wheel_edge_only_at_the_end(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| WheelViewport(handle, px(600.))
+        });
+        draw(cx);
+        let origin = handle.bounds().origin.y;
+        sideways_swipe(cx, 8.);
+        assert!(handle.bounds().origin.y > origin);
+
+        cx.executor().advance_clock(Duration::from_secs(1));
+        draw(cx);
+        handle.set_offset(point(px(0.), px(-200.)));
+        draw(cx);
+        sideways_swipe(cx, -8.);
+        // Between the ends the swipe passes on without stretching.
+        assert_eq!(handle.bounds().origin.y, origin);
     }
 
     #[test]
