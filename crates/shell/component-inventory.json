@@ -157,6 +157,12 @@
     },
     {
       "source": "ui",
+      "name": "grid_layout",
+      "classification": "infrastructure",
+      "explanation": "GridLayout lives in gpui-base and is re-exported by gpui-component. Its gpui-shell registration follows in a separate pull request once the base API settles."
+    },
+    {
+      "source": "ui",
       "name": "chart",
       "classification": "component",
       "registration": {
@@ -1372,6 +1378,12 @@
           }
         ]
       }
+    },
+    {
+      "source": "story",
+      "name": "grid_layout",
+      "classification": "infrastructure",
+      "explanation": "GridLayout lives in gpui-base and is re-exported by gpui-component. Its gpui-shell registration follows in a separate pull request once the base API settles."
     },
     {
       "source": "story",

@@ -22,6 +22,16 @@ export const stories = [
     api: "Carousel",
   }),
   pendingStory({
+    id: "grid-layout",
+    title: "GridLayout",
+    group: "Layout & advanced",
+    rustStory: "GridLayoutStory",
+    description: "A grid whose items are dragged and resized into place.",
+    states: ["arranged", "dragging", "resizing", "locked item"],
+    availability: "infrastructure",
+    api: "GridLayout",
+  }),
+  pendingStory({
     id: "chart",
     title: "Chart",
     group: "Layout & advanced",
