@@ -533,7 +533,7 @@ fn validate_dependencies(
 
 fn valid_git_ref_name(reference: &str) -> bool {
     reference != "@"
-        && !reference.starts_with(['.', '/'])
+        && !reference.starts_with(['.', '/', '-'])
         && !reference.ends_with(['.', '/'])
         && !reference.contains("..")
         && !reference.contains("@{")
@@ -2521,6 +2521,7 @@ mod tests {
             "huacnlee//omarchy-ui",
             "huacnlee/omarchy-ui#",
             "https://github.com/huacnlee/omarchy-ui#",
+            "file:///tmp/omarchy-ui#--upload-pack=touch${IFS}/tmp/pwned;true",
             "not a git dependency",
         ] {
             let error = PluginManifest::parse(&format!(
