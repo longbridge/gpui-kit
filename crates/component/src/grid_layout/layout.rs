@@ -159,6 +159,12 @@ pub(crate) fn rows(items: &[GridItem]) -> usize {
 pub(crate) fn normalize(items: &mut [GridItem], rules: LayoutRules) {
     let columns = rules.columns.max(1);
     for item in items.iter_mut() {
+        // An item's own limits first, which may have changed since it was
+        // placed, then the grid's width.
+        let max_w = item.max_w.unwrap_or(usize::MAX).max(1);
+        let max_h = item.max_h.unwrap_or(usize::MAX).max(1);
+        item.w = item.w.clamp(item.min_w.min(max_w), max_w);
+        item.h = item.h.clamp(item.min_h.min(max_h), max_h);
         item.w = item.w.clamp(1, columns);
         item.h = item.h.max(1);
         if item.right() > columns {
@@ -595,6 +601,34 @@ mod tests {
         assert_eq!(at(&items, "wide").w, 12);
         assert_eq!(at(&items, "wide").x, 0);
         assert_no_overlaps(&items);
+    }
+
+    #[test]
+    fn normalize_applies_changed_size_limits() {
+        let mut items = vec![
+            GridItem::new("a", 0, 0, 2, 6)
+                .with_min_size(4, 1)
+                .with_max_size(12, 3),
+        ];
+        normalize(&mut items, rules(None));
+        assert_eq!((items[0].w, items[0].h), (4, 3));
+    }
+
+    /// `GridItem` is what applications persist, so its JSON is a format
+    /// contract: field names stay put, and a layout saved before the limits
+    /// existed — only the place — still loads.
+    #[test]
+    fn grid_item_json_is_a_stable_format() {
+        let saved = r#"{"id":"a","x":1,"y":2,"w":3,"h":4}"#;
+        let item: GridItem = serde_json::from_str(saved).unwrap();
+        assert_eq!(item, GridItem::new("a", 1, 2, 3, 4));
+        assert_eq!(
+            serde_json::to_value(GridItem::new("a", 1, 2, 3, 4).with_locked(true)).unwrap(),
+            serde_json::json!({
+                "id": "a", "x": 1, "y": 2, "w": 3, "h": 4,
+                "min_w": 1, "min_h": 1, "max_w": null, "max_h": null, "locked": true
+            })
+        );
     }
 
     #[test]

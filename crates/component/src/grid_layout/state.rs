@@ -572,6 +572,9 @@ impl GridLayoutState {
     }
 
     /// Select the next or previous item in reading order.
+    ///
+    /// Returns `false` past the last or before the first item, leaving the
+    /// selection as it is so Tab moves focus out of the grid.
     pub(crate) fn select_adjacent(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
         let mut order = self.items.iter().collect::<Vec<_>>();
         order.sort_by_key(|item| (item.y, item.x));
@@ -585,8 +588,9 @@ impl GridLayoutState {
         let next = match (current, forward) {
             (None, true) => 0,
             (None, false) => order.len() - 1,
-            (Some(ix), true) => (ix + 1).min(order.len() - 1),
-            (Some(ix), false) => ix.saturating_sub(1),
+            (Some(ix), true) if ix + 1 < order.len() => ix + 1,
+            (Some(ix), false) if ix > 0 => ix - 1,
+            (Some(_), _) => return false,
         };
         self.keyboard_active = true;
         self.selected = Some(order[next].id.clone());
@@ -696,6 +700,10 @@ mod tests {
             assert!(state.select_adjacent(true, cx));
             assert_eq!(state.selected_item().map(|id| id.as_ref()), Some("a"));
             assert!(state.select_adjacent(true, cx));
+            assert_eq!(state.selected_item().map(|id| id.as_ref()), Some("b"));
+            // Past the last item Tab is not handled, so focus can leave the
+            // grid, and the selection stays where it was.
+            assert!(!state.select_adjacent(true, cx));
             assert_eq!(state.selected_item().map(|id| id.as_ref()), Some("b"));
 
             assert!(state.nudge_selected(1, 0, cx));

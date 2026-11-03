@@ -245,25 +245,7 @@ impl RenderOnce for BoundGridLayout {
         let resizable = rules
             .resizable
             .filter(|value| current.resizable() != *value);
-        // Membership belongs to the script too: an item appears with the cell
-        // it declares and leaves when the script stops rendering it. Places
-        // the user has given existing items are kept.
-        let membership_changed = current.items().len() != self.seeds.len()
-            || self
-                .seeds
-                .iter()
-                .any(|seed| current.item(&seed.id).is_none());
-        let membership = membership_changed.then(|| {
-            self.seeds
-                .iter()
-                .map(|seed| {
-                    current
-                        .item(&seed.id)
-                        .cloned()
-                        .unwrap_or_else(|| seed.clone())
-                })
-                .collect::<Vec<_>>()
-        });
+        let membership = reconcile(current.items(), &self.seeds);
         let (row_height, gap) = (rules.row_height, rules.gap);
 
         self.state.update(cx, |state, cx| {
@@ -321,6 +303,50 @@ impl RenderOnce for BoundGridLayout {
         *host.read(cx).callback.borrow_mut() = self.callback;
         self.grid
     }
+}
+
+/// The layout the script's latest render asks for, or `None` when the state
+/// already holds it.
+///
+/// Membership and each item's limits belong to the script: an item appears
+/// with the cell it declares, leaves when the script stops rendering it, and
+/// takes whatever `locked`, `min_size` and `max_size` the latest render gives
+/// it. Only the place — `x`, `y`, `w`, `h` — belongs to the user, so an item
+/// already in the grid keeps the place it was given. `set_items` then settles
+/// that place under the new limits.
+fn reconcile(current: &[GridItem], seeds: &[GridItem]) -> Option<Vec<GridItem>> {
+    let next = seeds
+        .iter()
+        .map(
+            |seed| match current.iter().find(|item| item.id == seed.id) {
+                Some(item) => {
+                    let mut kept = seed.clone();
+                    (kept.x, kept.y, kept.w, kept.h) = (item.x, item.y, item.w, item.h);
+                    kept
+                }
+                None => seed.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    // Compare everything except the place: settling may clamp a place to the
+    // new limits, and comparing it would reapply the layout every frame.
+    let script_owned = |item: &GridItem| {
+        (
+            item.id.clone(),
+            item.min_w,
+            item.min_h,
+            item.max_w,
+            item.max_h,
+            item.locked,
+        )
+    };
+    let unchanged = next.len() == current.len()
+        && next.iter().all(|item| {
+            current
+                .iter()
+                .any(|existing| script_owned(existing) == script_owned(item))
+        });
+    (!unchanged).then_some(next)
 }
 
 /// The layout as a script reads it: one `[id, x, y, w, h]` tuple per item.
@@ -751,6 +777,40 @@ mod tests {
         assert!(nonempty_id(&ComponentArgument::String(" ".into()), "GridLayoutItem").is_err());
         assert_eq!(compaction("none"), Some(None));
         assert_eq!(compaction("diagonal"), None);
+    }
+
+    #[test]
+    fn reconciling_keeps_the_users_place_and_the_scripts_limits() {
+        let moved = GridItem::new("a", 6, 4, 3, 2);
+        let current = vec![moved.clone(), GridItem::new("gone", 0, 0, 1, 1)];
+        let seeds = vec![
+            GridItem::new("a", 0, 0, 2, 2)
+                .with_min_size(3, 2)
+                .with_locked(true),
+            GridItem::new("new", 0, 0, 1, 1),
+        ];
+
+        let next = reconcile(&current, &seeds).unwrap();
+        let a = next.iter().find(|item| item.id == "a").unwrap();
+        // The place is the user's; the limits and lock are the script's.
+        assert_eq!((a.x, a.y, a.w, a.h), (6, 4, 3, 2));
+        assert_eq!(a.min_w, 3);
+        assert!(a.locked);
+        assert!(next.iter().any(|item| item.id == "new"));
+        assert!(!next.iter().any(|item| item.id == "gone"));
+
+        // Once the state holds it, nothing is reapplied on the next frame,
+        // even after settling clamped the place to the new limits.
+        assert_eq!(reconcile(&next, &seeds), None);
+        let mut settled = next.clone();
+        settled[0].w = 5;
+        assert_eq!(reconcile(&settled, &seeds), None);
+        // A limit changed on a later render reaches an item already placed.
+        let unlocked = vec![
+            GridItem::new("a", 0, 0, 2, 2).with_min_size(3, 2),
+            GridItem::new("new", 0, 0, 1, 1),
+        ];
+        assert!(!reconcile(&next, &unlocked).unwrap()[0].locked);
     }
 
     #[test]
