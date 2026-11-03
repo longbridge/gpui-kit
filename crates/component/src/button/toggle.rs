@@ -205,11 +205,16 @@ impl RenderOnce for Toggle {
                     .border_color(cx.theme().border)
                     .bg(cx.theme().tokens.background)
             })
-            .when(hoverable, |this| {
-                this.hover(|this| {
-                    this.bg(cx.theme().tokens.accent)
-                        .text_color(cx.theme().accent_foreground)
-                })
+            // Always register the hover style: GPUI only refreshes the cached
+            // hover state while one is present. If a checked toggle skipped it,
+            // the stale state would paint its label in the hover color once
+            // something else unchecks it while the pointer rests elsewhere.
+            .hover(|this| {
+                if !hoverable {
+                    return this;
+                }
+                this.bg(cx.theme().tokens.accent)
+                    .text_color(cx.theme().accent_foreground)
             })
             .styles(|styles| {
                 styles.pressed(|style| {
@@ -432,10 +437,10 @@ impl RenderOnce for ToggleGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{IconName, h_flex};
+    use crate::{IconName, Theme, h_flex};
     use gpui::{
-        Context, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Render,
-        StatefulInteractiveElement, TestAppContext, VisualTestContext, point, px,
+        Context, Hsla, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Render,
+        StatefulInteractiveElement, TestAppContext, VisualTestContext, div, point, px,
     };
     use std::cell::{Cell, RefCell};
 
@@ -657,6 +662,87 @@ mod tests {
         let (cx, changes) = selection_harness(cx, false);
         cx.simulate_click(point(px(90.), px(16.)), Modifiers::default());
         assert_eq!(changes.borrow().as_slice(), &[vec![true, true, false]]);
+    }
+
+    /// Records the text color the toggle hands down to its content.
+    #[derive(IntoElement)]
+    struct ContentColor(Rc<Cell<Option<Hsla>>>);
+
+    impl RenderOnce for ContentColor {
+        fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+            self.0.set(Some(window.text_style().color));
+            div().w(px(40.)).h(px(16.))
+        }
+    }
+
+    /// A single group of two 60 px items that owns its selection; the first
+    /// item reports the text color it passes to its content.
+    struct ContentColorHarness {
+        checked: Option<usize>,
+        color: Rc<Cell<Option<Hsla>>>,
+    }
+
+    impl Render for ContentColorHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            ToggleGroup::new("selection")
+                .segmented()
+                .single()
+                .child(
+                    Toggle::new("one")
+                        .w(px(60.))
+                        .checked(self.checked == Some(0))
+                        .child(ContentColor(self.color.clone())),
+                )
+                .child(
+                    Toggle::new("two")
+                        .label("Two")
+                        .w(px(60.))
+                        .checked(self.checked == Some(1)),
+                )
+                .on_click(cx.listener(|this, next: &Vec<bool>, _, cx| {
+                    this.checked = next.iter().position(|checked| *checked);
+                    cx.notify();
+                }))
+        }
+    }
+
+    #[gpui::test]
+    fn an_item_unchecked_from_elsewhere_drops_its_hover_color(cx: &mut TestAppContext) {
+        let (foreground, accent_foreground) = cx.update(|cx| {
+            crate::init(cx);
+            let theme = Theme::global_mut(cx);
+            theme.foreground = gpui::black();
+            theme.accent_foreground = gpui::white();
+            (theme.foreground, theme.accent_foreground)
+        });
+        let color = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let color = color.clone();
+            move |_, _| ContentColorHarness {
+                checked: None,
+                color,
+            }
+        });
+        let draw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+        draw(cx);
+        assert_eq!(color.get(), Some(foreground));
+
+        // Hover the first item and check it, then rest the pointer on the second.
+        cx.simulate_mouse_move(point(px(30.), px(16.)), None, Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(accent_foreground));
+        cx.simulate_click(point(px(30.), px(16.)), Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(accent_foreground));
+        cx.simulate_mouse_move(point(px(90.), px(16.)), None, Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(accent_foreground));
+
+        // Checking the second item unchecks the first while the pointer is
+        // elsewhere, so its content goes back to the plain foreground.
+        cx.simulate_click(point(px(90.), px(16.)), Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(foreground));
     }
 
     #[test]
