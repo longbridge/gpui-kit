@@ -63,6 +63,8 @@ pub struct GridLayout {
     transition: Option<Transition>,
     dragging_item: StyleRefinement,
     selected_item: StyleRefinement,
+    focused_item: StyleRefinement,
+    reflow: Option<usize>,
     placeholder: Option<PartRenderer>,
     resize_handle: Option<PartRenderer>,
 }
@@ -79,6 +81,8 @@ impl GridLayout {
             transition: None,
             dragging_item: StyleRefinement::default(),
             selected_item: StyleRefinement::default(),
+            focused_item: StyleRefinement::default(),
+            reflow: None,
             placeholder: None,
             resize_handle: None,
         }
@@ -122,10 +126,37 @@ impl GridLayout {
         self
     }
 
-    /// The style of the selected item while the grid has keyboard focus,
-    /// layered over its own. A pointer press selects without showing it.
+    /// The style of the selected item, layered over its own — whether the
+    /// pointer or the keyboard selected it. An editor shows which item its
+    /// settings apply to with this.
     pub fn selected_item(mut self, build: impl FnOnce(StateStyle) -> StateStyle) -> Self {
         self.selected_item = build(StateStyle::default()).into_refinement();
+        self
+    }
+
+    /// The style of the selected item while the keyboard drives the grid,
+    /// layered over [`GridLayout::selected_item`]: the focus ring. A pointer
+    /// press selects without showing it.
+    pub fn focused_item(mut self, build: impl FnOnce(StateStyle) -> StateStyle) -> Self {
+        self.focused_item = build(StateStyle::default()).into_refinement();
+        self
+    }
+
+    /// Lay the items out over `cols` columns for display, without changing the
+    /// layout the state holds — a one-column stack for a narrow window, say.
+    ///
+    /// The areas are derived from the state's: each is fitted to the width and
+    /// the result compacted upward in reading order, locked items included.
+    /// While reflowed the grid is read-only — items cannot be dragged,
+    /// resized or moved from the keyboard — so nothing is saved at the
+    /// narrower width. Selection still works.
+    ///
+    /// ```ignore
+    /// GridLayout::new("dashboard", &state)
+    ///     .when(window.viewport_size().width < px(768.), |grid| grid.reflow(1))
+    /// ```
+    pub fn reflow(mut self, cols: usize) -> Self {
+        self.reflow = Some(cols.max(1));
         self
     }
 
@@ -193,6 +224,8 @@ impl GridItem {
         self
     }
 }
+
+impl gpui::prelude::FluentBuilder for GridItem {}
 
 impl Styled for GridItem {
     fn style(&mut self) -> &mut StyleRefinement {
@@ -350,15 +383,19 @@ impl RenderOnce for GridLayout {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.read(cx);
         let grid = state_id(&self.state);
-        let columns = state.column_count();
+        let reflow = self.reflow;
+        let columns = reflow.unwrap_or_else(|| state.column_count());
         let gap = resolve_gap(&self.style, window.rem_size());
         let row_height = self.row_height.to_pixels(window.rem_size());
-        let displayed = state.displayed_areas(cx).to_vec();
-        let drag = state.active_drag(cx);
+        let displayed = match reflow {
+            Some(cols) => layout::reflowed(state.areas(), cols),
+            None => state.displayed_areas(cx).to_vec(),
+        };
+        let drag = state.active_drag(cx).filter(|_| reflow.is_none());
         let active = drag.map(|drag| (drag.item.clone(), drag.gesture));
         let following = drag.and_then(|drag| ItemFrame::following(drag, drag.metrics?, columns));
         let focus_handle = state.focus_handle().clone();
-        let show_selection = state.is_keyboard_active() && focus_handle.is_focused(window);
+        let focus_visible = state.is_keyboard_active() && focus_handle.is_focused(window);
         let selected = state.selected_item().cloned();
         let rows = layout::rows(&displayed);
         let height =
@@ -386,7 +423,9 @@ impl RenderOnce for GridLayout {
             gap,
             dragging_item: &self.dragging_item,
             selected_item: &self.selected_item,
+            focused_item: &self.focused_item,
             resize_handle: self.resize_handle.as_ref(),
+            read_only: reflow.is_some(),
         };
         let rendered = items
             .into_iter()
@@ -415,7 +454,7 @@ impl RenderOnce for GridLayout {
                     frame,
                     gesture,
                     selected,
-                    show_selection,
+                    focus_visible,
                     window,
                     cx,
                 ))
@@ -432,14 +471,24 @@ impl RenderOnce for GridLayout {
                 .relative()
                 .w_full()
                 .h(height)
-                .on_drag_move(window.listener_for(
-                    &self.state,
-                    move |state, event: &gpui::DragMoveEvent<DragGridItem>, _, cx| {
-                        if event.drag(cx).grid == cx.entity_id() {
-                            state.drag_to(event.event.position, event.bounds, row_height, gap, cx);
-                        }
-                    },
-                ))
+                // A reflowed grid shows a derived layout; a drag begun from a
+                // handle inside it must not edit the stored one.
+                .when(reflow.is_none(), |surface| {
+                    surface.on_drag_move(window.listener_for(
+                        &self.state,
+                        move |state, event: &gpui::DragMoveEvent<DragGridItem>, _, cx| {
+                            if event.drag(cx).grid == cx.entity_id() {
+                                state.drag_to(
+                                    event.event.position,
+                                    event.bounds,
+                                    row_height,
+                                    gap,
+                                    cx,
+                                );
+                            }
+                        },
+                    ))
+                })
                 // A drop anywhere ends the gesture, inside the grid or not;
                 // capturing keeps a child that stops propagation from
                 // swallowing the release.
@@ -457,38 +506,45 @@ impl RenderOnce for GridLayout {
                         }
                     }),
                 )
-                .on_action(keyboard(
-                    &self.state,
-                    window,
-                    |state: &mut GridLayoutState, _: &MoveLeft, cx| state.nudge_selected(-1, 0, cx),
-                ))
-                .on_action(keyboard(&self.state, window, |state, _: &MoveRight, cx| {
-                    state.nudge_selected(1, 0, cx)
-                }))
-                .on_action(keyboard(&self.state, window, |state, _: &MoveUp, cx| {
-                    state.nudge_selected(0, -1, cx)
-                }))
-                .on_action(keyboard(&self.state, window, |state, _: &MoveDown, cx| {
-                    state.nudge_selected(0, 1, cx)
-                }))
-                .on_action(keyboard(
-                    &self.state,
-                    window,
-                    |state, _: &ShrinkWidth, cx| state.resize_selected(-1, 0, cx),
-                ))
-                .on_action(keyboard(&self.state, window, |state, _: &GrowWidth, cx| {
-                    state.resize_selected(1, 0, cx)
-                }))
-                .on_action(keyboard(
-                    &self.state,
-                    window,
-                    |state, _: &ShrinkHeight, cx| state.resize_selected(0, -1, cx),
-                ))
-                .on_action(keyboard(
-                    &self.state,
-                    window,
-                    |state, _: &GrowHeight, cx| state.resize_selected(0, 1, cx),
-                ))
+                // Moving and resizing edit the stored layout, which a
+                // reflowed grid is not showing.
+                .when(reflow.is_none(), |surface| {
+                    surface
+                        .on_action(keyboard(
+                            &self.state,
+                            window,
+                            |state: &mut GridLayoutState, _: &MoveLeft, cx| {
+                                state.nudge_selected(-1, 0, cx)
+                            },
+                        ))
+                        .on_action(keyboard(&self.state, window, |state, _: &MoveRight, cx| {
+                            state.nudge_selected(1, 0, cx)
+                        }))
+                        .on_action(keyboard(&self.state, window, |state, _: &MoveUp, cx| {
+                            state.nudge_selected(0, -1, cx)
+                        }))
+                        .on_action(keyboard(&self.state, window, |state, _: &MoveDown, cx| {
+                            state.nudge_selected(0, 1, cx)
+                        }))
+                        .on_action(keyboard(
+                            &self.state,
+                            window,
+                            |state, _: &ShrinkWidth, cx| state.resize_selected(-1, 0, cx),
+                        ))
+                        .on_action(keyboard(&self.state, window, |state, _: &GrowWidth, cx| {
+                            state.resize_selected(1, 0, cx)
+                        }))
+                        .on_action(keyboard(
+                            &self.state,
+                            window,
+                            |state, _: &ShrinkHeight, cx| state.resize_selected(0, -1, cx),
+                        ))
+                        .on_action(keyboard(
+                            &self.state,
+                            window,
+                            |state, _: &GrowHeight, cx| state.resize_selected(0, 1, cx),
+                        ))
+                })
                 .on_action(keyboard(
                     &self.state,
                     window,
@@ -592,7 +648,10 @@ struct ItemParts<'a> {
     gap: Size<Pixels>,
     dragging_item: &'a StyleRefinement,
     selected_item: &'a StyleRefinement,
+    focused_item: &'a StyleRefinement,
     resize_handle: Option<&'a PartRenderer>,
+    /// A reflowed grid shows a derived layout, so nothing in it can move.
+    read_only: bool,
 }
 
 impl ItemParts<'_> {
@@ -604,21 +663,27 @@ impl ItemParts<'_> {
         frame: ItemFrame,
         gesture: Option<GridGesture>,
         selected: bool,
-        show_selection: bool,
+        focus_visible: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
         let state = self.state;
         let snapshot = state.read(cx);
-        let movable = !item.handle_only && snapshot.is_gesture_allowed(&area.id, GridGesture::Move);
-        let resizable = snapshot.is_gesture_allowed(&area.id, GridGesture::Resize);
+        let movable = !self.read_only
+            && !item.handle_only
+            && snapshot.is_gesture_allowed(&area.id, GridGesture::Move);
+        let resizable =
+            !self.read_only && snapshot.is_gesture_allowed(&area.id, GridGesture::Resize);
         let item_id = ElementId::NamedChild(
             Arc::new(ElementId::from(area.id.clone())),
             "grid-layout-item".into(),
         );
         let mut surface_style = item.style;
-        if selected && show_selection {
+        if selected {
             surface_style.refine(self.selected_item);
+            if focus_visible {
+                surface_style.refine(self.focused_item);
+            }
         }
         if gesture.is_some() {
             surface_style.refine(self.dragging_item);
@@ -707,6 +772,7 @@ mod tests {
 
     struct Harness {
         state: Entity<GridLayoutState>,
+        reflow: Option<usize>,
     }
 
     impl Render for Harness {
@@ -714,14 +780,27 @@ mod tests {
             div().w(WIDTH).child(
                 GridLayout::new("grid", &self.state)
                     .gap(px(10.))
+                    .when_some(self.reflow, |grid, cols| grid.reflow(cols))
                     .item(GridItem::new("a").child(div().size_full()))
                     .item(GridItem::new("b").child(div().size_full())),
             )
         }
     }
 
+    /// A grid of `a` and `b` side by side, and the layout changes it emits.
     fn harness(
         cx: &mut TestAppContext,
+    ) -> (
+        Entity<GridLayoutState>,
+        Rc<RefCell<Vec<GridLayoutEvent>>>,
+        &mut VisualTestContext,
+    ) {
+        harness_with(cx, None)
+    }
+
+    fn harness_with(
+        cx: &mut TestAppContext,
+        reflow: Option<usize>,
     ) -> (
         Entity<GridLayoutState>,
         Rc<RefCell<Vec<GridLayoutEvent>>>,
@@ -738,13 +817,15 @@ mod tests {
         cx.update(|cx| {
             let events = events.clone();
             cx.subscribe(&state, move |_, event: &GridLayoutEvent, _| {
-                events.borrow_mut().push(event.clone())
+                if matches!(event, GridLayoutEvent::Change(_)) {
+                    events.borrow_mut().push(event.clone())
+                }
             })
             .detach();
         });
         let (_, cx) = cx.add_window_view({
             let state = state.clone();
-            move |_, _| Harness { state }
+            move |_, _| Harness { state, reflow }
         });
         draw(cx);
         (state, events, cx)
@@ -860,6 +941,72 @@ mod tests {
         );
     }
 
+    /// The selections the state announces.
+    fn selections(
+        state: &Entity<GridLayoutState>,
+        cx: &mut VisualTestContext,
+    ) -> Rc<RefCell<Vec<Option<SharedString>>>> {
+        let selections = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|_, cx| {
+            let selections = selections.clone();
+            cx.subscribe(state, move |_, event: &GridLayoutEvent, _| {
+                if let GridLayoutEvent::Select(id) = event {
+                    selections.borrow_mut().push(id.clone())
+                }
+            })
+            .detach();
+        });
+        selections
+    }
+
+    #[gpui::test]
+    fn selecting_an_item_is_announced_once_per_change(cx: &mut TestAppContext) {
+        let (state, _, cx) = harness(cx);
+        let selections = selections(&state, cx);
+
+        cx.simulate_click(point(px(50.), px(30.)), Modifiers::default());
+        draw(cx);
+        // Pressing the selected item again changes nothing.
+        cx.simulate_click(point(px(60.), px(30.)), Modifiers::default());
+        draw(cx);
+        cx.simulate_keystrokes("tab");
+        // Past the last item Tab leaves the grid and selects nothing.
+        cx.simulate_keystrokes("tab");
+        // The application already knows what it selects itself.
+        state.update(cx, |state, cx| {
+            state.set_selected_item(Some("a".into()), cx)
+        });
+
+        assert_eq!(*selections.borrow(), [Some("a".into()), Some("b".into())]);
+    }
+
+    #[gpui::test]
+    fn a_reflowed_grid_shows_a_copy_and_edits_nothing(cx: &mut TestAppContext) {
+        let (state, events, cx) = harness_with(cx, Some(1));
+        let stored = state.read_with(cx, |state, _| state.areas().to_vec());
+
+        // `b` is stacked under `a`, which now spans the full width.
+        drag(
+            cx,
+            point(px(50.), px(30.)),
+            &[point(px(60.), px(30.)), point(px(450.), px(200.))],
+        );
+        release(cx, point(px(450.), px(200.)));
+        cx.simulate_keystrokes("right shift-down");
+        draw(cx);
+
+        assert_eq!(
+            state.read_with(cx, |state, _| state.areas().to_vec()),
+            stored
+        );
+        assert!(events.borrow().is_empty());
+        // Selection still works.
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_item().cloned()),
+            Some("a".into())
+        );
+    }
+
     #[gpui::test]
     fn test_grid_layout_builder(cx: &mut TestAppContext) {
         let state = cx.update(|cx| cx.new(|cx| GridLayoutState::new(cx)));
@@ -869,15 +1016,24 @@ mod tests {
             .gap_y(px(12.))
             .dragging_item(|style| style.opacity(0.5))
             .selected_item(|style| style.opacity(0.75))
+            .focused_item(|style| style.opacity(0.6))
+            .reflow(0)
             .placeholder(|_, _| div().into_any_element())
             .resize_handle(|_, _| div().into_any_element())
             .item(GridItem::new("a").drag_handle_only(true))
-            .items([GridItem::new("b"), GridItem::new("c")]);
+            .items([
+                GridItem::new("b"),
+                // Items take conditional styles like any element.
+                GridItem::new("c").when(true, |item| item.p_2()),
+            ]);
         assert_eq!(grid.items.len(), 3);
         assert!(grid.items[0].handle_only);
         assert_eq!(grid.row_height, rems(3.));
         assert_eq!(grid.dragging_item.opacity, Some(0.5));
         assert_eq!(grid.selected_item.opacity, Some(0.75));
+        assert_eq!(grid.focused_item.opacity, Some(0.6));
+        assert_eq!(grid.reflow, Some(1));
+        assert!(grid.items[2].style.padding.left.is_some());
         assert!(grid.placeholder.is_some() && grid.resize_handle.is_some());
         assert_eq!(resolve_gap(&grid.style, px(16.)), size(px(8.), px(12.)));
     }

@@ -14,6 +14,12 @@ pub enum GridLayoutEvent {
     /// so the application can persist it. [`GridLayoutState::set_areas`] does
     /// not emit this: the application already holds the layout it set.
     Change(Vec<GridArea>),
+    /// The user selected an item — by pressing it, or with Tab or Shift-Tab —
+    /// carried here so a view that follows the selection, such as a settings
+    /// panel, need not watch every redraw. It is emitted only when the
+    /// selection changes; [`GridLayoutState::set_selected_item`] does not
+    /// emit it, as the application already knows what it selected.
+    Select(Option<SharedString>),
 }
 
 /// What a pointer gesture on an item is doing to it.
@@ -403,7 +409,7 @@ impl GridLayoutState {
     ) {
         self.press_position = Some(position);
         self.keyboard_active = false;
-        self.selected = Some(id.clone());
+        self.select(Some(id.clone()), cx);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -419,7 +425,7 @@ impl GridLayoutState {
             .press_position
             .take()
             .unwrap_or_else(|| window.mouse_position());
-        self.selected = Some(id.clone());
+        self.select(Some(id.clone()), cx);
         self.drag = Some(GridDrag {
             item: id,
             gesture,
@@ -569,9 +575,18 @@ impl GridLayoutState {
             (Some(_), _) => return false,
         };
         self.keyboard_active = true;
-        self.selected = Some(order[next].id.clone());
+        self.select(Some(order[next].id.clone()), cx);
         cx.notify();
         true
+    }
+
+    /// Change the selection on the user's behalf, announcing it when it
+    /// actually changes.
+    fn select(&mut self, id: Option<SharedString>, cx: &mut Context<Self>) {
+        if self.selected != id {
+            self.selected = id.clone();
+            cx.emit(GridLayoutEvent::Select(id));
+        }
     }
 
     fn selected_area(&self) -> Option<GridArea> {
@@ -657,7 +672,9 @@ mod tests {
 
         let events = events.borrow();
         assert_eq!(events.len(), 2);
-        let GridLayoutEvent::Change(areas) = &events[1];
+        let GridLayoutEvent::Change(areas) = &events[1] else {
+            panic!("expected a layout change, got {:?}", events[1]);
+        };
         assert!(
             areas
                 .iter()

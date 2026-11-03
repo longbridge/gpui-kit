@@ -100,6 +100,33 @@ cx.subscribe(&state, |this, _, event: &GridLayoutEvent, cx| {
 
 拖动或调整大小结束时、键盘命令改变布局时，以及调用 `move_item` 或 `resize_item` 之后，都会发出 `Change`。一次拖动只在松开时报告一次变化，不会随指针移动反复发出。`set_areas` 不会发出 `Change`，因为应用已经持有它设置的布局。`GridLayoutEvent` 标记为 `#[non_exhaustive]`，请用 `if let` 或保留通配分支来匹配。
 
+## 跟随选中项
+
+`GridLayoutEvent::Select` 报告用户选中的 item——点击它，或使用 `Tab`、`Shift-Tab`——每次变化只发出一次。设置面板可以据此跟随选中项，无需监听每次重绘：
+
+```rust
+cx.subscribe(&state, |this, _, event: &GridLayoutEvent, cx| {
+    if let GridLayoutEvent::Select(id) = event {
+        this.inspected_tile = id.clone();
+        cx.notify();
+    }
+})
+.detach();
+```
+
+`set_selected_item` 修改选中项时不会发出该事件。
+
+## 窄窗口
+
+`reflow(cols)` 以较少的列数显示 item，而不改变保存的布局——例如在断点以下改为单列堆叠：
+
+```rust
+grid_layout("dashboard", &state, cx)
+    .when(window.viewport_size().width < px(768.), |grid| grid.reflow(1))
+```
+
+reflow 期间网格为只读，因此不会以较窄的宽度保存任何内容；选中仍然可用。
+
 ## 拖动手柄
 
 默认情况下，按住 item 的任意位置都能移动它。如果 item 的内容有自己的指针交互（例如表格或图表），可以只允许通过手柄移动，手柄通常是标题栏：
@@ -128,9 +155,9 @@ state.update(cx, |state, cx| {
 
 ## 外观
 
-`grid_layout` 会添加：拖动 item 将落下位置的虚线占位框、每个可调整大小 item 角上的调整手柄、拖动中 item 的浮起阴影、键盘选中 item 的焦点环，以及主题的移动动画（遵循应用的减少动态效果设置）。这些都可以在返回的 builder 上用 `placeholder`、`resize_handle`、`dragging_item`、`selected_item` 或 `transition` 替换。
+`grid_layout` 会添加：拖动 item 将落下位置的虚线占位框、每个可调整大小 item 角上的调整手柄、拖动中 item 的浮起阴影，以及主题的移动动画（遵循应用的减少动态效果设置）。网格可编辑时，选中的 item 带有主色描边，便于编辑器表明设置作用于哪个 item；键盘操作网格时由焦点环取代它，两者不会同时出现。只读网格不标记选中项。这些都可以在返回的 builder 上用 `placeholder`、`resize_handle`、`dragging_item`、`selected_item`、`focused_item` 或 `transition` 替换。
 
-`GridItem` 本身不绘制任何内容，外观由其中的内容提供，通常是卡片或 GroupBox。请为 item 设置与内容相同的圆角，使浮起阴影和焦点环沿用同样的轮廓。
+`GridItem` 本身不绘制任何内容，外观由其中的内容提供，通常是卡片或 GroupBox。请为 item 设置与内容相同的圆角，使浮起阴影和描边沿用同样的轮廓。
 
 ```rust
 GridItem::new("orders")

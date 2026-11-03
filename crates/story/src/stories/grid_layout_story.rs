@@ -8,6 +8,7 @@ use gpui_kit::component::{
     switch::Switch,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::section;
@@ -99,6 +100,10 @@ pub struct GridLayoutStory {
     dashboard: Entity<GridLayoutState>,
     handles: Entity<GridLayoutState>,
     last_change: Option<SharedString>,
+    /// The tile the dashboard has selected, as its `Select` events report it.
+    selected: Option<SharedString>,
+    /// Shows the dashboard as one column without changing its layout.
+    stacked: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -144,8 +149,15 @@ impl GridLayoutStory {
         let _subscriptions =
             vec![
                 cx.subscribe(&dashboard, |this, _, event: &GridLayoutEvent, cx| {
-                    let GridLayoutEvent::Change(areas) = event else {
-                        return;
+                    let areas = match event {
+                        GridLayoutEvent::Change(areas) => areas,
+                        // A settings panel would follow this; the story names it.
+                        GridLayoutEvent::Select(id) => {
+                            this.selected = id.clone();
+                            cx.notify();
+                            return;
+                        }
+                        _ => return,
                     };
                     // An application would persist this; the story shows it.
                     this.last_change = Some(
@@ -170,6 +182,8 @@ impl GridLayoutStory {
             dashboard,
             handles,
             last_change: None,
+            selected: None,
+            stacked: false,
             _subscriptions,
         }
     }
@@ -220,6 +234,15 @@ impl GridLayoutStory {
                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
                         this.dashboard
                             .update(cx, |state, cx| state.set_prevent_collision(*checked, cx));
+                    })),
+            )
+            .child(
+                Switch::new("grid-layout-one-column")
+                    .label("One column")
+                    .checked(self.stacked)
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        this.stacked = *checked;
+                        cx.notify();
                     })),
             )
             .child(
@@ -300,6 +323,7 @@ impl Render for GridLayoutStory {
                             .child(self.render_controls(cx))
                             .child(
                                 grid_layout("dashboard-grid", &self.dashboard, cx)
+                                    .when(self.stacked, |grid| grid.reflow(1))
                                     .accessibility_label("Dashboard")
                                     .items(TILES.iter().map(|tile| {
                                         GridItem::new(tile.id)
@@ -321,7 +345,12 @@ impl Render for GridLayoutStory {
                                     .font_family(cx.theme().mono_font_family.clone())
                                     .text_color(cx.theme().muted_foreground)
                                     .child(self.last_change.clone().unwrap_or_else(|| {
-                                        "Rearrange a tile to see the saved layout.".into()
+                                        match &self.selected {
+                                            Some(id) => format!("Selected: {id}").into(),
+                                            None => {
+                                                "Rearrange a tile to see the saved layout.".into()
+                                            }
+                                        }
                                     })),
                             ),
                     ),

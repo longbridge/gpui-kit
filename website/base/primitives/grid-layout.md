@@ -29,7 +29,7 @@ use gpui_kit::base::{GridArea, GridItem, GridLayout, GridLayoutEvent, GridLayout
 - `GridLayoutState` owns the layout and the rules it settles under: `cols(n)`, `compaction(Option<Axis>)`, `prevent_collision(bool)`, `draggable(bool)`, `resizable(bool)`, and the starting `default_areas(...)`.
 - `GridArea` is one item's place, in zero-based cells: `col`, `row`, `col_span`, `row_span`, the resize limits `min_span` / `max_span`, and `locked`. It is the record an application persists.
 - `GridLayout` is the element. It places each `GridItem` in the area with the same id. Set the row height with `row_height(rems(..))` and the gaps with GPUI's own `gap`, `gap_x` and `gap_y`, as on a CSS grid.
-- `GridItem` is one item; it implements `Styled` and `ParentElement`.
+- `GridItem` is one item; it implements `Styled` and `ParentElement`, and takes `.when(..)` and `.map(..)` like any element.
 - `grid_drag_handle(&state, id)` returns the element an item built with `drag_handle_only(true)` is moved by.
 
 ```rust
@@ -55,14 +55,27 @@ GridLayout::new("dashboard", &state)
 
 Grid Layout paints nothing by default. Give it a look with:
 
-- `dragging_item(|style| ..)` and `selected_item(|style| ..)` — styles layered over the item under the pointer and over the keyboard-selected item;
+- `dragging_item(|style| ..)` — the style layered over the item under the pointer;
+- `selected_item(|style| ..)` — the style layered over the selected item, whether the pointer or the keyboard selected it;
+- `focused_item(|style| ..)` — layered over that while the keyboard drives the grid: the focus ring;
 - `placeholder(|window, cx| ..)` — what fills the cells the dragged item will land in;
 - `resize_handle(|window, cx| ..)` — what a resizable item shows in the trailing-bottom corner it is resized by;
 - `transition(Transition)` — how items ease into their cells. Without one, items move at once.
 
+### Narrow windows
+
+`reflow(cols)` lays the items out over fewer columns for display without changing the layout the state holds — a one-column stack below a breakpoint, say:
+
+```rust
+GridLayout::new("dashboard", &state)
+    .when(window.viewport_size().width < px(768.), |grid| grid.reflow(1))
+```
+
+The areas are derived from the state's: fitted to the width and compacted upward in the wide layout's reading order, with locks set aside. While reflowed the grid is read-only — items cannot be dragged, resized or moved from the keyboard — so nothing is saved at the narrower width. Selection still works.
+
 ## State and events
 
-Subscribe to `GridLayoutEvent::Change` to persist what the user arranges. It carries the whole layout and is emitted once per committed change — when a drag or resize is released, after a keyboard command, and after `move_item` or `resize_item` — not on every pointer movement. `set_areas` replaces the layout without emitting it, because the application already holds the layout it set. `GridLayoutEvent` is `#[non_exhaustive]`, so match it with a wildcard arm.
+Subscribe to `GridLayoutEvent::Change` to persist what the user arranges. It carries the whole layout and is emitted once per committed change — when a drag or resize is released, after a keyboard command, and after `move_item` or `resize_item` — not on every pointer movement. `set_areas` replaces the layout without emitting it, because the application already holds the layout it set. `GridLayoutEvent::Select` reports the item the user selects — by pressing it, or with Tab or Shift-Tab — once per change, so a view that follows the selection, such as a settings panel, need not watch every redraw. `set_selected_item` does not emit it. `GridLayoutEvent` is `#[non_exhaustive]`, so match it with a wildcard arm.
 
 `GridArea` implements `Serialize` and `Deserialize`. Every field after the place has a default, so a layout saved with only `id`, `col`, `row`, `col_span` and `row_span` still loads.
 

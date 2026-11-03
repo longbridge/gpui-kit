@@ -245,6 +245,31 @@ fn settle(items: &mut [GridArea], rules: LayoutRules, priority: Option<usize>) {
     }
 }
 
+/// The layout `areas` would take over `columns` columns, for display only:
+/// every area fitted to the width and the whole compacted upward in reading
+/// order. Locks are dropped from the copy, since a display reflow pins nothing
+/// — a locked area pinned to a row of the wide layout would only open gaps in
+/// the narrow one. `areas` itself is left as it is.
+pub(crate) fn reflowed(areas: &[GridArea], columns: usize) -> Vec<GridArea> {
+    let mut reflowed = areas.to_vec();
+    // Fitting to fewer columns moves areas to the leading edge, and areas
+    // that shared a row would then tie in the compaction order. Order the copy
+    // as the wide layout reads first; compaction sorts stably, so ties keep it.
+    reflowed.sort_by_key(|area| (area.row, area.col));
+    for area in &mut reflowed {
+        area.locked = false;
+    }
+    normalize(
+        &mut reflowed,
+        LayoutRules {
+            columns,
+            compaction: Some(Axis::Vertical),
+            prevent_collision: false,
+        },
+    );
+    reflowed
+}
+
 /// Float every unlocked item toward `axis` as far as the others allow.
 pub(crate) fn compact(items: &mut [GridArea], rules: LayoutRules) {
     let Some(axis) = rules.compaction else {
@@ -682,6 +707,25 @@ pub(crate) mod tests {
                 "max_col_span": null, "max_row_span": null, "locked": true
             })
         );
+    }
+
+    #[test]
+    fn reflowing_stacks_a_copy_in_reading_order() {
+        let areas = vec![
+            area("b", 6, 0, 6, 2),
+            area("a", 0, 0, 6, 3).min_span(4, 1),
+            area("c", 0, 3, 12, 1).locked(true),
+        ];
+        let stacked = reflowed(&areas, 1);
+        // One column, in reading order, each keeping its height.
+        assert_eq!(pos(&stacked, "a"), (0, 0));
+        assert_eq!(pos(&stacked, "b"), (0, 3));
+        assert_eq!(pos(&stacked, "c"), (0, 5));
+        assert!(stacked.iter().all(|area| area.col_span == 1));
+        assert_no_overlaps(&stacked);
+        // The layout it was derived from is untouched.
+        assert_eq!(at(&areas, "a").col_span, 6);
+        assert!(at(&areas, "c").locked);
     }
 
     #[test]

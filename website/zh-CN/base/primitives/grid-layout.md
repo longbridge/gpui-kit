@@ -29,7 +29,7 @@ use gpui_kit::base::{GridArea, GridItem, GridLayout, GridLayoutEvent, GridLayout
 - `GridLayoutState` 持有布局及其整理规则：`cols(n)`、`compaction(Option<Axis>)`、`prevent_collision(bool)`、`draggable(bool)`、`resizable(bool)`，以及初始的 `default_areas(...)`。
 - `GridArea` 是一个 item 的位置，以从零开始的单元格计：`col`、`row`、`col_span`、`row_span`，调整大小的限制 `min_span` / `max_span`，以及 `locked`。应用持久化的就是这条记录。
 - `GridLayout` 是元素本身，它把每个 `GridItem` 放进 id 相同的 area。用 `row_height(rems(..))` 设置行高，用 GPUI 自带的 `gap`、`gap_x` 和 `gap_y` 设置间距，与 CSS grid 一致。
-- `GridItem` 是一个 item，实现了 `Styled` 和 `ParentElement`。
+- `GridItem` 是一个 item，实现了 `Styled` 和 `ParentElement`，并且与普通元素一样支持 `.when(..)` 和 `.map(..)`。
 - `grid_drag_handle(&state, id)` 返回拖动手柄元素，供设置了 `drag_handle_only(true)` 的 item 使用。
 
 ```rust
@@ -55,14 +55,27 @@ GridLayout::new("dashboard", &state)
 
 Grid Layout 默认不绘制任何内容。可以通过以下方式提供外观：
 
-- `dragging_item(|style| ..)` 和 `selected_item(|style| ..)`——叠加在拖动中的 item 和键盘选中的 item 上的样式；
+- `dragging_item(|style| ..)`——叠加在拖动中的 item 上的样式；
+- `selected_item(|style| ..)`——叠加在选中 item 上的样式，无论它是通过指针还是键盘选中的；
+- `focused_item(|style| ..)`——在键盘操作网格时再叠加其上，即焦点环；
 - `placeholder(|window, cx| ..)`——填充拖动 item 即将落入的单元格；
 - `resize_handle(|window, cx| ..)`——可调整大小的 item 在用于调整大小的末尾下角显示的内容；
 - `transition(Transition)`——item 移到新位置时的过渡。未设置时，item 立即移动。
 
+### 窄窗口
+
+`reflow(cols)` 以较少的列数显示 item，而不改变 state 中保存的布局——例如在断点以下改为单列堆叠：
+
+```rust
+GridLayout::new("dashboard", &state)
+    .when(window.viewport_size().width < px(768.), |grid| grid.reflow(1))
+```
+
+显示用的 area 由 state 中的 area 推导而来：先适配列宽，再按宽布局的阅读顺序向上靠拢，锁定不生效。reflow 期间网格为只读——item 不能拖动、调整大小，也不能用键盘移动——因此不会以较窄的宽度保存任何内容。选中仍然可用。
+
 ## 状态与事件
 
-订阅 `GridLayoutEvent::Change` 即可保存用户的排列。它携带完整的布局，每次确定的变化只发出一次——拖动或调整大小松开时、键盘命令之后，以及调用 `move_item` 或 `resize_item` 之后——不会随指针移动反复发出。`set_areas` 替换布局时不会发出该事件，因为应用已经持有它设置的布局。`GridLayoutEvent` 标记为 `#[non_exhaustive]`，匹配时请保留通配分支。
+订阅 `GridLayoutEvent::Change` 即可保存用户的排列。它携带完整的布局，每次确定的变化只发出一次——拖动或调整大小松开时、键盘命令之后，以及调用 `move_item` 或 `resize_item` 之后——不会随指针移动反复发出。`set_areas` 替换布局时不会发出该事件，因为应用已经持有它设置的布局。`GridLayoutEvent::Select` 报告用户选中的 item——点击它，或使用 `Tab`、`Shift-Tab`——每次变化只发出一次，因此跟随选中项的视图（例如设置面板）无需监听每次重绘。`set_selected_item` 不会发出该事件。`GridLayoutEvent` 标记为 `#[non_exhaustive]`，匹配时请保留通配分支。
 
 `GridArea` 实现了 `Serialize` 和 `Deserialize`。位置之后的字段都有默认值，因此只保存了 `id`、`col`、`row`、`col_span` 和 `row_span` 的布局仍可加载。
 

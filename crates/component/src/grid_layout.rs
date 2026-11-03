@@ -7,7 +7,7 @@
 
 use gpui::{
     App, ElementId, Entity, InteractiveElement as _, IntoElement as _, ParentElement as _,
-    Styled as _, div, px,
+    Styled as _, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{Transition, box_shadow};
 
@@ -23,8 +23,12 @@ const GRIP_GROUP: &str = "grid-layout-resize-grip";
 
 /// Create a [`GridLayout`] wearing this design system: the theme's medium
 /// spacing between items, its move motion, a dashed drop placeholder, a
-/// resize grip in each resizable item's corner, a raised dragged item and a
-/// focus ring on the keyboard-selected one.
+/// resize grip in each resizable item's corner and a raised dragged item.
+///
+/// While the grid is editable — its items can be moved or resized — the
+/// selected item carries a ring in the primary color, so an editor shows which
+/// item its settings apply to. While the keyboard drives the grid the focus
+/// ring takes its place, never both. A read-only grid marks no selection.
 ///
 /// Every part can still be overridden on the returned builder — `.gap_4()` for
 /// more room, say.
@@ -40,6 +44,11 @@ pub fn grid_layout(
 ) -> GridLayout {
     let theme = cx.theme();
     let motion = theme.motion_tokens();
+    let editable = {
+        let state = state.read(cx);
+        state.is_draggable() || state.is_resizable()
+    };
+    let selected = box_shadow(0., 0., 0., px(2.), theme.primary);
     let ring = if theme.focus_ring {
         box_shadow(
             0.,
@@ -56,7 +65,12 @@ pub fn grid_layout(
         .gap(theme.spacing_tokens().md)
         .transition(Transition::new(motion.duration_normal).easing(motion.easing_move.clone()))
         .dragging_item(|style| style.shadow_lg())
-        .selected_item(move |style| style.shadow(vec![ring]))
+        // Both rings are the item's shadow, so the focus ring replaces the
+        // selection ring rather than drawing a second one around it.
+        .when(editable, |grid| {
+            grid.selected_item(move |style| style.shadow(vec![selected]))
+        })
+        .focused_item(move |style| style.shadow(vec![ring]))
         .placeholder(|_, cx| {
             let theme = cx.theme();
             div()
