@@ -146,7 +146,7 @@ impl GridLayout {
     /// layout the state holds — a one-column stack for a narrow window, say.
     ///
     /// The areas are derived from the state's: each is fitted to the width and
-    /// the result compacted upward in reading order, locked items included.
+    /// the result compacted upward in reading order, with locks set aside.
     /// While reflowed the grid is read-only — items cannot be dragged,
     /// resized or moved from the keyboard — so nothing is saved at the
     /// narrower width. Selection still works.
