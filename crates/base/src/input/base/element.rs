@@ -1870,6 +1870,12 @@ impl<M: InputModeKind> TextElement<M> {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // The gutter is not text: show the arrow there, as code editors do,
+        // rather than the text cursor of the editor around it.
+        window.set_cursor_style(
+            gpui::CursorStyle::Arrow,
+            &fold_icon_layout.line_number_hitbox,
+        );
         let is_hovered = fold_icon_layout.line_number_hitbox.is_hovered(window);
         if !fold_icon_layout.icons.is_empty() {
             // Mouse moves do not repaint the editor, so repaint when the pointer
