@@ -14,7 +14,7 @@ use gpui::{
 };
 use ropey::Rope;
 use smallvec::SmallVec;
-use std::{ops::Range, rc::Rc};
+use std::{collections::BTreeSet, ops::Range, rc::Rc};
 
 use crate::{
     Scrollbar,
@@ -73,6 +73,52 @@ fn displayed_line_number(number: usize) -> usize {
 const FOLD_CHEVRON_RIGHT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
 const FOLD_CHEVRON_DOWN_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 
+/// Combine highlight lists into ordered, non-overlapping runs.
+///
+/// This is the same endpoint sweep as [`gpui::combine_highlights`], but it
+/// applies the active styles in input order. GPUI folds the active highlight
+/// ids from a `HashSet`, so when two styles set the same property the winner
+/// depends on hash iteration order: it changes with the ids of the styles in
+/// the visible range and can even differ between identical compositions. Here
+/// a later style always wins, which is the order the editor's decoration
+/// layers document.
+fn combine_highlights(
+    base: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
+    overrides: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let highlights: Vec<(Range<usize>, HighlightStyle)> = base
+        .into_iter()
+        .chain(overrides)
+        .filter(|(range, _)| !range.is_empty())
+        .collect::<Vec<_>>();
+
+    let mut endpoints = Vec::with_capacity(highlights.len() * 2);
+    for (ix, (range, _)) in highlights.iter().enumerate() {
+        endpoints.push((range.start, ix, true));
+        endpoints.push((range.end, ix, false));
+    }
+    endpoints.sort_unstable_by_key(|(position, _, _)| *position);
+
+    let mut combined = Vec::with_capacity(highlights.len());
+    let mut active: BTreeSet<usize> = BTreeSet::new();
+    let mut position = 0;
+    for (endpoint, id, is_start) in endpoints {
+        if endpoint > position && !active.is_empty() {
+            let style = active.iter().fold(HighlightStyle::default(), |style, id| {
+                style.highlight(highlights[*id].1)
+            });
+            combined.push((position..endpoint, style));
+        }
+        position = endpoint;
+        if is_start {
+            active.insert(id);
+        } else {
+            active.remove(&id);
+        }
+    }
+    combined
+}
+
 fn compose_decorations(
     mut styles: Vec<(Range<usize>, HighlightStyle)>,
     decorations: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
@@ -96,7 +142,7 @@ fn compose_decorations(
 
     // Decorations are application-authored overrides and must win over syntax
     // and semantic highlighting when both set the same style property.
-    Some(gpui::combine_highlights(styles, visible_decorations).collect())
+    Some(combine_highlights(styles, visible_decorations))
 }
 
 fn compose_decoration_collections<'a>(
@@ -2692,7 +2738,7 @@ impl<M: InputModeKind> TextElement<M> {
         // Range semantic tokens, resolved from the LSP provider's cached
         // result through the active highlight theme so it shares the same
         // colour vocabulary as the tree-sitter path. Empty Vec when no
-        // provider is set, so `combine_highlights` short-circuits.
+        // provider is set, so composition leaves the syntax styles unchanged.
         let custom_styles = state.extras.semantic_token_styles(
             text,
             &visible_byte_range,
@@ -2705,7 +2751,7 @@ impl<M: InputModeKind> TextElement<M> {
         }
 
         // Compose tree-sitter, semantic, application, then diagnostic styles.
-        styles = gpui::combine_highlights(custom_styles, styles).collect();
+        styles = combine_highlights(styles, custom_styles);
         if !state.masked {
             styles = compose_decoration_collections(
                 styles,
@@ -2714,7 +2760,7 @@ impl<M: InputModeKind> TextElement<M> {
             )
             .unwrap_or_default();
         }
-        styles = gpui::combine_highlights(diagnostic_styles, styles).collect();
+        styles = combine_highlights(styles, diagnostic_styles);
 
         // Some sources reach outside the flushed groups — a diagnostic
         // straddling the viewport edge, or any range inside a folded region —
@@ -5683,6 +5729,81 @@ mod tests {
         assert_eq!(styles[1].0, 2..6);
         assert_eq!(styles[1].1.color, Some(gpui::red()));
         assert_eq!(styles[1].1.font_style, Some(gpui::FontStyle::Italic));
+    }
+
+    #[test]
+    fn later_highlight_layer_wins_over_earlier_one() {
+        let syntax = HighlightStyle {
+            color: Some(gpui::blue()),
+            font_weight: Some(gpui::FontWeight::BOLD),
+            ..Default::default()
+        };
+        let decoration = HighlightStyle {
+            color: Some(gpui::red()),
+            ..Default::default()
+        };
+
+        let styles = combine_highlights([(0..8, syntax)], [(2..6, decoration)]);
+
+        assert_eq!(styles.len(), 3);
+        assert_eq!(styles[0], (0..2, syntax));
+        assert_eq!(styles[1].0, 2..6);
+        assert_eq!(styles[1].1.color, Some(gpui::red()));
+        assert_eq!(styles[1].1.font_weight, Some(gpui::FontWeight::BOLD));
+        assert_eq!(styles[2], (6..8, syntax));
+
+        // Precedence follows the order layers are passed in, not where a
+        // layer starts: the later, wider layer wins over the earlier one.
+        let wider = HighlightStyle {
+            color: Some(gpui::green()),
+            ..Default::default()
+        };
+        let styles = combine_highlights([], [(2..6, decoration), (0..8, wider)]);
+        assert!(
+            styles
+                .iter()
+                .all(|(_, style)| style.color == Some(gpui::green()))
+        );
+    }
+
+    #[test]
+    fn decoration_color_is_stable_across_compositions() {
+        // Each syntax run contributes an active style id, so the ids in a
+        // composition change with the number of runs before the decoration.
+        // GPUI folds those ids from a `HashSet`; with a syntax color and a
+        // decoration color over the same bytes, the winner depends on hash
+        // order. Varying the run count changes the active id pair, and an
+        // identical composition must always produce the same color.
+        let syntax_style = HighlightStyle {
+            color: Some(gpui::blue()),
+            ..Default::default()
+        };
+        let decoration = HighlightStyle {
+            color: Some(gpui::red()),
+            ..Default::default()
+        };
+
+        for run_count in 1..=512 {
+            let syntax = (0..run_count)
+                .map(|ix| (ix..ix + 1, syntax_style))
+                .collect::<Vec<_>>();
+            let decorated_at = run_count - 1;
+            let styles = compose_decorations(
+                syntax,
+                [(decorated_at..decorated_at + 1, decoration)],
+                0..run_count,
+            )
+            .unwrap();
+            let decorated = styles
+                .iter()
+                .find(|(range, _)| range.contains(&decorated_at))
+                .expect("decorated run");
+            assert_eq!(
+                decorated.1.color,
+                Some(gpui::red()),
+                "run_count = {run_count}"
+            );
+        }
     }
 
     #[test]
