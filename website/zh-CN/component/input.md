@@ -317,27 +317,27 @@ v_flex()
     .child(Input::new(&self.email_input))
 ```
 
-## 建议值
+## 列表
 
-`suggestions` 让输入框在用户输入时提供建议，同时仍接受任意文本，相当于 HTML 中带 `<datalist>` 的 `<input list>`。当字段接受自由文本、而一组已知值能帮助用户输入时（例如指标名、标签或主机名），可以使用它。如果值必须是列表中的某一项，请改用 [Combobox](combobox.md)。建议值提供的是整个字段的取值。若要补全光标处的词（例如长文本中的 `$变量` 或 `@提及`），请像 Input story 中的 Completion 示例那样，在输入框周围组合一个菜单；[Editor](editor.md) 则通过 `CompletionProvider` 补全代码。
+`list` 让输入框在用户输入时于下方显示一个 [List](list.md)，同时仍接受任意文本，相当于 HTML 的 `<input list>`。当字段接受自由文本、而已知值能帮助用户输入时（例如主机名或指标名），可以使用它。如果值必须是列表中的某一项，请改用 [Combobox](combobox.md)。若要补全光标处的词（例如 `$变量` 或 `@提及`），请像 Input story 中的 Completion 示例那样，在输入框周围组合一个菜单。
 
 ```rust
-let metric = cx.new(|cx| InputState::new(window, cx).placeholder("指标"));
+let input = cx.new(|cx| InputState::new(window, cx));
+let hosts = cx.new(|cx| ListState::new(HostDelegate::new(input.clone()), window, cx));
 
-Input::new(&metric).suggestions(["cpu.load", "cpu.temperature", "memory.used"])
+Input::new(&input).list(&hosts)
 ```
 
-用户输入时，建议列表会在输入框下方展开，宽度与输入框一致。列表包含所有含有当前文本的建议（不区分大小写），前缀匹配的排在前面，每组保持传入的顺序；已经输入的文本不会再次出现在建议中。输入框为空时，按 Down 会列出全部建议。建议列表只在输入框获得焦点时显示，点击列表以外的地方会将其关闭。禁用或只读的输入框不提供建议。
+`HostDelegate` 是普通的 `ListDelegate`，完整示例见[英文文档](/component/input#list)和 Input story。`perform_search` 返回的任务被替换时，旧任务会被丢弃，所以在任务开头等一个定时器就是防抖，旧查询的结果也不会覆盖新查询。固定列表就是在 `perform_search` 中同步过滤并返回 `Task::ready(())` 的 delegate。
 
-建议列表只在显示时进行匹配，但不做虚拟化，适合几十到几百个值。如有成千上万个值，请在应用中先行筛选，只传入最接近的若干个。
-
-值仍由 `InputState` 持有。像其他输入框一样订阅它的 `InputEvent`：接受建议会以一次可撤销的编辑替换文本，并发出 `InputEvent::Change`。
+和所有 `List` 一样，匹配、防抖、分组、分页和行的渲染都由 delegate 决定。delegate 有行或 `loading` 返回 true 时才显示弹层，并且只在输入框获得焦点时显示。没有行时弹层隐藏，因为自由文本不需要“无结果”提示；搜索失败可以显示为一行。只有用户输入才会触发搜索，代码修改未聚焦的输入框不会。请在 `confirm` 中写入接受的值（可以和行的标题不同），不要在 `ListEvent::Confirm` 订阅中写入，因为弹层关闭后写入的改动会被当作用户输入。禁用或只读的输入框不提供列表。
 
 | 按键 | 操作 |
 | --- | --- |
-| Down / Up | 在建议之间移动；在第一项上按 Up 会回到输入的文本 |
-| Enter | 接受高亮的建议；没有高亮项时，输入框照常为输入的文本发出 `InputEvent::PressEnter` |
-| Escape | 关闭建议列表 |
+| Down | 高亮下一行，或打开弹层 |
+| Up | 高亮上一行；从第一行返回输入的文本 |
+| Enter | 接受高亮的行；没有高亮时，输入框照常发出 `InputEvent::PressEnter` |
+| Escape | 关闭弹层 |
 
 ## 原子行内 token
 

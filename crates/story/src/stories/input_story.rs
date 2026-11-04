@@ -1,12 +1,96 @@
 use gpui_kit::{
     App, AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement as _,
-    Render, Role, Styled, Subscription, Window, div,
+    Render, Role, Styled, Subscription, Task, Window, div,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
-use gpui_kit::component::{button::*, input::*, label::Label, *};
+use gpui_kit::component::{button::*, input::*, label::Label, list::*, *};
 
 pub fn init(_: &mut App) {}
+
+const METRICS: [&str; 7] = [
+    "cpu.load",
+    "cpu.temperature",
+    "disk.cpu_wait",
+    "disk.read_bytes",
+    "memory.available",
+    "memory.used",
+    "network.received_bytes",
+];
+
+/// Searches like a remote service: replacing the task `perform_search` returns
+/// drops it, so the timer is the debounce and an older query never lands.
+struct MetricDelegate {
+    input: Entity<InputState>,
+    items: Vec<&'static str>,
+    selected: Option<IndexPath>,
+}
+
+impl MetricDelegate {
+    fn new(input: Entity<InputState>) -> Self {
+        Self {
+            input,
+            items: Vec::new(),
+            selected: None,
+        }
+    }
+}
+
+impl ListDelegate for MetricDelegate {
+    type Item = ListItem;
+
+    fn perform_search(
+        &mut self,
+        query: &str,
+        window: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> Task<()> {
+        let query = query.to_lowercase();
+        cx.spawn_in(window, async move |list, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(150))
+                .await;
+            _ = list.update(cx, |list, cx| {
+                list.delegate_mut().items = METRICS
+                    .into_iter()
+                    .filter(|metric| metric.contains(&query) && *metric != query)
+                    .collect();
+                cx.notify();
+            });
+        })
+    }
+
+    fn items_count(&self, _: usize, _: &App) -> usize {
+        self.items.len()
+    }
+
+    fn render_item(
+        &mut self,
+        ix: IndexPath,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) -> Option<ListItem> {
+        let metric = self.items.get(ix.row)?;
+        Some(ListItem::new(ix.row).child(*metric))
+    }
+
+    fn set_selected_index(
+        &mut self,
+        ix: Option<IndexPath>,
+        _: &mut Window,
+        _: &mut Context<ListState<Self>>,
+    ) {
+        self.selected = ix;
+    }
+
+    fn confirm(&mut self, _: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        let Some(metric) = self.selected.and_then(|ix| self.items.get(ix.row)) else {
+            return;
+        };
+        self.input
+            .update(cx, |input, cx| input.replace_all(*metric, window, cx));
+    }
+}
 
 pub struct InputStory {
     tokens: Entity<super::input_tokens::TokenExample>,
@@ -32,6 +116,7 @@ pub struct InputStory {
     custom_menu_input: Entity<InputState>,
     color_input: Entity<InputState>,
     metric_input: Entity<InputState>,
+    metric_list: Entity<ListState<MetricDelegate>>,
     content_type_inputs: Vec<ContentTypeInput>,
     size: gpui_kit::component::Size,
 
@@ -128,6 +213,8 @@ impl InputStory {
 
         let metric_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Metric, such as cpu.load"));
+        let metric_list =
+            cx.new(|cx| ListState::new(MetricDelegate::new(metric_input.clone()), window, cx));
         let color_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Type something...")
@@ -291,6 +378,7 @@ impl InputStory {
             custom_menu_input,
             color_input,
             metric_input,
+            metric_list,
             input_text_centered,
             input_text_right,
             content_type_inputs,
@@ -626,25 +714,18 @@ impl Render for InputStory {
                 .description("References keep their identity through selection, deletion and undo. Copy returns the underlying text.")
                 .w_full().child(self.tokens.clone()))
             .child(
-                section("Suggestions")
+                section("List")
                     .description(
-                        "Suggestions help type a value without limiting it: any text is \
-                         accepted. Down and Up move through the suggestions, Enter accepts \
-                         the highlighted one, and Enter with none highlighted submits the text.",
+                        "A list under the field helps type a value without limiting it: any \
+                         text is accepted. The list searches as you type, here with a simulated \
+                         remote search. Down and Up highlight a row, Enter accepts it, and \
+                         Enter with none highlighted submits the text.",
                     )
                     .w_128()
                     .child(
                         Input::new(&self.metric_input)
                             .with_size(self.size)
-                            .suggestions([
-                                "cpu.load",
-                                "cpu.temperature",
-                                "disk.cpu_wait",
-                                "disk.read_bytes",
-                                "memory.available",
-                                "memory.used",
-                                "network.received_bytes",
-                            ]),
+                            .list(&self.metric_list),
                     ),
             )
             .child(

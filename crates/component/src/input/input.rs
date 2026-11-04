@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
 use crate::input::clear_button;
+use crate::list::{ListDelegate, ListState};
 use crate::native_menu::NativeMenu;
 use crate::spinner::Spinner;
 use crate::touch_selection::{EditMenuItem, TouchSelectionOverlay};
@@ -163,8 +164,8 @@ pub struct Input {
     /// before the default text insertion. Return `true` if handled.
     paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
 
-    /// Values offered under the field while typing; see [`Input::suggestions`].
-    suggestions: Vec<SharedString>,
+    /// The list offered under the field while typing; see [`Input::list`].
+    list: Option<Rc<dyn super::list_popup::InputList>>,
 }
 
 impl Sizable for Input {
@@ -273,7 +274,7 @@ impl Input {
             token_renderer: None,
             token_click_listener: None,
             token_hover_listener: None,
-            suggestions: Vec::new(),
+            list: None,
         }
     }
 
@@ -288,27 +289,26 @@ impl Input {
         self.disabled
     }
 
-    /// Values to suggest while the user types, as an HTML `<input list>` does
-    /// with its `<datalist>`. The input still accepts any text: suggestions
-    /// only help type it.
+    /// Offer a [`List`](crate::list::List) under the field while the user
+    /// types, as an HTML `<input list>` does. The input still accepts any
+    /// text: the list only helps type it.
     ///
-    /// They open under the field as the user types — those containing the
-    /// text, ignoring case, prefix matches first and each group in the order
-    /// given, never the text already typed. Down opens them and moves through
-    /// them, Up moves back to the typed text, Enter accepts the highlighted
-    /// one, and Escape closes them. Accepting replaces the text in one
-    /// undoable edit, which emits [`super::InputEvent::Change`]. With nothing
-    /// highlighted, Enter reaches the input as usual. A disabled or read-only
-    /// input offers none.
+    /// The list searches with the field's text through
+    /// [`ListDelegate::perform_search`], so the delegate decides what matches,
+    /// how long to wait and how rows look. Nothing is highlighted until the
+    /// user presses Down, so Enter on the typed text emits
+    /// [`InputEvent::PressEnter`](super::InputEvent::PressEnter). Write the
+    /// accepted value in [`ListDelegate::confirm`], for example with
+    /// [`InputState::replace_all`]. The popup shows while there are rows or
+    /// [`ListDelegate::loading`] is true, and only while the input has focus.
+    /// A disabled or read-only input offers none.
     ///
     /// ```ignore
-    /// Input::new(&metric).suggestions(["cpu.load", "cpu.temperature", "memory.used"])
+    /// let hosts = cx.new(|cx| ListState::new(HostDelegate::new(&input), window, cx));
+    /// Input::new(&input).list(&hosts)
     /// ```
-    pub fn suggestions(
-        mut self,
-        suggestions: impl IntoIterator<Item = impl Into<SharedString>>,
-    ) -> Self {
-        self.suggestions = suggestions.into_iter().map(Into::into).collect();
+    pub fn list<D: ListDelegate>(mut self, list: &Entity<ListState<D>>) -> Self {
+        self.list = Some(Rc::new(list.clone()));
         self
     }
 
@@ -709,17 +709,16 @@ impl RenderOnce for Input {
         let presentation = state.presentation(cx);
         let content_type = self.content_type;
         let disabled = self.disabled;
-        // Suggestions belong to a single-line input, like an HTML `<input list>`.
-        let suggestion_list = match &state {
-            TextInputState::Input(input) if !self.suggestions.is_empty() => {
-                Some(super::suggestions::SuggestionList::new(
-                    input,
-                    std::mem::take(&mut self.suggestions),
-                    !self.disabled && !self.readonly,
-                    window,
-                    cx,
-                ))
-            }
+        // A list belongs to a single-line input, like an HTML `<input list>`.
+        let list_popup = match (&state, self.list.take()) {
+            (TextInputState::Input(input), Some(list)) => Some(super::list_popup::ListPopup::new(
+                input,
+                list,
+                !self.disabled && !self.readonly,
+                self.size,
+                window,
+                cx,
+            )),
             _ => None,
         };
         let is_multi_line = presentation.is_multi_line();
@@ -890,7 +889,7 @@ impl RenderOnce for Input {
             })
             .relative()
             .children(overlays.floating)
-            .when_some(suggestion_list, |this, list| list.attach(this, cx))
+            .when_some(list_popup, |this, popup| popup.attach(this, cx))
             .when_some(paste_handler, |this, handler| {
                 this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
                     if let Some(clipboard) = cx.read_from_clipboard() {

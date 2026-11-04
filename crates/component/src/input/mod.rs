@@ -8,12 +8,12 @@ pub use gpui_base::input::{
 };
 pub use token::InputToken;
 pub mod language_config;
+mod list_popup;
 mod number_input;
 mod otp_input;
 mod overlay;
 pub(crate) mod popovers;
 mod search;
-mod suggestions;
 mod syntax_context;
 
 pub(crate) use clear_button::*;
