@@ -732,6 +732,14 @@ fn empty_bottom_height(
     }
 }
 
+/// What folded lines draw: a background across the editor, under the text,
+/// and a placeholder after the text.
+#[derive(Default)]
+struct FoldedLines {
+    backgrounds: Vec<PaintQuad>,
+    placeholders: Vec<AnyElement>,
+}
+
 /// Layout information for fold icons.
 struct FoldIconLayout {
     /// Hitbox for the line number area (used for hover detection)
@@ -1856,97 +1864,81 @@ impl<M: InputModeKind> TextElement<M> {
         icon_layout
     }
 
-    /// Placeholders for folded lines, drawn by the `fold_placeholder_renderer`
-    /// one space past the end of the line's text, or from a column of it.
-    /// Rows below `ghost_rows.0` move down by the inline completion's ghost
-    /// lines, `ghost_rows.1` tall, as the text does.
-    fn layout_fold_placeholders(
+    /// The background of each folded line and the placeholder right after
+    /// its text, from `editor_fold_background` and
+    /// `fold_placeholder_renderer`. Rows below `ghost_rows.0` move down by the
+    /// inline completion's ghost lines, `ghost_rows.1` tall, as the text does.
+    fn layout_folded_lines(
         &self,
+        original_x: Pixels,
         bounds: &Bounds<Pixels>,
         last_layout: &LastLayout,
         ghost_rows: Option<(usize, Pixels)>,
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<AnyElement> {
-        // The folded lines on screen: their buffer row, their index into
-        // `last_layout.lines` and the top of their first row.
-        let (render, folded) = {
+    ) -> FoldedLines {
+        let mut folded_lines = FoldedLines::default();
+        let line_height = last_layout.line_height;
+        let (background, render, folded) = {
             let state = self.state.read(cx);
-            let Some(render) = state.editor_style.fold_placeholder_renderer.clone() else {
-                return Vec::new();
-            };
-            if !state.mode.is_folding() {
-                return Vec::new();
+            let style = &state.editor_style;
+            if !state.mode.is_folding()
+                || style.editor_fold_background.is_none()
+                    && style.fold_placeholder_renderer.is_none()
+            {
+                return folded_lines;
             }
 
+            // Each folded line on screen, the top of its first row, how many
+            // rows it wraps to, and where its text ends.
             let mut folded = Vec::new();
             let mut offset_y = last_layout.visible_top;
-            for (ix, (line, &buffer_line)) in last_layout
+            for (line, &buffer_line) in last_layout
                 .lines
                 .iter()
                 .zip(last_layout.visible_buffer_lines.iter())
-                .enumerate()
             {
-                if state.display_map.is_folded_at(buffer_line) {
-                    folded.push((buffer_line, ix, offset_y));
+                let rows = line.wrapped_lines.len();
+                if state.display_map.is_folded_at(buffer_line)
+                    && let Some(last) = line.wrapped_lines.last()
+                {
+                    let indent = if rows > 1 { line.wrap_indent } else { px(0.) };
+                    let end =
+                        last_layout.alignment_offset(line.longest_width) + indent + last.width;
+                    folded.push((buffer_line, offset_y, rows, end));
                 }
-                offset_y += line.wrapped_lines.len() * last_layout.line_height;
+                offset_y += rows * line_height;
                 if let Some((row, height)) = ghost_rows
                     && row == buffer_line
                 {
                     offset_y += height;
                 }
             }
-            (render, folded)
+            (
+                style.editor_fold_background,
+                style.fold_placeholder_renderer.clone(),
+                folded,
+            )
         };
 
-        let line_height = last_layout.line_height;
         let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
-        let mut placeholders = Vec::with_capacity(folded.len());
-        for (buffer_line, ix, top) in folded {
-            let Some(placeholder) = render(buffer_line) else {
-                continue;
-            };
-            let line = &last_layout.lines[ix];
-            let alignment = last_layout.alignment_offset(line.longest_width);
-            let last_row = line.wrapped_lines.len().saturating_sub(1);
-            // The wrapped row holding the column, and the column within it;
-            // past the end of the line, one space after its text.
-            let mut position = None;
-            if let Some(column) = placeholder.column {
-                let mut start = 0;
-                for (row, shaped) in line.wrapped_lines.iter().enumerate() {
-                    let end = start + shaped.len;
-                    if column < end || row == last_row && column == end {
-                        let indent = if row == 0 { px(0.) } else { line.wrap_indent };
-                        let x = alignment + indent + shaped.x_for_index(column - start);
-                        position = Some(point(x, top + row * line_height));
-                        break;
-                    }
-                    start = end;
-                }
+        for (buffer_line, top, rows, end) in folded {
+            if let Some(color) = background {
+                let bounds = Bounds::new(
+                    point(original_x, bounds.origin.y + top),
+                    size(bounds.size.width, rows * line_height),
+                );
+                folded_lines.backgrounds.push(fill(bounds, color));
             }
-            let position = position.or_else(|| {
-                let shaped = line.wrapped_lines.last()?;
-                let indent = if last_row == 0 {
-                    px(0.)
-                } else {
-                    line.wrap_indent
-                };
-                let x = alignment + indent + shaped.width + last_layout.space_width;
-                Some(point(x, top + last_row * line_height))
-            });
-            let Some(position) = position else {
+            let Some(render) = render.as_ref() else {
                 continue;
             };
-
-            let mut element = gpui::div()
+            // Centered on the row, but only the placeholder itself takes the
+            // pointer and the click.
+            let unfold = gpui::div()
                 .id(("fold-placeholder", buffer_line))
-                .h(line_height)
-                .flex()
-                .items_center()
                 .cursor_pointer()
-                .child(placeholder.element)
+                .child(render(buffer_line))
                 .on_mouse_down(MouseButton::Left, {
                     let state = self.state.clone();
                     move |_, _: &mut Window, cx: &mut App| {
@@ -1956,17 +1948,22 @@ impl<M: InputModeKind> TextElement<M> {
                             cx.notify();
                         });
                     }
-                })
+                });
+            let mut placeholder = gpui::div()
+                .h(line_height)
+                .flex()
+                .items_center()
+                .child(unfold)
                 .into_any_element();
-            element.prepaint_as_root(
-                origin + position,
+            placeholder.prepaint_as_root(
+                origin + point(end, top + (rows - 1) * line_height),
                 size(gpui::AvailableSpace::MinContent, line_height.into()),
                 window,
                 cx,
             );
-            placeholders.push(element);
+            folded_lines.placeholders.push(placeholder);
         }
-        placeholders
+        folded_lines
     }
 
     /// Paint fold icons using prepaint hitboxes.
@@ -2924,7 +2921,7 @@ pub(super) struct PrepaintState {
     bounds: Bounds<Pixels>,
     /// Fold icon layout data
     fold_icon_layout: FoldIconLayout,
-    fold_placeholders: Vec<AnyElement>,
+    folded_lines: FoldedLines,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
     ghost_lines: Vec<ShapedLine>,
@@ -3644,7 +3641,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
             )));
         let fold_icon_layout =
             self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
-        let fold_placeholders = self.layout_fold_placeholders(
+        let folded_lines = self.layout_folded_lines(
+            original_x,
             &bounds,
             &last_layout,
             current_row.map(|row| (row, ghost_lines_height)),
@@ -3704,7 +3702,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             line_number_offset,
             indent_guides_path,
             fold_icon_layout,
-            fold_placeholders,
+            folded_lines,
             ghost_first_line,
             ghost_lines,
             ghost_lines_height,
@@ -3755,6 +3753,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
         } else {
             editor_style.background
         };
+
+        for background in std::mem::take(&mut prepaint.folded_lines.backgrounds) {
+            window.paint_quad(background);
+        }
 
         // Paint active line
         let mut offset_y = px(0.);
@@ -3940,7 +3942,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         for element in &mut prepaint.token_elements {
             element.paint(window, cx);
         }
-        for placeholder in &mut prepaint.fold_placeholders {
+        for placeholder in &mut prepaint.folded_lines.placeholders {
             placeholder.paint(window, cx);
         }
 
@@ -4315,9 +4317,8 @@ fn split_runs_by_bg_segments(
 mod tests {
     use super::*;
     use crate::input::{
-        EditorMode, EditorState, FoldPlaceholder, FoldRange, GutterDecoration,
-        GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
-        RangeDecoration, Redo, Undo,
+        EditorMode, EditorState, FoldRange, GutterDecoration, GutterDecorationCollection,
+        OverviewRulerDecoration, OverviewRulerDecorationCollection, RangeDecoration, Redo, Undo,
     };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -5326,7 +5327,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_folded_line_shows_its_placeholder_after_the_text_and_unfolds_on_click(
+    fn a_folded_line_shows_its_placeholder_right_after_the_text_and_unfolds_on_click(
         cx: &mut TestAppContext,
     ) {
         let text = "top {\nhidden\n}\nlast";
@@ -5339,7 +5340,7 @@ mod tests {
                 let mut style = state.editor_style.clone();
                 style.fold_placeholder_renderer = Some(Rc::new(move |line| {
                     drawn.borrow_mut().push(line);
-                    Some(FoldPlaceholder::new(div().w(px(20.)).h(px(10.))))
+                    div().w(px(20.)).h(px(10.)).into_any_element()
                 }));
                 state.set_editor_style(style);
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 3)], cx);
@@ -5356,51 +5357,19 @@ mod tests {
             let line = layout.line(0).unwrap();
             let end = state.input_bounds.origin.x
                 + layout.line_number_width
-                + line.wrapped_lines[0].width
-                + layout.space_width;
+                + line.wrapped_lines[0].width;
             point(
                 end + px(10.),
                 state.input_bounds.origin.y + layout.line_height.half(),
             )
         });
 
-        cx.simulate_mouse_down(at, MouseButton::Left, gpui::Modifiers::default());
-        cx.update(|_, cx| assert!(!editor.read(cx).display_map.is_folded_at(0)));
-    }
-
-    #[gpui::test]
-    fn a_fold_placeholder_with_a_column_starts_over_that_text(cx: &mut TestAppContext) {
-        let text = "top {\nhidden\n}\nlast";
-        let (editor, window) = decoration_editor(cx, text, false);
-        let mut cx = VisualTestContext::from_window(window.into(), cx);
-        let brace = text.find('{').unwrap();
-        let (on_brace, past_end) = cx.update(|window, cx| {
-            editor.update(cx, |state, cx| {
-                let mut style = state.editor_style.clone();
-                style.fold_placeholder_renderer = Some(Rc::new(move |_| {
-                    Some(FoldPlaceholder::new(div().w(px(4.)).h(px(10.))).with_column(brace))
-                }));
-                state.set_editor_style(style);
-                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 3)], cx);
-                state.display_map.set_folded(0, true);
-            });
-            window.draw(cx).clear(cx);
-
-            let state = editor.read(cx);
-            let layout = state.last_layout.as_ref().unwrap();
-            let line = &layout.line(0).unwrap().wrapped_lines[0];
-            let text_x = state.input_bounds.origin.x + layout.line_number_width;
-            let y = state.input_bounds.origin.y + layout.line_height.half();
-            (
-                point(text_x + line.x_for_index(brace) + px(2.), y),
-                point(text_x + line.width + layout.space_width + px(2.), y),
-            )
-        });
-
-        // Only the 4 px from the brace on take the click.
-        cx.simulate_mouse_down(past_end, MouseButton::Left, gpui::Modifiers::default());
+        // The 10 px placeholder sits in the middle of the row; the row's top
+        // edge above it is still text.
+        let above = point(at.x, at.y - px(6.));
+        cx.simulate_mouse_down(above, MouseButton::Left, gpui::Modifiers::default());
         cx.update(|_, cx| assert!(editor.read(cx).display_map.is_folded_at(0)));
-        cx.simulate_mouse_down(on_brace, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_down(at, MouseButton::Left, gpui::Modifiers::default());
         cx.update(|_, cx| assert!(!editor.read(cx).display_map.is_folded_at(0)));
     }
 
