@@ -48,6 +48,7 @@ pub mod diff;
 pub mod dock;
 pub mod empty;
 pub mod form;
+pub mod grid_layout;
 pub mod group_box;
 pub mod highlighter;
 pub mod history;
