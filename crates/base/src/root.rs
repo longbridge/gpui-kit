@@ -247,6 +247,9 @@ impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(feature = "test-support")]
         crate::test_support::begin_frame(window);
+        // New frame: drop the horizontal strips this window registered last
+        // frame; the masks painted in this one register again.
+        crate::scrollable_mask::begin_horizontal_strip_frame(window.window_handle().window_id());
         for plugin in &self.plugins {
             (plugin.prepare)(window, cx);
         }

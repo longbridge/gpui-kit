@@ -19,6 +19,58 @@ thread_local! {
         const { Cell::new(None) };
 }
 
+thread_local! {
+    /// Horizontal strips painted in each window's latest frame, with the room
+    /// each had to scroll then. See [`horizontal_strip_can_scroll_at`].
+    static HORIZONTAL_STRIPS: RefCell<Vec<HorizontalStrip>> = const { RefCell::new(Vec::new()) };
+}
+
+/// One horizontal [`ScrollableMask`] as painted in its window's latest frame.
+#[derive(Clone, Copy, Debug)]
+struct HorizontalStrip {
+    window: gpui::WindowId,
+    /// Visible bounds in window coordinates (clipped by the content mask).
+    bounds: Bounds<Pixels>,
+    /// The content can still move right (reveal what is on the left).
+    can_scroll_right: bool,
+    /// The content can still move left (reveal what is on the right).
+    can_scroll_left: bool,
+}
+
+/// Forgets the strips `window` painted last frame. [`Root`](crate::Root) calls
+/// it at the start of every render, so the list only ever holds the strips of
+/// the frame on screen.
+pub(crate) fn begin_horizontal_strip_frame(window: gpui::WindowId) {
+    HORIZONTAL_STRIPS.with(|strips| strips.borrow_mut().retain(|s| s.window != window));
+}
+
+/// Whether a horizontal strip (a markdown table, …) under `point` in `window`
+/// can still scroll its content in `direction`: `> 0` means right (a rightward
+/// swipe revealing the left side), `< 0` left, `0` either way.
+///
+/// Unlike [`last_horizontal_scroll_claim`], which only tells after the strip
+/// moved, this answers before the swipe starts, so a host pan gesture over
+/// GPUI content (e.g. a swipe that opens a side drawer) can decide on touch
+/// down whether to leave the swipe to the strip. Reflects the frame on screen;
+/// read on the thread that dispatches input.
+pub fn horizontal_strip_can_scroll_at(
+    window: gpui::WindowId,
+    point: Point<Pixels>,
+    direction: i32,
+) -> bool {
+    HORIZONTAL_STRIPS.with(|strips| {
+        strips.borrow().iter().any(|s| {
+            s.window == window
+                && s.bounds.contains(&point)
+                && match direction.signum() {
+                    1 => s.can_scroll_right,
+                    -1 => s.can_scroll_left,
+                    _ => s.can_scroll_right || s.can_scroll_left,
+                }
+        })
+    })
+}
+
 /// Offsets closer than this count as unchanged, so a sub-pixel residue left at
 /// an edge does not read as room to scroll.
 const CLAIM_EPSILON: Pixels = px(0.5);
@@ -487,6 +539,28 @@ impl<H: ScrollbarHandle + Clone> Element for ScrollableMask<H> {
                 })
             })
             .unwrap_or_default();
+
+        // Register this strip with its room to scroll, for hosts that decide on
+        // touch down whether a swipe belongs to it (see
+        // `horizontal_strip_can_scroll_at`). Bounds are clipped by the
+        // enclosing content mask, so a strip scrolled out of a list viewport
+        // does not claim points it no longer covers.
+        if is_horizontal {
+            let visible = bounds.intersect(&window.content_mask().bounds);
+            if !visible.size.width.is_zero() && !visible.size.height.is_zero() {
+                let axis_max = (self.scroll_handle.content_size().width
+                    - self.scroll_handle.viewport_bounds().size.width)
+                    .max(px(0.));
+                let x = self.scroll_handle.offset().x.clamp(-axis_max, px(0.));
+                let strip = HorizontalStrip {
+                    window: window.window_handle().window_id(),
+                    bounds: visible,
+                    can_scroll_right: x < -CLAIM_EPSILON,
+                    can_scroll_left: x > -axis_max + CLAIM_EPSILON,
+                };
+                HORIZONTAL_STRIPS.with(|strips| strips.borrow_mut().push(strip));
+            }
+        }
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             if let Some(color) = self.debug {
@@ -1126,6 +1200,45 @@ mod tests {
             });
             assert_eq!(last_horizontal_scroll_claim(), Some(claim));
         }
+    }
+
+    #[gpui::test]
+    fn horizontal_strip_reports_room_to_scroll_at_a_point(cx: &mut TestAppContext) {
+        let scroll_handle = ScrollHandle::new();
+        let cx = setup_horizontal_area_test(cx, &scroll_handle);
+        let window = cx.update(|window, _| window.window_handle().window_id());
+        // The test view has no `Root`, so start each frame by hand.
+        let redraw = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                begin_horizontal_strip_frame(window.window_handle().window_id());
+                _ = window.draw(cx);
+            });
+        };
+        redraw(cx);
+        let inside = point(px(10.), px(10.));
+
+        // At the left edge: room only to the left (the content is wider).
+        assert!(!horizontal_strip_can_scroll_at(window, inside, 1));
+        assert!(horizontal_strip_can_scroll_at(window, inside, -1));
+        assert!(horizontal_strip_can_scroll_at(window, inside, 0));
+        // Outside the strip nothing claims the point.
+        assert!(!horizontal_strip_can_scroll_at(window, point(px(150.), px(10.)), 0));
+
+        // Scrolled to the middle: room both ways.
+        scroll_handle.set_offset(point(px(-100.), px(0.)));
+        redraw(cx);
+        assert!(horizontal_strip_can_scroll_at(window, inside, 1));
+        assert!(horizontal_strip_can_scroll_at(window, inside, -1));
+
+        // At the right edge: room only to the right.
+        scroll_handle.set_offset(point(px(-200.), px(0.)));
+        redraw(cx);
+        assert!(horizontal_strip_can_scroll_at(window, inside, 1));
+        assert!(!horizontal_strip_can_scroll_at(window, inside, -1));
+
+        // A new frame forgets the last one's strips until they paint again.
+        begin_horizontal_strip_frame(window);
+        assert!(!horizontal_strip_can_scroll_at(window, inside, 0));
     }
 
     fn setup_horizontal_area_test<'a>(
