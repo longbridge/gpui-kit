@@ -356,38 +356,25 @@ v_flex()
     .child(Input::new(&self.email_input))
 ```
 
-## Autocomplete
+## Suggestions
 
-`Autocomplete` is a text input that suggests values while accepting any text — the counterpart of HTML's `<datalist>`. Use it when the field takes free text but a list of known values helps people type it, such as a metric, a tag or a host name. When the value must be one of the items, use [Combobox](combobox.md) instead.
+`suggestions` makes the input offer values while the user types, and still accept any text — the counterpart of an HTML `<input list>` with its `<datalist>`. Use it when the field takes free text but a list of known values helps people type it, such as a metric, a tag or a host name. When the value must be one of the items, use [Combobox](combobox.md) instead.
 
 ```rust
-use gpui_kit::component::input::{Autocomplete, InputEvent, InputState};
-
 let metric = cx.new(|cx| InputState::new(window, cx).placeholder("Metric"));
 
-Autocomplete::new(&metric)
-    .suggestions(["cpu.load", "cpu.temperature", "memory.used"])
+Input::new(&metric).suggestions(["cpu.load", "cpu.temperature", "memory.used"])
 ```
 
-The suggestions open under the field as the user types. They are the ones containing the text, ignoring case, with prefix matches first and each group in the order given; the text already typed is not offered again. An empty field offers every suggestion when the user presses Down.
+The suggestions open under the field, as wide as it, as the user types. They are the ones containing the text, ignoring case, with prefix matches first and each group in the order given; the text already typed is not offered again. An empty field offers every suggestion when the user presses Down. A disabled or read-only input offers none.
 
-The application owns the `InputState` and reads the value from it. Subscribe to its `InputEvent`s as for any input: accepting a suggestion replaces the text in one undoable edit, which emits `InputEvent::Change`.
+The value stays in the `InputState`. Subscribe to its `InputEvent`s as for any input: accepting a suggestion replaces the text in one undoable edit, which emits `InputEvent::Change`.
 
 | Key | Action |
 | --- | --- |
 | Down / Up | Move through the suggestions; Up from the first returns to the typed text |
-| Enter | Accept the highlighted suggestion; with none highlighted, the input emits `InputEvent::PressEnter` for the typed text |
+| Enter | Accept the highlighted suggestion; with none highlighted, the input emits `InputEvent::PressEnter` for the typed text as usual |
 | Escape | Close the suggestions |
-
-Configure the field itself with `input`, which receives the underlying `Input`, and set the size, the disabled state and the field's style on the `Autocomplete` directly:
-
-```rust
-Autocomplete::new(&metric)
-    .suggestions(metrics)
-    .small()
-    .menu_max_h(px(240.))
-    .input(|input| input.cleanable(true).prefix(Icon::new(IconName::Search)))
-```
 
 ## Atomic inline tokens
 

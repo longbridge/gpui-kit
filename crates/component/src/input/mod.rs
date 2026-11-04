@@ -1,4 +1,3 @@
-mod autocomplete;
 mod clear_button;
 mod content_type;
 mod input;
@@ -14,6 +13,7 @@ mod otp_input;
 mod overlay;
 pub(crate) mod popovers;
 mod search;
+mod suggestions;
 mod syntax_context;
 
 pub(crate) use clear_button::*;
@@ -49,7 +49,6 @@ mod editor;
 mod group;
 mod state;
 mod textarea;
-pub use autocomplete::Autocomplete;
 pub use editor::Editor;
 pub use gpui_base::input::{
     AutoClosingPair, BracketPair, IndentationRules, LanguageProvider, SyntaxContext,

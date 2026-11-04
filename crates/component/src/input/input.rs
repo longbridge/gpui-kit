@@ -162,6 +162,9 @@ pub struct Input {
     /// An optional paste handler. If set, it is invoked with the clipboard item
     /// before the default text insertion. Return `true` if handled.
     paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
+
+    /// Values offered under the field while typing; see [`Input::suggestions`].
+    suggestions: Vec<SharedString>,
 }
 
 impl Sizable for Input {
@@ -270,6 +273,7 @@ impl Input {
             token_renderer: None,
             token_click_listener: None,
             token_hover_listener: None,
+            suggestions: Vec::new(),
         }
     }
 
@@ -282,6 +286,30 @@ impl Input {
 
     pub(crate) fn is_disabled(&self) -> bool {
         self.disabled
+    }
+
+    /// Values to suggest while the user types, as an HTML `<input list>` does
+    /// with its `<datalist>`. The input still accepts any text: suggestions
+    /// only help type it.
+    ///
+    /// They open under the field as the user types — those containing the
+    /// text, ignoring case, prefix matches first and each group in the order
+    /// given, never the text already typed. Down opens them and moves through
+    /// them, Up moves back to the typed text, Enter accepts the highlighted
+    /// one, and Escape closes them. Accepting replaces the text in one
+    /// undoable edit, which emits [`super::InputEvent::Change`]. With nothing
+    /// highlighted, Enter reaches the input as usual. A disabled or read-only
+    /// input offers none.
+    ///
+    /// ```ignore
+    /// Input::new(&metric).suggestions(["cpu.load", "cpu.temperature", "memory.used"])
+    /// ```
+    pub fn suggestions(
+        mut self,
+        suggestions: impl IntoIterator<Item = impl Into<SharedString>>,
+    ) -> Self {
+        self.suggestions = suggestions.into_iter().map(Into::into).collect();
+        self
     }
 
     pub fn accessibility_id(mut self, id: impl Into<SharedString>) -> Self {
@@ -681,6 +709,19 @@ impl RenderOnce for Input {
         let presentation = state.presentation(cx);
         let content_type = self.content_type;
         let disabled = self.disabled;
+        // Suggestions belong to a single-line input, like an HTML `<input list>`.
+        let suggestion_list = match &state {
+            TextInputState::Input(input) if !self.suggestions.is_empty() => {
+                Some(super::suggestions::SuggestionList::new(
+                    input,
+                    &self.suggestions,
+                    !self.disabled && !self.readonly,
+                    window,
+                    cx,
+                ))
+            }
+            _ => None,
+        };
         let is_multi_line = presentation.is_multi_line();
         // Without a content type, a masked input is a password field to screen
         // readers, so they announce it as one.
@@ -849,6 +890,7 @@ impl RenderOnce for Input {
             })
             .relative()
             .children(overlays.floating)
+            .when_some(suggestion_list, |this, list| list.attach(this, cx))
             .when_some(paste_handler, |this, handler| {
                 this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
                     if let Some(clipboard) = cx.read_from_clipboard() {

@@ -626,7 +626,7 @@ impl Render for InputStory {
                 .description("References keep their identity through selection, deletion and undo. Copy returns the underlying text.")
                 .w_full().child(self.tokens.clone()))
             .child(
-                section("Autocomplete")
+                section("Suggestions")
                     .description(
                         "Suggestions help type a value without limiting it: any text is \
                          accepted. Down and Up move through the suggestions, Enter accepts \
@@ -634,7 +634,7 @@ impl Render for InputStory {
                     )
                     .w_128()
                     .child(
-                        Autocomplete::new(&self.metric_input)
+                        Input::new(&self.metric_input)
                             .with_size(self.size)
                             .suggestions([
                                 "cpu.load",
