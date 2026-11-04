@@ -614,4 +614,43 @@ mod tests {
         assert_eq!(room, 0.);
         assert_eq!(overscroll.offset(), 0.);
     }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_wheel_after_a_pause_stops_at_the_edge() {
+        // A trackpad lift, then the hand moves to the mouse.
+        let start = Instant::now();
+        let mut overscroll = Overscroll::default();
+        let mut room = 30.;
+        overscroll.packet(0., TouchPhase::Ended, 400., start, text(&mut room));
+        for n in 0..10 {
+            let at = start + GESTURE_GAP + Duration::from_millis(8 * n);
+            assert!(!overscroll.packet(-40., TouchPhase::Moved, 400., at, text(&mut room)));
+        }
+        assert_eq!(overscroll.offset(), 0.);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_wheel_after_a_new_touch_stops_at_the_edge() {
+        // A lift, then a touch that lifts without moving, which GPUI reports
+        // as a move of nothing, then the wheel, all without a pause.
+        let start = Instant::now();
+        let mut overscroll = Overscroll::default();
+        let mut room = 30.;
+        let at = |ms| start + Duration::from_millis(ms);
+        overscroll.packet(0., TouchPhase::Ended, 400., at(0), text(&mut room));
+        overscroll.packet(0., TouchPhase::Started, 400., at(16), text(&mut room));
+        overscroll.packet(0., TouchPhase::Moved, 400., at(32), text(&mut room));
+        for n in 0..10 {
+            assert!(!overscroll.packet(
+                -40.,
+                TouchPhase::Moved,
+                400.,
+                at(48 + 8 * n),
+                text(&mut room)
+            ));
+        }
+        assert_eq!(overscroll.offset(), 0.);
+    }
 }
