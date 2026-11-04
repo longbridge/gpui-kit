@@ -358,7 +358,7 @@ v_flex()
 
 ## Suggestions
 
-`suggestions` makes the input offer values while the user types, and still accept any text — the counterpart of an HTML `<input list>` with its `<datalist>`. Use it when the field takes free text but a list of known values helps people type it, such as a metric, a tag or a host name. When the value must be one of the items, use [Combobox](combobox.md) instead.
+`suggestions` makes the input offer values while the user types, and still accept any text — the counterpart of an HTML `<input list>` with its `<datalist>`. Use it when the field takes free text but a list of known values helps people type it, such as a metric, a tag or a host name. When the value must be one of the items, use [Combobox](combobox.md) instead. Suggestions offer whole values for the field. To complete a word at the caret instead — a `$variable` or an `@mention` inside longer text — compose a menu around the input, as the Completion example in the Input story does; the [Editor](editor.md) completes code through a `CompletionProvider`.
 
 ```rust
 let metric = cx.new(|cx| InputState::new(window, cx).placeholder("Metric"));
@@ -366,7 +366,9 @@ let metric = cx.new(|cx| InputState::new(window, cx).placeholder("Metric"));
 Input::new(&metric).suggestions(["cpu.load", "cpu.temperature", "memory.used"])
 ```
 
-The suggestions open under the field, as wide as it, as the user types. They are the ones containing the text, ignoring case, with prefix matches first and each group in the order given; the text already typed is not offered again. An empty field offers every suggestion when the user presses Down. A disabled or read-only input offers none.
+The suggestions open under the field, as wide as it, as the user types. They are the ones containing the text, ignoring case, with prefix matches first and each group in the order given; the text already typed is not offered again. An empty field offers every suggestion when the user presses Down. The list shows only while the input has focus, and closes when the user presses outside it. A disabled or read-only input offers none.
+
+The list is matched only while it shows, but it is not virtualized: it suits tens to a few hundred values. For thousands, filter them in the application and pass the closest few.
 
 The value stays in the `InputState`. Subscribe to its `InputEvent`s as for any input: accepting a suggestion replaces the text in one undoable edit, which emits `InputEvent::Change`.
 

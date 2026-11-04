@@ -567,7 +567,7 @@ impl Styled for Input {
 }
 
 impl RenderOnce for Input {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         const LINE_HEIGHT: Rems = Rems(1.25);
         let text_align = self.style.text.text_align.unwrap_or(TextAlign::Left);
         let state = self.state.clone();
@@ -714,7 +714,7 @@ impl RenderOnce for Input {
             TextInputState::Input(input) if !self.suggestions.is_empty() => {
                 Some(super::suggestions::SuggestionList::new(
                     input,
-                    &self.suggestions,
+                    std::mem::take(&mut self.suggestions),
                     !self.disabled && !self.readonly,
                     window,
                     cx,

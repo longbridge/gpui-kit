@@ -319,7 +319,7 @@ v_flex()
 
 ## 建议值
 
-`suggestions` 让输入框在用户输入时提供建议，同时仍接受任意文本，相当于 HTML 中带 `<datalist>` 的 `<input list>`。当字段接受自由文本、而一组已知值能帮助用户输入时（例如指标名、标签或主机名），可以使用它。如果值必须是列表中的某一项，请改用 [Combobox](combobox.md)。
+`suggestions` 让输入框在用户输入时提供建议，同时仍接受任意文本，相当于 HTML 中带 `<datalist>` 的 `<input list>`。当字段接受自由文本、而一组已知值能帮助用户输入时（例如指标名、标签或主机名），可以使用它。如果值必须是列表中的某一项，请改用 [Combobox](combobox.md)。建议值提供的是整个字段的取值。若要补全光标处的词（例如长文本中的 `$变量` 或 `@提及`），请像 Input story 中的 Completion 示例那样，在输入框周围组合一个菜单；[Editor](editor.md) 则通过 `CompletionProvider` 补全代码。
 
 ```rust
 let metric = cx.new(|cx| InputState::new(window, cx).placeholder("指标"));
@@ -327,7 +327,9 @@ let metric = cx.new(|cx| InputState::new(window, cx).placeholder("指标"));
 Input::new(&metric).suggestions(["cpu.load", "cpu.temperature", "memory.used"])
 ```
 
-用户输入时，建议列表会在输入框下方展开，宽度与输入框一致。列表包含所有含有当前文本的建议（不区分大小写），前缀匹配的排在前面，每组保持传入的顺序；已经输入的文本不会再次出现在建议中。输入框为空时，按 Down 会列出全部建议。禁用或只读的输入框不提供建议。
+用户输入时，建议列表会在输入框下方展开，宽度与输入框一致。列表包含所有含有当前文本的建议（不区分大小写），前缀匹配的排在前面，每组保持传入的顺序；已经输入的文本不会再次出现在建议中。输入框为空时，按 Down 会列出全部建议。建议列表只在输入框获得焦点时显示，点击列表以外的地方会将其关闭。禁用或只读的输入框不提供建议。
+
+建议列表只在显示时进行匹配，但不做虚拟化，适合几十到几百个值。如有成千上万个值，请在应用中先行筛选，只传入最接近的若干个。
 
 值仍由 `InputState` 持有。像其他输入框一样订阅它的 `InputEvent`：接受建议会以一次可撤销的编辑替换文本，并发出 `InputEvent::Change`。
 
