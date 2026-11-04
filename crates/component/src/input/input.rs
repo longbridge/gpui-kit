@@ -591,6 +591,7 @@ impl RenderOnce for Input {
                         .selected(is_folded)
                         .into_any_element()
                 })),
+                fold_placeholder_renderer: None,
             },
             cx,
         );
