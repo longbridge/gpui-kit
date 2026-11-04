@@ -1039,6 +1039,7 @@ fn set_leaf_key(state: &mut Arc<Mutex<InlineState>>, key: u64) {
     *state = Arc::new(Mutex::new(InlineState {
         text,
         editor_key: Some(key),
+        selection_rows: None,
         cleanup_senders: Vec::new(),
         ..Default::default()
     }));
