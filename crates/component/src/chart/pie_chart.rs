@@ -41,13 +41,19 @@ struct PieHover {
     focus: f32,
 }
 
+/// How the hole of the ring is sized, by the last of
+/// [`PieChart::inner_radius`] and [`PieChart::inner_radius_ratio`].
+#[derive(Clone, Copy)]
+enum InnerRadius {
+    Pixels(f32),
+    /// A fraction of the ring's outer radius.
+    Ratio(f32),
+}
+
 #[derive(IntoPlot)]
 pub struct PieChart<T: 'static> {
     data: Vec<T>,
-    inner_radius: f32,
-    /// The hole as a fraction of the ring's outer radius; replaces
-    /// `inner_radius` when set.
-    inner_radius_ratio: Option<f32>,
+    inner_radius: InnerRadius,
     inner_radius_fn: Option<Rc<dyn Fn(&ArcData<T>) -> f32 + 'static>>,
     outer_radius: f32,
     outer_radius_fn: Option<Rc<dyn Fn(&ArcData<T>) -> f32 + 'static>>,
@@ -75,8 +81,7 @@ impl<T> PieChart<T> {
     {
         Self {
             data: data.into_iter().collect(),
-            inner_radius: 0.,
-            inner_radius_ratio: None,
+            inner_radius: InnerRadius::Pixels(0.),
             inner_radius_fn: None,
             outer_radius: 0.,
             outer_radius_fn: None,
@@ -151,8 +156,7 @@ impl<T> PieChart<T> {
     /// This and [`Self::inner_radius_ratio`] replace each other; the last one
     /// set applies.
     pub fn inner_radius(mut self, inner_radius: f32) -> Self {
-        self.inner_radius = inner_radius;
-        self.inner_radius_ratio = None;
+        self.inner_radius = InnerRadius::Pixels(inner_radius);
         self
     }
 
@@ -166,7 +170,7 @@ impl<T> PieChart<T> {
     /// [`Self::inner_radius`] replace each other; the last one set applies,
     /// and [`Self::inner_radius_fn`] overrides both.
     pub fn inner_radius_ratio(mut self, ratio: f32) -> Self {
-        self.inner_radius_ratio = Some(ratio);
+        self.inner_radius = InnerRadius::Ratio(ratio);
         self
     }
 
@@ -183,16 +187,13 @@ impl<T> PieChart<T> {
     /// `ring`: the per-slice one, the ratio of `ring`, or the fixed one.
     fn get_inner_radius(&self, arc: &ArcData<T>, ring: f32) -> f32 {
         if let Some(inner_radius_fn) = self.inner_radius_fn.as_ref() {
-            inner_radius_fn(arc)
-        } else if let Some(ratio) = self.inner_radius_ratio {
+            return inner_radius_fn(arc);
+        }
+        match self.inner_radius {
+            InnerRadius::Pixels(radius) => radius,
             // A NaN ratio is no hole rather than a NaN radius.
-            ring * if ratio.is_nan() {
-                0.
-            } else {
-                ratio.clamp(0., 1.)
-            }
-        } else {
-            self.inner_radius
+            InnerRadius::Ratio(ratio) if ratio.is_nan() => 0.,
+            InnerRadius::Ratio(ratio) => ring * ratio.clamp(0., 1.),
         }
     }
 
