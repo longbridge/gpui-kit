@@ -328,7 +328,7 @@ let hosts = cx.new(|cx| ListState::new(HostDelegate::new(input.clone()), window,
 Input::new(&input).list(&hosts)
 ```
 
-`HostDelegate` 是普通的 `ListDelegate`，完整示例见[英文文档](/component/input#list)和 Input story。`perform_search` 返回的任务被替换时，旧任务会被丢弃，所以在任务开头等一个定时器就是防抖，旧查询的结果也不会覆盖新查询。固定列表就是在 `perform_search` 中同步过滤并返回 `Task::ready(())` 的 delegate。
+`HostDelegate` 是普通的 `ListDelegate`，完整示例见 Input story。`perform_search` 返回的任务被替换时，旧任务会被丢弃，所以在任务开头等一个定时器就是防抖，旧查询的结果也不会覆盖新查询。固定列表就是在 `perform_search` 中同步过滤并返回 `Task::ready(())` 的 delegate。
 
 和所有 `List` 一样，匹配、防抖、分组、分页和行的渲染都由 delegate 决定。delegate 有行或 `loading` 返回 true 时才显示弹层，并且只在输入框获得焦点时显示。没有行时弹层隐藏，因为自由文本不需要“无结果”提示；搜索失败可以显示为一行。只有用户输入才会触发搜索，代码修改未聚焦的输入框不会。请在 `confirm` 中写入接受的值（可以和行的标题不同），不要在 `ListEvent::Confirm` 订阅中写入，因为弹层关闭后写入的改动会被当作用户输入。禁用或只读的输入框不提供列表。
 
