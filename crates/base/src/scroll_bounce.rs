@@ -578,10 +578,12 @@ impl Element for ScrollBounce {
                     state.overscroll.reset();
                     return;
                 }
-                if delta.x.abs() > delta.y.abs() {
-                    // A sideways swipe passes on, and the area under it scrolls
-                    // by its vertical part. Only where that part runs past an
-                    // end, or into a stretched edge, does it stretch the edge.
+                // A sideways swipe passes on, and the area under it scrolls
+                // by its vertical part. Only where that part runs past an end,
+                // or into a stretched edge, does it stretch the edge. The
+                // swipe still reaches an ancestor that scrolls sideways.
+                let sideways = delta.x.abs() > delta.y.abs();
+                if sideways {
                     let past_end = (vertical > px(0.) && handle.offset().y >= px(0.))
                         || (vertical < px(0.) && handle.offset().y <= -max);
                     if event.touch_phase == TouchPhase::Moved
@@ -623,7 +625,9 @@ impl Element for ScrollBounce {
                 };
                 let scrolled = handle.offset() != before;
                 drop(state);
-                cx.stop_propagation();
+                if !sideways {
+                    cx.stop_propagation();
+                }
                 if changed || scrolled {
                     cx.notify(view);
                 }
@@ -1497,6 +1501,77 @@ mod tests {
         sideways_swipe(cx, -8.);
         // Between the ends the swipe passes on without stretching.
         assert_eq!(handle.bounds().origin.y, origin);
+    }
+
+    /// A wheel scroll area inside a row that scrolls sideways.
+    struct WheelInRow {
+        row: ScrollHandle,
+        list: ScrollHandle,
+    }
+
+    impl Render for WheelInRow {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("row")
+                .w(px(200.))
+                .h(px(200.))
+                .overflow_x_scroll()
+                .track_scroll(&self.row)
+                .child(
+                    div().w(px(600.)).h_full().child(
+                        ScrollBounce::new(
+                            "wheel-bounce",
+                            &self.list,
+                            div()
+                                .id("wheel-viewport")
+                                .w(px(200.))
+                                .h(px(200.))
+                                .overflow_y_scroll()
+                                .track_scroll(&self.list)
+                                .child(div().h(px(600.)).w_full()),
+                        )
+                        .enabled(true)
+                        .scroll_wheel(true),
+                    ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn a_sideways_swipe_reaches_a_sideways_ancestor_at_and_between_the_ends(
+        cx: &mut TestAppContext,
+    ) {
+        // The list's offset before the swipe, and its vertical part.
+        for (offset, dy) in [(0., 3.), (-200., -3.), (-200., 0.)] {
+            let mut app = cx.new_app();
+            let (row, list) = (ScrollHandle::new(), ScrollHandle::new());
+            let (_, cx) = app.add_window_view({
+                let (row, list) = (row.clone(), list.clone());
+                move |_, _| WheelInRow { row, list }
+            });
+            draw(cx);
+            list.set_offset(point(px(0.), px(offset)));
+            draw(cx);
+            let origin = list.bounds().origin.y;
+
+            let mut packets = vec![(-6., 0., TouchPhase::Started)];
+            packets.extend([(-12., dy, TouchPhase::Moved); 10]);
+            packets.push((0., 0., TouchPhase::Ended));
+            for (x, y, touch_phase) in packets {
+                cx.simulate_event(ScrollEvent {
+                    position: point(px(100.), px(100.)),
+                    delta: ScrollDelta::Pixels(point(px(x), px(y))),
+                    touch_phase,
+                    ..Default::default()
+                });
+            }
+            draw(cx);
+
+            assert_eq!(row.offset().x, px(-126.), "offset {offset}, dy {dy}");
+            if offset == 0. {
+                assert!(list.bounds().origin.y > origin, "the top edge stretches");
+            }
+        }
     }
 
     #[test]
