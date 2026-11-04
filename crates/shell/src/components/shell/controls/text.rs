@@ -118,8 +118,13 @@ impl ComponentMaterializer for KbdMaterializer {
     fn materialize(&self, mut request: MaterializeRequest<'_>) -> anyhow::Result<gpui::AnyElement> {
         let stroke = request
             .payload()
-            .downcast_ref::<Keystroke>()
-            .ok_or_else(|| anyhow::anyhow!("Kbd received an incompatible payload"))?;
+            .downcast_ref::<StringPayload>()
+            .ok_or_else(|| anyhow::anyhow!("Kbd received an incompatible payload"))?
+            .0
+            .clone();
+        let stroke = request.with_window_app(|_, cx| {
+            Ok(Keystroke::parse_with_os(&stroke, cx.platform_info().os)?)
+        })?;
         let operations = request
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<KbdOp>().cloned())
@@ -196,9 +201,11 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                 "Kbd",
                 vec![ArgumentDescriptor::new("keystroke", ArgumentSchema::String)],
                 |arguments| match arguments {
-                    [ComponentArgument::String(value)] => Keystroke::parse(value)
-                        .map(ComponentPayload::new)
-                        .map_err(|error| format!("invalid Kbd keystroke: {error}")),
+                    [ComponentArgument::String(value)] => {
+                        Keystroke::parse_with_os(value, gpui::OperatingSystem::Unknown)
+                            .map(|_| ComponentPayload::new(StringPayload(value.to_owned())))
+                            .map_err(|error| format!("invalid Kbd keystroke: {error}"))
+                    }
                     _ => Err("Kbd expects one keystroke string".into()),
                 },
             )])

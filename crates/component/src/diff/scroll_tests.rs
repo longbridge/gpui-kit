@@ -1,6 +1,6 @@
 use gpui::{
     AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, ScrollDelta,
-    ScrollWheelEvent, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
+    ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
 use super::{Diff, DiffState, document::fixture};
@@ -71,7 +71,7 @@ fn the_whole_patch_keeps_its_height_after_the_first_layout(cx: &mut TestAppConte
 fn the_wheel_scrolls_past_the_rows_rendered_so_far(cx: &mut TestAppContext) {
     let (state, cx) = long_patch(cx);
     for _ in 0..50 {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(120.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(-40.))),
             ..Default::default()

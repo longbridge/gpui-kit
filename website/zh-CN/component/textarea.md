@@ -116,7 +116,3 @@ Textarea::new(&state)
 ```
 
 从 `gpui_kit::component::input` 导入 `InputToken`，从 `gpui_kit::component` 导入 `IconName`。token 会整块换到下一行，自动增高会相应调整输入框高度。换行符应放在 token 之间的普通文本中。使用 `on_token_hover` 可在不选中、不编辑的情况下显示提示或预览；禁用 token 不会上报悬停进入事件；禁用已悬停的 token 时会发送离开事件。编辑、激活、草稿保存、模式限制和 JavaScript API 见 [Input：原子行内 token](./input.md#原子行内-token)。
-
-## 文本装饰
-
-`TextareaState::create_decorations_collection` 返回独立管理的 `TextDecorationCollection`，与 Editor 共用 `TextDecoration` 类型。范围使用 UTF-8 字节偏移，并随文本编辑调整。通过句柄的 `set`、`append`、`clear` 和 `get_ranges` 方法管理各自的装饰。整体替换文本值会清空装饰。丢弃句柄不会移除集合，不再需要样式时应调用 `clear`。

@@ -373,6 +373,19 @@ impl Capabilities {
                 .any(|grant| grant.allows(scheme, host, port, method, path))
     }
 
+    /// Whether a `GET` of an absolute `http` or `https` URL is permitted.
+    ///
+    /// The URL is parsed the way `fetch` parses it, so a resource that is not
+    /// a `fetch` gets the same answer for the same address.
+    pub fn may_get(&self, url: &str) -> bool {
+        reqwest::Url::parse(url).is_ok_and(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url.host_str().is_some_and(|host| {
+                    self.may_request(url.scheme(), host, url.port(), "GET", url.path())
+                })
+        })
+    }
+
     /// Opens the granted directory a path belongs to, and the path within it.
     ///
     /// The caller gets a **capability**, not a string: a directory handle that
@@ -735,6 +748,36 @@ mod tests {
     impl Drop for Root {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_get_needs_a_grant_for_its_scheme_host_port_and_path() {
+        let capabilities = Capabilities::new()
+            .network_hosts(["gpui-kit.com".to_owned()])
+            .http_requests([HttpRequestGrant::new(
+                "docs.example.com",
+                ["GET"],
+                Vec::<String>::new(),
+                ["/guide/"],
+            )]);
+        for allowed in [
+            "https://gpui-kit.com/",
+            "http://GPUI-Kit.com:8080/any",
+            "https://docs.example.com/guide/intro",
+        ] {
+            assert!(capabilities.may_get(allowed), "refused {allowed}");
+        }
+        for denied in [
+            "https://docs.example.com/admin",
+            "https://docs.example.com/guide/../admin",
+            "http://docs.example.com/guide/intro",
+            "https://docs.example.com:8443/guide/intro",
+            "http://127.0.0.1/",
+            "file:///etc/passwd",
+            "gpui-kit.com",
+        ] {
+            assert!(!capabilities.may_get(denied), "accepted {denied}");
         }
     }
 

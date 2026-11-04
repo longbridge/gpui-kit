@@ -200,6 +200,15 @@ pub fn set_capabilities(capabilities: Capabilities) {
     capability::install(capabilities);
 }
 
+/// The grant of the script call now running, or the default outside one.
+///
+/// A component that reaches a resource for the script checks this grant, as
+/// the runtime's own `fetch` does. Native callbacks run outside any call, so
+/// a component reads the grant when the script asks and keeps it for them.
+pub fn current_capabilities() -> Capabilities {
+    scope::policy().capabilities().clone()
+}
+
 /// Names the application, and puts its data where that name says.
 ///
 /// **This is how a host should place storage.** The bundle id is the

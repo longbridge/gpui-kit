@@ -117,6 +117,21 @@ fn command_skips_disabled_rows_wraps_and_confirms_original_index(cx: &mut TestAp
     });
 }
 
+/// A row's text isn't an accessibility node of its own, so each row is named
+/// after its item, and a screen reader doesn't read a list of blank options.
+#[gpui_kit::test]
+fn command_rows_are_named_after_their_items(cx: &mut TestAppContext) {
+    let (handle, _) = palette(cx);
+    cx.update_window(handle.into(), |_, window, _| {
+        for (ix, name) in ["Open", "Delete", "Save"].into_iter().enumerate() {
+            let row = window.find(IndexPath::new(ix));
+            assert_eq!(row.role(), Some(gpui_kit::Role::ListBoxOption));
+            assert_eq!(row.label(), Some(name));
+        }
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn command_searches_unicode_keywords_and_escape_clears_before_cancel(cx: &mut TestAppContext) {
     let (handle, view) = palette(cx);

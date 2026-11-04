@@ -778,7 +778,7 @@ fn a_wheel_packet_cancels_pending_resize_reveal_before_repaint(cx: &mut TestAppC
             cx,
         );
         window.dispatch_event(
-            gpui_kit::ScrollWheelEvent {
+            gpui_kit::ScrollEvent {
                 position,
                 delta: ScrollDelta::Lines(point(1000., 0.)),
                 touch_phase: gpui_kit::TouchPhase::Moved,
@@ -1652,7 +1652,7 @@ fn scroll_over(
         cx,
     );
     window.dispatch_event(
-        gpui_kit::ScrollWheelEvent {
+        gpui_kit::ScrollEvent {
             position,
             delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
             touch_phase: phase,
@@ -1751,7 +1751,7 @@ fn scrolling_vertically_over_a_single_line_input_scrolls_the_page(cx: &mut TestA
         // A trackpad swipe that is mostly vertical still drifts sideways,
         // here toward the start the text already sits at.
         window.dispatch_event(
-            gpui_kit::ScrollWheelEvent {
+            gpui_kit::ScrollEvent {
                 position,
                 delta: ScrollDelta::Pixels(point(px(2.), px(-40.))),
                 touch_phase: gpui_kit::TouchPhase::Moved,

@@ -33,6 +33,7 @@ mod event;
 mod focus_trap;
 mod geometry;
 mod global_state;
+pub mod grid_layout;
 mod history;
 mod hover_card;
 mod index_path;
@@ -120,6 +121,9 @@ pub use focus_trap::FocusTrapElement;
 pub use focus_trap::active_focus_trap;
 pub use geometry::*;
 pub use global_state::{DeferredPopover, GlobalState};
+pub use grid_layout::{
+    GridArea, GridItem, GridLayout, GridLayoutEvent, GridLayoutState, grid_drag_handle,
+};
 pub use history::History;
 pub use hover_card::{HoverCard, HoverCardState};
 pub use index_path::IndexPath;
@@ -145,7 +149,7 @@ pub use number_input::{
     Decrement, Increment, NumberInput, NumberInputEvent, NumberInputText, NumberStep, StepAction,
     step_value,
 };
-pub use observe::{ObservedElement, TestSupportExt};
+pub use observe::{ObservedElement, ObservedTextElement, TestSupportExt, TestTextExt};
 pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
 pub use plot::PlotMotion;
@@ -251,6 +255,7 @@ pub fn init(cx: &mut App) {
     time_field::init(cx);
     input::init(cx);
     tree::init(cx);
+    grid_layout::init(cx);
     text::init(cx);
     root::init(cx);
 }

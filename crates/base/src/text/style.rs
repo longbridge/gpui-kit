@@ -15,8 +15,6 @@ pub struct TextViewStyle {
     foreground: Hsla,
     muted_foreground: Hsla,
     link: Hsla,
-    link_underline: bool,
-    link_underline_on_hover: bool,
     selection: Hsla,
     code_background: Hsla,
     border: Hsla,
@@ -29,6 +27,10 @@ pub struct TextViewStyle {
     inline_code: HighlightStyle,
     /// Explicit inline code refinements, applied after theme and surface colors.
     inline_code_style: StyleRefinement,
+    /// Explicit list marker refinements, applied after theme and surface colors.
+    list_style: StyleRefinement,
+    /// Explicit blockquote refinements, applied after theme and surface colors.
+    blockquote_style: StyleRefinement,
     /// The table body background, or the theme surface when `None`. Only
     /// [`Self::on_text_color`] sets it, to let a table on an inverted surface
     /// show that surface.
@@ -42,8 +44,6 @@ impl PartialEq for TextViewStyle {
             && self.foreground == other.foreground
             && self.muted_foreground == other.muted_foreground
             && self.link == other.link
-            && self.link_underline == other.link_underline
-            && self.link_underline_on_hover == other.link_underline_on_hover
             && self.selection == other.selection
             && self.code_background == other.code_background
             && self.border == other.border
@@ -55,6 +55,8 @@ impl PartialEq for TextViewStyle {
             && self.table_cell == other.table_cell
             && self.inline_code == other.inline_code
             && self.inline_code_style == other.inline_code_style
+            && self.list_style == other.list_style
+            && self.blockquote_style == other.blockquote_style
             && self.table_background == other.table_background
             && self.is_dark == other.is_dark
     }
@@ -85,8 +87,6 @@ impl TextViewStyle {
             foreground: colors.foreground,
             muted_foreground: colors.muted_foreground,
             link: colors.primary,
-            link_underline: true,
-            link_underline_on_hover: false,
             selection: colors.selection,
             code_background: colors.accent,
             border: colors.border,
@@ -101,6 +101,8 @@ impl TextViewStyle {
                 ..Default::default()
             },
             inline_code_style: StyleRefinement::default(),
+            list_style: StyleRefinement::default(),
+            blockquote_style: StyleRefinement::default(),
             table_background: None,
             is_dark,
         }
@@ -121,18 +123,6 @@ impl TextViewStyle {
     /// Sets the link text color.
     pub fn with_link(mut self, color: Hsla) -> Self {
         self.link = color;
-        self
-    }
-
-    /// Sets whether links are underlined at rest. Defaults to `true`.
-    pub fn with_link_underline(mut self, underline: bool) -> Self {
-        self.link_underline = underline;
-        self
-    }
-
-    /// Sets whether links are underlined while hovered. Defaults to `false`.
-    pub fn with_link_underline_on_hover(mut self, underline: bool) -> Self {
-        self.link_underline_on_hover = underline;
         self
     }
 
@@ -207,6 +197,34 @@ impl TextViewStyle {
         self
     }
 
+    /// Refines the marker of a bullet or numbered list item.
+    ///
+    /// Applied to the marker column after its defaults: the muted text color,
+    /// a minimum width of the list indent, right-aligned text, and a right
+    /// padding of 0.3 times that indent. Text properties such as color, font
+    /// family, size, and weight style the bullet or number. The text color
+    /// also outlines an unchecked task-list checkbox; a checked one keeps the
+    /// link color. Unspecified properties keep the existing defaults, and
+    /// explicit refinements also take precedence on inverted surfaces.
+    pub fn with_list_style(mut self, style: StyleRefinement) -> Self {
+        self.list_style = style;
+        self
+    }
+
+    /// Refines the blockquote container.
+    ///
+    /// Applied after its defaults: the muted text color, a 2px left border in
+    /// the border color, and a left padding of 0.9 times the body font size.
+    /// Border widths and color style the quote bar; text properties,
+    /// background, padding, and corner radii style the quote and its
+    /// contents. Child blocks keep properties they set explicitly, including
+    /// heading and table font sizes. Unspecified properties keep the existing
+    /// defaults, and explicit refinements also take precedence on inverted surfaces.
+    pub fn with_blockquote_style(mut self, style: StyleRefinement) -> Self {
+        self.blockquote_style = style;
+        self
+    }
+
     /// Sets the style refinement for the table container (the bordered wrapper
     /// in wrap mode, the scroll viewport in horizontal-scroll mode).
     ///
@@ -255,16 +273,6 @@ impl TextViewStyle {
     /// The link text color.
     pub fn link(&self) -> Hsla {
         self.link
-    }
-
-    /// Whether links are underlined at rest.
-    pub fn is_link_underlined(&self) -> bool {
-        self.link_underline
-    }
-
-    /// Whether links are underlined while hovered.
-    pub fn is_link_underlined_on_hover(&self) -> bool {
-        self.link_underline_on_hover
     }
 
     /// The background painted behind selected text.
@@ -321,6 +329,16 @@ impl TextViewStyle {
     /// Explicit inline code typography and box refinements.
     pub fn inline_code_style(&self) -> &StyleRefinement {
         &self.inline_code_style
+    }
+
+    /// Explicit list marker refinements.
+    pub fn list_style(&self) -> &StyleRefinement {
+        &self.list_style
+    }
+
+    /// Explicit blockquote refinements.
+    pub fn blockquote_style(&self) -> &StyleRefinement {
+        &self.blockquote_style
     }
 
     /// Whether content-specific assets should use their dark variant.
@@ -447,12 +465,20 @@ mod tests {
         assert!(base != base.clone().with_table_cell(table));
 
         assert!(base != base.clone().with_dark(true));
-        assert!(base != base.clone().with_link_underline(false));
-        assert!(base != base.clone().with_link_underline_on_hover(true));
         assert!(
             base != base
                 .clone()
                 .with_inline_code_style(StyleRefinement::default().border_color(gpui::red()))
+        );
+        assert!(
+            base != base
+                .clone()
+                .with_list_style(StyleRefinement::default().text_color(gpui::red()))
+        );
+        assert!(
+            base != base
+                .clone()
+                .with_blockquote_style(StyleRefinement::default().border_color(gpui::red()))
         );
     }
 
@@ -562,6 +588,31 @@ mod tests {
                 .inline_code_style(),
             &refinement
         );
+    }
+
+    #[test]
+    fn list_and_blockquote_refinements_remain_explicit_on_an_inverted_surface() {
+        let colors = ColorTokens::light();
+        let plain = TextViewStyle::from_colors(&colors, false);
+        assert_eq!(plain.list_style(), &StyleRefinement::default());
+        assert_eq!(plain.blockquote_style(), &StyleRefinement::default());
+
+        let marker = StyleRefinement::default()
+            .text_color(gpui::red())
+            .font_weight(gpui::FontWeight::BOLD);
+        let quote = StyleRefinement::default()
+            .border_l_4()
+            .border_color(gpui::blue())
+            .bg(gpui::green());
+        let style = plain
+            .with_list_style(marker.clone())
+            .with_blockquote_style(quote.clone());
+        assert_eq!(style.list_style(), &marker);
+        assert_eq!(style.blockquote_style(), &quote);
+
+        let inverted = style.on_text_color(colors.primary_foreground);
+        assert_eq!(inverted.list_style(), &marker);
+        assert_eq!(inverted.blockquote_style(), &quote);
     }
 
     #[test]

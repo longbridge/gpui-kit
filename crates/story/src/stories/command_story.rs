@@ -241,7 +241,7 @@ fn with_entries(command: Command, entries: impl IntoIterator<Item = CommandEntry
         })
 }
 
-fn key_hint(keys: &[&str], label: &'static str) -> AnyElement {
+fn key_hint(keys: &[&'static str], label: &'static str) -> AnyElement {
     h_flex()
         .gap_1()
         .items_center()
@@ -273,25 +273,53 @@ const STOCKS: [Stock; 10] = [
 
 impl CommandStory {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let primary = if cfg!(target_os = "macos") {
-            "cmd"
-        } else {
-            "ctrl"
-        };
+        let is_mac = cx.platform_info().is_mac();
         cx.bind_keys([
-            KeyBinding::new(&format!("{primary}-p"), OpenProfile, Some(COMMAND_CONTEXT)),
-            KeyBinding::new(&format!("{primary}-b"), OpenBilling, Some(COMMAND_CONTEXT)),
-            KeyBinding::new(&format!("{primary}-s"), OpenSettings, Some(COMMAND_CONTEXT)),
-            KeyBinding::new(&format!("{primary}-h"), GoHome, Some(COMMAND_CONTEXT)),
-            KeyBinding::new(&format!("{primary}-i"), OpenInbox, Some(COMMAND_CONTEXT)),
             KeyBinding::new(
-                &format!("{primary}-d"),
+                if is_mac { "cmd-p" } else { "ctrl-p" },
+                OpenProfile,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-b" } else { "ctrl-b" },
+                OpenBilling,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-s" } else { "ctrl-s" },
+                OpenSettings,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-h" } else { "ctrl-h" },
+                GoHome,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-i" } else { "ctrl-i" },
+                OpenInbox,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-d" } else { "ctrl-d" },
                 OpenDocuments,
                 Some(COMMAND_CONTEXT),
             ),
-            KeyBinding::new(&format!("{primary}-f"), OpenFolders, Some(COMMAND_CONTEXT)),
-            KeyBinding::new(&format!("{primary}-n"), NewFile, Some(COMMAND_CONTEXT)),
-            KeyBinding::new(&format!("{primary}-c"), CopyItem, Some(COMMAND_CONTEXT)),
+            KeyBinding::new(
+                if is_mac { "cmd-f" } else { "ctrl-f" },
+                OpenFolders,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-n" } else { "ctrl-n" },
+                NewFile,
+                Some(COMMAND_CONTEXT),
+            ),
+            KeyBinding::new(
+                if is_mac { "cmd-c" } else { "ctrl-c" },
+                CopyItem,
+                Some(COMMAND_CONTEXT),
+            ),
             KeyBinding::new("backspace", DeleteItem, Some(COMMAND_CONTEXT)),
         ]);
 

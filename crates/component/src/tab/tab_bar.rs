@@ -1666,7 +1666,7 @@ mod tests {
         delta: gpui::ScrollDelta,
         touch_phase: gpui::TouchPhase,
     ) {
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position,
             delta,
             touch_phase,

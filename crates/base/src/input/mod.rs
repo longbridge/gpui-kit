@@ -85,10 +85,12 @@ pub(crate) fn init(cx: &mut App) {
 
 pub use crate::number_input::{NumberInputEvent, NumberStep};
 pub use base::{InputBase, InputContextMenuCapabilities, InputStyles};
+pub use blink_cursor::CursorBlink;
 pub use cursor::Selection;
 pub use decorations::{
-    RangeDecoration, RangeDecorationCollection, RangeDecorationStyle, TextDecoration,
-    TextDecorationCollection,
+    GutterDecoration, GutterDecorationCollection, OverviewRulerDecoration,
+    OverviewRulerDecorationCollection, OverviewRulerLane, RangeDecoration,
+    RangeDecorationCollection, RangeDecorationStyle, TextDecoration, TextDecorationCollection,
 };
 pub use diagnostics::{
     Diagnostic, DiagnosticEntry, DiagnosticRelatedInformation, DiagnosticSet, DiagnosticSeverity,
@@ -103,8 +105,7 @@ pub use highlighting::{
 pub use indent::TabSize;
 pub use input::{Input, InputState};
 pub use kind::{
-    EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaExtras,
-    TextareaMode,
+    EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaMode,
 };
 pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};

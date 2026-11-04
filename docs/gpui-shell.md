@@ -75,9 +75,11 @@ gpui_shell::init(cx);
 let runtime = gpui_shell::ShellRuntime::new(cx)?;
 ```
 
-The shell pins every LLRT crate to commit
-`7b95c82a9b15e7ddfb2778eca4b5a63111e74f51`, whose modules share
-`rquickjs 0.12`. LLRT supplies Standard Runtime implementations and data types;
+The shell uses the matching crates.io releases of `quickjs-jit`,
+`quickjs-jit-runtime` and `quickjs-jit-stdlib` (0.14.1). The standard modules
+are vendored into `quickjs-jit-stdlib` and share the same VM and binding types,
+without Git-only LLRT dependencies or a local compatibility facade. LLRT supplies
+Standard Runtime implementations and data types;
 GPUI Shell remains responsible for the VM, scheduler, Policy and OS authority.
 
 Scripts import bare GPUI Shell module names:
@@ -2298,8 +2300,22 @@ native webview, so the task ends when the state is released.
 URL, and the page's own navigation, through wry's navigation handler; `about:`
 is let through because the engines use `about:blank` while setting up. Without
 it a page or a script could open `file:` URLs and read the disk past every
-`fs` grant. Beyond the scheme, loading is not a capability: browsing a page is
-not treated as network access by the script, which never sees the bytes.
+`fs` grant.
+
+**A page needs the network grant a `fetch` of it would.** The script runs code
+in the page with `evaluate_script` and reads its replies through `on_message`,
+so showing a page is network access: without a grant, a WebView would read
+loopback and LAN services that the application's own `fetch` is refused. The
+creating script's grant is kept with the state and checked, as a `GET` of the
+URL (`Capabilities::may_get`), on the initial URL, `load_url`, every navigation
+through wry's navigation handler, and `evaluate_script`. A page message is
+delivered only when its sending document is granted, and `on_load` reports only
+granted documents, so a document reached past the navigation check (a server
+redirect the engine does not route through the handler) can neither answer the
+script nor run its code. A navigation that is not granted is cancelled rather
+than handed to the system browser, because a page can navigate without a
+gesture. On macOS the handler also sees frame navigations, so an iframe from an
+ungranted host does not load either.
 
 **Platform limits come from `gpui-webview`.** GPUI overlays render above the
 page only with GPUI Fast, so the feature selects GPUI Fast for the whole runtime. On Linux the page needs an X11
@@ -3081,7 +3097,8 @@ that scheme's standard port; a manifest writes `port` only for a non-default
 endpoint. Redirects are
 checked again with the same rule, so an allowed endpoint cannot redirect a
 credentialed request onto an unlisted path or host. An HTTP-only grant does not
-also grant TCP or WebSocket access to its host.
+also grant TCP or WebSocket access to its host. A `WebView` page is a `GET` of
+its URL and needs the same grant (§14.8).
 
 **Capability is permission; contribution is behavior.** Commands, panels, key
 bindings, settings, and themes are registered from script, never declared a

@@ -111,10 +111,16 @@ impl RenderOnce for SearchableListItemElement {
             .refine_style(&self.style)
             .when(!self.disabled, |this| {
                 this.when(!self.selected, |this| {
-                    this.hover(|this| this.bg(cx.theme().accent.opacity(0.7)))
+                    this.hover(|this| {
+                        this.bg(cx.theme().accent.opacity(0.7))
+                            .text_color(cx.theme().accent_foreground)
+                    })
                 })
             })
-            .when(self.selected, |this| this.bg(cx.theme().tokens.accent))
+            .when(self.selected, |this| {
+                this.bg(cx.theme().tokens.accent)
+                    .text_color(cx.theme().accent_foreground)
+            })
             .when(self.disabled, |this| {
                 this.cursor_not_allowed()
                     .text_color(cx.theme().muted_foreground)
@@ -135,10 +141,11 @@ impl RenderOnce for SearchableListItemElement {
                             .children(self.children),
                     )
                     .when_some(self.check_icon, |this, icon| {
+                        // The check inherits the row's text color, so it stays
+                        // legible on the accent fill alongside the label.
                         this.child(
                             icon.xsmall()
                                 .flex_shrink_0()
-                                .text_color(cx.theme().foreground)
                                 .when(!self.checked, |this| this.invisible()),
                         )
                     }),

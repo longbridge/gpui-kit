@@ -217,8 +217,8 @@ through motion alone.
 
 ## Content rules
 
-- The crate is **not published**. Installation must show the git dependency,
-  never `cargo add`, and the UI must not display a version number.
+- `gpui-shell` is published to crates.io from 0.8.1. Installation should show
+  the released crate; Git dependencies are for unreleased development builds.
 - Code samples must be real API, verified against `crates/component` and
   `crates/base`.
 - The release notes page is rendered at build time from GitHub Releases

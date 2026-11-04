@@ -10,7 +10,7 @@ A **KeyBinding** maps one or more keystrokes to a typed [Action](./action). GPUI
 
 ## Bind a command
 
-`KeyBinding::new(keys, action, context)` takes a keystroke string, an Action value, and an optional context predicate. Call `cx.bind_keys(...)` during initialization. A `None` context is eligible throughout the application; `Some("Editor")` requires an `Editor` context on the focused path.
+`KeyBinding::new(keys, action, context)` takes a static keystroke string (`&'static str`), an Action value, and an optional context predicate. Call `cx.bind_keys(...)` during initialization. A `None` context is eligible throughout the application; `Some("Editor")` requires an `Editor` context on the focused path.
 
 ```rust
 use gpui_kit::*;
@@ -20,7 +20,11 @@ const EDITOR_CONTEXT: &str = "Editor";
 
 fn init_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-s", SaveDocument, Some(EDITOR_CONTEXT)),
+        KeyBinding::new(
+            if cx.platform_info().is_mac() { "cmd-s" } else { "ctrl-s" },
+            SaveDocument,
+            Some(EDITOR_CONTEXT),
+        ),
         KeyBinding::new("up", MoveSelectionUp, Some(EDITOR_CONTEXT)),
     ]);
 }
@@ -57,7 +61,7 @@ A keystroke is a key name with optional modifiers separated by hyphens. Separate
 | `up`, `escape`, `space`, `backspace` | Named keys. |
 | `cmd-k left` | Two keystrokes in sequence: the platform modifier plus K, then Left. |
 
-GPUI also parses `fn`, `ctrl`, `alt`, `shift`, `cmd`, `super`, `win`, and `secondary` as modifiers. Use `secondary` for a conventional cross-platform Command/Control shortcut. Use `ctrl` when Control itself is required on every platform. A capital ASCII letter such as `A` implies Shift+A; writing `shift-a` makes that intent clearer. `KeyBinding::new` **panics** if its key string or context predicate cannot be parsed, so keep static definitions reviewable and validate user input before constructing bindings.
+GPUI also parses `fn`, `ctrl`, `alt`, `shift`, `cmd`, `super`, and `win` as modifiers. `KeyBinding::new` requires explicit modifiers; choose `cmd` or `ctrl` using `cx.platform_info().is_mac()` for a cross-platform Command/Control shortcut. Load dynamic strings or the `secondary` alias with `KeyBinding::load(..., cx)` so they resolve against the runtime operating system; parse individual keys with `Keystroke::parse_with_os(keys, cx.platform_info().os)`. Use `ctrl` when Control itself is required on every platform. A capital ASCII letter such as `A` implies Shift+A; writing `shift-a` makes that intent clearer. `KeyBinding::new` **panics** if its key string or context predicate cannot be parsed, so keep static definitions reviewable and validate user input before constructing bindings.
 
 The operating system or window manager may reserve a shortcut before GPUI receives it. Test the intended combination on each supported platform, especially `cmd`/`super`/`win` combinations and system shortcuts such as `alt-f4`. A binding that parses successfully is not proof that a key event will reach the application.
 

@@ -4316,7 +4316,7 @@ impl ShellRuntime {
     pub(crate) fn dispatch_scroll_wheel(
         self: &Rc<Self>,
         id: CallbackId,
-        event: &gpui::ScrollWheelEvent,
+        event: &gpui::ScrollEvent,
         line_height: gpui::Pixels,
         bounds: Option<gpui::Bounds<gpui::Pixels>>,
         window: &mut Window,

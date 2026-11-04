@@ -181,6 +181,11 @@ impl Easing {
     /// outside that range anticipates or overshoots, and linear stops or a
     /// custom curve may do the same. Clamp the result where it drives an
     /// opacity or a color.
+    ///
+    /// A curve built directly rather than through [`Self::steps`] or
+    /// [`Self::linear_stops`] may have nothing to sample: `LinearStops` with
+    /// no stops, or one `JumpNone` step, which has no jump. Such a curve
+    /// samples as [`Self::Linear`].
     #[inline]
     pub fn sample(&self, progress: f32) -> f32 {
         let progress = progress.clamp(0.0, 1.0);
@@ -201,9 +206,15 @@ impl Easing {
                     StepPosition::JumpNone => (count - 1.0, 0.0),
                     StepPosition::JumpBoth => (count + 1.0, 1.0),
                 };
+                if jumps == 0.0 {
+                    return progress;
+                }
                 ((progress * count).floor() + offset).clamp(0.0, jumps) / jumps
             }
             Self::LinearStops(stops) => {
+                if stops.is_empty() {
+                    return progress;
+                }
                 let upper = stops.partition_point(|(input, _)| *input <= progress);
                 if upper == 0 {
                     return stops[0].1;

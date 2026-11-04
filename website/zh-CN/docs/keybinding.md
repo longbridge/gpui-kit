@@ -10,7 +10,7 @@ order: -2.625
 
 ## 绑定一条命令
 
-`KeyBinding::new(keys, action, context)` 接收按键字符串、Action 值和可选的 context predicate。在初始化时调用 `cx.bind_keys(...)`。`None` 使 binding 在整个应用中有匹配资格；`Some("Editor")` 要求当前 Focus 路径上有 `Editor` context。
+`KeyBinding::new(keys, action, context)` 接收静态按键字符串（`&'static str`）、Action 值和可选的 context predicate。在初始化时调用 `cx.bind_keys(...)`。`None` 使 binding 在整个应用中有匹配资格；`Some("Editor")` 要求当前 Focus 路径上有 `Editor` context。
 
 ```rust
 use gpui_kit::*;
@@ -20,7 +20,11 @@ const EDITOR_CONTEXT: &str = "Editor";
 
 fn init_keys(cx: &mut App) {
     cx.bind_keys([
-        KeyBinding::new("secondary-s", SaveDocument, Some(EDITOR_CONTEXT)),
+        KeyBinding::new(
+            if cx.platform_info().is_mac() { "cmd-s" } else { "ctrl-s" },
+            SaveDocument,
+            Some(EDITOR_CONTEXT),
+        ),
         KeyBinding::new("up", MoveSelectionUp, Some(EDITOR_CONTEXT)),
     ]);
 }
@@ -57,7 +61,7 @@ Handler 使用 GPUI 的常规签名，例如 `on_action_save_document`。这里�
 | `up`、`escape`、`space`、`backspace` | 具名按键。 |
 | `cmd-k left` | 连续按两次：平台修饰键加 K，然后 Left。 |
 
-GPUI 还识别 `fn`、`ctrl`、`alt`、`shift`、`cmd`、`super`、`win` 与 `secondary`。常见的跨平台 Command/Control 快捷键应使用 `secondary`；所有平台都必须使用 Control 时才写 `ctrl`。大写 ASCII 字母如 `A` 表示 Shift+A，显式写 `shift-a` 更容易阅读。如果按键字符串或 context predicate 无法解析，`KeyBinding::new` 会 **panic**；静态定义应便于检查，用户输入则要先验证。
+GPUI 还识别 `fn`、`ctrl`、`alt`、`shift`、`cmd`、`super` 与 `win`。`KeyBinding::new` 要求显式指定 modifier；跨平台 Command/Control 快捷键应根据 `cx.platform_info().is_mac()` 选择 `cmd` 或 `ctrl`。动态字符串或 `secondary` 别名需要通过 `KeyBinding::load(..., cx)` 加载，以便按运行时操作系统解析；单个按键使用 `Keystroke::parse_with_os(keys, cx.platform_info().os)`。所有平台都必须使用 Control 时才写 `ctrl`。大写 ASCII 字母如 `A` 表示 Shift+A，显式写 `shift-a` 更容易阅读。如果按键字符串或 context predicate 无法解析，`KeyBinding::new` 会 **panic**；静态定义应便于检查，用户输入则要先验证。
 
 操作系统或窗口管理器可能先于 GPUI 占用快捷键。应在每个支持的平台测试预定组合，尤其是 `cmd`/`super`/`win` 组合以及 `alt-f4` 等系统快捷键。Binding 能成功解析，并不代表按键事件一定会到达应用。
 

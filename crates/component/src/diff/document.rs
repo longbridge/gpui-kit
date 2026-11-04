@@ -3,6 +3,7 @@ use std::{ops::Range, sync::Arc};
 use gpui::SharedString;
 
 use super::conflict::DiffConflict;
+use super::parser::{DiffParseError, DiffParseOptions};
 use smallvec::{SmallVec, smallvec};
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -259,8 +260,10 @@ pub(crate) struct Hunk {
     original: Range<usize>,
     modified: Range<usize>,
     label: SharedString,
-    /// The one-based original lines the header declares.
+    /// The one-based original lines the hunk supplies.
     original_lines: Range<usize>,
+    /// Whether the hunk ended before its declared line counts.
+    truncated: bool,
 }
 
 impl Hunk {
@@ -270,6 +273,7 @@ impl Hunk {
         modified: Range<usize>,
         label: SharedString,
         original_lines: Range<usize>,
+        truncated: bool,
     ) -> Self {
         Self {
             pairs,
@@ -277,6 +281,7 @@ impl Hunk {
             modified,
             label,
             original_lines,
+            truncated,
         }
     }
     /// Original lines between the previous hunk, or the file start, and this
@@ -297,6 +302,9 @@ impl Hunk {
     /// The `@@` header line.
     pub(crate) fn label(&self) -> &SharedString {
         &self.label
+    }
+    pub(crate) fn is_truncated(&self) -> bool {
+        self.truncated
     }
 }
 
@@ -394,8 +402,15 @@ impl DiffFile {
     /// Parses every file in a unified or Git diff, in patch order, without
     /// computing differences. Syntax emphasis is prepared later by
     /// [`super::DiffState`] on a background thread.
-    pub fn parse(patch: &str) -> Result<Vec<Self>, super::parser::DiffParseError> {
-        super::parser::parse(patch)
+    pub fn parse(patch: &str) -> Result<Vec<Self>, DiffParseError> {
+        super::parser::parse(patch, DiffParseOptions::default())
+    }
+
+    /// Parses like [`DiffFile::parse`], applying the relaxations `options`
+    /// enables. Malformed headers, invalid paths and unordered hunks are still
+    /// errors.
+    pub fn parse_with(patch: &str, options: DiffParseOptions) -> Result<Vec<Self>, DiffParseError> {
+        super::parser::parse(patch, options)
     }
 
     /// Assembles a parsed file, pairing counterpart lines and deriving its
@@ -495,6 +510,11 @@ impl DiffFile {
     /// Whether the patch reports binary contents rather than textual hunks.
     pub fn is_binary(&self) -> bool {
         self.inner.binary
+    }
+    /// Whether a hunk ended before its declared line counts, which only
+    /// [`DiffParseOptions::truncated_hunks`] accepts.
+    pub fn is_truncated(&self) -> bool {
+        self.inner.hunks.iter().any(Hunk::is_truncated)
     }
     pub fn additions(&self) -> usize {
         self.inner.additions

@@ -38,6 +38,8 @@ If the application already calls `gpui_kit::component::init`, Base initializatio
 
 TextView is selectable by default. While dragging a selection near a viewport edge, the shared selection layer scrolls the related `overflow_*_scroll` region automatically; no TextView scroll or selection parameter is required. Use `.selectable(false)` only to disable selection explicitly.
 
+Double-click selects a word and triple-click a paragraph. A drag that continues the click, or a Shift-click after it, extends the selection by whole words or paragraphs and keeps the first one selected.
+
 A drag that starts in a table cell selects only in that cell; when the pointer leaves the cell, the selection stops at its edge. A drag that starts outside the table selects through it. Use `table_actions` to offer a copy of the whole table.
 
 ## Markdown and HTML
@@ -327,21 +329,6 @@ The current byte-index geometry does not represent bidirectional caret affinity
 or both sides of a soft-wrap boundary; do not treat it as a complete visual
 navigation API.
 
-## Linked plain text
-
-`TextViewState::linked_text(text, links, cx)` creates selectable plain text with
-explicit `TextViewLink::new(range, url)` spans. Ranges are UTF-8 byte offsets,
-ordered and non-overlapping; invalid ranges are ignored. Use
-`set_linked_text(text, links, cx)` to replace both together. `range()` and `url()`
-inspect a link. Render the retained state with `TextView::new(&state)` and use
-`on_link_click` to override URL opening.
-
-`TextView::link_underline(bool)` and `link_underline_on_hover(bool)` override
-link appearance after theme resolution. The equivalent Base style builders are
-`TextViewStyle::with_link_underline` and `with_link_underline_on_hover`, with
-`is_link_underlined()` and `is_link_underlined_on_hover()` readers. Defaults are
-`true` at rest and `false` on hover.
-
 ## Inline code style
 
 `TextView::inline_code_style(StyleRefinement)` refines inline code after the
@@ -374,3 +361,40 @@ code remains 0.875 times its surrounding text. Without a border override, code
 has no border. Padding and border widths participate in wrapping and table
 measurement. Margin, positioning, flex, explicit box size, overflow, and
 interaction properties are not used; line height remains owned by the paragraph.
+
+## List and blockquote style
+
+`TextView::list_style(StyleRefinement)` and
+`blockquote_style(StyleRefinement)` refine list markers and blockquotes after
+the resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The Base style also exposes `TextViewStyle::with_list_style` and
+`with_blockquote_style`, with `list_style()` and `blockquote_style()`
+readers.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+
+let primary = gpui_kit::base::Theme::global(cx).tokens.colors.primary;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(primary))
+    .blockquote_style(StyleRefinement::default().border_color(primary))
+```
+
+The list marker refinement applies to the bullet or number column of each
+item, over its defaults: muted text color, a minimum width of the list indent,
+right-aligned text, and a right padding of 0.3 times that indent. Text
+properties such as color, font family, size, and weight style the marker; box
+properties such as width and padding change the marker column. Its text color
+also outlines an unchecked task-list checkbox; a checked one keeps the link
+color.
+
+The blockquote refinement applies to the quote container, over its defaults:
+muted text color, a 2px left border in the border color, and a left padding of
+0.9 times the body font size. Border widths and color style the quote bar;
+text properties, background, padding, and corner radii style the quote and the
+blocks inside it. Child blocks keep their own explicit styles, including
+heading and table font sizes. Other element properties apply to the container
+as they do to any `div`. Code blocks, tables, rules, and done tasks keep the
+shared muted and border colors.

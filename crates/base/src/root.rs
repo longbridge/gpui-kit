@@ -245,6 +245,8 @@ impl Styled for Root {
 }
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "test-support")]
+        crate::test_support::begin_frame(window);
         for plugin in &self.plugins {
             (plugin.prepare)(window, cx);
         }

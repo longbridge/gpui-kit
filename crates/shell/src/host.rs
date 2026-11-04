@@ -1136,13 +1136,12 @@ struct CommandTheme {
 fn install_palette(cx: &mut App) {
     match serde_json::from_str::<CommandThemes>(PALETTE) {
         Ok(themes) => {
-            gpui_base::Theme::global_mut(cx).tokens = gpui_base::SemanticThemeTokens {
-                colors: themes.light.colors,
-                radius: themes.light.radius,
-                spacing: themes.light.spacing,
-                typography: themes.light.typography,
-                shadow: themes.light.shadow,
-            };
+            let tokens = &mut gpui_base::Theme::global_mut(cx).tokens;
+            tokens.colors = themes.light.colors;
+            tokens.radius = themes.light.radius;
+            tokens.spacing = themes.light.spacing;
+            tokens.typography = themes.light.typography;
+            tokens.shadow = themes.light.shadow;
         }
         // The file is compiled in, so a parse error is a build-time mistake
         // that reached a user; the neutral fallback keeps the window legible.

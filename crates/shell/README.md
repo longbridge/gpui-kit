@@ -132,6 +132,12 @@ catalog) for macOS, Linux and Windows:
 curl -fsSL https://gpui-kit.com/shell/install.sh | sh
 ```
 
+The same runtime is available from crates.io:
+
+```bash
+cargo install gpui-shell --version 0.9.0 --locked
+```
+
 To follow `main` ahead of a release, build it from Git instead (into
 `~/.cargo/bin`; run it again to update):
 
@@ -343,7 +349,10 @@ WebView.new(this.page)
 | `.on_message(handler)` | `WebView` | `handler(text, cx)` for each `window.ipc.postMessage(text)` from the page |
 
 Only `http` and `https` documents load, whether the script or the page
-navigates. Loading is not gated by a capability. The feature builds the runtime
+navigates, and each needs the network grant a `fetch` of it would: a `GET` in
+`capabilities.network.hosts` or `capabilities.network.http`. A navigation that
+is not granted is cancelled, and a message from a page that is not granted is
+dropped. The feature builds the runtime
 on GPUI Fast; on Linux the page needs an X11 or XWayland window (start with
 `WAYLAND_DISPLAY=` in a Wayland session), and on Windows it draws above GPUI
 content it overlaps. [`examples/js_webview`](../../examples/js_webview/main.js)
