@@ -62,6 +62,10 @@ pub(crate) struct Overscroll {
     /// still scrolls the text back from the edge, but no longer moves the
     /// edge.
     spent: bool,
+    /// The trackpad reported a touch or a lift in this stream, so its
+    /// phaseless packets are momentum. A smooth-scrolling mouse sends the
+    /// same packets on macOS, but never a touch or a lift.
+    touched: bool,
 }
 
 impl Overscroll {
@@ -76,6 +80,7 @@ impl Overscroll {
     /// A new gesture starts: it may stretch the edge again.
     fn start_gesture(&mut self) {
         self.spent = false;
+        self.touched = false;
         self.velocity = 0.;
         self.moves.clear();
     }
@@ -107,6 +112,32 @@ impl Overscroll {
         self.moved_at = Some(now);
     }
 
+    /// Note the phase of a packet not handed to [`Self::packet`], such as a
+    /// sideways one: a touch or a lift there still marks the stream as the
+    /// trackpad's.
+    pub(crate) fn touch_phase(&mut self, phase: TouchPhase, now: Instant) {
+        if phase != TouchPhase::Moved {
+            self.follow(now);
+            self.touched = true;
+        }
+    }
+
+    /// Start a new gesture after a pause, unless a finger holds the edge.
+    fn follow(&mut self, now: Instant) {
+        let gap = self
+            .last_packet_at
+            .replace(now)
+            .map(|at| now.saturating_duration_since(at))
+            .filter(|gap| *gap < GESTURE_GAP);
+        // A finger resting on the trackpad sends nothing, however long it
+        // holds the edge; only its own `Ended` lets go. A pause ends the
+        // other streams.
+        if gap.is_none() && !self.physics.is_dragging() {
+            self.start_gesture();
+            self.moved_at = None;
+        }
+    }
+
     /// Handle one vertical packet of `dy` over a viewport `extent` tall.
     /// `scroll` moves the text by a delta and returns how much of it the text
     /// used. Returns whether the stretch changed.
@@ -120,19 +151,11 @@ impl Overscroll {
     ) -> bool {
         let before = self.offset();
         let mut thrown = false;
-        let gap = self
-            .last_packet_at
-            .replace(now)
-            .map(|at| now.saturating_duration_since(at))
-            .filter(|gap| *gap < GESTURE_GAP);
-        // A finger resting on the trackpad sends nothing, however long it
-        // holds the edge; only its own `Ended` lets go. A pause ends the
-        // other streams.
-        if gap.is_none() && !self.physics.is_dragging() {
-            self.start_gesture();
-            self.moved_at = None;
-        }
+        self.follow(now);
         self.sample(dy, now);
+        if phase != TouchPhase::Moved {
+            self.touched = true;
+        }
         if phase == TouchPhase::Started {
             // Grab the edge, a returning one included, where it is.
             self.physics.begin(extent);
@@ -182,9 +205,10 @@ impl Overscroll {
                 thrown = true;
                 self.spent = self.offset() != 0.;
             }
-        } else if self.spent {
+        } else if self.spent || cfg!(target_os = "macos") && !self.touched {
             // Momentum after the edge answered: back into the text it
-            // scrolls; against the edge it has nothing left to move.
+            // scrolls; against the edge it has nothing left to move. A
+            // smooth-scrolling mouse stops at the edge, as in NSScrollView.
             scroll(dy);
         } else {
             // Momentum or phaseless precise scrolling: it scrolls the text,
@@ -300,6 +324,8 @@ mod tests {
         let frame = Duration::from_micros(16_667);
         let mut overscroll = Overscroll::default();
         let mut dy = -speed / 60.;
+        // The momentum of a finger that let go inside the text.
+        overscroll.packet(0., TouchPhase::Ended, 300., start, text(&mut room));
         let mut held = Vec::new();
         let mut path = Vec::new();
         for n in 0..120 {
@@ -359,6 +385,7 @@ mod tests {
         let start = Instant::now();
         let mut overscroll = Overscroll::default();
         let mut room = 0.;
+        overscroll.packet(0., TouchPhase::Ended, 400., start, text(&mut room));
         overscroll.packet(-80., TouchPhase::Moved, 400., start, text(&mut room));
         let later = start + Duration::from_millis(30);
         overscroll.step(later);
@@ -530,12 +557,14 @@ mod tests {
         let start = Instant::now();
         let mut overscroll = Overscroll::default();
         let mut room = 0.;
+        overscroll.packet(0., TouchPhase::Ended, 400., start, text(&mut room));
         assert!(overscroll.packet(-40., TouchPhase::Moved, 400., start, text(&mut room)));
         let mut at = start;
         while overscroll.step(at) {
             at += Duration::from_millis(16);
         }
         let later = at + GESTURE_GAP;
+        overscroll.packet(0., TouchPhase::Ended, 400., later, text(&mut room));
         assert!(overscroll.packet(-40., TouchPhase::Moved, 400., later, text(&mut room)));
     }
 
@@ -564,6 +593,7 @@ mod tests {
         let start = Instant::now();
         let mut overscroll = Overscroll::default();
         let mut room = 0.;
+        overscroll.packet(0., TouchPhase::Ended, 400., start, text(&mut room));
         overscroll.packet(-80., TouchPhase::Moved, 400., start, text(&mut room));
         overscroll.step(start + Duration::from_millis(16));
         let later = start + Duration::from_millis(200);
@@ -581,5 +611,52 @@ mod tests {
             overscroll.offset() < before,
             "the new input pushes outward again"
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_smooth_scrolling_wheel_stops_at_the_edge() {
+        // Smooth-scrolling mouse drivers send precise packets with no phase
+        // and no lift before them; NSScrollView does not bounce them.
+        let start = Instant::now();
+        let mut overscroll = Overscroll::default();
+        let mut room = 30.;
+        for n in 0..10 {
+            let at = start + Duration::from_millis(8 * n);
+            assert!(!overscroll.packet(-40., TouchPhase::Moved, 400., at, text(&mut room)));
+        }
+        assert_eq!(room, 0.);
+        assert_eq!(overscroll.offset(), 0.);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_wheel_after_a_pause_stops_at_the_edge() {
+        // A trackpad lift, then the hand moves to the mouse.
+        let start = Instant::now();
+        let mut overscroll = Overscroll::default();
+        let mut room = 30.;
+        overscroll.packet(0., TouchPhase::Ended, 400., start, text(&mut room));
+        for n in 0..10 {
+            let at = start + GESTURE_GAP + Duration::from_millis(8 * n);
+            assert!(!overscroll.packet(-40., TouchPhase::Moved, 400., at, text(&mut room)));
+        }
+        assert_eq!(overscroll.offset(), 0.);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_swipe_that_touches_sideways_still_bounces() {
+        // The caller keeps the sideways first packet of a swipe, but passes
+        // on its phase; the vertical packets after it are no wheel.
+        let start = Instant::now();
+        let mut overscroll = Overscroll::default();
+        let mut room = 30.;
+        overscroll.touch_phase(TouchPhase::Started, start);
+        let stretched = (1..=10).any(|n| {
+            let at = start + Duration::from_millis(8 * n);
+            overscroll.packet(-40., TouchPhase::Moved, 400., at, text(&mut room))
+        });
+        assert!(stretched);
     }
 }
