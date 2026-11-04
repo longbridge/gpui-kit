@@ -581,6 +581,7 @@ Element builder methods answer the same element, so a chain is one expression. `
 | `children(iterable)`      | Adds several, in order                                                                                  |
 | `when(condition, branch)` | Applies `branch` when `condition` is truthy, keeping the chain in one piece                             |
 | `id(name)`                | A stable name for this element, used as its identity                                                    |
+| `group(name)`             | Names this element as a group that `group_hover` on an element inside it follows                        |
 
 ### Slots
 
@@ -761,6 +762,7 @@ Each takes a function that receives a detached element to collect styles on; its
 | `hover(declare)`             | While the pointer is over the element                                    |
 | `active(declare)`            | While the element is pressed                                             |
 | `focus(declare)`             | While the element has focus                                              |
+| `group_hover(name, declare)` | While the pointer is over the nearest ancestor named with `group(name)`  |
 | `range_style(declare)`       | The filled part of a `SliderIndicator` — how it looks, never where it is |
 | `cell_style(declare)`        | Every cell of an `OtpInput`; without it there is nothing on screen       |
 | `cell_active_style(declare)` | Layered on top, for the cell the next digit lands in                     |

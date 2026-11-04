@@ -302,7 +302,7 @@ fn pin(refinement: &mut StyleRefinement, axis: Axis, along: f32) {
 
 /// Reports state styles on a part that cannot carry any.
 fn warn_unstateful(states: &StateStyles, component: &str, instead: &str) {
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {component} are ignored: it is not an interactive element. Put \
              them on the {instead} inside it"

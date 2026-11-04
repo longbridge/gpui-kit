@@ -5256,6 +5256,31 @@ impl ShellRuntime {
         Ok(node)
     }
 
+    /// Opens the detached node of a `group_hover`, the one state style that
+    /// names something: the group whose hover it follows.
+    fn begin_group_hover(&self, ctx: &Ctx<'_>, id: SpecId, group: String) -> JsResult<SpecId> {
+        // An empty name would match no group GPUI registers, so the styles
+        // would never apply and nothing on screen would say why.
+        if group.is_empty() {
+            return Err(js_error::type_error(
+                ctx,
+                "group_hover(group, declare) expects the group's name first, as a non-empty \
+                 string",
+            ));
+        }
+
+        let node = self.arena.borrow_mut().push(Component::Div);
+        self.arena
+            .borrow_mut()
+            .claim(node)
+            .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
+        self.push_op_checked(
+            ctx,
+            self.push_op(id, SpecOp::GroupHover(group.into(), node)),
+        )?;
+        Ok(node)
+    }
+
     /// Fills a named element slot, detaching the element from the tree.
     ///
     /// The same `claim` a state style's declarations use: an element a
@@ -5871,6 +5896,25 @@ globalThis.__gpui = (() => {
   methods.hover = state("hover");
   methods.active = state("active");
   methods.focus = state("focus");
+  // The same detached element, applied while the pointer is over the nearest
+  // ancestor named with `group(name)` rather than over this element. Both
+  // arguments are checked before anything is recorded: with the two swapped,
+  // calling the name would fail as a type error naming neither.
+  methods.group_hover = function (group, declare) {
+    if (typeof group !== "string") {
+      throw new TypeError(
+        "group_hover(group, declare) expects the group's name first, as a non-empty string",
+      );
+    }
+    if (typeof declare !== "function") {
+      throw new TypeError(
+        "group_hover(group, declare) expects a function second; it receives the element to style",
+      );
+    }
+    const target = element(__group_hover(this.__id, group));
+    declare(target);
+    return this;
+  };
   // Not a state: the filled part of a slider, declared the same way because
   // it is the same thing — a detached element collecting styles. The shell
   // positions the box; this says what it looks like.
@@ -7313,6 +7357,7 @@ impl ShellRuntime {
                 "tab_stop",
                 "href",
                 "id",
+                "group",
                 "overflow_scroll",
                 "overflow_x_scroll",
                 "overflow_y_scroll",
@@ -7704,6 +7749,16 @@ impl ShellRuntime {
                 Func::from(
                     move |ctx: Ctx<'_>, id: u32, name: String| -> JsResult<SpecId> {
                         upgrade(&state_runtime, &ctx)?.begin_state(&ctx, id, &name)
+                    },
+                ),
+            )?;
+
+            let group_hover_runtime = runtime.clone();
+            globals.set(
+                "__group_hover",
+                Func::from(
+                    move |ctx: Ctx<'_>, id: u32, group: String| -> JsResult<SpecId> {
+                        upgrade(&group_hover_runtime, &ctx)?.begin_group_hover(&ctx, id, group)
                     },
                 ),
             )?;
@@ -8320,6 +8375,7 @@ impl ShellRuntime {
             | "tab_stop"
             | "href"
             | "id"
+            | "group"
             | "overflow_scroll"
             | "overflow_x_scroll"
             | "overflow_y_scroll"
@@ -8374,6 +8430,7 @@ impl ShellRuntime {
                     "tab_index" => "tab_index",
                     "tab_stop" => "tab_stop",
                     "id" => "id",
+                    "group" => "group",
                     "overflow_scroll" => "overflow_scroll",
                     "overflow_x_scroll" => "overflow_x_scroll",
                     "overflow_y_scroll" => "overflow_y_scroll",
@@ -8418,6 +8475,20 @@ impl ShellRuntime {
                         ctx,
                         "id(name) expects a string; it is the element's stable identity, so it \
                          must not change between renders",
+                    ));
+                }
+                // The name is all a `group_hover` below can match, so one that
+                // is missing or empty would leave those styles never applying.
+                if name == "group"
+                    && bridged
+                        .first()
+                        .and_then(|value| value.as_str().ok())
+                        .is_none_or(|group| group.is_empty())
+                {
+                    return Err(js_error::type_error(
+                        ctx,
+                        "group(name) expects a non-empty string; `group_hover(name, declare)` \
+                         on an element inside it matches the same name",
                     ));
                 }
                 // Dropping a non-string here would leave an element that

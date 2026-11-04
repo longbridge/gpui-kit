@@ -86,7 +86,7 @@ pub(in crate::materialize) fn dock_area(
              which are added with add_panel(...) rather than described"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles are ignored on a dock_area: it has no interactive state of its own. \
              Put them on the chrome you draw for it, or on an element around the area"
