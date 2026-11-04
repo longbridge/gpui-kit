@@ -1856,6 +1856,119 @@ impl<M: InputModeKind> TextElement<M> {
         icon_layout
     }
 
+    /// Placeholders for folded lines, drawn by the `fold_placeholder_renderer`
+    /// one space past the end of the line's text, or from a column of it.
+    /// Rows below `ghost_rows.0` move down by the inline completion's ghost
+    /// lines, `ghost_rows.1` tall, as the text does.
+    fn layout_fold_placeholders(
+        &self,
+        bounds: &Bounds<Pixels>,
+        last_layout: &LastLayout,
+        ghost_rows: Option<(usize, Pixels)>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<AnyElement> {
+        // The folded lines on screen: their buffer row, their index into
+        // `last_layout.lines` and the top of their first row.
+        let (render, folded) = {
+            let state = self.state.read(cx);
+            let Some(render) = state.editor_style.fold_placeholder_renderer.clone() else {
+                return Vec::new();
+            };
+            if !state.mode.is_folding() {
+                return Vec::new();
+            }
+
+            let mut folded = Vec::new();
+            let mut offset_y = last_layout.visible_top;
+            for (ix, (line, &buffer_line)) in last_layout
+                .lines
+                .iter()
+                .zip(last_layout.visible_buffer_lines.iter())
+                .enumerate()
+            {
+                if state.display_map.is_folded_at(buffer_line) {
+                    folded.push((buffer_line, ix, offset_y));
+                }
+                offset_y += line.wrapped_lines.len() * last_layout.line_height;
+                if let Some((row, height)) = ghost_rows
+                    && row == buffer_line
+                {
+                    offset_y += height;
+                }
+            }
+            (render, folded)
+        };
+
+        let line_height = last_layout.line_height;
+        let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
+        let mut placeholders = Vec::with_capacity(folded.len());
+        for (buffer_line, ix, top) in folded {
+            let Some(placeholder) = render(buffer_line) else {
+                continue;
+            };
+            let line = &last_layout.lines[ix];
+            let alignment = last_layout.alignment_offset(line.longest_width);
+            let last_row = line.wrapped_lines.len().saturating_sub(1);
+            // The wrapped row holding the column, and the column within it;
+            // past the end of the line, one space after its text.
+            let mut position = None;
+            if let Some(column) = placeholder.column {
+                let mut start = 0;
+                for (row, shaped) in line.wrapped_lines.iter().enumerate() {
+                    let end = start + shaped.len;
+                    if column < end || row == last_row && column == end {
+                        let indent = if row == 0 { px(0.) } else { line.wrap_indent };
+                        let x = alignment + indent + shaped.x_for_index(column - start);
+                        position = Some(point(x, top + row * line_height));
+                        break;
+                    }
+                    start = end;
+                }
+            }
+            let position = position.or_else(|| {
+                let shaped = line.wrapped_lines.last()?;
+                let indent = if last_row == 0 {
+                    px(0.)
+                } else {
+                    line.wrap_indent
+                };
+                let x = alignment + indent + shaped.width + last_layout.space_width;
+                Some(point(x, top + last_row * line_height))
+            });
+            let Some(position) = position else {
+                continue;
+            };
+
+            let mut element = gpui::div()
+                .id(("fold-placeholder", buffer_line))
+                .h(line_height)
+                .flex()
+                .items_center()
+                .cursor_pointer()
+                .child(placeholder.element)
+                .on_mouse_down(MouseButton::Left, {
+                    let state = self.state.clone();
+                    move |_, _: &mut Window, cx: &mut App| {
+                        cx.stop_propagation();
+                        state.update(cx, |state, cx| {
+                            state.display_map.set_folded(buffer_line, false);
+                            cx.notify();
+                        });
+                    }
+                })
+                .into_any_element();
+            element.prepaint_as_root(
+                origin + position,
+                size(gpui::AvailableSpace::MinContent, line_height.into()),
+                window,
+                cx,
+            );
+            placeholders.push(element);
+        }
+        placeholders
+    }
+
     /// Paint fold icons using prepaint hitboxes.
     ///
     /// This handles:
@@ -2811,6 +2924,7 @@ pub(super) struct PrepaintState {
     bounds: Bounds<Pixels>,
     /// Fold icon layout data
     fold_icon_layout: FoldIconLayout,
+    fold_placeholders: Vec<AnyElement>,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
     ghost_lines: Vec<ShapedLine>,
@@ -3530,6 +3644,13 @@ impl<M: InputModeKind> Element for TextElement<M> {
             )));
         let fold_icon_layout =
             self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
+        let fold_placeholders = self.layout_fold_placeholders(
+            &bounds,
+            &last_layout,
+            current_row.map(|row| (row, ghost_lines_height)),
+            window,
+            cx,
+        );
         let ghost_rows = current_row.filter(|_| !ghost_lines.is_empty()).map(|row| {
             let display_map = &self.state.read(cx).display_map;
             let rows = display_map
@@ -3583,6 +3704,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             line_number_offset,
             indent_guides_path,
             fold_icon_layout,
+            fold_placeholders,
             ghost_first_line,
             ghost_lines,
             ghost_lines_height,
@@ -3817,6 +3939,9 @@ impl<M: InputModeKind> Element for TextElement<M> {
 
         for element in &mut prepaint.token_elements {
             element.paint(window, cx);
+        }
+        for placeholder in &mut prepaint.fold_placeholders {
+            placeholder.paint(window, cx);
         }
 
         // Paint blinking cursors (shared blink state for all carets)
@@ -4190,8 +4315,9 @@ fn split_runs_by_bg_segments(
 mod tests {
     use super::*;
     use crate::input::{
-        EditorMode, EditorState, FoldRange, GutterDecoration, GutterDecorationCollection,
-        OverviewRulerDecoration, OverviewRulerDecorationCollection, RangeDecoration, Redo, Undo,
+        EditorMode, EditorState, FoldPlaceholder, FoldRange, GutterDecoration,
+        GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
+        RangeDecoration, Redo, Undo,
     };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -5197,6 +5323,85 @@ mod tests {
             window.draw(cx).clear(cx);
             assert_eq!(gutter_width(cx), without, "no collection, no strip");
         });
+    }
+
+    #[gpui::test]
+    fn a_folded_line_shows_its_placeholder_after_the_text_and_unfolds_on_click(
+        cx: &mut TestAppContext,
+    ) {
+        let text = "top {\nhidden\n}\nlast";
+        let (editor, window) = decoration_editor(cx, text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let drawn = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let at = cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                let drawn = drawn.clone();
+                let mut style = state.editor_style.clone();
+                style.fold_placeholder_renderer = Some(Rc::new(move |line| {
+                    drawn.borrow_mut().push(line);
+                    Some(FoldPlaceholder::new(div().w(px(20.)).h(px(10.))))
+                }));
+                state.set_editor_style(style);
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 3)], cx);
+            });
+            window.draw(cx).clear(cx);
+            assert!(drawn.borrow().is_empty(), "no placeholder for an open fold");
+
+            editor.update(cx, |state, _| state.display_map.set_folded(0, true));
+            window.draw(cx).clear(cx);
+            assert_eq!(*drawn.borrow(), vec![0]);
+
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let line = layout.line(0).unwrap();
+            let end = state.input_bounds.origin.x
+                + layout.line_number_width
+                + line.wrapped_lines[0].width
+                + layout.space_width;
+            point(
+                end + px(10.),
+                state.input_bounds.origin.y + layout.line_height.half(),
+            )
+        });
+
+        cx.simulate_mouse_down(at, MouseButton::Left, gpui::Modifiers::default());
+        cx.update(|_, cx| assert!(!editor.read(cx).display_map.is_folded_at(0)));
+    }
+
+    #[gpui::test]
+    fn a_fold_placeholder_with_a_column_starts_over_that_text(cx: &mut TestAppContext) {
+        let text = "top {\nhidden\n}\nlast";
+        let (editor, window) = decoration_editor(cx, text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let brace = text.find('{').unwrap();
+        let (on_brace, past_end) = cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                let mut style = state.editor_style.clone();
+                style.fold_placeholder_renderer = Some(Rc::new(move |_| {
+                    Some(FoldPlaceholder::new(div().w(px(4.)).h(px(10.))).with_column(brace))
+                }));
+                state.set_editor_style(style);
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 3)], cx);
+                state.display_map.set_folded(0, true);
+            });
+            window.draw(cx).clear(cx);
+
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let line = &layout.line(0).unwrap().wrapped_lines[0];
+            let text_x = state.input_bounds.origin.x + layout.line_number_width;
+            let y = state.input_bounds.origin.y + layout.line_height.half();
+            (
+                point(text_x + line.x_for_index(brace) + px(2.), y),
+                point(text_x + line.width + layout.space_width + px(2.), y),
+            )
+        });
+
+        // Only the 4 px from the brace on take the click.
+        cx.simulate_mouse_down(past_end, MouseButton::Left, gpui::Modifiers::default());
+        cx.update(|_, cx| assert!(editor.read(cx).display_map.is_folded_at(0)));
+        cx.simulate_mouse_down(on_brace, MouseButton::Left, gpui::Modifiers::default());
+        cx.update(|_, cx| assert!(!editor.read(cx).display_map.is_folded_at(0)));
     }
 
     #[gpui::test]

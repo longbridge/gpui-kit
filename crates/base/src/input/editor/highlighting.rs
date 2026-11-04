@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc, sync::Arc};
 
-use gpui::{AnyElement, Context, HighlightStyle, Hsla, SharedString, Window};
+use gpui::{AnyElement, Context, HighlightStyle, Hsla, IntoElement, SharedString, Window};
 use ropey::Rope;
 
 use super::{EditorState, FoldRange, InputEdit};
@@ -76,6 +76,33 @@ pub trait InputHighlighter {
 pub type InputHighlighterFactory = Rc<dyn Fn(&str) -> Option<Box<dyn InputHighlighter>>>;
 pub type SharedHighlightStyleResolver = Arc<dyn HighlightStyleResolver>;
 pub type FoldIconRenderer = Rc<dyn Fn(usize, bool) -> AnyElement>;
+/// Given a folded line's buffer row; `None` draws nothing for that line.
+pub type FoldPlaceholderRenderer = Rc<dyn Fn(usize) -> Option<FoldPlaceholder>>;
+
+/// What to draw for a folded line, from
+/// [`InputEditorStyle::fold_placeholder_renderer`].
+pub struct FoldPlaceholder {
+    pub(crate) element: AnyElement,
+    pub(crate) column: Option<usize>,
+}
+
+impl FoldPlaceholder {
+    /// Drawn one space past the end of the folded line's text.
+    pub fn new(element: impl IntoElement) -> Self {
+        Self {
+            element: element.into_any_element(),
+            column: None,
+        }
+    }
+
+    /// Starts the placeholder at this byte offset into the line instead, over
+    /// the text from there to the end of the line. That text is still
+    /// painted, so give the element an opaque background to cover it.
+    pub fn with_column(mut self, column: usize) -> Self {
+        self.column = Some(column);
+        self
+    }
+}
 
 /// Where in the syntax tree an offset sits, for editing decisions.
 ///
@@ -119,6 +146,8 @@ pub struct InputEditorStyle {
     pub editor_active_line: Option<Hsla>,
     pub editor_gutter_background: Option<Hsla>,
     pub fold_icon_renderer: Option<FoldIconRenderer>,
+    /// Draws a placeholder for each folded line. Clicking it unfolds the line.
+    pub fold_placeholder_renderer: Option<FoldPlaceholderRenderer>,
 }
 
 impl InputEditorStyle {
@@ -174,6 +203,7 @@ impl Default for InputEditorStyle {
             editor_active_line: None,
             editor_gutter_background: None,
             fold_icon_renderer: None,
+            fold_placeholder_renderer: None,
         }
     }
 }
