@@ -577,7 +577,6 @@ impl RenderOnce for Input {
                 editor_invisible: cx.theme().highlight_theme.style.editor_invisible,
                 editor_active_line: cx.theme().highlight_theme.style.editor_active_line,
                 editor_gutter_background: cx.theme().highlight_theme.style.editor_gutter_background,
-                editor_fold_background: None,
                 fold_icon_renderer: Some(Rc::new(|ix, is_folded| {
                     Button::new(("fold-icon", ix))
                         .ghost()
@@ -592,7 +591,6 @@ impl RenderOnce for Input {
                         .selected(is_folded)
                         .into_any_element()
                 })),
-                fold_placeholder_renderer: None,
             },
             cx,
         );

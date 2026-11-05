@@ -1865,8 +1865,8 @@ impl<M: InputModeKind> TextElement<M> {
     }
 
     /// The background of each folded line and the placeholder right after
-    /// its text, from `editor_fold_background` and
-    /// `fold_placeholder_renderer`. Rows below `ghost_rows.0` move down by the
+    /// its text, as set with `set_fold_background` and
+    /// `set_fold_placeholder_renderer`. Rows below `ghost_rows.0` move down by the
     /// inline completion's ghost lines, `ghost_rows.1` tall, as the text does.
     fn layout_folded_lines(
         &self,
@@ -1881,10 +1881,8 @@ impl<M: InputModeKind> TextElement<M> {
         let line_height = last_layout.line_height;
         let (background, render, folded) = {
             let state = self.state.read(cx);
-            let style = &state.editor_style;
             if !state.mode.is_folding()
-                || style.editor_fold_background.is_none()
-                    && style.fold_placeholder_renderer.is_none()
+                || state.fold_background.is_none() && state.fold_placeholder_renderer.is_none()
             {
                 return folded_lines;
             }
@@ -1915,8 +1913,8 @@ impl<M: InputModeKind> TextElement<M> {
                 }
             }
             (
-                style.editor_fold_background,
-                style.fold_placeholder_renderer.clone(),
+                state.fold_background,
+                state.fold_placeholder_renderer.clone(),
                 folded,
             )
         };
@@ -4317,8 +4315,9 @@ fn split_runs_by_bg_segments(
 mod tests {
     use super::*;
     use crate::input::{
-        EditorMode, EditorState, FoldRange, GutterDecoration, GutterDecorationCollection,
-        OverviewRulerDecoration, OverviewRulerDecorationCollection, RangeDecoration, Redo, Undo,
+        EditorMode, EditorState, FoldPlaceholderRenderer, FoldRange, GutterDecoration,
+        GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
+        RangeDecoration, Redo, Undo,
     };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -5337,12 +5336,11 @@ mod tests {
         let at = cx.update(|window, cx| {
             editor.update(cx, |state, cx| {
                 let drawn = drawn.clone();
-                let mut style = state.editor_style.clone();
-                style.fold_placeholder_renderer = Some(Rc::new(move |line| {
+                let renderer: FoldPlaceholderRenderer = Rc::new(move |line| {
                     drawn.borrow_mut().push(line);
                     div().w(px(20.)).h(px(10.)).into_any_element()
-                }));
-                state.set_editor_style(style);
+                });
+                state.set_fold_placeholder_renderer(Some(renderer), cx);
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 3)], cx);
             });
             window.draw(cx).clear(cx);

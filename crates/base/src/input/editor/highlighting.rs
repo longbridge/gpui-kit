@@ -119,12 +119,7 @@ pub struct InputEditorStyle {
     pub editor_invisible: Option<Hsla>,
     pub editor_active_line: Option<Hsla>,
     pub editor_gutter_background: Option<Hsla>,
-    /// Fills each folded line across the editor, as VS Code's `editor.foldBackground`.
-    pub editor_fold_background: Option<Hsla>,
     pub fold_icon_renderer: Option<FoldIconRenderer>,
-    /// Draws a placeholder right after the text of each folded line, given its
-    /// buffer row. Clicking it unfolds the line.
-    pub fold_placeholder_renderer: Option<FoldPlaceholderRenderer>,
 }
 
 impl InputEditorStyle {
@@ -179,9 +174,7 @@ impl Default for InputEditorStyle {
             editor_invisible: None,
             editor_active_line: None,
             editor_gutter_background: None,
-            editor_fold_background: None,
             fold_icon_renderer: None,
-            fold_placeholder_renderer: None,
         }
     }
 }
