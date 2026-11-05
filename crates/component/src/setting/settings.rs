@@ -5,7 +5,7 @@ use crate::{
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
-    input::{Input, InputState},
+    input::{Escape, Input, InputState},
     resizable_panel,
     setting::SettingPage,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
@@ -171,6 +171,22 @@ impl Settings {
                 div()
                     .w_full()
                     .refine_style(&self.header_style)
+                    // The input passes on an Escape it has no use for. Clear a
+                    // non-empty query with it; otherwise let it reach an enclosing
+                    // dialog or window. On Android, Escape is the back button,
+                    // which never edits a field.
+                    .on_action({
+                        let search_input = search_input.clone();
+                        move |_: &Escape, window, cx| {
+                            if search_input.read(cx).value().is_empty()
+                                || cfg!(target_os = "android")
+                            {
+                                cx.propagate();
+                                return;
+                            }
+                            search_input.update(cx, |input, cx| input.clean(window, cx));
+                        }
+                    })
                     .child(Input::new(&search_input).prefix(IconName::Search)),
             )
             .child(
