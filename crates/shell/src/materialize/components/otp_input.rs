@@ -143,7 +143,7 @@ pub(in crate::materialize) fn otp_input(
     // `InteractiveElement` nor `StatefulInteractiveElement`, so a state style
     // here has nowhere to land. As with `Switch` and `Slider`, saying so beats
     // dropping it without a word.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on an OtpInput are ignored: it is not an interactive element, and \
              its cells are the shell's rather than the script's. Put a hover on the element \

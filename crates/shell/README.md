@@ -576,8 +576,8 @@ that.
 ## Host capabilities
 
 Present today: the element and style surface, state styles (`hover` / `active` /
-`focus`), `Button`, `Checkbox`, `Switch`, retained `InputState` with input
-events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
+`focus`, and `group_hover` under a `group`), `Button`, `Checkbox`, `Switch`,
+retained `InputState` with input events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
 timers, `fs` / `localStorage` / clipboard / `process` behind capabilities,
 capability-gated HTTP and text/binary WebSocket clients, native target-value
 transitions and springs, hot reload, `check`, and generated TypeScript

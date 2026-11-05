@@ -1853,6 +1853,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * and ignores this.
      */
     id<Self extends Element>(this: Self, name: string): Self;
+    /**
+     * Names this element as a group, so that `group_hover(name, declare)` on
+     * an element inside it styles that element while the pointer is over this
+     * one. GPUI `InteractiveElement::group`.
+     *
+     * The name need not be unique: a group hover follows the nearest ancestor
+     * with its name, so every row of a list can be `group("row")`.
+     */
+    group<Self extends Element>(this: Self, name: string): Self;
     /** Owns wheel and touch scrolling on both axes for overflowing children. */
     overflow_scroll<Self extends Element>(this: Self): Self;
     /** Owns horizontal wheel and touch scrolling for overflowing children. */
@@ -2028,6 +2037,21 @@ const ELEMENT_METHODS: &str = r#"    /**
     active<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element has focus. */
     focus<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
+    /**
+     * Styles applied while the pointer is over the nearest ancestor named
+     * `name` with `group(name)`, rather than over this element: an action
+     * that appears when its row is hovered. `declare` receives a detached
+     * element that collects the styles, exactly as `hover` does; its return
+     * value is ignored. GPUI `InteractiveElement::group_hover`.
+     *
+     * It is a style, not a handler, so a virtual list's item renderer may use
+     * it. With no ancestor of that name the styles never apply. A second call
+     * replaces the first. A group hover that changes the element's size or
+     * position needs a stable identity, `.id(...)`, because GPUI lays the
+     * element out from its own state; one that only paints, such as an
+     * opacity or a color, does not.
+     */
+    group_hover<Self extends Element>(this: Self, name: string, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Displays the tab at `index` in `group` when this element is clicked.
      *
@@ -4341,6 +4365,7 @@ mod tests {
         "tab_stop",
         "href",
         "id",
+        "group",
         "overflow_scroll",
         "overflow_x_scroll",
         "overflow_y_scroll",
@@ -4387,6 +4412,7 @@ mod tests {
         "hover",
         "active",
         "focus",
+        "group_hover",
     ];
 
     /// Every method name declared in the `Element` interface, in order.

@@ -790,6 +790,14 @@ pub enum SpecOp {
     /// into a detached node. Reusing the ordinary style methods there is what
     /// keeps state styling from needing a second value grammar.
     StateStyle(&'static str, SpecId),
+    /// The styles applied while the pointer is over the nearest ancestor that
+    /// declared the named group, recorded into a detached node as a
+    /// [`SpecOp::StateStyle`] is.
+    ///
+    /// Its own op for the reason [`SpecOp::ActionCallback`] is: the group name
+    /// is the script's, discovered at run time, and a `StateStyle` holds a
+    /// `&'static str`.
+    GroupHover(SharedString, SpecId),
     /// A named element slot: an element the component renders in a place of
     /// its own rather than among its children — a `Collapsible`'s content, a
     /// popover's trigger, a number input's buttons.
@@ -832,6 +840,9 @@ impl SpecOp {
             // The detached node these point at is part of the shape: a hover
             // style and the declarations inside it are one structure.
             SpecOp::StateStyle(name, id) => mix(mix(6, static_name(name)), u64::from(*id)),
+            // The group name is left out for the reason arguments are: a row
+            // whose group is keyed by its data is still the same shape.
+            SpecOp::GroupHover(_, id) => mix(10, u64::from(*id)),
             SpecOp::Slot(name, id) => mix(mix(7, static_name(name)), u64::from(*id)),
         }
     }
@@ -1253,7 +1264,9 @@ impl SpecArena {
             }
             for op in &mut node.ops {
                 match op {
-                    SpecOp::StateStyle(_, id) | SpecOp::Slot(_, id) => *id += base,
+                    SpecOp::StateStyle(_, id) | SpecOp::GroupHover(_, id) | SpecOp::Slot(_, id) => {
+                        *id += base
+                    }
                     SpecOp::NullaryStyle(_)
                     | SpecOp::ParamStyle(..)
                     | SpecOp::Method(..)
@@ -1489,23 +1502,12 @@ impl SpecArena {
                 SpecOp::ActionCallback(id, _) => out.push_str(&format!(" :on_action({id}, fn)")),
                 SpecOp::StateStyle(name, node) => {
                     out.push_str(&format!(" :{name}("));
-                    match self.node(*node) {
-                        Some(state) => {
-                            for op in state.ops() {
-                                match op {
-                                    SpecOp::NullaryStyle(index) => out.push_str(&format!(
-                                        ".{}",
-                                        crate::style::nullary_name(*index)
-                                    )),
-                                    SpecOp::ParamStyle(name, args) => {
-                                        out.push_str(&format!(".{name}{args:?}"))
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        None => out.push_str("?"),
-                    }
+                    self.write_state(*node, out);
+                    out.push(')');
+                }
+                SpecOp::GroupHover(group, node) => {
+                    out.push_str(&format!(" :group_hover[{group:?}]("));
+                    self.write_state(*node, out);
                     out.push(')');
                 }
                 // A slot holds a whole subtree, so it is written under the
@@ -1526,6 +1528,23 @@ impl SpecArena {
         }
         for child in node.children() {
             self.write_tree(*child, depth + 1, out);
+        }
+    }
+
+    /// The style calls a state style's detached node collected.
+    fn write_state(&self, node: SpecId, out: &mut String) {
+        let Some(state) = self.node(node) else {
+            out.push('?');
+            return;
+        };
+        for op in state.ops() {
+            match op {
+                SpecOp::NullaryStyle(index) => {
+                    out.push_str(&format!(".{}", crate::style::nullary_name(*index)))
+                }
+                SpecOp::ParamStyle(name, args) => out.push_str(&format!(".{name}{args:?}")),
+                _ => {}
+            }
         }
     }
 }

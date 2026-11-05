@@ -4060,6 +4060,234 @@ export default class Styled extends View {
     );
 }
 
+/// A group hover follows the pointer over the group, not over the element
+/// that declares it.
+///
+/// The spacer widens only while the row is hovered, which pushes the button
+/// along under a pointer that would otherwise miss it. A click landing on the
+/// button is therefore the group hover having been applied natively, between
+/// frames, with no script render in between. The spacer is named because GPUI
+/// resolves a group hover during layout from the element's own state; one that
+/// only paints, such as an opacity, needs no name. The second spacer names a
+/// group no ancestor declares: it renders, and nothing happens to it.
+#[gpui::test]
+fn group_hover_restyles_an_element_while_the_pointer_is_over_its_group(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { h_flex, v_flex, Button } from "gpui-base";
+
+export default class Row extends View {
+  init() { this.clicks = 0; this.renders = 0; }
+  render() {
+    this.renders += 1;
+    return v_flex()
+      .w(400)
+      .h(100)
+      .child(
+        h_flex()
+          .group("row")
+          .w(400)
+          .h(40)
+          .child(div().id("spacer").w(10).h(40).group_hover("row", (el) => el.w(200)))
+          .child(
+            Button.new("after")
+              .w(40)
+              .h(40)
+              .on_click((_event, cx) => { this.clicks += 1; cx.notify(); })
+              .child(`Clicks: ${this.clicks}`),
+          ),
+      )
+      .child(div().w(10).h(10).group_hover("nowhere", (el) => el.w(300)))
+      .child(`Renders: ${this.renders}`);
+  }
+}
+"#;
+    let view_type = runtime.load_source("group-hover.js", source).expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let object = runtime_for_view
+            .instantiate(&view_type, window, cx)
+            .expect("instantiate");
+        ScriptView::new(runtime_for_view, object)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let tree = |context: &mut VisualTestContext| {
+        let view = window.root(context).expect("view");
+        context.update(|_, cx| {
+            view.read(cx)
+                .snapshot()
+                .map(crate::RenderSnapshot::debug_tree)
+                .unwrap_or_default()
+        })
+    };
+
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let described = tree(&mut context);
+    assert!(
+        described.contains(r#":group[Str("row")]"#),
+        "the group has to survive into the description: {described}"
+    );
+    assert!(
+        described.contains(r#":group_hover["row"](.w"#),
+        "the group hover has to survive into the description: {described}"
+    );
+    assert!(
+        described.contains(r#":group_hover["nowhere"](.w"#),
+        "a group hover naming no group still renders: {described}"
+    );
+
+    assert!(
+        described.contains("Renders: 1"),
+        "one script render before the pointer arrives: {described}"
+    );
+
+    // Unhovered, the button spans 10..50, so x = 220 is empty row.
+    let over_the_widened_button = point(px(220.), px(20.));
+    context.simulate_mouse_move(over_the_widened_button, None, Modifiers::default());
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(
+        tree(&mut context).contains("Renders: 1"),
+        "the group hover must apply natively, without a script render"
+    );
+    context.simulate_click(over_the_widened_button, Modifiers::default());
+    context.run_until_parked();
+    assert!(
+        tree(&mut context).contains("Clicks: 1"),
+        "hovering the row must widen the spacer and move the button under the pointer"
+    );
+}
+
+/// A group and a group hover are styles, not handlers, so a virtual list's
+/// item renderer may declare them: that renderer runs during layout, where a
+/// handler would be refused, and it is where a list's rows are built.
+#[gpui::test]
+fn a_virtual_list_row_may_declare_a_group_and_a_group_hover(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { h_flex, v_flex, v_virtual_list, Button } from "gpui-base";
+export default class Rows extends View {
+  init() { this.errors = []; this.built = 0; }
+  render() {
+    return v_flex()
+      .w(300)
+      .h(120)
+      .child(
+        Button.new("refresh")
+          .h(40)
+          .on_click((_event, cx) => cx.notify())
+          .child(`Built: ${this.built}; Errors: ${this.errors.join(" | ") || "none"}`),
+      )
+      .child(v_virtual_list("rows", 3, 20, (index) => String(index), (range) => {
+        this.errors = [];
+        const rows = [];
+        for (let index = range.start; index < range.end; index++) {
+          try {
+            rows.push(
+              h_flex()
+                .group("row")
+                .h(20)
+                .child(String(index))
+                .child(div().w(10).h(10).opacity(0).group_hover("row", (el) => el.opacity(1))),
+            );
+            this.built += 1;
+          } catch (error) {
+            this.errors.push(String(error));
+          }
+        }
+        return rows;
+      }));
+  }
+}
+"#;
+    let view_type = runtime
+        .load_source("group-hover-rows.js", source)
+        .expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime_for_view
+            .instantiate_view(&view_type, window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("view")
+        .read_with(&context, |root, _| root.0.clone());
+    context.simulate_click(point(px(20.), px(20.)), Modifiers::default());
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    assert!(
+        tree.contains("Errors: none"),
+        "a row refused the group hover: {tree}"
+    );
+    assert!(
+        !tree.contains("Built: 0"),
+        "the renderer built no rows: {tree}"
+    );
+}
+
+/// A group name is all a group hover can match, so one that could never match
+/// is refused where it was written, and so is a call with the two arguments
+/// swapped or the function missing. Each would otherwise leave styles that
+/// never apply, with nothing on screen to say why.
+#[gpui::test]
+fn group_and_group_hover_refuse_a_name_they_could_never_match(cx: &mut TestAppContext) {
+    for (call, expected) in [
+        (
+            r#"div().group("")"#,
+            "group(name) expects a non-empty string",
+        ),
+        ("div().group(7)", "group(name) expects a non-empty string"),
+        (
+            r#"div().group_hover("", (el) => el.w(10))"#,
+            "expects the group's name first",
+        ),
+        (
+            "div().group_hover(7, (el) => el.w(10))",
+            "expects the group's name first",
+        ),
+        (
+            r#"div().group_hover((el) => el.w(10), "row")"#,
+            "expects the group's name first",
+        ),
+        (r#"div().group_hover("row")"#, "expects a function second"),
+    ] {
+        let source = format!(
+            r#"
+import {{ div, View }} from "gpui-kit";
+
+export default class Misused extends View {{
+  render() {{
+    return {call};
+  }}
+}}
+"#
+        );
+        let message = render_error(cx, "group-misuse.js", &source);
+        assert!(
+            message.contains(expected),
+            "`{call}` must fail naming what it wanted: {message}"
+        );
+    }
+}
+
 #[gpui::test]
 fn bg_takes_a_background_and_shadow_takes_css_records(cx: &mut TestAppContext) {
     cx.update(|cx| crate::init(cx));

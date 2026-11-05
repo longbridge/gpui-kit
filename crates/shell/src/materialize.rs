@@ -302,12 +302,29 @@ struct StateStyles {
     hover: Option<StyleRefinement>,
     active: Option<StyleRefinement>,
     focus: Option<StyleRefinement>,
+    /// The name `group(name)` gave this element, which a `group_hover` on an
+    /// element inside it matches. Kept with the state styles rather than the
+    /// behavior because it lands where they do: on the interactive element,
+    /// through [`with_hover`].
+    group: Option<SharedString>,
+    group_hover: Option<(SharedString, StyleRefinement)>,
 }
 
 impl StateStyles {
-    /// `active` and `focus` need a stable element identity; `hover` does not.
+    /// `active` and `focus` need a stable element identity; `hover` does not,
+    /// and neither does a group or a group hover.
     fn needs_identity(&self) -> bool {
         self.active.is_some() || self.focus.is_some()
+    }
+
+    /// Whether the script asked for anything here, for the components that
+    /// have no interactive element to put it on and say so.
+    fn is_empty(&self) -> bool {
+        self.hover.is_none()
+            && self.active.is_none()
+            && self.focus.is_none()
+            && self.group.is_none()
+            && self.group_hover.is_none()
     }
 }
 
@@ -1287,7 +1304,7 @@ fn materialize_component(
             // `Switch` itself is not interactive — `SwitchTrack` is — so a
             // state style on the switch root has nowhere to land. Saying so is
             // better than dropping it without a word.
-            if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+            if !states.is_empty() {
                 tracing::warn!(
                     "state styles on a Switch are ignored; style the row around it instead"
                 );
@@ -1609,14 +1626,28 @@ where
 /// has; `div()` becomes stateful lazily and Button already is, so the two arms
 /// differ. Components that are not interactive silently ignore state styles
 /// rather than failing the render — the script gets a `tracing` warning.
+///
+/// A group and a group hover land here too: GPUI keeps both on the same
+/// `Interactivity` a hover does and resolves them natively, so a pointer
+/// crossing a list of grouped rows runs no script either.
 fn with_hover<E: InteractiveElement>(element: E, states: &StateStyles) -> E {
-    match states.hover.clone() {
-        Some(hover) => element.hover(move |mut style| {
+    let mut element = element;
+    if let Some(hover) = states.hover.clone() {
+        element = element.hover(move |mut style| {
             style.refine(&hover);
             style
-        }),
-        None => element,
+        });
     }
+    if let Some(group) = states.group.clone() {
+        element = element.group(group);
+    }
+    if let Some((group, hover)) = states.group_hover.clone() {
+        element = element.group_hover(group, move |mut style| {
+            style.refine(&hover);
+            style
+        });
+    }
+    element
 }
 
 fn with_active_and_focus<E: StatefulInteractiveElement>(element: E, states: &StateStyles) -> E {
@@ -2326,7 +2357,7 @@ pub(in crate::materialize) fn resolve_slot(
         window,
         cx,
     );
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {part} are ignored: it is rebuilt from its description as a \
              value, so there is no interactive element here for a hover or a press to land \
@@ -2545,6 +2576,14 @@ pub(in crate::materialize) fn resolve_ops(
                     );
                 }
             }
+            // A group is applied with the state styles, which is where the
+            // group hovers that match it are, rather than with the behavior.
+            SpecOp::Method("group", args) => {
+                states.group = args
+                    .first()
+                    .and_then(|value| value.as_str().ok())
+                    .map(SharedString::from);
+            }
             SpecOp::Method(name, args) => {
                 if !matches!(
                     *name,
@@ -2578,6 +2617,11 @@ pub(in crate::materialize) fn resolve_ops(
                     "caret_style" => behavior.caret_style = Some(resolved),
                     other => tracing::error!("unhandled state style `{other}`"),
                 }
+            }
+            // GPUI holds one group hover per element, so a second call replaces
+            // the first, as a second `hover` does.
+            SpecOp::GroupHover(group, node) => {
+                states.group_hover = Some((group.clone(), resolve_state(arena, *node)));
             }
             SpecOp::Callback(name, id) => match *name {
                 "on_click" => behavior.on_click = Some(*id),
@@ -2905,7 +2949,7 @@ fn warn_without_surface(
              you gave to `trigger`, or the one you gave to `content`"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {component} are ignored; put them on the element you gave to \
              `trigger`"

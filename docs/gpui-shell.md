@@ -1142,9 +1142,9 @@ not the interactive element (`SwitchTrack` is) and the style has nowhere to land
 
 #### State styles resolve natively
 
-`.hover(...)`, `.active(...)` and `.focus(...)` record their declarations into a
-detached node while the script runs, and materialization turns them into
-`StyleRefinement`s that GPUI applies itself. A pointer moving across the
+`.hover(...)`, `.active(...)`, `.focus(...)` and `.group_hover(name, ...)` record
+their declarations into a detached node while the script runs, and
+materialization turns them into `StyleRefinement`s that GPUI applies itself. A pointer moving across the
 interface executes no script at all. The same rule is what any future animation
 API has to follow: the script creates a native animation once, and receives at
 most a completion callback — never a per-frame one.
