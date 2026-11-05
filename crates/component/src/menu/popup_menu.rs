@@ -433,7 +433,7 @@ impl PopupMenu {
         }
     }
 
-    /// Set min width of the popup menu, default is 120px
+    /// Set min width of the popup menu, default is 8rem
     pub fn min_w(mut self, width: impl Into<Pixels>) -> Self {
         self.min_width = Some(width.into());
         self
@@ -446,7 +446,8 @@ impl PopupMenu {
         self
     }
 
-    /// Set max height of the popup menu, default is half of the window height
+    /// Set max height of the popup menu, default is half of the window height,
+    /// at most 28.125rem (450px at the default 16px rem)
     pub fn max_h(mut self, height: impl Into<Pixels>) -> Self {
         self.max_height = Some(height.into());
         self
@@ -1225,12 +1226,6 @@ impl PopupMenu {
         Some(icon.xsmall())
     }
 
-    #[inline]
-    fn max_width(&self, window: &Window) -> Pixels {
-        self.max_width
-            .unwrap_or_else(|| rems(31.25).to_pixels(window.rem_size()))
-    }
-
     /// Calculate the anchor corner and left offset for child submenu
     fn update_submenu_menu_anchor(&mut self, window: &Window, cx: &App) {
         let bounds = self.bounds;
@@ -1245,10 +1240,14 @@ impl PopupMenu {
             })
             .filter(|width| *width > Pixels::ZERO)
             .unwrap_or(bounds.size.width);
+        let rem_size = window.rem_size();
         let (anchor, left) = if bounds.right() + submenu_width > window.viewport_size().width {
-            (Anchor::TopRight, -px(16.))
+            (Anchor::TopRight, -rems(1.).to_pixels(rem_size))
         } else {
-            (Anchor::TopLeft, bounds.size.width - px(8.))
+            (
+                Anchor::TopLeft,
+                bounds.size.width - rems(0.5).to_pixels(rem_size),
+            )
         };
 
         let is_bottom_pos = bounds.origin.y + bounds.size.height > window.bounds().size.height;
@@ -1277,8 +1276,6 @@ impl PopupMenu {
 
         let selected = self.selected_index == Some(ix);
         const EDGE_PADDING: Pixels = px(4.);
-        // In rems, so an item grows and shrinks with its text when the window's
-        // rem size changes; 8, 20 and 26 px at the default 16 px rem.
         const INNER_PADDING: Rems = rems(0.5);
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
@@ -1532,7 +1529,7 @@ impl Render for PopupMenu {
 
         let max_height = self.max_height.unwrap_or_else(|| {
             let window_half_height = window.window_bounds().get_bounds().size.height * 0.5;
-            window_half_height.min(px(450.))
+            window_half_height.min(rems(28.125).to_pixels(window.rem_size()))
         });
 
         let has_left_icon = self
@@ -1540,7 +1537,6 @@ impl Render for PopupMenu {
             .iter()
             .any(|item| item.has_left_icon(self.check_side));
 
-        let max_width = self.max_width(window);
         let options = RenderOptions {
             has_left_icon,
             check_side: self.check_side,
@@ -1571,7 +1567,10 @@ impl Render for PopupMenu {
                     .gap_y_0p5()
                     .min_w(rems(8.))
                     .when_some(self.min_width, |this, min_width| this.min_w(min_width))
-                    .max_w(max_width)
+                    .map(|this| match self.max_width {
+                        Some(max_width) => this.max_w(max_width),
+                        None => this.max_w(rems(31.25)),
+                    })
                     .when(self.scrollable, |this| {
                         this.max_h(max_height)
                             .overflow_y_scroll()
