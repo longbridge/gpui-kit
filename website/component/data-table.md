@@ -699,12 +699,12 @@ impl TableDelegate for MyTableDelegate {
 - `PageUp/PageDown` - Navigate by page
 - `Escape` - Clear selection
 
+Tab and Shift+Tab move focus out of the table in both modes: the table is one tab stop.
+
 ### Cell Selection Mode
 
 - `↑/↓` - Navigate up/down within current column
 - `←/→` - Navigate left/right within current row
-- `Tab` - Move to next cell (right, then next row)
-- `Shift+Tab` - Move to previous cell
 - `Home` - Jump to first cell in current row
 - `End` - Jump to last cell in current row
 - `PageUp/PageDown` - Navigate by page within current column

@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use gpui_kit::component::{
     IndexPath,
+    button::Button,
     list::{List, ListDelegate, ListItem, ListState},
     table::{Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableSelection, TableState},
     tree::{Tree, TreeItem, TreeState},
@@ -281,6 +282,78 @@ fn a_focused_table_is_its_named_grid(cx: &mut TestAppContext) {
         assert_eq!(window.find("table-inner").role(), None);
     })
     .unwrap();
+}
+
+struct TableBetweenButtons {
+    table: Entity<TableState<Rows>>,
+}
+impl Render for TableBetweenButtons {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(Button::new("before").label("Before"))
+            .child(div().h(px(200.)).child(DataTable::new(&self.table)))
+            .child(Button::new("after").label("After"))
+    }
+}
+
+/// The table is one tab stop: Tab and Shift+Tab leave it, and the arrow keys
+/// keep moving inside it, in both row and cell selection.
+#[gpui_kit::test]
+fn tab_moves_focus_through_a_table_as_one_stop(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    for cell_selectable in [false, true] {
+        let (handle, content) =
+            common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+                cx.new(|cx| TableBetweenButtons {
+                    table: cx.new(|cx| {
+                        TableState::new(Rows, window, cx).cell_selectable(cell_selectable)
+                    }),
+                })
+            });
+        let table = cx
+            .update_window(handle.into(), |_, _, cx| content.read(cx).table.clone())
+            .unwrap();
+        let press_and_expect =
+            |key: &'static str, expected: &'static str, cx: &mut TestAppContext| {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.press(key, cx);
+                    window.render_frame(cx);
+                    assert_eq!(
+                        window.find(expected).focused(),
+                        Some(true),
+                        "{key} should focus {expected} (cell_selectable: {cell_selectable})",
+                    );
+                })
+                .unwrap();
+                cx.run_until_parked();
+            };
+
+        cx.update_window(handle.into(), |_, window, cx| {
+            let focus = table.focus_handle(cx);
+            window.focus(&focus, cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        press_and_expect("shift-tab", "before", cx);
+        press_and_expect("tab", "table", cx);
+        press_and_expect("right", "table", cx);
+        let selection = cx
+            .update_window(handle.into(), |_, _, cx| {
+                let table = table.read(cx);
+                (table.selected_cell(), table.selected_col())
+            })
+            .unwrap();
+        if cell_selectable {
+            assert_eq!(selection.0, Some((0, 0)));
+        } else {
+            assert_eq!(selection.1, Some(1));
+        }
+        press_and_expect("tab", "after", cx);
+        press_and_expect("shift-tab", "table", cx);
+    }
 }
 
 struct NamedRecords {

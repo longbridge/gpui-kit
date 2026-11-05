@@ -25,8 +25,6 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("end", SelectLast, Some(CONTEXT)),
         KeyBinding::new("pageup", SelectPageUp, Some(CONTEXT)),
         KeyBinding::new("pagedown", SelectPageDown, Some(CONTEXT)),
-        KeyBinding::new("tab", SelectNextColumn, Some(CONTEXT)),
-        KeyBinding::new("shift-tab", SelectPrevColumn, Some(CONTEXT)),
     ]);
 }
 

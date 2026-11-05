@@ -422,12 +422,12 @@ DataTable::new(&state)
 - `PageUp/PageDown` 按页移动
 - `Escape` 清除选中
 
+两种模式下，Tab 和 Shift+Tab 都会把焦点移出表格：整个表格只占一个 Tab 停靠点。
+
 ### 单元格选择模式
 
 - `↑/↓` 在当前列中上下移动
 - `←/→` 在当前行中左右移动
-- `Tab` 移动到下一个单元格
-- `Shift+Tab` 移动到上一个单元格
 - `Escape` 清除选中
 
 ## API 参考
