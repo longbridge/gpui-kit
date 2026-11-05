@@ -2768,6 +2768,8 @@ const BASE: &str = r#"  /** A row. */
    * collapsing each broken run into an ellipsis. `visible_pages` defaults to
    * seven and is clamped to a minimum of five; a total of one page or fewer
    * answers an empty list, because a control for a single page is not one.
+   * Throws for a page number above 4294967295 or `visible_pages` above
+   * 1000000.
    *
    * An ellipsis names the pages it stands for, inclusive on both ends, so it
    * can be a "jump to" control rather than inert text.
@@ -3778,7 +3780,10 @@ const FPS: &str = r#"  /**
   export interface FpsMonitorOptions {
     /** Corner or edge of the window. Default `top_right`. */
     anchor?: Anchor;
-    /** Frame budget in milliseconds, for the FRAME grading and the chart's scale. */
+    /**
+     * Frame budget in milliseconds, for the FRAME grading and the chart's
+     * scale. Positive, and no longer than a `Duration` holds.
+     */
     frame_budget?: number;
   }
 

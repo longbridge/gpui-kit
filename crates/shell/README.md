@@ -364,7 +364,8 @@ is a small browser built on it.
 position and tail following; `MessageScroller` places it and asks the script
 for each visible row by index. A transcript changes while it is on screen, so
 the state is edited in place rather than recreated, which would drop the
-reader's position.
+reader's position. A state holds at most 1,000,000 rows; a count or an edit
+that would exceed it throws.
 
 ```js
 import { MessageScroller, MessageScrollerState } from "gpui-component";
