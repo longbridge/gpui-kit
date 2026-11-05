@@ -438,6 +438,16 @@ render(cx) {
 
 [示例应用](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist)就是这样写的：`ui.js` 把 `button`、`label`、`icon`、`checkbox` 等导出为函数，`main.js` 调用它们。读起来像一个组件库，而且不花什么代价——一次函数调用就是一段新描述的来源。
 
+## 嵌套有上限
+
+一份描述最多嵌套 **64 层**。子元素、`content` 这类已填入的 slot、组件以 element 参数接收的元素，都算一层。会嵌套得更深的那次调用直接抛错，并且不记录任何改动：
+
+```text
+this element would nest the description more than 64 levels deep; elements, filled slots and component element arguments may nest at most 64 levels
+```
+
+绘制描述时，原生代码会逐层遍历它。没有这个上限，脚本可以搭出一条足以撑爆原生栈的链，那会直接结束进程，而不是抛出异常。真实布局远到不了 64 层。元素也不能被放进它自己里面，无论直接放还是经由 slot：这同样会抛错。
+
 ## 回调属于它所在的那次渲染
 
 传给 `.on_click` 的处理函数属于那次渲染产出的那份描述——而不是属于某一帧。那份描述会[被之后的每一帧复用，直到有东西让它失效](./state.md#render-什么时候执行)，处理函数在这期间一直可调用。描述里只记录一个 id；Rust 装配的闭包持有对运行时的弱引用加上这个 id。

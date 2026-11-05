@@ -421,7 +421,9 @@ script cost follows what your application does rather than the frame rate.
 
 Elements are single-use values. Build them in `render` and never store one on
 the instance — a stored element belongs to a render that has already ended, and
-reusing it throws rather than drawing something unexpected.
+reusing it throws rather than drawing something unexpected. A description
+nests at most 64 levels, counting children, filled slots and component element
+arguments; the call that would go deeper throws.
 
 ## Capabilities and Asynchronous I/O
 

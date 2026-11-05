@@ -438,6 +438,16 @@ render(cx) {
 
 That is how the [example application](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist) is written: `ui.js` exports `button`, `label`, `icon`, `checkbox` and the rest as functions, and `main.js` calls them. It reads like a component library and costs nothing, because a function call is where a fresh description comes from.
 
+## Nesting is bounded
+
+A description nests at most **64 levels**, counting children, filled slots such as `content`, and the elements a component takes as arguments. The call that would go deeper throws, and records nothing:
+
+```text
+this element would nest the description more than 64 levels deep; elements, filled slots and component element arguments may nest at most 64 levels
+```
+
+Drawing a description walks it level by level in native code, so without the bound a script could build a chain deep enough to overflow the native stack, which ends the process rather than throwing. Real layouts stay far below 64. An element still cannot be placed inside itself, directly or through a slot: that throws too.
+
 ## Callbacks belong to their render
 
 A handler passed to `.on_click` belongs to the description that render produced — not to a frame. That description is [replayed by every frame until something invalidates it](./state.md#when-render-runs), and the handler stays callable for all of them. The description records only an id; the closure Rust assembles holds a weak reference to the runtime plus that id.
