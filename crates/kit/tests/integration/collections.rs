@@ -334,6 +334,9 @@ fn tab_moves_focus_through_a_table_as_one_stop(cx: &mut TestAppContext) {
         cx.update_window(handle.into(), |_, window, cx| {
             let focus = table.focus_handle(cx);
             window.focus(&focus, cx);
+            if cell_selectable {
+                table.update(cx, |table, cx| table.set_selected_cell(0, 0, cx));
+            }
             window.render_frame(cx);
         })
         .unwrap();
@@ -347,7 +350,7 @@ fn tab_moves_focus_through_a_table_as_one_stop(cx: &mut TestAppContext) {
             })
             .unwrap();
         if cell_selectable {
-            assert_eq!(selection.0, Some((0, 0)));
+            assert_eq!(selection.0, Some((0, 1)));
         } else {
             assert_eq!(selection.1, Some(1));
         }
