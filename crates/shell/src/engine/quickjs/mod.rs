@@ -5311,11 +5311,8 @@ impl ShellRuntime {
             }
         };
 
-        self.arena
-            .borrow_mut()
-            .claim(element)
-            .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
-        self.push_op_checked(ctx, self.push_op(id, SpecOp::Slot(interned, element)))
+        let filled = self.arena.borrow_mut().fill_slot(id, interned, element);
+        self.push_op_checked(ctx, filled)
     }
 
     fn push_node(&self, component: Component) -> SpecId {
@@ -7960,8 +7957,9 @@ impl ShellRuntime {
                                     deprecation.message(),
                                 );
                             }
-                            let payload = runtime.component_payload_transaction(
+                            let (payload, elements) = runtime.component_payload_transaction(
                                 &ctx,
+                                None,
                                 constructor.export(),
                                 &constructor.arguments(),
                                 &arguments,
@@ -7972,7 +7970,9 @@ impl ShellRuntime {
                                 component_name,
                                 payload,
                             );
-                            Ok(runtime.push_node(Component::Registered(component)))
+                            let node = runtime.push_node(Component::Registered(component));
+                            runtime.arena.borrow_mut().hold(node, &elements);
+                            Ok(node)
                         }),
                     )?;
                 }
@@ -8114,6 +8114,7 @@ impl ShellRuntime {
             let mut callback = None;
             self.component_payload_transaction(
                 ctx,
+                Some(id),
                 descriptor.name(),
                 descriptor.arguments(),
                 &args,
@@ -8144,8 +8145,9 @@ impl ShellRuntime {
                 .borrow()
                 .check_live(id)
                 .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
-            let payload = self.component_payload_transaction(
+            let (payload, _) = self.component_payload_transaction(
                 ctx,
+                Some(id),
                 descriptor.name(),
                 descriptor.arguments(),
                 &args,
@@ -8767,14 +8769,18 @@ impl ShellRuntime {
             .collect()
     }
 
+    /// Validates and records one registered component call, claiming the
+    /// elements among its arguments for `holder`. `None` is a constructor's
+    /// node, not pushed yet: the caller holds the returned elements under it.
     fn component_payload_transaction(
         &self,
         ctx: &Ctx<'_>,
+        holder: Option<SpecId>,
         api: &str,
         descriptors: &[ArgumentDescriptor],
         arguments: &Arguments,
         factory: impl FnOnce(&[ComponentArgument]) -> Result<ComponentPayload, String>,
-    ) -> JsResult<ComponentPayload> {
+    ) -> JsResult<(ComponentPayload, Vec<SpecId>)> {
         self.flush_component_state_releases();
         let callback_checkpoint = self.callbacks.borrow().checkpoint();
         let result = (|| {
@@ -8794,14 +8800,21 @@ impl ShellRuntime {
                     &format!("{api}(...) cannot consume element {duplicate} twice"),
                 ));
             }
+            self.arena
+                .borrow()
+                .check_hold(holder, &element_ids)
+                .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
             let payload = factory(&arguments).map_err(|error| js_error::type_error(ctx, &error))?;
-            for element in element_ids {
+            for element in &element_ids {
                 self.arena
                     .borrow_mut()
-                    .claim(element)
+                    .claim(*element)
                     .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
             }
-            Ok(payload)
+            if let Some(holder) = holder {
+                self.arena.borrow_mut().hold(holder, &element_ids);
+            }
+            Ok((payload, element_ids))
         })();
         if result.is_err() {
             self.callbacks.borrow_mut().rollback_to(callback_checkpoint);

@@ -24,6 +24,21 @@ use crate::value::Bridged;
 /// Index of a node inside a [`SpecArena`].
 pub type SpecId = u32;
 
+/// The most levels one description may nest, counting children, filled slots
+/// and registered components' element arguments.
+///
+/// Every walk over a description — materialization, GPUI's layout and
+/// prepaint, the element tree's drop, [`SpecArena::debug_tree`] — recurses once
+/// per level, and one described node can become several GPUI elements. A
+/// script builds a chain one call at a time, so the interpreter's own stack
+/// limit never sees it; the bound has to be enforced while recording.
+///
+/// Sized so an unoptimized build draws the costliest chain measured, nested
+/// `Checkbox`es, at this depth on a 2 MiB test thread with room to spare.
+pub(crate) const MAX_DESCRIPTION_DEPTH: u8 = 64;
+
+const NO_HOLDER: SpecId = SpecId::MAX;
+
 /// A hash of a description's *shape*, with the values left out of it.
 ///
 /// Two renders of one view that differ only in a price, a label or a handler's
@@ -1098,6 +1113,14 @@ pub struct SpecArena {
     /// declarations, or the element filling a named slot. They still take ops,
     /// but they can never enter the tree.
     claimed: Vec<bool>,
+    /// The node each one is rendered under: the parent it was attached to, the
+    /// node whose slot it fills, or the registered component that took it as
+    /// an element argument. [`NO_HOLDER`] for a root.
+    holders: Vec<SpecId>,
+    /// The levels each node spans, itself included, kept current as edges are
+    /// added so the depth bound costs no walk at render time. A claimed node
+    /// can still grow after it is held, so a raise climbs through its holders.
+    heights: Vec<u8>,
     /// Retained view handles already described in this snapshot. GPUI cannot
     /// mount one entity at two positions in the same tree.
     mounted_views: HashSet<crate::entities::EntityHandle>,
@@ -1116,6 +1139,8 @@ impl SpecArena {
         self.nodes.clear();
         self.parented.clear();
         self.claimed.clear();
+        self.holders.clear();
+        self.heights.clear();
         self.mounted_views.clear();
         self.virtual_items = 0;
         self.structure = 0;
@@ -1157,6 +1182,8 @@ impl SpecArena {
         });
         self.parented.push(false);
         self.claimed.push(false);
+        self.holders.push(NO_HOLDER);
+        self.heights.push(1);
         (self.nodes.len() - 1) as SpecId
     }
 
@@ -1192,11 +1219,109 @@ impl SpecArena {
 
     pub fn push_op(&mut self, id: SpecId, op: SpecOp) -> Result<(), SpecError> {
         self.check_live(id)?;
-        // After the check, not before: a rejected call records nothing, so it
+        let held = match op {
+            SpecOp::Slot(_, element) => {
+                self.check_live(element)?;
+                if self.holders[element as usize] != NO_HOLDER {
+                    return Err(SpecError::Claimed);
+                }
+                Some(element)
+            }
+            _ => None,
+        };
+        if let Some(element) = held {
+            self.check_hold(Some(id), &[element])?;
+        }
+        // After the checks, not before: a rejected call records nothing, so it
         // must not move the shape either.
         self.structure = mix(self.structure, op.shape());
         self.nodes[id as usize].ops.push(op);
+        if let Some(element) = held {
+            self.hold(id, &[element]);
+        }
         Ok(())
+    }
+
+    /// Fills a named slot of `holder` with `element`, consuming the element.
+    ///
+    /// Claims only once the slot is recorded, so a refused call leaves the
+    /// element usable.
+    pub(crate) fn fill_slot(
+        &mut self,
+        holder: SpecId,
+        name: &'static str,
+        element: SpecId,
+    ) -> Result<(), SpecError> {
+        self.ensure_claimable(element)?;
+        self.push_op(holder, SpecOp::Slot(name, element))?;
+        self.claim(element)
+    }
+
+    /// Whether `holder` can take `elements` without nesting the description
+    /// past [`MAX_DESCRIPTION_DEPTH`] or inside itself. `None` stands for a node
+    /// about to be pushed, which nothing holds yet.
+    ///
+    /// Every element must be unheld. The raise climbs only while it changes a
+    /// height, so it takes at most `MAX_DESCRIPTION_DEPTH + 1` steps.
+    pub(crate) fn check_hold(
+        &self,
+        holder: Option<SpecId>,
+        elements: &[SpecId],
+    ) -> Result<(), SpecError> {
+        let mut height = elements
+            .iter()
+            .map(|element| u32::from(self.heights[*element as usize]) + 1)
+            .max()
+            .unwrap_or(0);
+        if height > u32::from(MAX_DESCRIPTION_DEPTH) {
+            return Err(SpecError::TooDeep);
+        }
+        let Some(mut node) = holder else {
+            return Ok(());
+        };
+        loop {
+            if height <= u32::from(self.heights[node as usize]) {
+                // An element that encloses `holder` is a root above it with a
+                // greater height, so the raise always reaches it; stopping
+                // here means none does.
+                return Ok(());
+            }
+            if height > u32::from(MAX_DESCRIPTION_DEPTH) {
+                return Err(SpecError::TooDeep);
+            }
+            match self.holders[node as usize] {
+                NO_HOLDER => break,
+                next => {
+                    node = next;
+                    height += 1;
+                }
+            }
+        }
+        if elements.contains(&node) {
+            return Err(SpecError::Cycle);
+        }
+        Ok(())
+    }
+
+    /// Records `holder` as where `elements` render and raises the heights
+    /// above them. Only after [`Self::check_hold`] accepted the same call.
+    pub(crate) fn hold(&mut self, holder: SpecId, elements: &[SpecId]) {
+        let mut height = 0;
+        for element in elements {
+            self.holders[*element as usize] = holder;
+            height = height.max(self.heights[*element as usize] + 1);
+        }
+        let mut node = holder;
+        while height > self.heights[node as usize] {
+            self.heights[node as usize] = height;
+            match self.holders[node as usize] {
+                NO_HOLDER => break,
+                next => {
+                    node = next;
+                    height += 1;
+                }
+            }
+        }
     }
 
     /// Attaches `child` to `parent`, consuming the child.
@@ -1227,6 +1352,7 @@ impl SpecArena {
         if parent == child {
             return Err(SpecError::SelfParent);
         }
+        self.check_hold(Some(parent), &[child])?;
         // The tree is the half of the shape the nodes themselves do not carry:
         // the same components in a different arrangement are a different
         // structure, and a template could not fill one from the other.
@@ -1236,6 +1362,7 @@ impl SpecArena {
         );
         self.parented[child as usize] = true;
         self.nodes[parent as usize].children.push(child);
+        self.hold(parent, &[child]);
         Ok(())
     }
 
@@ -1279,10 +1406,17 @@ impl SpecArena {
         }
         self.parented.extend_from_slice(&source.parented);
         self.claimed.extend_from_slice(&source.claimed);
+        self.holders
+            .extend(source.holders.iter().map(|holder| match *holder {
+                NO_HOLDER => NO_HOLDER,
+                holder => holder + base,
+            }));
+        self.heights.extend_from_slice(&source.heights);
 
         // The root arrives with no parent so the caller can attach it, whatever
         // it was in the template.
         self.parented[(template.root + base) as usize] = false;
+        self.holders[(template.root + base) as usize] = NO_HOLDER;
 
         // One mix for the whole graft rather than one per node: the template's
         // own fingerprint already summarizes everything inside it, and a
@@ -1563,6 +1697,10 @@ pub enum SpecError {
     SelfParent,
     /// One retained entity was described at two positions in one snapshot.
     DuplicateChildView,
+    /// The element would nest the description past [`MAX_DESCRIPTION_DEPTH`].
+    TooDeep,
+    /// The element already encloses the node it was given to.
+    Cycle,
 }
 
 impl std::fmt::Display for SpecError {
@@ -1585,6 +1723,15 @@ impl std::fmt::Display for SpecError {
             SpecError::DuplicateChildView => f.write_str(
                 "a child view handle can be mounted only once in one snapshot; create a second \
                  Entity for a second position",
+            ),
+            SpecError::TooDeep => write!(
+                f,
+                "this element would nest the description more than {MAX_DESCRIPTION_DEPTH} \
+                 levels deep; elements, filled slots and component element arguments may nest \
+                 at most {MAX_DESCRIPTION_DEPTH} levels"
+            ),
+            SpecError::Cycle => f.write_str(
+                "an element cannot be placed inside itself or inside an element it contains",
             ),
         }
     }
@@ -1653,6 +1800,101 @@ mod tests {
             arena.push_op(node, SpecOp::NullaryStyle(0)).unwrap_err(),
             SpecError::Expired
         );
+    }
+
+    /// A chain `levels` deep, built from the bottom up; answers its root.
+    fn chain(arena: &mut SpecArena, levels: u8) -> SpecId {
+        let mut node = arena.push(Component::Div);
+        for _ in 1..levels {
+            let parent = arena.push(Component::Div);
+            arena.attach(parent, node).unwrap();
+            node = parent;
+        }
+        node
+    }
+
+    #[test]
+    fn a_refused_slot_leaves_both_nodes_untouched() {
+        let mut arena = SpecArena::new();
+        let deep = chain(&mut arena, MAX_DESCRIPTION_DEPTH);
+        let holder = arena.push(Component::Collapsible);
+
+        assert_eq!(
+            arena.fill_slot(holder, "content", deep).unwrap_err(),
+            SpecError::TooDeep
+        );
+        assert!(arena.node(holder).unwrap().ops().is_empty());
+        assert_eq!(arena.heights[holder as usize], 1);
+        assert_eq!(arena.holders[deep as usize], NO_HOLDER);
+        assert!(arena.ensure_claimable(deep).is_ok());
+    }
+
+    #[test]
+    fn a_refused_raise_below_a_slot_changes_no_height_above_it() {
+        let mut arena = SpecArena::new();
+        let root = arena.push(Component::Collapsible);
+        let mut tip = root;
+        for _ in 1..MAX_DESCRIPTION_DEPTH {
+            let next = arena.push(Component::Collapsible);
+            arena.fill_slot(tip, "content", next).unwrap();
+            tip = next;
+        }
+        let leaf = arena.push(Component::Div);
+        let heights = arena.heights.clone();
+
+        assert_eq!(arena.attach(tip, leaf).unwrap_err(), SpecError::TooDeep);
+        assert_eq!(arena.heights, heights);
+        assert_eq!(arena.heights[root as usize], MAX_DESCRIPTION_DEPTH);
+    }
+
+    #[test]
+    fn a_raise_stops_where_a_height_does_not_change() {
+        let mut arena = SpecArena::new();
+        let root = arena.push(Component::Div);
+        let tall = chain(&mut arena, 4);
+        arena.attach(root, tall).unwrap();
+        // Held through a slot so it can still grow after it is placed.
+        let short = arena.push(Component::Collapsible);
+        arena.fill_slot(root, "content", short).unwrap();
+
+        let content = arena.push(Component::Div);
+        arena.fill_slot(short, "content", content).unwrap();
+
+        assert_eq!(arena.heights[short as usize], 2);
+        assert_eq!(arena.heights[root as usize], 5);
+    }
+
+    #[test]
+    fn a_node_cannot_hold_an_element_that_encloses_it() {
+        let mut arena = SpecArena::new();
+        let outer = arena.push(Component::Collapsible);
+        let inner = arena.push(Component::Div);
+        arena.fill_slot(outer, "content", inner).unwrap();
+
+        assert_eq!(arena.attach(inner, outer).unwrap_err(), SpecError::Cycle);
+        assert_eq!(
+            arena.fill_slot(outer, "content", outer).unwrap_err(),
+            SpecError::Cycle
+        );
+    }
+
+    #[test]
+    fn a_graft_carries_heights_and_frees_its_root() {
+        let mut source = SpecArena::new();
+        let root = chain(&mut source, 3);
+        let template = Template::new(source, root, Vec::new(), 0, None);
+
+        let mut arena = SpecArena::new();
+        let before = arena.push(Component::Div);
+        let grafted = arena.graft(&template);
+
+        assert_eq!(arena.heights[grafted as usize], 3);
+        assert_eq!(arena.holders[grafted as usize], NO_HOLDER);
+        let child = arena.node(grafted).unwrap().children()[0];
+        assert_eq!(arena.holders[child as usize], grafted);
+
+        arena.attach(before, grafted).unwrap();
+        assert_eq!(arena.heights[before as usize], 4);
     }
 
     #[test]
