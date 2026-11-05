@@ -8412,6 +8412,139 @@ export default class Pager extends View {
     );
 }
 
+/// A page count is bounded before base builds one item per visible page, so a
+/// huge count is a script error rather than an allocation that aborts the host.
+#[gpui::test]
+fn pagination_items_refuse_counts_beyond_their_bounds(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import { pagination_items } from "gpui-base";
+
+const outcome = (call) => {
+  try {
+    return `${call().length} items`;
+  } catch (error) {
+    return String(error.message);
+  }
+};
+
+export default class Pager extends View {
+  render(_cx) {
+    return v_flex()
+      .child(div().child(`window=${outcome(() => pagination_items(1, 1e9, 1e17))}`))
+      .child(div().child(`total=${outcome(() => pagination_items(1, 1e17, 7))}`))
+      .child(div().child(`largest=${outcome(() => pagination_items(1, 4294967295, 7))}`));
+  }
+}
+"#;
+    let view_type = runtime
+        .load_source("pagination-bounds", source)
+        .expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let view = context
+        .update(|window, cx| runtime.instantiate_view(&view_type, window, cx))
+        .expect("instantiate");
+    draw(&mut context, &view);
+
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    assert!(
+        tree.contains("window=pagination_items(current_page, total_pages, visible_pages?) expects"),
+        "a visible-page count beyond the bound must be refused: {tree}"
+    );
+    assert!(
+        tree.contains("total=pagination_items(current_page, total_pages, visible_pages?) expects"),
+        "a page number beyond what a script receives must be refused: {tree}"
+    );
+    assert!(
+        tree.contains("largest=6 items"),
+        "the largest representable total still lays out: {tree}"
+    );
+}
+
+/// Every edit that changes a transcript's row count is bounded, because the
+/// virtual list keeps native state for each row.
+#[cfg(feature = "components")]
+#[gpui::test]
+fn message_scroller_state_refuses_row_counts_beyond_its_bound(cx: &mut TestAppContext) {
+    cx.update(crate::components::init);
+
+    let runtime = crate::components::new_isolated_runtime().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import { MessageScrollerState } from "gpui-component";
+
+const outcome = (call) => {
+  try {
+    call();
+    return "accepted";
+  } catch (error) {
+    return String(error.message);
+  }
+};
+
+export default class Transcript extends View {
+  init() {
+    this.outcomes = [
+      `new=${outcome(() => MessageScrollerState.new(1e17))}`,
+    ];
+    this.rows = MessageScrollerState.new(2);
+    this.outcomes.push(
+      `reset=${outcome(() => this.rows.reset(1e17))}`,
+      `append=${outcome(() => this.rows.append(1e17))}`,
+      `prepend=${outcome(() => this.rows.prepend(999999))}`,
+      `splice=${outcome(() => this.rows.splice({ start: 0, end: 1 }, 1e17))}`,
+      `fill=${outcome(() => this.rows.splice({ start: 0, end: 2 }, 1000000))}`,
+    );
+  }
+
+  render(_cx) {
+    return v_flex()
+      .children(this.outcomes.map((line) => div().child(line)))
+      .child(div().child(`count=${this.rows.item_count()}`));
+  }
+}
+"#;
+    let view_type = runtime
+        .load_source("message-scroller-bounds", source)
+        .expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let object = context
+        .update(|window, cx| runtime.instantiate(&view_type, window, cx))
+        .expect("instantiate");
+    let tree = context.update(|window, cx| {
+        runtime
+            .render_to_spec(&object, None, window, cx)
+            .expect("render")
+    });
+
+    assert!(
+        tree.contains("new=MessageScrollerState expects an integer item_count from 0 to 1000000"),
+        "{tree}"
+    );
+    for edit in ["reset", "append", "prepend", "splice"] {
+        assert!(
+            tree.contains(&format!("{edit}=MessageScrollerState.{edit} would leave")),
+            "{edit} beyond the bound must be refused: {tree}"
+        );
+    }
+    assert!(tree.contains("fill=accepted"), "{tree}");
+    assert!(tree.contains("count=1000000"), "{tree}");
+}
+
 /// An `Avatar` renders its image slot, and falls back to the other when there
 /// is none.
 ///

@@ -9626,6 +9626,8 @@ impl ContextBinding {
     }
 }
 
+const MAX_PAGINATION_PAGE: usize = u32::MAX as usize;
+
 /// `pagination_items(current, total, visible)`.
 ///
 /// A plain calculation rather than a component: what it answers is which page
@@ -9637,19 +9639,27 @@ fn pagination_items<'js>(
     total_pages: f64,
     visible_pages: f64,
 ) -> JsResult<Array<'js>> {
-    let clamp = |value: f64| -> JsResult<usize> {
-        if !value.is_finite() || value < 0.0 {
+    // Pages go back to the script as `u32`, and base builds one item per
+    // visible page, so `visible_pages` bounds the allocation.
+    let clamp = |value: f64, max: usize| -> JsResult<usize> {
+        if !value.is_finite() || value < 0.0 || value > max as f64 {
             return Err(js_error::type_error(
                 &ctx,
-                "pagination_items(current_page, total_pages, visible_pages?) expects \
-                 non-negative numbers",
+                &format!(
+                    "pagination_items(current_page, total_pages, visible_pages?) expects \
+                     non-negative page numbers up to {MAX_PAGINATION_PAGE} and at most \
+                     {MAX_VIRTUAL_ITEMS_PER_RENDER} visible pages"
+                ),
             ));
         }
         Ok(value as usize)
     };
-    let items = gpui_base::PaginationState::new(clamp(current_page)?, clamp(total_pages)?)
-        .visible_pages(clamp(visible_pages)?)
-        .items();
+    let items = gpui_base::PaginationState::new(
+        clamp(current_page, MAX_PAGINATION_PAGE)?,
+        clamp(total_pages, MAX_PAGINATION_PAGE)?,
+    )
+    .visible_pages(clamp(visible_pages, MAX_VIRTUAL_ITEMS_PER_RENDER)?)
+    .items();
 
     let out = Array::new(ctx.clone())?;
     for (index, item) in items.into_iter().enumerate() {
