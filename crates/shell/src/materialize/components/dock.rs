@@ -122,7 +122,13 @@ pub(in crate::materialize) fn dock_area(
     // failure with no visible cause on screen.
     let mut frame = div().size_full();
     frame.style().refine(&refinement);
-    frame.child(area).into_any_element()
+    frame
+        .child(crate::view::nesting_frame(
+            area.entity_id(),
+            crate::view::DOCK_AREA_LEVELS,
+            area.into_any_element(),
+        ))
+        .into_any_element()
 }
 
 /// Where the dock's own content goes inside the chrome drawn around it.

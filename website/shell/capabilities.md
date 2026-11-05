@@ -393,16 +393,17 @@ Beyond the capability grants, the runtime trims the language itself. All of it a
 
 **Resource limits**, so a runaway script reports rather than taking the window with it:
 
-| Limit                                                         | Value                                                                                                          |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Heap                                                          | 256 MiB — a leak becomes a catchable JavaScript exception, not an OOM kill                                     |
-| Interpreter stack                                             | 1 MiB — deep script recursion becomes a `RangeError`, not a native stack overflow                              |
-| Element nesting                                               | 64 levels — the call that would nest deeper throws, so a deep tree cannot overflow the native stack when drawn |
-| Loaded JavaScript module                                      | 8 MiB per source file                                                                                          |
-| Outstanding host tasks                                        | 1,024 per runtime                                                                                              |
-| Time in one call: render and layout                           | 50 ms                                                                                                          |
-| Time in one call: event and task                              | 500 ms                                                                                                         |
-| Time in one call: outside any call, such as module evaluation | 5 s                                                                                                            |
+| Limit                                                         | Value                                                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Heap                                                          | 256 MiB — a leak becomes a catchable JavaScript exception, not an OOM kill                                                            |
+| Interpreter stack                                             | 1 MiB — deep script recursion becomes a `RangeError`, not a native stack overflow                                                     |
+| Element nesting                                               | 64 levels — the call that would nest deeper throws, so a deep tree cannot overflow the native stack when drawn                        |
+| View nesting                                                  | 65 levels across Views mounted inside one another — a mount past it, or a View mounted inside itself, draws nothing and logs an error |
+| Loaded JavaScript module                                      | 8 MiB per source file                                                                                                                 |
+| Outstanding host tasks                                        | 1,024 per runtime                                                                                                                     |
+| Time in one call: render and layout                           | 50 ms                                                                                                                                 |
+| Time in one call: event and task                              | 500 ms                                                                                                                                |
+| Time in one call: outside any call, such as module evaluation | 5 s                                                                                                                                   |
 
 The clock restarts on every host call, which is what lets the render path have a tighter budget than an event handler. **The interrupt cannot be swallowed by a `catch` block** — that is measured by a test, because if it could be, the interrupt would not be a defence at all. Each WebSocket also has an 8-command queue shared by `read`, `write`, and `close`; when full, a new operation rejects and tells the caller to wait for outstanding work.
 

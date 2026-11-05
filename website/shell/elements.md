@@ -448,6 +448,8 @@ this element would nest the description more than 64 levels deep; elements, fill
 
 Drawing a description walks it level by level in native code, so without the bound a script could build a chain deep enough to overflow the native stack, which ends the process rather than throwing. Real layouts stay far below 64. An element still cannot be placed inside itself, directly or through a slot: that throws too.
 
+Views mounted inside one another share the same depth. Each View counts the levels of its own description plus one for itself, and the Views drawn one inside another may add up to at most **65** — what one View at the bound takes. A [dock area](./api.md#dock) counts four levels more. Nothing is thrown here, because the mounts are only resolved while the window is drawn: a View that would cross the bound draws nothing in that position, and so does a View mounted inside itself, directly or through other Views or a dock. Each logs an error; the rest of the window draws as usual. The same View under two parents that do not contain each other is not a recursion, and draws in both places.
+
 ## Callbacks belong to their render
 
 A handler passed to `.on_click` belongs to the description that render produced — not to a frame. That description is [replayed by every frame until something invalidates it](./state.md#when-render-runs), and the handler stays callable for all of them. The description records only an id; the closure Rust assembles holds a weak reference to the runtime plus that id.
