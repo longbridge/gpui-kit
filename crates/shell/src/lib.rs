@@ -107,7 +107,7 @@ pub(crate) mod watch;
 
 pub use anyhow;
 pub use assets::AppAssets;
-pub use capability::{Capabilities, ExecuteGrant, HttpRequestGrant};
+pub use capability::{Capabilities, ExecuteGrant, HttpRequestGrant, is_openable_url};
 pub use component::ComponentArgs;
 #[cfg(test)]
 pub(crate) use component_registry::ComponentState;
