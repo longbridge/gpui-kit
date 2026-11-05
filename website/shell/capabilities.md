@@ -350,7 +350,7 @@ Handlers run on the UI thread with an async `cx`, as a `cx.spawn` task's do, so 
 
 `spawn` takes the same grant as `run`, resolves the command on the host PATH the same way, and starts it with the same empty environment.
 
-It is gated on an execute grant, which is one of three: denied (the default), an allowlist of command names, or unrestricted. A denied command **throws at the call** rather than rejecting, like a denied `fs` path — a rejected promise nobody awaited is a denial nobody sees.
+It is gated on an execute grant, which is one of three: denied (the default), an allowlist of command names, or unrestricted. A manifest writes the allowlist as `"execute": ["git"]` and unrestricted as `"execute": "*"`; any other string, such as `"git"`, is refused when the manifest is read. A denied command **throws at the call** rather than rejecting, like a denied `fs` path — a rejected promise nobody awaited is a denial nobody sees.
 
 `process.exit` is **a request, never `exit(2)`** inside the runtime. It hands the code to a handler the host installed, which decides what to do — close the plugin's panel, close the window, end the process. One plugin must not be able to take the host process down, and the host may have unsaved state.
 

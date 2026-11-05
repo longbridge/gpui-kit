@@ -3183,7 +3183,9 @@ rest of the environment stays out of reach, because it routinely holds tokens
 and keys handed to the host rather than to every script it runs; `process.env`
 is always an object, so `process.env.X ?? fallback` works without a grant.
 
-`execute` is either an allowlist of command names or the string `"*"`.
+`execute` is either an allowlist of command names or the string `"*"`; any
+other string is a manifest error, since `"git"` would otherwise read as one
+command while granting all of them.
 Unrestricted execution has to be spellable — a host that cannot express it pushes
 its users toward granting a wildcard read root instead, which is worse — but it
 is spelled differently from an allowlist so a permission sheet can show it at the
