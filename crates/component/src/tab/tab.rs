@@ -872,8 +872,11 @@ impl RenderOnce for Tab {
                 None => this.flex_shrink_0(),
             })
             .map(|this| match self.icon {
+                // `flex_1()` above zeroes the basis, so `w` alone collapses the
+                // box to the icon; `min_w` holds the width it asks for.
                 Some(icon) => this
                     .w(inner_height * 1.25)
+                    .min_w(inner_height * 1.25)
                     .child(icon.map(|this| match self.size {
                         Size::XSmall => this.size_2p5(),
                         Size::Small => this.size_3p5(),
@@ -1238,5 +1241,24 @@ mod tests {
             uncapped,
             "an icon-only tab must ignore max_width"
         );
+    }
+
+    /// An icon-only tab keeps the room its content box asks for, so the icon has
+    /// space on both sides instead of the tabs packing icon against icon.
+    #[gpui::test]
+    fn icon_only_tabs_keep_their_width(cx: &mut TestAppContext) {
+        let build: fn(Tab) -> Tab = |tab| tab.icon(Icon::new(IconName::BookOpen));
+        for variant in VARIANTS {
+            let width = show(cx, variant, None, build)
+                .debug_bounds("tab")
+                .expect("tab not rendered")
+                .size
+                .width;
+            let content = variant.inner_height(Size::default()) * 1.25;
+            assert!(
+                width >= content,
+                "{variant:?}: icon-only tab is {width:?}, narrower than its {content:?} content"
+            );
+        }
     }
 }
