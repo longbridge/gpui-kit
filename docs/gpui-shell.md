@@ -3171,8 +3171,9 @@ asked for.
 
 `process.env` shows a default set of variables that describe the user's
 machine, session and preferences (`HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`,
-`PATH`, `EDITOR`, `DISPLAY`, the proxy settings, the XDG directories and their
-Windows counterparts) and are never tokens, keys or passwords, so an application does not have
+`PATH`, `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories and their
+Windows counterparts) and are never tokens, keys or passwords (the proxy URLs
+are left out because they can carry a user name and password), so an application does not have
 to list the same names every other one does. The set is maintained in one
 place, `crates/shell/src/default-env`, one name per line; a test in
 `capability.rs` refuses a duplicate, a malformed name, or one that looks like it
