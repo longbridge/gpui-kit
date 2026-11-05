@@ -418,7 +418,8 @@ mod tests {
             .style(style)
             .selectable(true)
             .scrollable(true)
-            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())));
+            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())))
+            .on_task_toggle(|_offset, _checked, _, _| {});
     }
 
     #[test]

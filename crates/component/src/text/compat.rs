@@ -185,6 +185,15 @@ impl TextView {
         self.inner = self.inner.on_link_click(f);
         self
     }
+    /// Makes Markdown task list checkboxes clickable, reporting the clicked
+    /// item's byte offset in the source and its new checked state.
+    pub fn on_task_toggle<F>(mut self, f: F) -> Self
+    where
+        F: Fn(usize, bool, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.inner = self.inner.on_task_toggle(f);
+        self
+    }
     /// Scrolls a container that ignores scroll requests to the line of
     /// `TextViewState::reveal_range`, with the line's window bounds.
     pub fn on_reveal<F>(mut self, f: F) -> Self

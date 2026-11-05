@@ -316,6 +316,33 @@ opening behavior. If no handler is installed, links continue to use
 `App::open_url` as usual. The callback is used for both text links and linked
 images.
 
+## Task Lists
+
+Markdown task list items (`- [ ]`, `- [x]`) show a checkbox that is not
+interactive by default. Use `on_task_toggle` to let the user check and uncheck
+them. The callback receives the byte offset in the source text at which the
+clicked list item starts, and the checked state the item should now have:
+
+```rust
+use gpui_kit::component::text::markdown;
+
+let view = cx.entity().downgrade();
+markdown(self.source.clone()).on_task_toggle(move |offset, checked, _window, cx| {
+    _ = view.update(cx, |this, cx| {
+        // The item's marker is the first `[ ]` or `[x]` after its start.
+        if let Some(start) = this.source[offset..].find('[') {
+            let start = offset + start;
+            let marker = if checked { "[x]" } else { "[ ]" };
+            this.source.replace_range(start..start + 3, marker);
+            cx.notify();
+        }
+    });
+})
+```
+
+`TextView` does not change its own text: the application owns the source,
+updates the marker and renders the new text.
+
 ## Images
 
 A Markdown `![alt](src)` or HTML `<img src>` renders through GPUI's `img`
