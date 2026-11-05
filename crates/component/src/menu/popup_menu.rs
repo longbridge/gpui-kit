@@ -19,6 +19,10 @@ use std::rc::Rc;
 
 const CONTEXT: &str = "PopupMenu";
 
+/// How many frames a newly opened scrollable menu waits for its items to be
+/// measured before it gives up scrolling to the checked item.
+const SCROLL_TO_CHECKED_FRAMES: u8 = 4;
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
@@ -308,6 +312,9 @@ pub struct PopupMenu {
     /// The parent menu of this menu, if this is a submenu
     parent_menu: Option<WeakEntity<Self>>,
     scrollable: bool,
+    /// Frames left to scroll the checked item into view on open. Zero once
+    /// done, so the user's scrolling is not overridden afterwards.
+    scroll_to_checked_frames: u8,
     external_link_icon: bool,
     scroll_handle: ScrollHandle,
     // This will update on render
@@ -351,6 +358,7 @@ impl PopupMenu {
             checkable: HashSet::new(),
             bounds: Bounds::default(),
             scrollable: false,
+            scroll_to_checked_frames: SCROLL_TO_CHECKED_FRAMES,
             scroll_handle: ScrollHandle::default(),
             external_link_icon: true,
             size: Size::default(),
@@ -946,6 +954,47 @@ impl PopupMenu {
         }
     }
 
+    /// Scroll a scrollable menu once, as it opens, so its checked item is the
+    /// first one in view, the way a native picker opens on its current value.
+    ///
+    /// `ScrollHandle::scroll_to_top_of_item` is not used: it measures the item
+    /// against the container bounds recorded on the previous frame, which a
+    /// just-opened `anchored` menu does not have at its final position yet, so
+    /// it would land off by the distance the menu moved. The offset here is
+    /// the distance between the first item and the checked one, measured in
+    /// the same frame, so it does not depend on where the container is. Items
+    /// are measured on the first prepaint, so until then this asks for another
+    /// frame, up to `SCROLL_TO_CHECKED_FRAMES` times.
+    fn scroll_to_checked_item(&mut self, cx: &mut Context<Self>) {
+        if !self.scrollable || self.scroll_to_checked_frames == 0 {
+            return;
+        }
+
+        // Only a trailing separator is not rendered, so an item's index is
+        // also its index among the scroll container's children.
+        let checked_ix = self.menu_items.iter().position(|item| item.is_checked());
+        let Some(ix) = checked_ix.filter(|ix| *ix > 0) else {
+            self.scroll_to_checked_frames = 0;
+            return;
+        };
+
+        match (
+            self.scroll_handle.bounds_for_item(0),
+            self.scroll_handle.bounds_for_item(ix),
+        ) {
+            (Some(first), Some(checked)) => {
+                self.scroll_to_checked_frames = 0;
+                let mut offset = self.scroll_handle.offset();
+                offset.y = first.top() - checked.top();
+                self.scroll_handle.set_offset(offset);
+            }
+            _ => {
+                self.scroll_to_checked_frames -= 1;
+                cx.notify();
+            }
+        }
+    }
+
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
         let ix = self.selected_index.unwrap_or(0);
@@ -1521,6 +1570,8 @@ impl Render for PopupMenu {
                 }
             }
         }
+
+        self.scroll_to_checked_item(cx);
 
         let view = cx.entity().clone();
         let items_count = self.menu_items.len();
