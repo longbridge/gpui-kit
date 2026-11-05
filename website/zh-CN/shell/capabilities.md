@@ -369,13 +369,13 @@ import.meta.url; // "file:///…/main.js"，当前运行的模块
 process.env.EDITOR; // 默认可读；其他变量要在 manifest 里列出
 ```
 
-这些路径都不需要授权：路径只说明东西在哪里，能否读写仍由 `fs` 授权决定。环境变量不同，因为变量的*值*可能是交给 Host、而不是交给它运行的每个脚本的 token。所以 `process.env` 只包含一组描述用户机器、会话和偏好的默认变量——`HOME`、`USER`、`HOSTNAME`、`LANG`、`TZ`、`PATH`、`EDITOR`、`DISPLAY`、代理设置、XDG 目录及其 Windows 对应变量，但绝不包含 token、密钥或密码——再加上 `capabilities.process.env` 列出的变量，而且只包含已设置的：
+这些路径都不需要授权：路径只说明东西在哪里，能否读写仍由 `fs` 授权决定。环境变量不同，因为变量的*值*可能是交给 Host、而不是交给它运行的每个脚本的 token。所以 `process.env` 只包含一组描述用户机器、会话和偏好的默认变量——`HOME`、`USER`、`HOSTNAME`、`LANG`、`TZ`、`PATH`、`EDITOR`、`DISPLAY`、`NO_PROXY`、XDG 目录及其 Windows 对应变量，但绝不包含 token、密钥或密码——再加上 `capabilities.process.env` 列出的变量，而且只包含已设置的：
 
 ```json
 "process": { "env": ["MY_APP_MODE"] }
 ```
 
-变量名匹配不区分大小写：列出 `HTTP_PROXY` 时，环境里的 `http_proxy` 也能读到，键名保持环境中的原样。默认变量清单统一维护在 [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env)。
+变量名匹配不区分大小写：列出 `HTTP_PROXY` 时，环境里的 `http_proxy` 也能读到，键名保持环境中的原样。代理 URL（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）不在默认清单里，因为其中可能带有用户名和密码；需要走代理的应用要自己列出它们。默认变量清单统一维护在 [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env)。
 
 它始终是一个对象，所以不授权时 `process.env.X ?? fallback` 也能用。
 

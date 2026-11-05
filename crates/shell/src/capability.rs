@@ -1173,10 +1173,22 @@ mod symlink_tests {
     }
 
     #[test]
+    fn proxy_urls_are_not_shown_by_default() {
+        let capabilities = Capabilities::new();
+        for name in ["HTTP_PROXY", "https_proxy", "ALL_PROXY"] {
+            assert!(!capabilities.may_show_env_variable(name), "{name}");
+        }
+        assert!(capabilities.may_show_env_variable("no_proxy"));
+
+        let granted = Capabilities::new().env_variables(["HTTPS_PROXY".to_owned()]);
+        assert!(granted.may_show_env_variable("https_proxy"));
+    }
+
+    #[test]
     fn a_variable_is_shown_under_any_spelling_of_a_listed_name() {
         let capabilities = Capabilities::new().env_variables(["my_app_mode".to_owned()]);
-        assert!(capabilities.may_show_env_variable("HTTP_PROXY"));
-        assert!(capabilities.may_show_env_variable("http_proxy"));
+        assert!(capabilities.may_show_env_variable("PATH"));
+        assert!(capabilities.may_show_env_variable("Path"));
         assert!(capabilities.may_show_env_variable("MY_APP_MODE"));
         assert!(!capabilities.may_show_env_variable("GITHUB_TOKEN"));
     }

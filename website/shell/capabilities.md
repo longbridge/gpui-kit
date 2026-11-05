@@ -371,13 +371,13 @@ import.meta.url; // "file:///…/main.js", the running module
 process.env.EDITOR; // a default; other variables only when the manifest lists them
 ```
 
-None of the paths needs a grant: a path says where something is, and reading or writing there is still the `fs` grant's decision. The environment is different, because a variable's _value_ can be a token handed to the host rather than to every script it runs. `process.env` therefore holds a fixed set of variables that describe the user's machine, session and preferences — `HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`, `EDITOR`, `DISPLAY`, the proxy settings, the XDG directories and their Windows counterparts — but never tokens, keys or passwords, plus the ones `capabilities.process.env` names, and only those that are set:
+None of the paths needs a grant: a path says where something is, and reading or writing there is still the `fs` grant's decision. The environment is different, because a variable's _value_ can be a token handed to the host rather than to every script it runs. `process.env` therefore holds a fixed set of variables that describe the user's machine, session and preferences — `HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`, `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories and their Windows counterparts — but never tokens, keys or passwords, plus the ones `capabilities.process.env` names, and only those that are set:
 
 ```json
 "process": { "env": ["MY_APP_MODE"] }
 ```
 
-Names match regardless of case, so listing `HTTP_PROXY` also shows `http_proxy`, under the spelling the environment uses. The default set is maintained in [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env).
+Names match regardless of case, so listing `HTTP_PROXY` also shows `http_proxy`, under the spelling the environment uses. The proxy URLs (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) are not defaults, because they can carry a user name and password; an application that honours a proxy lists them. The default set is maintained in [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env).
 
 It is always an object, so `process.env.X ?? fallback` works without a grant.
 
