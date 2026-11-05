@@ -4245,8 +4245,17 @@ impl BlockNode {
                             .min_w(px(column.min))
                             .max_w(px(column.max))
                             .overflow_hidden()
-                            .when(align == ColumnumnAlign::Center, |this| this.text_center())
-                            .when(align == ColumnumnAlign::Right, |this| this.text_right())
+                            // Align the content box, not its text: GPUI
+                            // paints `text_align` with an offset that
+                            // `TextLayout` hit-testing leaves out, so
+                            // aligned text could not be selected where it
+                            // shows.
+                            .when(align == ColumnumnAlign::Center, |this| {
+                                this.flex().flex_col().items_center()
+                            })
+                            .when(align == ColumnumnAlign::Right, |this| {
+                                this.flex().flex_col().items_end()
+                            })
                             .px_3()
                             .py(px(7.))
                             .refine_style(&style.table_cell())

@@ -1879,6 +1879,104 @@ mod tests {
         assert_eq!(copied.trim(), "Cell A");
     }
 
+    /// Text in a right-aligned or centered column is selected where it is
+    /// painted: a drag over it selects it, and the highlight covers it.
+    #[gpui::test]
+    fn table_drag_selects_aligned_cell_text_where_it_is_painted(cx: &mut TestAppContext) {
+        const SELECTION: u32 = 0xf020b0;
+
+        struct AlignedTableRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for AlignedTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                // The underline is painted under the glyphs, so it shows
+                // where the text is drawn.
+                div()
+                    .w(px(520.))
+                    .underline()
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).style(
+                        TextViewStyle::default().with_selection(gpui::rgb(SELECTION).into()),
+                    ))
+            }
+        }
+
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| AlignedTableRoot {
+            text_view: cx.new(|cx| {
+                TextViewState::markdown(
+                    "| Quarterly revenue | Review status |\n| ---: | :---: |\n| 42 | ok |",
+                    cx,
+                )
+            }),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let mut underlines = cx.update(|window, _| {
+            let scale_factor = window.scale_factor();
+            window
+                .painted_underlines()
+                .into_iter()
+                .map(|underline| underline.bounds.map(|value| px(value.0 / scale_factor)))
+                .collect::<Vec<_>>()
+        });
+        underlines.sort_by(|a, b| {
+            (a.top(), a.left())
+                .partial_cmp(&(b.top(), b.left()))
+                .expect("finite bounds")
+        });
+        let [right_head, center_head, right, center] = underlines[..] else {
+            panic!("expected one underline per cell, got {underlines:?}");
+        };
+        // The body text is narrower than its header, so it is drawn at the
+        // end or in the middle of its column.
+        assert!((right.right() - right_head.right()).abs() < px(1.));
+        assert!(right.left() > right_head.left() + px(1.));
+        assert!((center.center().x - center_head.center().x).abs() < px(1.));
+        assert!(center.left() > center_head.left() + px(1.));
+
+        for (underline, expected) in [(right, "42"), (center, "ok")] {
+            // A few pixels above the underline is inside the text's line.
+            let y = underline.top() - px(4.);
+            let start = point(underline.left() + px(0.1), y);
+            let end = point(underline.right() - px(0.1), y);
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+            let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+            assert_eq!(selected.trim(), expected);
+            assert_eq!(copied.trim(), expected);
+            let highlights = cx.update(|window, _| {
+                let selection: gpui::Background = gpui::rgb(SELECTION).into();
+                let scale_factor = window.scale_factor();
+                window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == selection)
+                    .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
+                    .collect::<Vec<_>>()
+            });
+            assert!(
+                highlights.iter().any(|highlight| {
+                    highlight.left() <= underline.left() + px(1.)
+                        && highlight.right() >= underline.right() - px(1.)
+                        && highlight.top() <= y
+                        && highlight.bottom() >= underline.bottom()
+                }),
+                "the highlight {highlights:?} must cover the text above {underline:?}"
+            );
+        }
+    }
+
     struct CellSelectionTestRoot {
         text_view: Entity<TextViewState>,
         scrollable: bool,
