@@ -79,6 +79,8 @@ TextView::markdown("themed", source).style(style)
 
 `TextViewStyle::from_theme(&theme)` 可读取 `gpui_kit::base::Theme` 的语义颜色。使用上层组件主题时，可调用 `gpui_kit::component::text::text_view_style(cx.theme())`。
 
+表格正文行默认没有悬停高亮。`with_table_row_hover(color)` 会用 `color` 填充指针下方的正文行，表头行保持自己的背景。GPUI Component 会把它设为主题的 `table_hover`，也就是 `Table` 组件高亮行时使用的颜色。
+
 没有显式设置 `.style()` 的 TextView 可以跟随容器设置的文字颜色，这样放在聊天气泡这类有填充底色的容器里也能看清。在应用默认值里开启：
 
 ```rust

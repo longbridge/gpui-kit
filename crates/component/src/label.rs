@@ -254,7 +254,7 @@ mod tests {
             );
         });
         let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
     }
 
     #[cfg(feature = "test-support")]
@@ -276,7 +276,7 @@ mod tests {
         // Root starts each frame; this window has none.
         cx.update(|window, cx| {
             gpui_base::test_support::begin_frame(window);
-            window.draw(cx).clear(cx)
+            crate::test_redraw(window, cx)
         });
         cx.update(|window, _| {
             let texts: Vec<_> = gpui_base::test_support::texts(window)

@@ -1879,6 +1879,104 @@ mod tests {
         assert_eq!(copied.trim(), "Cell A");
     }
 
+    /// Text in a right-aligned or centered column is selected where it is
+    /// painted: a drag over it selects it, and the highlight covers it.
+    #[gpui::test]
+    fn table_drag_selects_aligned_cell_text_where_it_is_painted(cx: &mut TestAppContext) {
+        const SELECTION: u32 = 0xf020b0;
+
+        struct AlignedTableRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for AlignedTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                // The underline is painted under the glyphs, so it shows
+                // where the text is drawn.
+                div()
+                    .w(px(520.))
+                    .underline()
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).style(
+                        TextViewStyle::default().with_selection(gpui::rgb(SELECTION).into()),
+                    ))
+            }
+        }
+
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| AlignedTableRoot {
+            text_view: cx.new(|cx| {
+                TextViewState::markdown(
+                    "| Quarterly revenue | Review status |\n| ---: | :---: |\n| 42 | ok |",
+                    cx,
+                )
+            }),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let mut underlines = cx.update(|window, _| {
+            let scale_factor = window.scale_factor();
+            window
+                .painted_underlines()
+                .into_iter()
+                .map(|underline| underline.bounds.map(|value| px(value.0 / scale_factor)))
+                .collect::<Vec<_>>()
+        });
+        underlines.sort_by(|a, b| {
+            (a.top(), a.left())
+                .partial_cmp(&(b.top(), b.left()))
+                .expect("finite bounds")
+        });
+        let [right_head, center_head, right, center] = underlines[..] else {
+            panic!("expected one underline per cell, got {underlines:?}");
+        };
+        // The body text is narrower than its header, so it is drawn at the
+        // end or in the middle of its column.
+        assert!((right.right() - right_head.right()).abs() < px(1.));
+        assert!(right.left() > right_head.left() + px(1.));
+        assert!((center.center().x - center_head.center().x).abs() < px(1.));
+        assert!(center.left() > center_head.left() + px(1.));
+
+        for (underline, expected) in [(right, "42"), (center, "ok")] {
+            // A few pixels above the underline is inside the text's line.
+            let y = underline.top() - px(4.);
+            let start = point(underline.left() + px(0.1), y);
+            let end = point(underline.right() - px(0.1), y);
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+            let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+            assert_eq!(selected.trim(), expected);
+            assert_eq!(copied.trim(), expected);
+            let highlights = cx.update(|window, _| {
+                let selection: gpui::Background = gpui::rgb(SELECTION).into();
+                let scale_factor = window.scale_factor();
+                window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == selection)
+                    .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
+                    .collect::<Vec<_>>()
+            });
+            assert!(
+                highlights.iter().any(|highlight| {
+                    highlight.left() <= underline.left() + px(1.)
+                        && highlight.right() >= underline.right() - px(1.)
+                        && highlight.top() <= y
+                        && highlight.bottom() >= underline.bottom()
+                }),
+                "the highlight {highlights:?} must cover the text above {underline:?}"
+            );
+        }
+    }
+
     struct CellSelectionTestRoot {
         text_view: Entity<TextViewState>,
         scrollable: bool,
@@ -3203,6 +3301,131 @@ mod tests {
                 quad.corner_radii.bottom_right, square,
                 "{mode}: bottom right"
             );
+        }
+    }
+
+    /// A table body row under the pointer takes the hover background and the
+    /// header does not. Every row of every table keeps its own hover state, so
+    /// each move onto or off a row notifies the view, even a move between the
+    /// same row of two tables.
+    #[test]
+    fn table_body_row_under_the_pointer_takes_the_hover_background() {
+        use gpui::TestApp;
+        use std::{cell::Cell, rc::Rc};
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const ROW_HOVER: u32 = 0x7711aa;
+
+        struct HoverTableRoot {
+            text_view: Entity<TextViewState>,
+            scroll: bool,
+        }
+
+        impl Render for HoverTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                if self.scroll {
+                    table.overflow.x = Some(Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table)
+                    .with_table_row_hover(gpui::rgb(ROW_HOVER).into());
+                div()
+                    .w(px(400.))
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        let table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |";
+        let source = format!("{table}\n\nBetween\n\n{table}");
+        for scroll in [false, true] {
+            let mode = if scroll { "scroll" } else { "wrap" };
+            let mut app = TestApp::new();
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| HoverTableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+
+            // The text view's own view paints the rows, so it is the one
+            // their hover notifies.
+            let notifications = Rc::new(Cell::new(0));
+            let text_view = window.update(|root, _, _| root.text_view.clone());
+            app.update(|cx| {
+                let notifications = notifications.clone();
+                cx.observe(&text_view, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+                .detach();
+            });
+
+            // The header rows, top to bottom, in logical pixels.
+            let (heads, scale) = window.update(|_, window, _| {
+                let scale = window.scale_factor();
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                let mut heads = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == head)
+                    .map(|quad| quad.bounds.map(|value| px(value.as_f32() / scale)))
+                    .collect::<Vec<_>>();
+                heads.sort_by_key(|bounds| bounds.origin.y);
+                (heads, scale)
+            });
+            assert_eq!(heads.len(), 2, "{mode}: two header rows");
+            let first_body_row =
+                |head: Bounds<Pixels>| point(head.center().x, head.bottom() + px(4.));
+            let first_head = heads[0].center();
+            let first_row = first_body_row(heads[0]);
+            let second_row = first_body_row(heads[1]);
+            let outside = point(px(600.), first_row.y);
+
+            for (step, position, highlighted) in [
+                ("first table's body row", first_row, true),
+                ("first table's header", first_head, false),
+                ("second table's body row", second_row, true),
+                ("same row of the first table", first_row, true),
+                ("outside the tables", outside, false),
+            ] {
+                let before = notifications.get();
+                window.simulate_mouse_move(position);
+                assert!(
+                    notifications.get() > before,
+                    "{mode}: moving onto the {step} notifies the view"
+                );
+                window.draw();
+
+                let hovered = window.update(|_, window, _| {
+                    let hover: gpui::Background = gpui::rgb(ROW_HOVER).into();
+                    window
+                        .painted_quads()
+                        .into_iter()
+                        .filter(|quad| quad.background == hover)
+                        .map(|quad| quad.bounds)
+                        .collect::<Vec<_>>()
+                });
+                if highlighted {
+                    assert_eq!(
+                        hovered.len(),
+                        1,
+                        "{mode}: one row is highlighted on the {step}"
+                    );
+                    assert!(
+                        hovered[0].contains(&position.scale(scale)),
+                        "{mode}: the {step} is highlighted, not {:?}",
+                        hovered[0]
+                    );
+                } else {
+                    assert!(
+                        hovered.is_empty(),
+                        "{mode}: nothing is highlighted on the {step}"
+                    );
+                }
+            }
         }
     }
 

@@ -5,7 +5,7 @@
 use gpui::TextAlign;
 use gpui::{
     Action, App, AppContext, Bounds, ClipboardItem, Context, Edges, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding,
+    EventEmitter, FocusHandle, Focusable, Hsla, InteractiveElement as _, IntoElement, KeyBinding,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
     Render, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled as _,
     Subscription, UTF16Selection, WeakFocusHandle, Window, actions, div, point,
@@ -22,8 +22,9 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    DiagnosticSet, DisplayMap, InputContextMenuCapabilities, InputEditorStyle,
-    InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, WrappingIndent,
+    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, InputContextMenuCapabilities,
+    InputEditorStyle, InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep,
+    WrappingIndent,
     blink_cursor::BlinkCursor,
     change::Change,
     cursor::{CursorSelection, Selections},
@@ -554,6 +555,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// colours once and then never see them as unset again, which is the same
     /// freeze in a different place.
     projected_editor_style: InputEditorStyle,
+    pub(super) fold_placeholder_renderer: Option<FoldPlaceholderRenderer>,
+    pub(super) fold_background: Option<Hsla>,
     accessibility: Option<InputAccessibility>,
     /// What paints in place of Base's editor scrollbar, when a consumer
     /// supplies its own.
@@ -1041,6 +1044,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             mask_pattern_set: false,
             editor_style: InputEditorStyle::default(),
             projected_editor_style: InputEditorStyle::default(),
+            fold_placeholder_renderer: None,
+            fold_background: None,
             accessibility: None,
             scrollbar_renderer: None,
             diagnostic_popover: None,
@@ -1136,6 +1141,24 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn set_editor_style(&mut self, style: InputEditorStyle) {
         self.editor_style = style.clone();
         self.projected_editor_style = style;
+    }
+
+    /// Draws a placeholder right after the text of each folded line, given its
+    /// buffer row. Clicking it unfolds the line.
+    pub fn set_fold_placeholder_renderer(
+        &mut self,
+        renderer: Option<FoldPlaceholderRenderer>,
+        cx: &mut Context<Self>,
+    ) {
+        self.fold_placeholder_renderer = renderer;
+        cx.notify();
+    }
+
+    /// Fills each folded line across the editor, as VS Code's
+    /// `editor.foldBackground`.
+    pub fn set_fold_background(&mut self, color: Option<Hsla>, cx: &mut Context<Self>) {
+        self.fold_background = color;
+        cx.notify();
     }
 
     /// Project semantics onto the editor, never onto a second focus owner.
@@ -2941,6 +2964,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                 cx.notify();
             }
         } else {
+            self.overscroll
+                .touch_phase(event.touch_phase, cx.background_executor().now());
             // Axis drift must not drop the end of a vertical drag.
             if matches!(
                 event.touch_phase,

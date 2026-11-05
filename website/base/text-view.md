@@ -91,6 +91,11 @@ let style = TextViewStyle::default().with_heading(|level| match level {
 
 `TextViewStyle::from_theme(&theme)` maps the semantic colors from a `gpui_kit::base::Theme`. Applications using the higher-level component theme can use `gpui_kit::component::text::text_view_style(cx.theme())`.
 
+Table body rows have no hover highlight by default. `with_table_row_hover(color)`
+fills the body row under the pointer with `color`; the header row keeps its own
+background. GPUI Component sets it to the theme's `table_hover`, the color the
+`Table` component highlights its rows with.
+
 A text view without an explicit `.style()` can follow the text color its
 container sets, so rich text stays readable on a filled surface such as a chat
 bubble. Turn it on in the application defaults:

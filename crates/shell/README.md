@@ -135,7 +135,7 @@ curl -fsSL https://gpui-kit.com/shell/install.sh | sh
 The same runtime is available from crates.io:
 
 ```bash
-cargo install gpui-shell --version 0.8.1 --locked
+cargo install gpui-shell --version 0.9.0 --locked
 ```
 
 To follow `main` ahead of a release, build it from Git instead (into
@@ -349,7 +349,10 @@ WebView.new(this.page)
 | `.on_message(handler)` | `WebView` | `handler(text, cx)` for each `window.ipc.postMessage(text)` from the page |
 
 Only `http` and `https` documents load, whether the script or the page
-navigates. Loading is not gated by a capability. The feature builds the runtime
+navigates, and each needs the network grant a `fetch` of it would: a `GET` in
+`capabilities.network.hosts` or `capabilities.network.http`. A navigation that
+is not granted is cancelled, and a message from a page that is not granted is
+dropped. The feature builds the runtime
 on GPUI Fast; on Linux the page needs an X11 or XWayland window (start with
 `WAYLAND_DISPLAY=` in a Wayland session), and on Windows it draws above GPUI
 content it overlaps. [`examples/js_webview`](../../examples/js_webview/main.js)
@@ -361,7 +364,8 @@ is a small browser built on it.
 position and tail following; `MessageScroller` places it and asks the script
 for each visible row by index. A transcript changes while it is on screen, so
 the state is edited in place rather than recreated, which would drop the
-reader's position.
+reader's position. A state holds at most 1,000,000 rows; a count or an edit
+that would exceed it throws.
 
 ```js
 import { MessageScroller, MessageScrollerState } from "gpui-component";
@@ -417,7 +421,12 @@ script cost follows what your application does rather than the frame rate.
 
 Elements are single-use values. Build them in `render` and never store one on
 the instance — a stored element belongs to a render that has already ended, and
-reusing it throws rather than drawing something unexpected.
+reusing it throws rather than drawing something unexpected. A description
+nests at most 64 levels, counting children, filled slots and component element
+arguments; the call that would go deeper throws. Views mounted inside one another
+share that depth: together they may span 65 levels, one more for each view, and
+a mount past it, or a view mounted inside itself, draws nothing and logs an
+error.
 
 ## Capabilities and Asynchronous I/O
 
@@ -573,8 +582,8 @@ that.
 ## Host capabilities
 
 Present today: the element and style surface, state styles (`hover` / `active` /
-`focus`), `Button`, `Checkbox`, `Switch`, retained `InputState` with input
-events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
+`focus`, and `group_hover` under a `group`), `Button`, `Checkbox`, `Switch`,
+retained `InputState` with input events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
 timers, `fs` / `localStorage` / clipboard / `process` behind capabilities,
 capability-gated HTTP and text/binary WebSocket clients, native target-value
 transitions and springs, hot reload, `check`, and generated TypeScript
