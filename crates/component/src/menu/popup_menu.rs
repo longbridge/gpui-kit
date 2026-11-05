@@ -8,8 +8,9 @@ use crate::{Side, Size, kbd::Kbd};
 use gpui::{
     Action, Anchor, AnyElement, App, AppContext, Bounds, Context, DismissEvent, Edges, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement, Pixels, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement,
-    Styled, WeakEntity, Window, anchored, deferred, div, prelude::FluentBuilder, px, rems,
+    ParentElement, Pixels, Rems, Render, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, anchored, deferred, div,
+    prelude::FluentBuilder, px, rems,
 };
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
 use gpui_base::TestSupportExt as _;
@@ -438,7 +439,8 @@ impl PopupMenu {
         self
     }
 
-    /// Set max width of the popup menu, default is 500px
+    /// Set max width of the popup menu, default is 31.25rem (500px at the
+    /// default 16px rem)
     pub fn max_w(mut self, width: impl Into<Pixels>) -> Self {
         self.max_width = Some(width.into());
         self
@@ -1224,8 +1226,9 @@ impl PopupMenu {
     }
 
     #[inline]
-    fn max_width(&self) -> Pixels {
-        self.max_width.unwrap_or(px(500.))
+    fn max_width(&self, window: &Window) -> Pixels {
+        self.max_width
+            .unwrap_or_else(|| rems(31.25).to_pixels(window.rem_size()))
     }
 
     /// Calculate the anchor corner and left offset for child submenu
@@ -1274,13 +1277,15 @@ impl PopupMenu {
 
         let selected = self.selected_index == Some(ix);
         const EDGE_PADDING: Pixels = px(4.);
-        const INNER_PADDING: Pixels = px(8.);
+        // In rems, so an item grows and shrinks with its text when the window's
+        // rem size changes; 8, 20 and 26 px at the default 16 px rem.
+        const INNER_PADDING: Rems = rems(0.5);
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
 
         let (item_height, radius) = match self.size {
-            Size::Small => (px(20.), options.radius.half()),
-            _ => (px(26.), options.radius),
+            Size::Small => (rems(1.25), options.radius.half()),
+            _ => (rems(1.625), options.radius),
         };
 
         let this = MenuItemElement::new(ix)
@@ -1535,7 +1540,7 @@ impl Render for PopupMenu {
             .iter()
             .any(|item| item.has_left_icon(self.check_side));
 
-        let max_width = self.max_width();
+        let max_width = self.max_width(window);
         let options = RenderOptions {
             has_left_icon,
             check_side: self.check_side,
