@@ -3206,6 +3206,131 @@ mod tests {
         }
     }
 
+    /// A table body row under the pointer takes the hover background and the
+    /// header does not. Every row of every table keeps its own hover state, so
+    /// each move onto or off a row notifies the view, even a move between the
+    /// same row of two tables.
+    #[test]
+    fn table_body_row_under_the_pointer_takes_the_hover_background() {
+        use gpui::TestApp;
+        use std::{cell::Cell, rc::Rc};
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const ROW_HOVER: u32 = 0x7711aa;
+
+        struct HoverTableRoot {
+            text_view: Entity<TextViewState>,
+            scroll: bool,
+        }
+
+        impl Render for HoverTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                if self.scroll {
+                    table.overflow.x = Some(Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table)
+                    .with_table_row_hover(gpui::rgb(ROW_HOVER).into());
+                div()
+                    .w(px(400.))
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        let table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |";
+        let source = format!("{table}\n\nBetween\n\n{table}");
+        for scroll in [false, true] {
+            let mode = if scroll { "scroll" } else { "wrap" };
+            let mut app = TestApp::new();
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| HoverTableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+
+            // The text view's own view paints the rows, so it is the one
+            // their hover notifies.
+            let notifications = Rc::new(Cell::new(0));
+            let text_view = window.update(|root, _, _| root.text_view.clone());
+            app.update(|cx| {
+                let notifications = notifications.clone();
+                cx.observe(&text_view, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+                .detach();
+            });
+
+            // The header rows, top to bottom, in logical pixels.
+            let (heads, scale) = window.update(|_, window, _| {
+                let scale = window.scale_factor();
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                let mut heads = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == head)
+                    .map(|quad| quad.bounds.map(|value| px(value.as_f32() / scale)))
+                    .collect::<Vec<_>>();
+                heads.sort_by_key(|bounds| bounds.origin.y);
+                (heads, scale)
+            });
+            assert_eq!(heads.len(), 2, "{mode}: two header rows");
+            let first_body_row =
+                |head: Bounds<Pixels>| point(head.center().x, head.bottom() + px(4.));
+            let first_head = heads[0].center();
+            let first_row = first_body_row(heads[0]);
+            let second_row = first_body_row(heads[1]);
+            let outside = point(px(600.), first_row.y);
+
+            for (step, position, highlighted) in [
+                ("first table's body row", first_row, true),
+                ("first table's header", first_head, false),
+                ("second table's body row", second_row, true),
+                ("same row of the first table", first_row, true),
+                ("outside the tables", outside, false),
+            ] {
+                let before = notifications.get();
+                window.simulate_mouse_move(position);
+                assert!(
+                    notifications.get() > before,
+                    "{mode}: moving onto the {step} notifies the view"
+                );
+                window.draw();
+
+                let hovered = window.update(|_, window, _| {
+                    let hover: gpui::Background = gpui::rgb(ROW_HOVER).into();
+                    window
+                        .painted_quads()
+                        .into_iter()
+                        .filter(|quad| quad.background == hover)
+                        .map(|quad| quad.bounds)
+                        .collect::<Vec<_>>()
+                });
+                if highlighted {
+                    assert_eq!(
+                        hovered.len(),
+                        1,
+                        "{mode}: one row is highlighted on the {step}"
+                    );
+                    assert!(
+                        hovered[0].contains(&position.scale(scale)),
+                        "{mode}: the {step} is highlighted, not {:?}",
+                        hovered[0]
+                    );
+                } else {
+                    assert!(
+                        hovered.is_empty(),
+                        "{mode}: nothing is highlighted on the {step}"
+                    );
+                }
+            }
+        }
+    }
+
     /// A table wider than its frame shrinks its widest column. A narrower
     /// column keeps its content width rather than shrinking by the same
     /// ratio and wrapping the end of its text onto a line of its own, in the
