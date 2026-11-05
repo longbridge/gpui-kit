@@ -297,17 +297,21 @@ fn takes_typed_children(component: &Component) -> bool {
 
 /// Behavior collected from a node's ops, applied after styling.
 /// Style refinements that apply only in a runtime state.
+///
+/// Each refinement is boxed, here and in [`Behavior`]: `materialize_node` holds
+/// both across its recursion into the children, so every inline refinement
+/// was paid once per level of the description whether the node used it or not.
 #[derive(Default)]
 struct StateStyles {
-    hover: Option<StyleRefinement>,
-    active: Option<StyleRefinement>,
-    focus: Option<StyleRefinement>,
+    hover: Option<Box<StyleRefinement>>,
+    active: Option<Box<StyleRefinement>>,
+    focus: Option<Box<StyleRefinement>>,
     /// The name `group(name)` gave this element, which a `group_hover` on an
     /// element inside it matches. Kept with the state styles rather than the
     /// behavior because it lands where they do: on the interactive element,
     /// through [`with_hover`].
     group: Option<SharedString>,
-    group_hover: Option<(SharedString, StyleRefinement)>,
+    group_hover: Option<Box<(SharedString, StyleRefinement)>>,
 }
 
 impl StateStyles {
@@ -521,7 +525,7 @@ struct Behavior {
     /// where it is comes from the state on every frame, because a fill the
     /// script positioned would be frozen at the value the render that
     /// positioned it saw.
-    range_style: Option<StyleRefinement>,
+    range_style: Option<Box<StyleRefinement>>,
     /// How every cell of an `OtpInput` looks, how the cell taking the next
     /// digit differs, and what the caret in it looks like.
     ///
@@ -531,9 +535,9 @@ struct Behavior {
     /// digit the render that described it saw. `cell_active_style` is layered
     /// on top of `cell_style` the way a hover is layered on a base style, so a
     /// script declares only what differs.
-    cell_style: Option<StyleRefinement>,
-    cell_active_style: Option<StyleRefinement>,
-    caret_style: Option<StyleRefinement>,
+    cell_style: Option<Box<StyleRefinement>>,
+    cell_active_style: Option<Box<StyleRefinement>>,
+    caret_style: Option<Box<StyleRefinement>>,
     /// Whether a `Collapsible` renders the element in its `content` slot, or
     /// whether a `Popover` is showing.
     ///
@@ -803,40 +807,36 @@ fn materialize_node(
     // A component that takes typed children is handed the descriptions instead:
     // flattening them here would throw away the very thing it needs. See
     // [`ChildSpecs`].
-    let children: Children = if takes_typed_children(&component)
-        || matches!(component, Component::Registered(_))
-    {
-        Children::new()
-    } else {
-        node.children()
-            .iter()
-            .map(|child| materialize_node(runtime, snapshot, arena, *child, inherited, window, cx))
-            .collect()
-    };
+    //
+    // Loops rather than iterator adapters: this is the recursion, and in an
+    // unoptimized build every adapter between two levels is another frame.
+    let mut children = Children::new();
+    if !takes_typed_children(&component) && !matches!(component, Component::Registered(_)) {
+        for child in node.children() {
+            children.push(materialize_node(
+                runtime, snapshot, arena, *child, inherited, window, cx,
+            ));
+        }
+    }
 
     // A slot's element is built here, beside the children, so it inherits the
     // same text color: where the component chooses to put it is the component's
     // business, but what it looks like should not depend on that choice.
-    let slots: Slots = if matches!(component, Component::Registered(_)) {
-        SmallVec::new()
-    } else if materializes_slots(&component, &behavior) {
-        slot_specs
-            .iter()
-            .filter(|(name, _)| {
-                !matches!(component, Component::Popover(_))
-                    || *name != "content"
-                    || behavior.open != Some(false)
-            })
-            .map(|(name, slot)| {
-                (
-                    *name,
-                    materialize_node(runtime, snapshot, arena, *slot, inherited, window, cx),
-                )
-            })
-            .collect()
-    } else {
-        SmallVec::new()
-    };
+    let mut slots = Slots::new();
+    if !matches!(component, Component::Registered(_)) && materializes_slots(&component, &behavior) {
+        for (name, slot) in &slot_specs {
+            if matches!(component, Component::Popover(_))
+                && *name == "content"
+                && behavior.open == Some(false)
+            {
+                continue;
+            }
+            slots.push((
+                *name,
+                materialize_node(runtime, snapshot, arena, *slot, inherited, window, cx),
+            ));
+        }
+    }
     // Every component that reads a slot reports its own leftovers, because only
     // it knows which names it read.
     if !matches!(
@@ -1632,7 +1632,7 @@ where
 /// crossing a list of grouped rows runs no script either.
 fn with_hover<E: InteractiveElement>(element: E, states: &StateStyles) -> E {
     let mut element = element;
-    if let Some(hover) = states.hover.clone() {
+    if let Some(hover) = states.hover.as_deref().cloned() {
         element = element.hover(move |mut style| {
             style.refine(&hover);
             style
@@ -1641,7 +1641,7 @@ fn with_hover<E: InteractiveElement>(element: E, states: &StateStyles) -> E {
     if let Some(group) = states.group.clone() {
         element = element.group(group);
     }
-    if let Some((group, hover)) = states.group_hover.clone() {
+    if let Some((group, hover)) = states.group_hover.as_deref().cloned() {
         element = element.group_hover(group, move |mut style| {
             style.refine(&hover);
             style
@@ -1652,13 +1652,13 @@ fn with_hover<E: InteractiveElement>(element: E, states: &StateStyles) -> E {
 
 fn with_active_and_focus<E: StatefulInteractiveElement>(element: E, states: &StateStyles) -> E {
     let mut element = element;
-    if let Some(active) = states.active.clone() {
+    if let Some(active) = states.active.as_deref().cloned() {
         element = element.active(move |mut style| {
             style.refine(&active);
             style
         });
     }
-    if let Some(focus) = states.focus.clone() {
+    if let Some(focus) = states.focus.as_deref().cloned() {
         element = element.focus(move |mut style| {
             style.refine(&focus);
             style
@@ -2599,7 +2599,7 @@ pub(in crate::materialize) fn resolve_ops(
                 }
             }
             SpecOp::StateStyle(name, node) => {
-                let resolved = resolve_state(arena, *node);
+                let resolved = Box::new(resolve_state(arena, *node));
                 match *name {
                     "hover" => states.hover = Some(resolved),
                     "active" => states.active = Some(resolved),
@@ -2621,7 +2621,7 @@ pub(in crate::materialize) fn resolve_ops(
             // GPUI holds one group hover per element, so a second call replaces
             // the first, as a second `hover` does.
             SpecOp::GroupHover(group, node) => {
-                states.group_hover = Some((group.clone(), resolve_state(arena, *node)));
+                states.group_hover = Some(Box::new((group.clone(), resolve_state(arena, *node))));
             }
             SpecOp::Callback(name, id) => match *name {
                 "on_click" => behavior.on_click = Some(*id),

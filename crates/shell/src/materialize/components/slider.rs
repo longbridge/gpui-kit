@@ -189,9 +189,9 @@ pub(in crate::materialize) fn slider_indicator(
     // among its children the script wanted it, and this is the only order a
     // slider is ever drawn in.
     let mut all: Children = Children::new();
-    if let Some(fill) = behavior.range_style.clone() {
+    if let Some(fill) = behavior.range_style.as_deref() {
         let mut element = div();
-        element.style().refine(&fill);
+        element.style().refine(fill);
         span(
             element.style(),
             axis(&behavior),
