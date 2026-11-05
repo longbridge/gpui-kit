@@ -31,6 +31,7 @@ members = [
     "examples/system_monitor",
     "examples/focus_trap",
     "examples/tooltip_top_edge",
+    "examples/link_tooltip",
     "examples/sidebar",
     "examples/text_max_lines",
     "examples/text_selection",
