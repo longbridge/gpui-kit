@@ -1217,6 +1217,11 @@ impl SpecArena {
         self.nodes.get(id as usize)
     }
 
+    /// The levels `id` spans, itself included.
+    pub(crate) fn height(&self, id: SpecId) -> u8 {
+        self.heights.get(id as usize).copied().unwrap_or(1)
+    }
+
     pub fn push_op(&mut self, id: SpecId, op: SpecOp) -> Result<(), SpecError> {
         self.check_live(id)?;
         let held = match op {

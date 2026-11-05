@@ -423,7 +423,10 @@ Elements are single-use values. Build them in `render` and never store one on
 the instance — a stored element belongs to a render that has already ended, and
 reusing it throws rather than drawing something unexpected. A description
 nests at most 64 levels, counting children, filled slots and component element
-arguments; the call that would go deeper throws.
+arguments; the call that would go deeper throws. Views mounted inside one another
+share that depth: together they may span 65 levels, one more for each view, and
+a mount past it, or a view mounted inside itself, draws nothing and logs an
+error.
 
 ## Capabilities and Asynchronous I/O
 
