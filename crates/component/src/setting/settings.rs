@@ -417,7 +417,18 @@ impl RenderOnce for Settings {
             }
         });
 
-        let query = state.read(cx).search_input.read(cx).value();
+        // The placeholder is localized when the state is created, and rebuilding
+        // the state would lose the selected page, so follow a runtime locale
+        // change here. `set_placeholder` notifies, so only write on a change.
+        let placeholder = t!("Settings.search_placeholder");
+        let search_input = state.read(cx).search_input.clone();
+        if search_input.read(cx).presentation().placeholder() != &*placeholder {
+            search_input.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx);
+            });
+        }
+
+        let query = search_input.read(cx).value();
         let filter = SettingsFilter::new(&self.pages, &query, cx);
         let previous = state.read(cx).selected_index;
         let selected = filter.selected_index(previous);

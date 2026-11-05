@@ -214,6 +214,40 @@ fn search_preserves_group_and_item_identity(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn search_placeholder_follows_the_locale_and_keeps_the_page(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    let (state, input) = cx.update(|_, cx| {
+        let state = host.read(cx).state.clone().unwrap();
+        let input = state.read(cx).search_input.clone();
+        (state, input)
+    });
+
+    // The locale is process-wide and tests run in parallel, so stand in for a
+    // switch with a state that was created under another locale.
+    cx.update(|window, cx| {
+        state.update(cx, |state, _| {
+            state.selected_index = SelectIndex {
+                page_ix: 2,
+                group_ix: None,
+            };
+        });
+        input.update(cx, |input, cx| {
+            let placeholder = t!("Settings.search_placeholder", locale = "zh-CN");
+            input.set_placeholder(placeholder, window, cx);
+        });
+        // As an application does after `set_locale`.
+        window.refresh();
+    });
+    draw(cx);
+
+    cx.update(|_, cx| {
+        let placeholder = input.read(cx).presentation().placeholder().clone();
+        assert_eq!(placeholder, &*t!("Settings.search_placeholder"));
+    });
+    assert_eq!(selection(&host, cx), (2, None));
+}
+
+#[gpui::test]
 fn footer_follows_group_search_visibility(cx: &mut TestAppContext) {
     let (host, cx) = setup(cx);
     cx.update(|_, cx| {
