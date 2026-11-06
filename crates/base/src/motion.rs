@@ -103,6 +103,16 @@ impl Interpolate for MotionTransform {
     }
 }
 
+/// How a value transition responds to the application's reduced-motion setting.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ReducedMotion {
+    /// Adopt the target immediately. Appropriate for spatial motion.
+    #[default]
+    Finish,
+    /// Keep the transition timing, for non-spatial effects such as fades.
+    Continue,
+}
+
 /// CSS-like timing policy for a target-value transition.
 ///
 /// This type is intentionally separate from [`crate::animation::Transition`],
@@ -113,6 +123,7 @@ pub struct Transition {
     duration: Duration,
     delay: SignedDuration,
     easing: Easing,
+    reduced_motion: ReducedMotion,
 }
 
 impl Transition {
@@ -121,7 +132,15 @@ impl Transition {
             duration,
             delay: SignedDuration::ZERO,
             easing: Easing::Custom(Rc::new(ease_out_cubic)),
+            reduced_motion: ReducedMotion::Finish,
         }
+    }
+
+    /// Select reduced-motion behavior for this transition only.
+    /// The application's preference and other motion channels are unchanged.
+    pub fn reduced_motion(mut self, behavior: ReducedMotion) -> Self {
+        self.reduced_motion = behavior;
+        self
     }
 
     pub fn delay(mut self, delay: impl Into<SignedDuration>) -> Self {
@@ -308,7 +327,9 @@ where
 
     let snapshot = state.read(cx).clone();
 
-    if cx.reduce_motion() || policy.duration.is_zero() {
+    if (cx.reduce_motion() && policy.reduced_motion == ReducedMotion::Finish)
+        || policy.duration.is_zero()
+    {
         if snapshot.from != target || snapshot.target != target {
             state.update(cx, |state, _| {
                 state.from = target.clone();
@@ -1114,6 +1135,65 @@ mod tests {
         assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Delayed);
         cx.executor().advance_clock(Duration::from_millis(501));
         assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn effects_opt_in_keeps_timing_under_reduced_motion(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .ease(|t| t)
+                .reduced_motion(ReducedMotion::Continue),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.update(|cx| cx.set_reduce_motion(true));
+        assert!((fixture.render(cx, 1.0).value - 0.2).abs() < 1e-6);
+        cx.update(|cx| assert!(cx.reduce_motion()));
+        cx.executor().advance_clock(Duration::from_millis(800));
+        assert_eq!(fixture.render(cx, 1.0).status, MotionStatus::Finished);
+        fixture.render(cx, 0.0);
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!((fixture.render(cx, 0.0).value - 0.5).abs() < 1e-6);
+        cx.update(|cx| cx.set_reduce_motion(false));
+        assert!((fixture.render(cx, 0.0).value - 0.5).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn current_reduced_motion_policy_and_zero_duration_take_effect(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .ease(|t| t)
+                .reduced_motion(ReducedMotion::Continue),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy = view.policy.clone().reduced_motion(ReducedMotion::Finish);
+            })
+            .unwrap();
+        assert_eq!(fixture.render(cx, 1.0).value, 1.0);
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy = view.policy.clone().reduced_motion(ReducedMotion::Continue);
+            })
+            .unwrap();
+        assert_eq!(fixture.render(cx, 0.0).value, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        assert!((fixture.render(cx, 0.0).value - 0.8).abs() < 1e-6);
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy =
+                    Transition::new(Duration::ZERO).reduced_motion(ReducedMotion::Continue);
+            })
+            .unwrap();
+        assert_eq!(fixture.render(cx, 0.0).value, 0.0);
     }
 
     struct KeyframeView {

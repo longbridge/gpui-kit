@@ -132,7 +132,7 @@ Sequence::new(("row", index), px(12.))
 
 ## Reduced motion and performance
 
-Transitions, springs, keyframes, presence, and reveal-compatible controls honor GPUI's reduced-motion preference. Finite motion snaps to the target, synchronizes retained state, and leaves no pending animation frame. Motion must never be the only way state is communicated.
+Transitions, springs, keyframes, presence, and reveal-compatible controls honor GPUI's reduced-motion preference. Finite motion snaps to the target, synchronizes retained state, and leaves no pending animation frame. A `Transition` built with `.reduced_motion(ReducedMotion::Continue)` keeps its timing instead; use it only for non-spatial effects such as a fade. Motion must never be the only way state is communicated.
 
 The preference is the operating system's. `gpui_base::init` (and so `gpui_component::init`) reads the system setting into `App::set_reduce_motion` — macOS's "Reduce motion" (`NSWorkspace.accessibilityDisplayShouldReduceMotion`), Windows' "Animation effects" (`SPI_GETCLIENTAREAANIMATION`, off means reduce), and on Linux the XDG desktop portal's `org.freedesktop.appearance` `reduced-motion` key, which arrives over D-Bus a moment after `init` and is then followed as it changes. Other targets, wasm included, leave the flag alone. An application that calls `cx.set_reduce_motion(...)` itself owns the flag from then on: Base only writes it while it still holds what Base last wrote. macOS and Windows are read once, at `init`; call `gpui_base::apply_system_reduce_motion(cx)` to read them again.
 

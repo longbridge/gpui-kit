@@ -110,7 +110,7 @@ Sequence::new(("row", index), px(12.))
 
 ## Reduced motion 与性能
 
-Transition、spring、keyframes、presence 和 reveal 控件都遵守 GPUI 的 reduced-motion 偏好。有限动画会直接同步目标、更新 retained state，并且不留下待处理 frame。动画不能成为表达状态的唯一方式。
+Transition、spring、keyframes、presence 和 reveal 控件都遵守 GPUI 的 reduced-motion 偏好。有限动画会直接同步目标、更新 retained state，并且不留下待处理 frame。以 `.reduced_motion(ReducedMotion::Continue)` 构建的 `Transition` 则保留其时序；只应将它用于淡入淡出等非空间效果。动画不能成为表达状态的唯一方式。
 
 这个偏好来自操作系统。`gpui_base::init`（因此 `gpui_component::init` 也一样）会把系统设置读入 `App::set_reduce_motion`：macOS 的「减弱动态效果」（`NSWorkspace.accessibilityDisplayShouldReduceMotion`）、Windows 的「动画效果」（`SPI_GETCLIENTAREAANIMATION`，关闭即为减弱动效），以及 Linux 上 XDG desktop portal `org.freedesktop.appearance` 命名空间的 `reduced-motion` 键——它经 D-Bus 在 `init` 返回后片刻送达，之后持续跟随其变化。其他目标（包括 wasm）不改动这个标志。应用一旦自己调用 `cx.set_reduce_motion(...)`，就接管了这个标志：Base 只在标志仍是自己上次写入的值时才会写入。macOS 和 Windows 只在 `init` 时读取一次；需要重新读取时调用 `gpui_base::apply_system_reduce_motion(cx)`。
 
