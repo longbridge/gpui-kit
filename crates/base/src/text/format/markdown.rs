@@ -1117,6 +1117,30 @@ fn new_span(pos: Option<markdown::unist::Position>, cx: &NodeContext) -> Option<
     })
 }
 
+/// The `[ ]` / `[x]` marker of a task list item, which mdast does not keep.
+///
+/// The marker opens the item's first paragraph. Before it in the item come
+/// only the list marker, whitespace, line prefixes and link reference
+/// definitions, so it is the first `[` after the definitions.
+fn task_marker_span(source: &str, item: &mdast::ListItem, cx: &NodeContext) -> Option<Span> {
+    item.checked?;
+    let mut from = item.position.as_ref()?.start.offset;
+    for definition in item
+        .children
+        .iter()
+        .take_while(|child| !matches!(child, Node::Paragraph(_)))
+    {
+        from = definition.position()?.end.offset;
+    }
+    let bytes = source.as_bytes();
+    let open = from + bytes.get(from..)?.iter().position(|&byte| byte == b'[')?;
+    let close = open + bytes[open..].iter().position(|&byte| byte == b']')?;
+    Some(Span {
+        start: cx.offset + open,
+        end: cx.offset + close + 1,
+    })
+}
+
 fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockNode {
     let span = new_span(value.position().cloned(), cx);
     let parse_cx = MarkdownParseContext::new(source, cx.offset);
@@ -1161,6 +1185,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             }
         }
         Node::ListItem(val) => {
+            let task_marker = task_marker_span(source, &val, cx);
             let children = val
                 .children
                 .into_iter()
@@ -1170,6 +1195,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 children,
                 spread: val.spread,
                 checked: val.checked,
+                task_marker,
                 span: new_span(val.position, cx),
             }
         }
@@ -1871,6 +1897,49 @@ mod tests {
         for source in ["- ```\n  a\\\\b\n  ```", "> ```\n> a\\\\b\n> ```"] {
             assert_eq!(selected_code_range(source, 1..2), Some(9..10));
             assert_eq!(selected_code_range(source, 2..3), Some(10..11));
+        }
+    }
+
+    fn task_markers(block: &BlockNode, markers: &mut Vec<Range<usize>>) {
+        match block {
+            BlockNode::ListItem {
+                children,
+                task_marker,
+                ..
+            } => {
+                markers.extend(task_marker.map(|span| span.start..span.end));
+                children
+                    .iter()
+                    .for_each(|child| task_markers(child, markers));
+            }
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. } => children
+                .iter()
+                .for_each(|child| task_markers(child, markers)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn task_marker_is_the_bracketed_check_wherever_the_item_text_starts() {
+        for (source, marker) in [
+            // The item text opens with a `[` of its own.
+            ("- [ ] [link](https://example.com)", "[ ]"),
+            ("> - [x] quoted", "[x]"),
+            ("- [X]\n  on the next line", "[X]"),
+            (
+                "- [a]: https://example.com\n  [ ] after a definition",
+                "[ ]",
+            ),
+        ] {
+            let document = parse(source, &mut NodeContext::default()).unwrap();
+            let mut markers = Vec::new();
+            for block in document.blocks.iter() {
+                task_markers(block, &mut markers);
+            }
+            let start = source.rfind(marker).unwrap();
+            assert_eq!(markers, vec![start..start + marker.len()], "{source:?}");
         }
     }
 
