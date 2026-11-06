@@ -311,15 +311,21 @@ impl MarkdownExtensions {
         self
     }
 
-    /// Draw the top-level blocks between two fences inside a container.
+    /// Draw a top-level blockquote that opens with the marker `[!name]` inside
+    /// a container.
     ///
     /// ```markdown
-    /// <!-- surface:summary -->
-    /// Blocks of any kind, as many as you like.
-    ///
-    /// - They stay part of the document.
-    /// <!-- /surface -->
+    /// > [!summary]
+    /// > Blocks of any kind, as many as you like.
+    /// >
+    /// > - They stay part of the document.
     /// ```
+    ///
+    /// This is the syntax of GitHub alerts, with names of your own, and other
+    /// renderers show it as a blockquote. Names match ASCII-case-insensitively,
+    /// so `[!NOTE]` opens a surface registered as `note`. The marker is alone on
+    /// the first line, and is not document text; the lines after it are the
+    /// first paragraph.
     ///
     /// `render` runs each time the document renders and returns the container
     /// with its background, shape, padding and text style, and any children to
@@ -327,30 +333,36 @@ impl MarkdownExtensions {
     /// appended to it and bring the view's paragraph gap, so a `gap` on the
     /// container adds to that. Read theme colors in `render`, so a theme change
     /// needs no new parse. What the container shows itself is not document text.
+    /// Unless the container sets a width, it takes the row's.
     ///
-    /// The blocks remain the document's: selection, range highlights, reveals and
-    /// copy go across and inside the container as if the fences were not there,
-    /// and [`rendered_text`](super::TextViewState::rendered_text) is the same with
-    /// or without them. A select-all copies the source verbatim, fences
-    /// included. The surface is one row of a scrollable view, so keep it to
-    /// what fits a few screens.
+    /// The blocks remain the document's: selection, range highlights and
+    /// reveals go across and inside the container, and
+    /// [`rendered_text`](super::TextViewState::rendered_text) has them without
+    /// the marker. A select-all copies the source verbatim. A partial source
+    /// copy is quoted under the marker line, as a blockquote's is quoted.
     ///
-    /// Fences work only at the top level of a Markdown view and only for a
-    /// registered `name`. Any other comment stays a comment. Surfaces do not nest:
-    /// an opening fence ends the surface before it, and so does the end of the
-    /// text.
+    /// Only a blockquote at the top level of a Markdown view, with a registered
+    /// name, is a surface. A nested one stays a blockquote, and so does one with
+    /// text after the marker on its line, such as Obsidian's `> [!note] Title`:
+    /// the container shows its own title. Surfaces do not nest. The marker is
+    /// markup, so escape text you don't control, as with any other Markdown.
     ///
-    /// Fences are markup, so a registered fence in text you don't control takes
-    /// effect: escape that text, as with any other Markdown. One unclosed fence
-    /// gathers the rest of the document into one row, which is no longer
-    /// virtualized. [`Self::mdx`] is not for these documents: MDX has no HTML
-    /// comments, so a fence fails the parse of the whole document, as any comment
-    /// does there.
+    /// A surface is one row of a scrollable view, so keep it to what fits a few
+    /// screens. While it is the last block of a streaming view, each append
+    /// parses and measures all of it again, so streaming one costs time
+    /// quadratic in its length. Until its marker line is complete, it shows as
+    /// a blockquote.
     pub fn block_surface<F>(mut self, name: impl Into<SharedString>, render: F) -> Self
     where
         F: Fn(&mut Window, &mut App) -> Div + Send + Sync + 'static,
     {
-        self.block_surfaces.insert(name.into(), Arc::new(render));
+        let name = name.into();
+        let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            name.to_ascii_lowercase().into()
+        } else {
+            name
+        };
+        self.block_surfaces.insert(name, Arc::new(render));
         self.bump_revision();
         self
     }
@@ -465,8 +477,15 @@ impl MarkdownExtensions {
         !self.block_surfaces.is_empty()
     }
 
-    pub(crate) fn has_block_surface(&self, name: &str) -> bool {
-        self.block_surfaces.contains_key(name)
+    /// The registered name that `written` matches, ignoring ASCII case.
+    pub(crate) fn block_surface_name(&self, written: &str) -> Option<SharedString> {
+        let name = if written.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            self.block_surfaces
+                .get_key_value(written.to_ascii_lowercase().as_str())
+        } else {
+            self.block_surfaces.get_key_value(written)
+        };
+        name.map(|(name, _)| name.clone())
     }
 
     pub(crate) fn render_block_surface(

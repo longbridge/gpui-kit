@@ -1,6 +1,7 @@
-//! A block surface draws blocks inside a container and changes nothing else about
-//! them: a selection, a find and a reveal go across and inside it as in a document
-//! without one. See `MarkdownExtensions::block_surface`.
+//! A block surface draws a blockquote that opens with a registered `[!name]`
+//! marker inside a container, and keeps its blocks part of the document: a
+//! selection, a find and a reveal go across and inside it. See
+//! `MarkdownExtensions::block_surface`.
 //!
 //! Places in the text are found the way a find shows them: a range highlight in its
 //! own color, read back from the quads of the frame. So a position is where the text
@@ -45,8 +46,19 @@ fn extensions() -> MarkdownExtensions {
     })
 }
 
-fn fenced(body: &str) -> String {
-    format!("<!-- surface:summary -->\n\n{body}\n\n<!-- /surface -->")
+/// `body` in a `summary` surface: a blockquote under the marker `[!summary]`.
+fn alert(body: &str) -> String {
+    std::iter::once("[!summary]")
+        .chain(body.lines())
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn words(count: usize) -> String {
@@ -281,37 +293,11 @@ impl Doc<'_> {
     }
 }
 
-/// A source, what to drag from and to, and what that copies.
-const AS_EVER: &[(&str, &str, &str, &str)] = &[
-    ("- a1\n\n* b1", "a1", "b1", "- a1\n\n- b1"),
-    ("1. a1\n\n1) b1", "a1", "b1", "1. a1\n\n1. b1"),
-    ("- a1\n- a2\n\n* b1", "a1", "b1", "- a1\n- a2\n\n- b1"),
-    (
-        "- a1\n\n<!-- c -->\n\n- b1",
-        "a1",
-        "b1",
-        "- a1\n\n<!-- c -->\n\n- b1",
-    ),
-    (
-        "one _em_\n\n---\n\n![](a.png)\n\n| a   | b |\n|-----|---|\n| 1   | 2 |\n\n[r]: http://x\n\ntwo",
-        "one",
-        "two",
-        "one *em*\n\n---\n\n![](a.png)\n\n| a   | b |\n|-----|---|\n| 1   | 2 |\n\n[r]: http://x\n\ntwo",
-    ),
-    (
-        "> quote\n\n```\ncode\n```\n\nlast",
-        "quote",
-        "last",
-        "> quote\n\n```\ncode\n```\n\nlast",
-    ),
-];
+const DOCUMENT: &str = "before text\n\n> [!summary]\n> inside one\n>\n> inside two\n\nafter text";
 
-const DOCUMENT: &str = "before text\n\n<!-- surface:summary -->\n\ninside one\n\ninside two\n\n<!-- /surface -->\n\nafter text";
-
-// What gathers, and what does not.
-
+/// Anything else stays a blockquote, as `block_surface_tests` checks.
 #[gpui::test]
-fn the_blocks_between_fences_draw_as_one_row_in_one_panel(cx: &mut TestAppContext) {
+fn a_registered_marker_draws_its_blockquote_in_a_panel(cx: &mut TestAppContext) {
     let mut doc = open(
         DOCUMENT,
         tall(true, SelectionFormat::Plain),
@@ -319,158 +305,19 @@ fn the_blocks_between_fences_draw_as_one_row_in_one_panel(cx: &mut TestAppContex
         cx,
     );
     assert_eq!(doc.rows(), 3);
-    let panel = doc.quads(PANEL);
-    assert_eq!(panel.len(), 1);
-    for text in ["inside one", "inside two"] {
-        let line = doc.marked(text)[0];
-        assert_eq!(line.left(), panel[0].left() + px(PADDING), "{text}");
-        assert!(panel[0].contains(&line.origin), "{text}");
-    }
-    for text in ["before text", "after text"] {
-        let line = doc.marked(text)[0];
-        assert!(!panel[0].contains(&line.origin), "{text}");
-    }
-}
-
-#[gpui::test]
-fn a_flex_container_wraps_a_list_to_the_view(cx: &mut TestAppContext) {
-    // A column flex container, as a callout with a title row is, sizes a child
-    // to its content unless the surface takes the row's width.
-    let extensions = MarkdownExtensions::default().block_surface("summary", |_, _| {
-        div().flex().flex_col().bg(PANEL).p(px(PADDING))
-    });
-    let mut doc = open(
-        &fenced(&format!("- {}", words(80))),
-        tall(true, SelectionFormat::Plain),
-        extensions,
-        cx,
-    );
-    let panel = doc.quads(PANEL)[0];
-    assert!(panel.right() <= px(WIDTH), "{panel:?}");
-    let last = *doc.marked("w79").last().unwrap();
-    assert!(
-        last.right() <= panel.right() - px(PADDING) + px(0.5),
-        "{last:?} in {panel:?}"
-    );
-    assert!(last.top() > doc.marked("w0")[0].bottom(), "the item wraps");
-}
-
-#[gpui::test]
-fn fences_need_no_blank_lines(cx: &mut TestAppContext) {
-    let mut doc = open(
-        "<!-- surface:summary -->\ninside\n<!-- /surface -->\nafter",
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    assert_eq!(doc.rows(), 2);
-    assert_eq!(doc.quads(PANEL).len(), 1);
-}
-
-#[gpui::test]
-fn without_a_registration_a_fence_is_a_comment(cx: &mut TestAppContext) {
-    let mut doc = open(
-        DOCUMENT,
-        tall(true, SelectionFormat::Plain),
-        MarkdownExtensions::default().block_surface("other", |_, _| div().bg(PANEL)),
-        cx,
-    );
-    // Before, comment, one, two, comment, after.
-    assert_eq!(doc.rows(), 6);
-    assert!(doc.quads(PANEL).is_empty());
+    // The marker line is not text.
     assert_eq!(
         doc.rendered(),
         "before text\ninside one\ninside two\nafter text\n"
     );
-}
-
-#[gpui::test]
-fn a_closing_fence_with_nothing_open_is_a_comment(cx: &mut TestAppContext) {
-    let mut doc = open(
-        "one\n\n<!-- /surface -->\n\ntwo",
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    assert_eq!(doc.rows(), 3);
-    assert!(doc.quads(PANEL).is_empty());
-}
-
-#[gpui::test]
-fn fences_are_only_for_the_top_level(cx: &mut TestAppContext) {
-    const OPEN: &str = "<!-- surface:summary -->";
-    for source in [
-        format!("> {OPEN}\n>\n> quoted\n\nafter"),
-        format!("- item\n\n  {OPEN}\n\n  listed\n\nafter"),
-        format!("1. item\n\n   {OPEN}\n\n   listed\n\n   <!-- /surface -->\n\nafter"),
-        format!("```\n{OPEN}\ncode\n```\n\nafter"),
-        format!("    {OPEN}\n\nafter"),
-        format!("text `{OPEN}` more\n\nafter"),
-    ] {
-        let mut doc = open(
-            &source,
-            tall(true, SelectionFormat::Plain),
-            extensions(),
-            cx,
-        );
-        assert_eq!(doc.rows(), 2, "{source}");
-        assert!(doc.quads(PANEL).is_empty(), "{source}");
-        assert!(doc.rendered().contains("after"), "{source}");
-        drop(doc);
+    let panel = doc.quads(PANEL);
+    assert_eq!(panel.len(), 1);
+    let line = doc.marked("inside one")[0];
+    assert_eq!(line.left(), panel[0].left() + px(PADDING));
+    assert!(panel[0].contains(&line.origin));
+    for text in ["before text", "after text"] {
+        assert!(!panel[0].contains(&doc.marked(text)[0].origin), "{text}");
     }
-}
-
-#[gpui::test]
-fn the_end_of_the_text_or_another_fence_ends_a_surface(cx: &mut TestAppContext) {
-    let mut doc = open(
-        "<!-- surface:summary -->\n\none\n\n<!-- surface:summary -->\n\ntwo",
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    assert_eq!(doc.rows(), 2);
-    assert_eq!(doc.quads(PANEL).len(), 2);
-}
-
-#[gpui::test]
-fn a_surface_with_nothing_to_show_draws_nothing(cx: &mut TestAppContext) {
-    for body in [
-        "",
-        "<!-- a comment -->",
-        "[r]: http://x",
-        "<!-- a comment -->\n\n[r]: http://x",
-        "<br>",
-    ] {
-        let source = format!("{}\n\nafter", fenced(body));
-        let mut doc = open(
-            &source,
-            tall(true, SelectionFormat::Plain),
-            extensions(),
-            cx,
-        );
-        assert!(doc.quads(PANEL).is_empty(), "{body}");
-        assert_eq!(doc.row_height(0), px(0.), "{body}");
-        drop(doc);
-    }
-}
-
-#[gpui::test]
-fn a_definition_after_the_last_block_leaves_no_gap_in_the_panel(cx: &mut TestAppContext) {
-    let mut with = open(
-        &format!("{}\n\nafter", fenced("[l][r]\n\n[r]: http://x")),
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    let with_definition = with.row_height(0);
-    drop(with);
-    let mut without = open(
-        &format!("{}\n\nafter\n\n[r]: http://x", fenced("[l][r]")),
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    assert_eq!(with_definition, without.row_height(0));
 }
 
 // Copy.
@@ -486,16 +333,8 @@ fn a_selection_copies_as_text_across_and_inside(cx: &mut TestAppContext) {
         );
         for (from, to, copied) in [
             ("inside one", "inside two", "inside one\ninside two"),
-            (
-                "before text",
-                "inside two",
-                "before text\ninside one\ninside two",
-            ),
-            (
-                "inside one",
-                "after text",
-                "inside one\ninside two\nafter text",
-            ),
+            ("before text", "inside one", "before text\ninside one"),
+            ("inside two", "after text", "inside two\nafter text"),
             (
                 "before text",
                 "after text",
@@ -504,96 +343,50 @@ fn a_selection_copies_as_text_across_and_inside(cx: &mut TestAppContext) {
         ] {
             assert_eq!(doc.drag_copy(from, to), copied, "scrollable: {scrollable}");
         }
+        // The container's title is not text.
+        let panel = doc.quads(PANEL)[0];
+        let title = panel.origin + point(px(PADDING + 1.), px(PADDING + HEADER / 2.));
+        let end = doc.end_of("inside");
+        doc.drag(title, end);
+        assert_eq!(doc.copied().trim_end(), "inside");
+        doc.cx.update(TextSelection::clear);
+        assert_eq!(
+            doc.select_all(),
+            "before text\ninside one\ninside two\nafter text\n"
+        );
         drop(doc);
     }
 }
 
-/// The source of `body` between its first and last paragraphs, dragged in from
-/// inside the surface and across each of its edges.
-fn assert_source_is_verbatim(body: &str, format: SelectionFormat, cx: &mut TestAppContext) {
-    let source = format!("before\n\n{}\n\nafter", fenced(body));
-    for scrollable in [false, true] {
-        let mut doc = open(&source, tall(scrollable, format), extensions(), cx);
-        for (from, to, copied) in [
-            ("first", "last", body.to_string()),
-            ("before", "last", format!("before\n\n{body}")),
-            ("first", "after", format!("{body}\n\nafter")),
-            ("before", "after", format!("before\n\n{body}\n\nafter")),
-        ] {
-            assert_eq!(doc.drag_copy(from, to), copied, "scrollable: {scrollable}");
-        }
-        drop(doc);
-    }
-}
-
+/// A source copy of a surface is what a copy of the same blockquote is, under
+/// the marker line, and the source verbatim where the selection covers all of it.
 #[gpui::test]
-fn a_source_copy_keeps_blocks_with_no_text_inside_a_surface(cx: &mut TestAppContext) {
-    assert_source_is_verbatim(
-        "first\n\n---\n\n![](a.png)\n\nlast",
-        SelectionFormat::Source,
-        cx,
-    );
-}
-
-#[gpui::test]
-fn a_source_copy_keeps_what_the_author_wrote_inside_a_surface(cx: &mut TestAppContext) {
-    assert_source_is_verbatim(
-        "first\n\n_italic_ a \\*b\\* \\<!-- c [l][r]\n\n| a   | b |\n|-----|---|\n| 1   | 2 |\n\n[r]: http://x\n\nlast",
-        SelectionFormat::Source,
-        cx,
-    );
-}
-
-#[gpui::test]
-fn across_styles_a_copy_is_source_across_blocks_and_edges(cx: &mut TestAppContext) {
-    assert_source_is_verbatim(
-        "first\n\n---\n\n_italic_ \\*b\\*\n\nlast",
-        SelectionFormat::SourceAcrossStyles,
-        cx,
-    );
-}
-
-#[gpui::test]
-fn across_styles_a_copy_in_one_block_of_a_surface_is_its_text(cx: &mut TestAppContext) {
-    let source = format!("before\n\n{}", fenced("one **bold** run\n\nsecond"));
-    let mut doc = open(
-        &source,
-        tall(true, SelectionFormat::SourceAcrossStyles),
-        extensions(),
-        cx,
-    );
-    assert_eq!(doc.drag_copy("bold", "bold"), "bold");
-    assert_eq!(doc.drag_copy("one", "run"), "one **bold** run");
-}
-
-#[gpui::test]
-fn a_partial_source_copy_takes_only_what_is_selected(cx: &mut TestAppContext) {
-    let source = format!(
-        "before\n\n{}",
-        fenced("skipped\n\none **two** three\n\nlast")
-    );
-    let mut doc = open(
-        &source,
-        tall(false, SelectionFormat::Source),
-        extensions(),
-        cx,
-    );
-    assert_eq!(doc.drag_copy("two", "last"), "**two** three\n\nlast");
-    assert_eq!(doc.drag_copy("before", "one"), "before\n\nskipped\n\none");
-}
-
-/// These strings are what `TextView` copied before block surfaces existed.
-#[gpui::test]
-fn a_document_without_a_surface_copies_as_ever(cx: &mut TestAppContext) {
-    for (source, from, to, copied) in AS_EVER {
+fn a_source_copy_quotes_the_selection_under_the_marker(cx: &mut TestAppContext) {
+    let source = format!("before\n\n{}\n\nafter", alert("first _em_\n\nmid\n\nlast"));
+    for format in [SelectionFormat::Source, SelectionFormat::SourceAcrossStyles] {
         for scrollable in [false, true] {
-            let mut doc = open(
-                source,
-                tall(scrollable, SelectionFormat::Source),
-                MarkdownExtensions::default(),
-                cx,
-            );
-            assert_eq!(doc.drag_copy(from, to), *copied, "{source}");
+            let mut doc = open(&source, tall(scrollable, format), extensions(), cx);
+            let in_one_block = match format {
+                SelectionFormat::Source => "> [!summary]\n> mid",
+                _ => "mid",
+            };
+            for (from, to, copied) in [
+                ("mid", "mid", in_one_block),
+                ("first", "last", "> [!summary]\n> first *em*\n> mid\n> last"),
+                (
+                    "before",
+                    "last",
+                    "before\n\n> [!summary]\n> first *em*\n> mid\n> last",
+                ),
+                ("mid", "after", "> [!summary]\n> mid\n> last\n\nafter"),
+                ("before", "after", &source),
+            ] {
+                assert_eq!(
+                    doc.drag_copy(from, to),
+                    copied,
+                    "{format:?}, scrollable: {scrollable}"
+                );
+            }
             drop(doc);
         }
     }
@@ -603,8 +396,8 @@ fn a_document_without_a_surface_copies_as_ever(cx: &mut TestAppContext) {
 fn a_select_all_copies_the_source_verbatim(cx: &mut TestAppContext) {
     for source in [
         DOCUMENT.to_string(),
-        format!("{}\n\n{}\n", fenced("- one"), fenced("- two")),
-        "\n\none\n\n<!-- a comment -->\n\n- two\n\n\n".to_string(),
+        format!("{}\n\n{}\n", alert("- one"), alert("- two")),
+        "\n\n> [!Summary]  \n> one\n\n<!-- a comment -->\n\n- two\n\n\n".to_string(),
     ] {
         for format in [SelectionFormat::Source, SelectionFormat::SourceAcrossStyles] {
             let mut doc = open(&source, tall(true, format), extensions(), cx);
@@ -614,80 +407,21 @@ fn a_select_all_copies_the_source_verbatim(cx: &mut TestAppContext) {
     }
 }
 
-#[gpui::test]
-fn a_select_all_as_text_has_no_fences_and_no_title(cx: &mut TestAppContext) {
-    let mut doc = open(
-        DOCUMENT,
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    assert_eq!(
-        doc.select_all(),
-        "before text\ninside one\ninside two\nafter text\n"
-    );
-}
-
-#[gpui::test]
-fn the_title_is_not_selectable_text(cx: &mut TestAppContext) {
-    let mut doc = open(
-        DOCUMENT,
-        tall(false, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    let panel = doc.quads(PANEL)[0];
-    let title = panel.origin + point(px(PADDING + 1.), px(PADDING + HEADER / 2.));
-    let in_the_line = doc.end_of("inside");
-    doc.drag(title, in_the_line);
-    assert_eq!(doc.copied().trim_end(), "inside");
-}
-
 // Find.
 
 #[gpui::test]
-fn the_rendered_text_is_what_it_is_without_fences(cx: &mut TestAppContext) {
-    let mut doc = open(
-        DOCUMENT,
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    let rendered = doc.rendered();
-    drop(doc);
-    let mut plain = open(
-        "before text\n\ninside one\n\ninside two\n\nafter text",
-        tall(true, SelectionFormat::Plain),
-        MarkdownExtensions::default(),
-        cx,
-    );
-    assert_eq!(rendered, plain.rendered());
-}
-
-#[gpui::test]
-fn source_positions_map_through_the_fences(cx: &mut TestAppContext) {
-    let mut doc = open(
-        DOCUMENT,
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
-    let expected = doc.range_of("inside two");
-    let start = DOCUMENT.find("inside two").unwrap();
-    let mapped = doc.view.read_with(doc.cx, |view, _| {
-        view.rendered_text().range_for_source(start..start + 10)
-    });
-    assert_eq!(mapped, Some(expected));
-}
-
-#[gpui::test]
-fn a_highlight_paints_inside_a_surface_and_across_its_edges(cx: &mut TestAppContext) {
-    let mut doc = open(
-        DOCUMENT,
-        tall(true, SelectionFormat::Plain),
-        extensions(),
-        cx,
-    );
+fn highlights_and_source_positions_go_inside_and_across_the_edges(cx: &mut TestAppContext) {
+    // `inside one` shares its source line run with the marker.
+    let source = "before text\n\n> [!summary]\n> inside one\n> inside two\n\nafter text";
+    let mut doc = open(source, tall(true, SelectionFormat::Plain), extensions(), cx);
+    for needle in ["inside one", "inside two"] {
+        let start = source.find(needle).unwrap();
+        let mapped = doc.view.read_with(doc.cx, |view, _| {
+            view.rendered_text()
+                .range_for_source(start..start + needle.len())
+        });
+        assert_eq!(mapped, Some(doc.range_of(needle)), "{needle}");
+    }
     let panel = doc.quads(PANEL)[0];
 
     // Inside: one quad, over that text, inside the panel's padding.
@@ -695,17 +429,14 @@ fn a_highlight_paints_inside_a_surface_and_across_its_edges(cx: &mut TestAppCont
     assert_eq!(inside.len(), 1);
     assert!(panel.contains(&inside[0].origin));
     assert!(inside[0].left() > panel.left() + px(PADDING));
-    let before_two = doc.marked("inside ")[0];
-    assert!(inside[0].left() >= before_two.right() - px(1.));
 
-    // Across both edges: a quad per block, none over a separator or the title.
-    let across = doc.marked("text\ninside one\ninside two\nafter");
-    assert_eq!(across.len(), 4);
+    // Across both edges: a quad per line, none over the title.
+    let across = doc.marked("text\ninside one inside two\nafter");
     let in_panel: Vec<_> = across
         .iter()
         .map(|quad| panel.contains(&quad.origin))
         .collect();
-    assert_eq!(in_panel, [false, true, true, false]);
+    assert_eq!(in_panel, [false, true, false]);
     assert!(across[1].top() > panel.top() + px(PADDING + HEADER - 1.));
 }
 
@@ -713,8 +444,8 @@ fn a_highlight_paints_inside_a_surface_and_across_its_edges(cx: &mut TestAppCont
 
 #[gpui::test]
 fn a_reveal_reaches_a_line_inside_a_surface(cx: &mut TestAppContext) {
-    // A long surface, which is one row: the line has to be scrolled to within it.
-    let source = format!("{}\n\nafter", fenced(&words(800)));
+    // A long surface is one row, so a line has to be scrolled to within it.
+    let source = format!("{}\n\nafter", alert(&words(800)));
     let mut doc = open(
         &source,
         (100., true, SelectionFormat::Plain),
@@ -726,14 +457,12 @@ fn a_reveal_reaches_a_line_inside_a_surface(cx: &mut TestAppContext) {
         assert_eq!(doc.scroll_top().item_ix, 0, "{word}");
         doc.assert_shown(word);
     }
-}
+    drop(doc);
 
-#[gpui::test]
-fn a_reveal_reaches_a_surface_off_screen(cx: &mut TestAppContext) {
     let source = format!(
         "{}\n\n{}\n\n{}",
         paragraphs(200),
-        fenced("target line"),
+        alert("target line"),
         paragraphs(50)
     );
     let mut doc = open(
@@ -772,55 +501,40 @@ fn with_cards(extensions: MarkdownExtensions) -> MarkdownExtensions {
 }
 
 #[gpui::test]
-fn a_reveal_shows_all_of_a_custom_block_inside_a_surface(cx: &mut TestAppContext) {
-    // Text above it fills the view, so the line before it can be shown without it.
+fn a_reveal_shows_a_custom_block_inside_a_surface_and_settles(cx: &mut TestAppContext) {
+    // Text above the card fills the view, so the line before it can be shown
+    // without it. At 50px, the card is taller than the view and fills it.
     let body = format!("{}\n\n[card](target)\n\n{}", paragraphs(20), paragraphs(20));
-    let source = format!("{}\n\nafter", fenced(&body));
-    let mut doc = open(
-        &source,
-        (200., true, SelectionFormat::Plain),
-        with_cards(extensions()),
-        cx,
-    );
-    doc.reveal("target");
-    settle(doc.cx);
-    let viewport = doc.viewport();
-    let card = doc.cx.debug_bounds("target-card").unwrap();
-    assert!(
-        card.top() >= viewport.top() - px(0.5) && card.bottom() <= viewport.bottom() + px(0.5),
-        "{card:?} in {viewport:?}"
-    );
-}
-
-#[gpui::test]
-fn a_reveal_of_a_custom_block_taller_than_the_view_settles(cx: &mut TestAppContext) {
-    let body = format!("{}\n\n[card](target)\n\n{}", paragraphs(20), paragraphs(20));
-    let source = format!("{}\n\nafter", fenced(&body));
-    let mut doc = open(
-        &source,
-        (50., true, SelectionFormat::Plain),
-        with_cards(extensions()),
-        cx,
-    );
-    let range = doc.range_of("target");
-    doc.view
-        .update(doc.cx, |view, cx| view.reveal_range(range, cx).unwrap());
-    let mut tops = Vec::new();
-    for _ in 0..16 {
-        doc.cx.update(|window, cx| window.draw(cx).clear(cx));
-        let top = doc.scroll_top();
-        tops.push(top.offset_in_item);
+    let source = format!("{}\n\nafter", alert(&body));
+    for height in [200., 50.] {
+        let mut doc = open(
+            &source,
+            (height, true, SelectionFormat::Plain),
+            with_cards(extensions()),
+            cx,
+        );
+        let range = doc.range_of("target");
+        doc.view
+            .update(doc.cx, |view, cx| view.reveal_range(range, cx).unwrap());
+        let mut tops = Vec::new();
+        for _ in 0..16 {
+            doc.cx.update(|window, cx| window.draw(cx).clear(cx));
+            tops.push(doc.scroll_top().offset_in_item);
+        }
+        assert!(
+            tops[1..].iter().all(|top| *top == tops[1]),
+            "it moved after the first frames: {tops:?}"
+        );
+        let viewport = doc.viewport();
+        let card = doc.cx.debug_bounds("target-card").unwrap();
+        let shown = if card.size.height <= viewport.size.height {
+            card.top() >= viewport.top() - px(0.5) && card.bottom() <= viewport.bottom() + px(0.5)
+        } else {
+            card.top() <= viewport.top() + px(0.5) && card.bottom() >= viewport.bottom() - px(0.5)
+        };
+        assert!(shown, "{card:?} in {viewport:?}");
+        drop(doc);
     }
-    assert!(
-        tops[1..].iter().all(|top| *top == tops[1]),
-        "it moved after the first frames: {tops:?}"
-    );
-    let viewport = doc.viewport();
-    let card = doc.cx.debug_bounds("target-card").unwrap();
-    assert!(
-        card.top() <= viewport.top() + px(0.5) && card.bottom() >= viewport.bottom() - px(0.5),
-        "{card:?} fills {viewport:?}"
-    );
 }
 
 // Height.
@@ -828,13 +542,12 @@ fn a_reveal_of_a_custom_block_taller_than_the_view_settles(cx: &mut TestAppConte
 #[gpui::test]
 fn a_surface_measures_as_its_blocks_and_its_container(cx: &mut TestAppContext) {
     let mut plain = open(
-        DOCUMENT,
+        "before text\n\ninside one\n\ninside two\n\nafter text",
         tall(true, SelectionFormat::Plain),
         MarkdownExtensions::default(),
         cx,
     );
-    assert_eq!(plain.rows(), 6);
-    let blocks = [plain.row_height(2), plain.row_height(3)];
+    let blocks = [plain.row_height(1), plain.row_height(2)];
     drop(plain);
     let mut doc = open(
         DOCUMENT,
@@ -842,48 +555,56 @@ fn a_surface_measures_as_its_blocks_and_its_container(cx: &mut TestAppContext) {
         extensions(),
         cx,
     );
-    assert_eq!(doc.rows(), 3);
-    // Each paragraph's gap is in its row. In the surface the last one's moves below
-    // the container, so it is still one row's worth of each.
+    // Each paragraph's gap is in its row. In the surface the last one's moves
+    // below the container, so it is still one row's worth of each.
     assert_eq!(
         doc.row_height(1),
         blocks[0] + blocks[1] + px(HEADER + 2. * PADDING),
     );
     // The panel is the row, less that gap.
     assert_eq!(doc.quads(PANEL)[0].size.height, doc.row_height(1) - px(12.));
+    drop(doc);
+
+    // With nothing to show, it draws nothing.
+    for body in ["", "\n[r]: http://x"] {
+        let mut doc = open(
+            &format!("{}\n\nafter", alert(body)),
+            tall(true, SelectionFormat::Plain),
+            extensions(),
+            cx,
+        );
+        assert!(doc.quads(PANEL).is_empty(), "{body:?}");
+        assert_eq!(doc.row_height(0), px(0.), "{body:?}");
+        drop(doc);
+    }
 }
 
 #[gpui::test]
-fn a_surface_wraps_inside_its_padding_and_remeasures_at_a_new_width(cx: &mut TestAppContext) {
-    let source = format!("{}\n\nafter", fenced(&words(200)));
-    // Comment, paragraph, comment, after; the paragraph wraps at the full width.
-    let mut plain = open(
-        &source,
-        tall(true, SelectionFormat::Plain),
-        MarkdownExtensions::default(),
-        cx,
-    );
-    let full_width = plain.row_height(1);
-    drop(plain);
+fn a_surface_wraps_to_the_view_and_remeasures_at_a_new_width(cx: &mut TestAppContext) {
+    // A column flex container, as a callout with a title row is, sizes a child
+    // to its content unless the surface takes the row's width.
+    let flex = MarkdownExtensions::default().block_surface("summary", |_, _| {
+        div().flex().flex_col().bg(PANEL).p(px(PADDING))
+    });
     let mut doc = open(
-        &source,
+        &format!("{}\n\nafter", alert(&format!("- {}", words(200)))),
         tall(true, SelectionFormat::Plain),
-        extensions(),
+        flex,
         cx,
     );
+    let panel = doc.quads(PANEL)[0];
+    assert_eq!(panel.size.width, px(WIDTH));
+    let last = *doc.marked("w199").last().unwrap();
+    assert!(last.right() <= panel.right() - px(PADDING) + px(0.5));
+    assert!(last.top() > doc.marked("w0")[0].bottom(), "the item wraps");
+
     let (wide, wide_extent) = (doc.row_height(0), doc.extent());
-    // The padding takes width from the text, so it wraps into more lines.
-    assert!(
-        wide > full_width + px(HEADER + 2. * PADDING),
-        "{wide:?} {full_width:?}"
-    );
     doc.root.update(doc.cx, |root, cx| {
         root.width = WIDTH / 2.;
         cx.notify();
     });
     settle(doc.cx);
-    let narrow = doc.row_height(0);
-    assert!(narrow > wide * 1.5, "{wide:?} to {narrow:?}");
+    assert!(doc.row_height(0) > wide * 1.5);
     assert!(doc.extent() > wide_extent);
     assert_eq!(doc.quads(PANEL)[0].size.width, px(WIDTH / 2.));
 }
@@ -894,7 +615,7 @@ fn a_surface_wraps_inside_its_padding_and_remeasures_at_a_new_width(cx: &mut Tes
 fn a_stream_builds_what_a_whole_parse_does(cx: &mut TestAppContext) {
     let source = format!(
         "before\n\n{}\n\nafter",
-        fenced("# inside one\n\ninside **two**\n\n- three")
+        alert("# inside one\n\ninside **two**\n\n- three")
     );
     let mut whole = open(
         &source,
@@ -902,15 +623,10 @@ fn a_stream_builds_what_a_whole_parse_does(cx: &mut TestAppContext) {
         extensions(),
         cx,
     );
-    let expected = (
-        whole.rendered(),
-        whole.rows(),
-        whole.row_height(1),
-        whole.select_all(),
-    );
+    let expected = (whole.rendered(), whole.rows(), whole.row_height(1));
     drop(whole);
 
-    // Every chunk size, fences split included: 1 is each byte alone.
+    // Every chunk size, the marker split included: 1 is each byte alone.
     for chunk in [1, 7, 30] {
         let mut doc = open(
             &source[..chunk],
@@ -928,12 +644,7 @@ fn a_stream_builds_what_a_whole_parse_does(cx: &mut TestAppContext) {
             at = end;
         }
         assert_eq!(doc.quads(PANEL).len(), 1, "chunk {chunk}");
-        let streamed = (
-            doc.rendered(),
-            doc.rows(),
-            doc.row_height(1),
-            doc.select_all(),
-        );
+        let streamed = (doc.rendered(), doc.rows(), doc.row_height(1));
         assert_eq!(streamed, expected, "chunk {chunk}");
         drop(doc);
     }

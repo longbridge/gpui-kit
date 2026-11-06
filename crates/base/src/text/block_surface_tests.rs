@@ -37,14 +37,80 @@ fn parsed(source: &str, extensions: MarkdownExtensions) -> Vec<BlockNode> {
     document.blocks.as_ref().clone()
 }
 
-const DOCUMENT: &str = "before\n\n<!-- surface:summary -->\n\n# inside one\n\ninside **two**\n\n- three\n\n<!-- /surface -->\n\nafter";
-const WITHOUT_FENCES: &str = "before\n\n# inside one\n\ninside **two**\n\n- three\n\nafter";
+/// The surface `source` parses to, as its name and its children's Markdown,
+/// or `None` when it parses to something else.
+fn surface(source: &str) -> Option<(String, String)> {
+    match &parsed(source, extensions())[..] {
+        [BlockNode::Surface { name, children, .. }] => Some((
+            name.to_string(),
+            children
+                .iter()
+                .map(BlockNode::to_markdown)
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        )),
+        _ => None,
+    }
+}
 
 #[test]
-fn a_document_without_fences_parses_the_same_with_or_without_a_registration() {
+fn a_registered_marker_alone_on_the_first_line_makes_a_surface() {
+    for (source, children) in [
+        ("> [!summary]\n> one\n> two", "one two"),
+        ("> [!SUMMARY]\n>\n> one", "one"),
+        ("> [!Summary]  \n> one", "one"),
+        ("> [!summary] \n> *one*", "*one*"),
+        ("> [!summary]\nlazy", "lazy"),
+        ("> [!summary]\n> - one\n> - two", "- one\n- two"),
+        ("> [!summary]", ""),
+    ] {
+        assert_eq!(
+            surface(source),
+            Some(("summary".to_string(), children.to_string())),
+            "{source}"
+        );
+    }
+    // The marker is not its first paragraph's text, which starts after it.
+    let source = "> [!summary]\n>  one";
+    let [BlockNode::Surface { children, span, .. }] = &parsed(source, extensions())[..] else {
+        panic!("a surface");
+    };
+    let BlockNode::Paragraph(paragraph) = &children[0] else {
+        panic!("a paragraph");
+    };
+    assert_eq!(paragraph.span.unwrap().start, source.find("one").unwrap());
+    assert_eq!(span.unwrap().start, 0);
+}
+
+#[test]
+fn anything_else_parses_as_it_does_without_a_registration() {
+    for source in [
+        "> [!other]\n> one",
+        "> [!summary] Title\n> one",
+        "> [!summary]*one*",
+        "> [!summary\n> one",
+        "> one\n> [!summary]",
+        "> > [!summary]\n> > one",
+        "- > [!summary]\n  > one",
+        "[!summary]\n\none",
+        "[!summary]: http://x\n\n> [!summary]\n> one",
+    ] {
+        assert_eq!(
+            parsed(source, extensions()),
+            parsed(source, MarkdownExtensions::default()),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn a_surface_writes_markdown_as_its_marker_and_quoted_blocks() {
+    let source = "> [!SUMMARY]\n> one\n>\n> - two";
+    let blocks = parsed(source, extensions());
+    assert_eq!(blocks[0].to_markdown(), "> [!summary]\n> one\n>\n> - two");
     assert_eq!(
-        parsed(WITHOUT_FENCES, extensions()),
-        parsed(WITHOUT_FENCES, MarkdownExtensions::default())
+        parsed(&blocks[0].to_markdown(), extensions()),
+        parsed("> [!summary]\n> one\n>\n> - two", extensions())
     );
 }
 
@@ -119,7 +185,7 @@ fn a_new_container_needs_no_new_parse(cx: &mut TestAppContext) {
                 div()
             })
     };
-    let (root, cx) = window(DOCUMENT, counted(renders.clone()), false, cx);
+    let (root, cx) = window("> [!summary]\n> one", counted(renders.clone()), false, cx);
     let view = view(&root, cx);
     let document = view.read_with(cx, |state, _| state.parsed_content.document.blocks.clone());
     let before = renders.load(Ordering::Relaxed);
@@ -137,13 +203,4 @@ fn a_new_container_needs_no_new_parse(cx: &mut TestAppContext) {
             &state.parsed_content.document.blocks
         ));
     });
-}
-
-#[test]
-fn mdx_fails_the_whole_document_as_any_comment_does() {
-    let mut cx = NodeContext {
-        markdown_extensions: Arc::new(extensions().mdx()),
-        ..NodeContext::default()
-    };
-    assert!(markdown::parse(DOCUMENT, &mut cx).is_err());
 }

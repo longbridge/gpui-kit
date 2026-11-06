@@ -166,17 +166,15 @@ impl ParsedDocument {
             return text;
         }
 
-        let covered = self.covered_blocks(first, last, &painted);
-        let last_covered = covered.len().saturating_sub(1);
         let mut out: Vec<String> = Vec::new();
-        for (ix, block) in covered.iter().copied().enumerate() {
+        for (ix, block) in self.blocks.iter().enumerate().take(last + 1).skip(first) {
             // The selection is one continuous range, so only the block it
             // starts in and the block it ends in can be partly selected.
             // Everything between them is covered whole, and so is any block
             // that reports nothing — it either scrolled past without painting,
             // or renders no selectable text run at all (a rule, a break, a
             // custom node, a standalone image).
-            let source = if (ix == 0 || ix == last_covered) && block.has_selection() {
+            let source = if (ix == first || ix == last) && painted[ix] {
                 block.selected_text(format)
             } else {
                 self.whole_source(block)
@@ -188,30 +186,6 @@ impl ParsedDocument {
             }
         }
         out.join("\n\n")
-    }
-
-    /// The blocks from top-level block `first` through `last`, with a block
-    /// surface's children in its place: they are blocks of the document, and
-    /// its source has them as such. A surface the selection ends in takes only
-    /// the children from or up to the end it painted.
-    fn covered_blocks(&self, first: usize, last: usize, painted: &[bool]) -> Vec<&BlockNode> {
-        let mut covered = Vec::with_capacity((last + 1).saturating_sub(first));
-        for (ix, block) in self.blocks.iter().enumerate().take(last + 1).skip(first) {
-            let BlockNode::Surface { children, .. } = block else {
-                covered.push(block);
-                continue;
-            };
-            let start = (ix == first && painted[ix])
-                .then(|| children.iter().position(BlockNode::has_selection))
-                .flatten()
-                .unwrap_or(0);
-            let end = (ix == last && painted[ix])
-                .then(|| children.iter().rposition(BlockNode::has_selection))
-                .flatten()
-                .map_or(children.len(), |end| end + 1);
-            covered.extend(&children[start..end]);
-        }
-        covered
     }
 
     /// The whole source of a block the selection covers.

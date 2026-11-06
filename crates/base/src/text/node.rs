@@ -66,18 +66,18 @@ pub enum BlockNode {
         children: Vec<BlockNode>,
         span: Option<Span>,
     },
-    /// Blocks drawn inside a container named by a
-    /// [block surface](super::MarkdownExtensions::block_surface).
+    /// A blockquote opening with the marker of a
+    /// [block surface](super::MarkdownExtensions::block_surface), drawn inside
+    /// the container registered for `name`.
     ///
-    /// Presentation only: its text, selection, highlights and reveals are its
-    /// children's, as if the fences around them were not there.
+    /// Its text, selection, highlights and reveals are its children's, which
+    /// leave out the marker line.
     Surface {
+        /// The name it is registered under, in ASCII lowercase.
         name: SharedString,
         children: Vec<BlockNode>,
-        /// The source from the opening fence through the closing one.
+        /// The source of the whole blockquote, marker included.
         span: Option<Span>,
-        /// The source between the fences, which is what a copy takes.
-        content: Option<Span>,
     },
     List {
         /// Only contains ListItem, others will be ignored
@@ -655,29 +655,25 @@ impl BlockNode {
 
                 if !block_text.is_empty() {
                     if matches!(kind, BlockTextKind::SelectedSource) {
-                        // Prefix every line with `> ` so a selected blockquote
-                        // round-trips as Markdown.
-                        let quoted = block_text
-                            .trim_end_matches('\n')
-                            .lines()
-                            .map(|line| {
-                                if line.is_empty() {
-                                    ">".to_string()
-                                } else {
-                                    format!("> {}", line)
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        text.push_str(&quoted);
+                        text.push_str(&quoted_source(None, &block_text));
                     } else {
                         text.push_str(&block_text);
                     }
                     text.push('\n');
                 }
             }
-            BlockNode::Surface { children, .. } => {
-                text.push_str(&Self::children_text(children, kind));
+            BlockNode::Surface { name, children, .. } => {
+                let block_text = Self::children_text(children, kind);
+                if matches!(kind, BlockTextKind::SelectedSource) {
+                    // Quoted under its marker, as a blockquote's selection is
+                    // quoted, so that it round-trips as the same surface.
+                    if !block_text.is_empty() {
+                        text.push_str(&quoted_source(Some(name), &block_text));
+                        text.push('\n');
+                    }
+                } else {
+                    text.push_str(&block_text);
+                }
             }
             BlockNode::Table(table) => {
                 if matches!(kind, BlockTextKind::SelectedSource) {
@@ -1440,6 +1436,25 @@ fn table_selected_source(table: &Table) -> String {
 /// and sub-list lines align under the item text. Items with no selected content
 /// are skipped but still consume an ordered number, so the remaining items keep
 /// their original numbering.
+/// `text` as the source of a blockquote, each line prefixed with `> ` so it
+/// round-trips as Markdown, under a block surface's `[!marker]` line when it has
+/// one.
+fn quoted_source(marker: Option<&SharedString>, text: &str) -> String {
+    marker
+        .map(|name| format!("[!{name}]"))
+        .into_iter()
+        .chain(text.trim_end_matches('\n').lines().map(str::to_string))
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn list_selected_source(
     children: &[BlockNode],
     ordered: bool,
@@ -3723,10 +3738,12 @@ impl BlockNode {
                     .join("\n")
             }
             BlockNode::Surface { name, children, .. } => {
-                let mut parts = vec![format!("<!-- surface:{name} -->")];
-                parts.extend(children.iter().map(|child| child.to_markdown()));
-                parts.push("<!-- /surface -->".to_string());
-                parts.join("\n\n")
+                let content = children
+                    .iter()
+                    .map(|child| child.to_markdown())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                quoted_source(Some(name), &content)
             }
             BlockNode::List {
                 children,
@@ -4535,7 +4552,7 @@ impl BlockNode {
             ),
             BlockNode::Surface { name, children, .. } => {
                 if children.iter().all(Self::draws_nothing) {
-                    // Nothing to hold, as when a stream has just opened the fence.
+                    // Nothing to hold, as when a stream has only sent the marker.
                     return div().into_any_element();
                 }
                 // Unless the container sets its own width, it takes the row's,
@@ -5264,7 +5281,6 @@ mod tests {
                 vec![],
             ))],
             span: None,
-            content: None,
         };
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
         in_prepaint(&mut app, move |window, cx| {

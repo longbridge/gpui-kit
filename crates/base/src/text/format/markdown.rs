@@ -990,122 +990,109 @@ fn ast_to_document(source: &str, root: mdast::Node, cx: &mut NodeContext) -> Par
         _ => panic!("expected root node"),
     };
 
-    let blocks = if cx.markdown_extensions.has_block_surfaces() {
-        blocks_with_surfaces(source, root.children, cx)
-    } else {
-        root.children
-            .into_iter()
-            .map(|c| ast_to_node(source, c, cx))
-            .collect()
-    };
+    let has_surfaces = cx.markdown_extensions.has_block_surfaces();
+    let blocks = root
+        .children
+        .into_iter()
+        .map(|node| match node {
+            Node::Blockquote(quote) if has_surfaces => blockquote_to_node(source, quote, cx),
+            node => ast_to_node(source, node, cx),
+        })
+        .collect();
     ParsedDocument {
         source: source.to_string().into(),
         blocks: Arc::new(blocks),
     }
 }
 
-enum SurfaceFence {
-    Open(SharedString),
-    Close,
+/// A top-level blockquote, which is a block surface when it opens with the
+/// marker of a registered one.
+fn blockquote_to_node(
+    source: &str,
+    mut quote: mdast::Blockquote,
+    cx: &mut NodeContext,
+) -> BlockNode {
+    let Some(name) = take_surface_marker(source, &mut quote, cx) else {
+        return ast_to_node(source, Node::Blockquote(quote), cx);
+    };
+    let children = quote
+        .children
+        .into_iter()
+        .map(|child| ast_to_node(source, child, cx))
+        .collect();
+    BlockNode::Surface {
+        name,
+        children,
+        span: new_span(quote.position, cx),
+    }
 }
 
-/// The block surface fence `node` is, if any. Comments naming a surface nobody
-/// registered remain plain comments.
-fn surface_fence(node: &Node, cx: &NodeContext) -> Option<SurfaceFence> {
-    let Node::Html(html) = node else {
+/// Removes the marker line that names a registered block surface from the
+/// start of `quote`, and returns that name.
+///
+/// As in a GitHub alert, the marker `[!name]` is alone on the first line of
+/// the first paragraph, and the lines after it are that paragraph's text. The
+/// name matches ASCII-case-insensitively.
+fn take_surface_marker(
+    source: &str,
+    quote: &mut mdast::Blockquote,
+    cx: &NodeContext,
+) -> Option<SharedString> {
+    let Some(Node::Paragraph(paragraph)) = quote.children.first_mut() else {
         return None;
     };
-    let comment = html
-        .value
-        .trim()
-        .strip_prefix("<!--")?
-        .strip_suffix("-->")?
-        .trim();
-    if comment == "/surface" {
-        return Some(SurfaceFence::Close);
-    }
-    let name = comment.strip_prefix("surface:")?;
-    cx.markdown_extensions
-        .has_block_surface(name)
-        .then(|| SurfaceFence::Open(name.to_string().into()))
-}
-
-/// A surface whose closing fence has not been reached.
-struct OpenSurface {
-    name: SharedString,
-    children: Vec<BlockNode>,
-    span: Option<Span>,
-    content_start: Option<usize>,
-}
-
-impl OpenSurface {
-    /// Ends the surface where its last child ends, as the end of the text or
-    /// the next surface's fence does. A closing fence passes its own span.
-    fn close(self, closing: Option<Span>) -> BlockNode {
-        let end = self
-            .children
-            .last()
-            .and_then(BlockNode::span)
-            .or(self.span)
-            .map(|span| span.end);
-        let content_end = closing.map(|span| span.start).or(end);
-        let span_end = closing.map(|span| span.end).or(end);
-        BlockNode::Surface {
-            name: self.name,
-            children: self.children,
-            span: self.span.zip(span_end).map(|(open, end)| Span {
-                start: open.start,
-                end,
-            }),
-            content: self
-                .content_start
-                .zip(content_end)
-                .map(|(start, end)| Span { start, end }),
-        }
-    }
-}
-
-/// The top-level blocks, with those between surface fences gathered into one.
-///
-/// A surface is one block, with one span that starts at its opening fence, so
-/// the stream parser, which parses the last block again with what was appended,
-/// always sees the fence again.
-fn blocks_with_surfaces(source: &str, nodes: Vec<Node>, cx: &mut NodeContext) -> Vec<BlockNode> {
-    let mut blocks = Vec::with_capacity(nodes.len());
-    let mut open: Option<OpenSurface> = None;
-    for node in nodes {
-        let fence = surface_fence(&node, cx);
-        let span = new_span(node.position().cloned(), cx);
-        match fence {
-            Some(SurfaceFence::Open(name)) => {
-                if let Some(surface) = open.take() {
-                    blocks.push(surface.close(None));
-                }
-                open = Some(OpenSurface {
-                    name,
-                    children: Vec::new(),
-                    span,
-                    content_start: span.map(|span| span.end),
-                });
-            }
-            Some(SurfaceFence::Close) if open.is_some() => {
-                if let Some(surface) = open.take() {
-                    blocks.push(surface.close(span));
-                }
-            }
-            _ => {
-                let block = ast_to_node(source, node, cx);
-                match &mut open {
-                    Some(surface) => surface.children.push(block),
-                    None => blocks.push(block),
-                }
+    let Some(Node::Text(text)) = paragraph.children.first_mut() else {
+        return None;
+    };
+    let (line, rest) = match text.value.split_once('\n') {
+        Some((line, rest)) => (line.strip_suffix('\r').unwrap_or(line), Some(rest)),
+        None => (text.value.as_str(), None),
+    };
+    let name = line.strip_prefix("[!")?.strip_suffix(']')?;
+    let name = cx.markdown_extensions.block_surface_name(name)?;
+    match rest {
+        // The next line goes on in this text, which starts after the line's
+        // blockquote marker in the source.
+        Some(rest) => {
+            let rest = rest.to_string();
+            let position = text.position.as_mut()?;
+            let line_start =
+                source[position.start.offset..].find('\n')? + position.start.offset + 1;
+            let content = source[line_start..].trim_start_matches([' ', '\t']);
+            let content = content.strip_prefix('>').unwrap_or(content);
+            let content = content.trim_start_matches([' ', '\t']);
+            let offset = source.len() - content.len();
+            position.start = Point::new(position.start.line + 1, offset - line_start + 1, offset);
+            text.value = rest;
+            if text.value.is_empty() {
+                paragraph.children.remove(0);
             }
         }
+        // The marker ends the paragraph or a hard break ends its line.
+        None => match paragraph.children.get(1) {
+            None => {
+                paragraph.children.clear();
+            }
+            Some(Node::Break(_)) => {
+                paragraph.children.drain(..2);
+            }
+            Some(_) => return None,
+        },
     }
-    if let Some(surface) = open {
-        blocks.push(surface.close(None));
+    // The paragraph starts where its first remaining child does.
+    match paragraph.children.first() {
+        Some(first) => {
+            if let Some(start) = first.position().map(|first| first.start.clone())
+                && let Some(position) = paragraph.position.as_mut()
+            {
+                position.start = start;
+            }
+        }
+        None => {
+            quote.children.remove(0);
+        }
     }
-    blocks
+    Some(name)
 }
 
 fn new_span(pos: Option<markdown::unist::Position>, cx: &NodeContext) -> Option<Span> {
