@@ -12929,6 +12929,19 @@ impl InputBaseState<crate::input::EditorMode> {
         cx.notify();
     }
 
+    /// Fold or unfold every candidate without editing the source.
+    pub fn set_all_folded(&mut self, folded: bool, cx: &mut Context<Self>) {
+        if self.mode.is_folding() {
+            self.display_map.set_all_folded(folded);
+            cx.notify();
+        }
+    }
+
+    /// Current folded source-line ranges, including nested folds.
+    pub fn folded_ranges(&self) -> &[crate::input::FoldRange] {
+        self.display_map.folded_ranges()
+    }
+
     /// Unfold any folded ranges that hide the given position.
     ///
     /// Use this to reveal a position before acting on it (e.g. before
