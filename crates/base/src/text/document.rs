@@ -231,45 +231,6 @@ impl ParsedDocument {
         block.selected_text(SelectionFormat::Source)
     }
 
-    /// The source a select-all copies: all of it, as written, except the
-    /// fences of block surfaces. What they stood between stays separate blocks,
-    /// except that two lists of one kind read as one list without a fence.
-    pub(super) fn copied_source(&self) -> String {
-        if !self
-            .blocks
-            .iter()
-            .any(|block| matches!(block, BlockNode::Surface { .. }))
-        {
-            return self.source.to_string();
-        }
-        let mut copied = String::new();
-        let mut push = |source: &str| {
-            let source = source.trim_matches(['\r', '\n']);
-            if source.is_empty() {
-                return;
-            }
-            if !copied.is_empty() {
-                copied.push_str("\n\n");
-            }
-            copied.push_str(source);
-        };
-        let mut end = 0;
-        for block in self.blocks.iter() {
-            if let BlockNode::Surface {
-                span: Some(span),
-                content: Some(content),
-                ..
-            } = block
-            {
-                push(&self.source[end..span.start]);
-                push(&self.source[content.start..content.end]);
-                end = span.end;
-            }
-        }
-        push(&self.source[end..]);
-        copied
-    }
-
     pub(super) fn selected_source_range(&self) -> Option<Range<usize>> {
         let mut selected = SourceRangeSelection::Unselected;
         for block in self.blocks.iter() {

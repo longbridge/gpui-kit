@@ -331,13 +331,14 @@ impl MarkdownExtensions {
     /// The blocks remain the document's: selection, range highlights, reveals and
     /// copy go across and inside the container as if the fences were not there,
     /// and [`rendered_text`](super::TextViewState::rendered_text) is the same with
-    /// or without them. Fences are not copied. The surface is one row of a
-    /// scrollable view, so keep it to what fits a few screens.
+    /// or without them. A select-all copies the source verbatim, fences
+    /// included. The surface is one row of a scrollable view, so keep it to
+    /// what fits a few screens.
     ///
     /// Fences work only at the top level of a Markdown view and only for a
     /// registered `name`. Any other comment stays a comment. Surfaces do not nest:
     /// an opening fence ends the surface before it, and so does the end of the
-    /// text. Two lists of one kind that only a fence kept apart copy as one list.
+    /// text.
     ///
     /// Fences are markup, so a registered fence in text you don't control takes
     /// effect: escape that text, as with any other Markdown. One unclosed fence

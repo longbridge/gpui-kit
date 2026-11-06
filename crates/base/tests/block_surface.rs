@@ -600,47 +600,18 @@ fn a_document_without_a_surface_copies_as_ever(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn a_select_all_leaves_out_fences_and_their_lines(cx: &mut TestAppContext) {
-    for (source, copied) in [
-        (fenced("only"), "only".to_string()),
-        (
-            DOCUMENT.to_string(),
-            "before text\n\ninside one\n\ninside two\n\nafter text".to_string(),
-        ),
-        (
-            "<!-- surface:summary -->\nno blank lines\n<!-- /surface -->\nafter".to_string(),
-            "no blank lines\n\nafter".to_string(),
-        ),
-        (
-            format!("{}\n\n{}\n", fenced("one"), fenced("two")),
-            "one\n\ntwo".to_string(),
-        ),
-        (
-            format!("{}\n\nafter", fenced("[r]: http://x")),
-            "[r]: http://x\n\nafter".to_string(),
-        ),
+fn a_select_all_copies_the_source_verbatim(cx: &mut TestAppContext) {
+    for source in [
+        DOCUMENT.to_string(),
+        format!("{}\n\n{}\n", fenced("- one"), fenced("- two")),
+        "\n\none\n\n<!-- a comment -->\n\n- two\n\n\n".to_string(),
     ] {
-        let mut doc = open(
-            &source,
-            tall(true, SelectionFormat::Source),
-            extensions(),
-            cx,
-        );
-        assert_eq!(doc.select_all(), copied, "{source}");
-        drop(doc);
+        for format in [SelectionFormat::Source, SelectionFormat::SourceAcrossStyles] {
+            let mut doc = open(&source, tall(true, format), extensions(), cx);
+            assert_eq!(doc.select_all(), source);
+            drop(doc);
+        }
     }
-}
-
-#[gpui::test]
-fn a_select_all_without_a_surface_is_verbatim(cx: &mut TestAppContext) {
-    let source = "\n\none\n\n<!-- a comment -->\n\n- two\n\n\n";
-    let mut doc = open(
-        source,
-        tall(true, SelectionFormat::Source),
-        extensions(),
-        cx,
-    );
-    assert_eq!(doc.select_all(), source);
 }
 
 #[gpui::test]
