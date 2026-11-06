@@ -109,7 +109,45 @@ pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + 
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
-pub(crate) type TaskToggleHandlerFn = dyn Fn(usize, bool, &mut Window, &mut App) + Send + Sync;
+pub(crate) type TaskToggleHandlerFn = dyn Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync;
+
+/// A click on the checkbox of a Markdown task list item, passed to the
+/// [`TextView::on_task_toggle`] handler.
+///
+/// The ranges are byte ranges in the view's source text.
+#[derive(Debug, Clone)]
+pub struct TaskToggleEvent {
+    checked: bool,
+    item_range: Range<usize>,
+    marker_range: Range<usize>,
+}
+
+impl TaskToggleEvent {
+    pub(crate) fn new(checked: bool, item_range: Range<usize>, marker_range: Range<usize>) -> Self {
+        Self {
+            checked,
+            item_range,
+            marker_range,
+        }
+    }
+
+    /// The checked state the item should now have: the opposite of the
+    /// state its checkbox shows.
+    pub fn checked(&self) -> bool {
+        self.checked
+    }
+
+    /// The list item's source span, starting at its list marker (`-`, `*`,
+    /// `1.`) and covering its content, nested lists included.
+    pub fn item_range(&self) -> Range<usize> {
+        self.item_range.clone()
+    }
+
+    /// The item's task marker: the `[ ]` or `[x]` itself, brackets included.
+    pub fn marker_range(&self) -> Range<usize> {
+        self.marker_range.clone()
+    }
+}
 
 /// Kept by the element only, so unlike the handlers the state carries, it
 /// may hold a `ScrollHandle`.
@@ -457,14 +495,14 @@ impl TextView {
     /// Make the checkboxes of Markdown task list items (`- [ ]`, `- [x]`)
     /// clickable.
     ///
-    /// The handler receives the byte offset in the source text at which the
-    /// clicked list item starts, and the checked state the item should now
-    /// have. The view does not change its text: the caller owns the source,
-    /// updates the item's marker and sets the new text. Without a handler,
-    /// the checkboxes are not interactive.
+    /// The handler receives a [`TaskToggleEvent`] with the checked state the
+    /// item should now have and where the item and its `[ ]` / `[x]` marker
+    /// are in the source text. The view does not change its text: the caller
+    /// owns the source, replaces the marker and sets the new text. Without a
+    /// handler, the checkboxes are not interactive.
     pub fn on_task_toggle<F>(mut self, handler: F) -> Self
     where
-        F: Fn(usize, bool, &mut Window, &mut App) + Send + Sync + 'static,
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.task_toggle_handler = Some(Arc::new(handler));
         self
@@ -1004,7 +1042,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use super::{TextView, TextViewPlugin};
+    use super::{TaskToggleEvent, TextView, TextViewPlugin};
     use crate::text::{SelectionFormat, TableData, TextViewState, TextViewStyle};
     use gpui::{
         AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
@@ -2429,9 +2467,12 @@ mod tests {
         }
     }
 
-    const TASK_LIST: &str = "- [ ] Open\n  - [x] Nested\n- [x] Done\n";
+    /// A task under each list marker, one of them nested.
+    const TASK_LIST: &str =
+        "- [ ] Open\n  - [x] Nested\n* [X] Star\n+ [ ] Plus\n1. [x] One\n2) [ ] Two\n";
+    const TASK_LABELS: [&str; 6] = ["Open", "Nested", "Star", "Plus", "One", "Two"];
 
-    type TaskToggles = Arc<std::sync::Mutex<Vec<(usize, bool)>>>;
+    type TaskToggles = Arc<std::sync::Mutex<Vec<TaskToggleEvent>>>;
 
     struct TaskListTestRoot {
         text_view: Entity<TextViewState>,
@@ -2453,8 +2494,8 @@ mod tests {
                 .child(TextView::new(&self.text_view).when_some(
                     self.toggles.clone(),
                     |this, toggles| {
-                        this.on_task_toggle(move |offset, checked, _, _| {
-                            toggles.lock().unwrap().push((offset, checked));
+                        this.on_task_toggle(move |event, _, _| {
+                            toggles.lock().unwrap().push(event.clone());
                         })
                     },
                 ))
@@ -2484,7 +2525,7 @@ mod tests {
                     .text_position(label, 0)
             })
         };
-        for label in ["Open", "Nested", "Done"] {
+        for label in TASK_LABELS {
             // The checkbox sits just before the item's text.
             let checkbox = text(label, cx) - point(px(16.), px(0.));
             cx.simulate_click(checkbox, Modifiers::default());
@@ -2496,17 +2537,38 @@ mod tests {
     }
 
     #[gpui::test]
-    fn task_checkbox_click_reports_the_item_offset_and_its_new_state(cx: &mut TestAppContext) {
+    fn task_checkbox_click_reports_its_new_state_item_and_marker(cx: &mut TestAppContext) {
         let toggles = TaskToggles::default();
         let container_clicks = click_task_list(Some(toggles.clone()), cx);
 
-        let nested = TASK_LIST.find("- [x] Nested").unwrap();
-        let done = TASK_LIST.find("- [x] Done").unwrap();
+        let reported: Vec<_> = toggles
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| (event.checked(), event.item_range(), event.marker_range()))
+            .collect();
+        let task = |checked, item: &str, marker: &str| {
+            let item_start = TASK_LIST.find(item).unwrap();
+            let marker_start = item_start + item.find(marker).unwrap();
+            (
+                checked,
+                item_start..item_start + item.len(),
+                marker_start..marker_start + marker.len(),
+            )
+        };
         assert_eq!(
-            *toggles.lock().unwrap(),
-            vec![(0, true), (nested, false), (done, false)],
-            "each checkbox reports where its item starts and the flipped state, \
-             and a click on the item text toggles nothing",
+            reported,
+            vec![
+                task(true, "- [ ] Open\n  - [x] Nested", "[ ]"),
+                task(false, "- [x] Nested", "[x]"),
+                task(false, "* [X] Star", "[X]"),
+                task(true, "+ [ ] Plus", "[ ]"),
+                task(false, "1. [x] One", "[x]"),
+                task(true, "2) [ ] Two", "[ ]"),
+            ],
+            "each checkbox reports the flipped state, its item with any nested \
+             list and exactly its `[ ]` / `[x]`, and a click on the item text \
+             toggles nothing",
         );
         assert_eq!(
             container_clicks, 1,
@@ -2519,7 +2581,8 @@ mod tests {
         let container_clicks = click_task_list(None, cx);
 
         assert_eq!(
-            container_clicks, 4,
+            container_clicks,
+            TASK_LABELS.len() + 1,
             "every click, including those on a checkbox, reaches the container"
         );
     }
