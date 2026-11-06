@@ -1021,7 +1021,25 @@ fn layout_measured_flow(
         .iter()
         .map(|object| object.clone().map(|object| object.fit_text(wrap_width)))
         .collect::<Vec<_>>();
-    let line_ranges = line_ranges(items, image_sizes, &objects, text_style, wrap_width, window);
+    // An image wider than the wrap is narrowed to it, in its ratio, the way
+    // the image-alone path narrows with `max_w(relative(1.))`; text objects
+    // already fit above. The measured sizes stay cached: this makes a
+    // per-layout copy, as `fit_text` does for objects.
+    let image_sizes = image_sizes
+        .iter()
+        .map(|image_size| {
+            image_size.map(|mut size| {
+                if let Some(wrap_width) = wrap_width
+                    && size.width > wrap_width
+                {
+                    size.height *= wrap_width / size.width;
+                    size.width = wrap_width;
+                }
+                size
+            })
+        })
+        .collect::<Vec<_>>();
+    let line_ranges = line_ranges(items, &image_sizes, &objects, text_style, wrap_width, window);
     let font_size = text_style.font_size.to_pixels(rem_size);
     let mut fragments = Vec::new();
     let mut empty_lines = Vec::new();
@@ -1748,23 +1766,16 @@ fn image_size(
                 .unwrap_or(height);
             size(width, height)
         }
-        (None, None) => inline_image_size_for_line(intrinsic_size, line_height),
+        (None, None) => intrinsic_size.unwrap_or_else(|| inline_image_size_for_line(line_height)),
     }
 }
 
-fn inline_image_size_for_line(
-    intrinsic_size: Option<Size<Pixels>>,
-    line_height: Pixels,
-) -> Size<Pixels> {
-    let height = line_height * 0.75;
-    let aspect_ratio = intrinsic_size
-        .and_then(|intrinsic_size| {
-            (intrinsic_size.width > Pixels::ZERO && intrinsic_size.height > Pixels::ZERO)
-                .then(|| intrinsic_size.width / intrinsic_size.height)
-        })
-        .unwrap_or(1.);
-
-    size((height * aspect_ratio).max(px(1.)), height.max(px(1.)))
+/// The size an inline image without explicit dimensions holds while it has
+/// not loaded: a compact square at three quarters of the line height, so the
+/// line keeps its height until the image's own size is known.
+fn inline_image_size_for_line(line_height: Pixels) -> Size<Pixels> {
+    let side = (line_height * 0.75).max(px(1.));
+    size(side, side)
 }
 
 fn shape_line(
@@ -1982,20 +1993,59 @@ mod tests {
     }
 
     #[test]
-    fn inline_image_without_explicit_size_scales_intrinsic_ratio_to_line_height() {
-        let line_height = px(20.);
+    fn inline_image_without_explicit_size_is_drawn_at_its_intrinsic_size() {
         let intrinsic_size = size(px(160.), px(40.));
 
-        let measured = inline_image_size_for_line(Some(intrinsic_size), line_height);
+        let measured = image_size(None, None, Some(intrinsic_size), px(20.), px(16.));
 
-        assert_eq!(measured, size(px(60.), px(15.)));
+        assert_eq!(measured, intrinsic_size);
     }
 
     #[test]
-    fn inline_image_without_intrinsic_size_uses_compact_square_fallback() {
-        let measured = inline_image_size_for_line(None, px(20.));
+    fn inline_image_before_it_loads_keeps_a_compact_square() {
+        let measured = image_size(None, None, None, px(20.), px(16.));
 
         assert_eq!(measured, size(px(15.), px(15.)));
+    }
+
+    #[test]
+    fn inline_image_wider_than_the_wrap_is_narrowed_to_it() {
+        use gpui::{AbsoluteLength, Empty, TestApp};
+        use super::super::inline::test_fonts::{BODY, WideMonoTextSystem};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let style = TextStyle {
+            font_family: BODY.into(),
+            font_size: AbsoluteLength::Pixels(px(10.)),
+            ..Default::default()
+        };
+        let items = vec![MeasureItem::Image {
+            source: SharedUri::from("https://example.com/photo.png").into(),
+            width: None,
+            height: None,
+        }];
+        let image_sizes = vec![Some(size(px(200.), px(60.)))];
+
+        let layout = window.update(|_, window, cx| {
+            layout_flow(&items, &image_sizes, &style, Some(px(100.)), window, cx)
+        });
+
+        let image = layout
+            .fragments
+            .iter()
+            .find_map(|fragment| match fragment {
+                PositionedFragment::Image { size, .. } => Some(*size),
+                _ => None,
+            })
+            .expect("the image is laid out as a fragment");
+        assert_eq!(image, size(px(100.), px(30.)));
+        assert!(
+            layout.size.width <= px(100.),
+            "flow width {:?} exceeds wrap width {:?}",
+            layout.size.width,
+            px(100.)
+        );
     }
 
     /// Line breaking must see the width of an inline code span in its own

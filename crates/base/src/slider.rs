@@ -3,10 +3,11 @@ use std::ops::Range;
 
 use gpui::{
     AccessibleAction, Along, AnyElement, App, AppContext as _, Axis, Bounds, Context, Div,
-    DragMoveEvent, Empty, Entity, EntityId, EventEmitter, HitboxBehavior, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, Orientation, ParentElement, Pixels, Point, Render,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
-    TouchDragEvent, TouchPhase, Window, div, prelude::FluentBuilder as _, px,
+    DragMoveEvent, Empty, Entity, EntityId, EventEmitter, FocusHandle, HitboxBehavior,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, Orientation, ParentElement,
+    Pixels, Point, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
+    StyleRefinement, Styled, TouchDragEvent, TouchPhase, Window, div, prelude::FluentBuilder as _,
+    px,
 };
 
 use crate::{a11y_disabled::A11yDisabledExt as _, element_ext::ElementExt, geometry::AxisExt};
@@ -446,6 +447,7 @@ pub struct Slider {
     axis: Axis,
     disabled: bool,
     accessibility_label: Option<SharedString>,
+    focus: Option<FocusHandle>,
     base: Div,
     children: Vec<AnyElement>,
 }
@@ -457,6 +459,7 @@ impl Slider {
             axis: Axis::Horizontal,
             disabled: false,
             accessibility_label: None,
+            focus: None,
             base: div(),
             children: Vec::new(),
         }
@@ -487,6 +490,13 @@ impl Slider {
         self.accessibility_label = Some(label.into());
         self
     }
+
+    /// Makes the slider's accessibility node itself focusable with `focus`,
+    /// so keyboard focus and assistive technology land on the slider.
+    pub fn track_focus(mut self, focus: &FocusHandle) -> Self {
+        self.focus = Some(focus.clone());
+        self
+    }
 }
 
 impl ParentElement for Slider {
@@ -511,6 +521,7 @@ impl RenderOnce for Slider {
         self.base
             .id(("slider", entity_id))
             .test_support()
+            .when_some(self.focus, |this, focus| this.track_focus(&focus))
             .role(Role::Slider)
             .when_some(self.accessibility_label, |this, label| {
                 this.aria_label(label)
@@ -940,6 +951,35 @@ mod tests {
             .default_value(10.);
         let percentage = state.percentage().end;
         assert!((percentage - (1. / 3.)).abs() < 0.0001);
+    }
+
+    #[gpui::test]
+    fn a_slider_takes_focus_on_its_own_node(cx: &mut gpui::TestAppContext) {
+        struct Focusable {
+            state: Entity<SliderState>,
+            focus: FocusHandle,
+        }
+
+        impl Render for Focusable {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                Slider::new(&self.state).track_focus(&self.focus)
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|_, cx| Focusable {
+            state: cx.new(|_| SliderState::new()),
+            focus: cx.focus_handle(),
+        });
+        cx.update(|window, cx| {
+            let focus = view.read(cx).focus.clone();
+            focus.focus(window, cx);
+            window.draw(cx).clear(cx);
+            let slider = crate::test_support::snapshots(window)
+                .into_iter()
+                .find(|node| node.role() == Some(Role::Slider))
+                .expect("a slider node");
+            assert_eq!(slider.focused(), Some(true));
+        });
     }
 
     #[test]
