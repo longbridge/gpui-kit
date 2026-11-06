@@ -929,6 +929,7 @@ mod tests {
                     children: vec![BlockNode::Paragraph(plain("item").with_leaf_key(8))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 }],
                 ordered: false,

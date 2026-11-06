@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
-    TableData, TextViewMotion, TextViewState, TextViewStyle,
+    TableData, TaskToggleEvent, TextViewMotion, TextViewState, TextViewStyle,
 };
 use gpui_base::{Easing, text::CodeBlock};
 
@@ -183,6 +183,15 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.inner = self.inner.on_link_click(f);
+        self
+    }
+    /// Makes Markdown task list checkboxes clickable, reporting the clicked
+    /// item's new checked state and where it and its marker are in the source.
+    pub fn on_task_toggle<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.inner = self.inner.on_task_toggle(f);
         self
     }
     /// Scrolls a container that ignores scroll requests to the line of

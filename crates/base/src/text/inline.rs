@@ -1,3 +1,5 @@
+mod selection_paint;
+
 #[cfg(target_family = "wasm")]
 use async_channel::bounded;
 use gpui::Corners;
@@ -20,7 +22,7 @@ use gpui::{
     ForegroundExecutor, Global, GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior,
     Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, StyledText, Task,
-    TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, quad, size,
+    TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, size,
 };
 
 use crate::{
@@ -387,6 +389,7 @@ pub(crate) struct InlineState {
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
+    pub(super) selection_rows: Option<Box<selection_paint::Rows>>,
     /// Set only through the editor host API (`Paragraph::with_leaf_key`):
     /// the leaf reports its geometry to the collector installed by
     /// `editor_host::collect_leaf_geometry`. `None` for every plain `TextView`.
@@ -1054,80 +1057,6 @@ impl Inline {
         ))
     }
 
-    /// Paint the selection background.
-    fn paint_selection(
-        selection: &Selection,
-        text_layout: &TextLayout,
-        bounds: &Bounds<Pixels>,
-        window: &mut Window,
-        color: gpui::Hsla,
-    ) {
-        let mut start = selection.start;
-        let mut end = selection.end;
-        if end < start {
-            std::mem::swap(&mut start, &mut end);
-        }
-        let Some(start_position) = text_layout.position_for_index(start) else {
-            return;
-        };
-        let Some(end_position) = text_layout.position_for_index(end) else {
-            return;
-        };
-
-        let line_height = text_layout.line_height();
-        if start_position.y == end_position.y {
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    start_position,
-                    point(end_position.x, end_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-        } else {
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    start_position,
-                    point(bounds.right(), start_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-
-            if end_position.y > start_position.y + line_height {
-                window.paint_quad(quad(
-                    Bounds::from_corners(
-                        point(bounds.left(), start_position.y + line_height),
-                        point(bounds.right(), end_position.y),
-                    ),
-                    px(0.),
-                    color,
-                    Edges::default(),
-                    gpui::transparent_black(),
-                    BorderStyle::default(),
-                ));
-            }
-
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    point(bounds.left(), end_position.y),
-                    point(end_position.x, end_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-        }
-    }
-
     /// Paint each range highlight behind the text of its range.
     fn paint_range_highlights(&self, text_layout: &TextLayout, window: &mut Window) {
         let glyphs = glyph_boxes(
@@ -1307,13 +1236,20 @@ impl Element for Inline {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
         }
 
-        if let Some(selection) = &state.selection {
+        if let Some(selection) = state.selection {
             let color = GlobalState::global(cx)
                 .text_view_state()
                 .map(|state| state.read(cx).text_view_style.selection())
                 .unwrap_or_else(|| crate::Theme::global(cx).tokens.colors.selection);
-            Self::paint_selection(selection, &text_layout, &bounds, window, color);
-            if let Some((start, end)) = Self::selection_edges(selection, &text_layout)
+            selection_paint::visit(
+                &text_layout,
+                window.text_style().text_align,
+                selection.start.min(selection.end)..selection.start.max(selection.end),
+                window.content_mask().bounds,
+                &mut state.selection_rows,
+                |rect| window.paint_quad(gpui::fill(rect, color)),
+            );
+            if let Some((start, end)) = Self::selection_edges(&selection, &text_layout)
                 && let Some(text_view_state) = GlobalState::global(cx).text_view_state()
             {
                 text_view_state
@@ -1321,6 +1257,8 @@ impl Element for Inline {
                     .selection_adapter
                     .register_selection_edges(start, end);
             }
+        } else {
+            state.selection_rows = None;
         }
 
         _ = text_layout.paint_foreground(window, cx);
@@ -2098,7 +2036,14 @@ mod range_highlight_tests {
             let origin = point(px(7.), px(11.));
             element.prepaint_at(origin, window, cx);
             let glyphs = glyph_boxes(&layout, align, layout.bounds().size.width);
-            range_boxes(&glyphs, range)
+            let expected = range_boxes(&glyphs, range.clone());
+            let mut selection_boxes = Vec::new();
+            selection_paint::visit(&layout, align, range, layout.bounds(), &mut None, |rect| {
+                let row = ((rect.top() - origin.y) / layout.line_height()).round() as usize;
+                selection_boxes.push((row, rect.left() - origin.x, rect.right() - origin.x));
+            });
+            assert_eq!(selection_boxes, expected);
+            expected
                 .into_iter()
                 .map(|(row, left, right)| (left, right, row))
                 .collect()
@@ -2179,6 +2124,17 @@ mod range_highlight_tests {
         assert_eq!(across.len(), 2, "{across:?}");
         assert_eq!(across[0].1, rows[0].1);
         assert_eq!((across[1].0, across[1].2), (px(0.), 1));
+    }
+
+    #[test]
+    fn selection_preserves_spaces_and_skips_empty_rows() {
+        let text = "aa  \n\nbbbbb";
+        let rows = boxes(text, 200., TextAlign::Left, 0..text.len());
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].2, 2);
+        let letters = boxes(text, 200., TextAlign::Left, 0..2);
+        assert_eq!(rows[0].1, letters[0].1 * 2.);
+        assert!(boxes(text, 200., TextAlign::Left, 4..6).is_empty());
     }
 
     #[test]
