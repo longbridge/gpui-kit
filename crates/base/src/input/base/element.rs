@@ -3535,12 +3535,11 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // Stash the fresh caret geometry for caret-anchored popups. Their
         // deferred prepaint runs after this prepaint but before paint, so
         // they anchor to the current frame's caret instead of the previous
-        // frame's. Only the positioning geometry is stashed here; the rest
-        // of the paint-time state updates stay where they are.
+        // frame's. The rest of the layout is published at the end of prepaint.
         let caret_geometry = last_layout.cursor_bounds.map(|cursor_bounds| {
             let mut scroll_offset = cursor_scroll_offset;
             // Mirror update_scroll_offset's clamping with the fresh values,
-            // so the stash matches what paint will publish.
+            // so the stash matches what prepaint will publish.
             let state = self.state.read(cx);
             let safe_y_range = (-scroll_size.height + input_bounds.size.height).min(px(0.))..px(0.);
             scroll_offset.y = if state.is_single_line() {
@@ -3685,6 +3684,37 @@ impl<M: InputModeKind> Element for TextElement<M> {
         );
 
         let token_elements = self.prepaint_tokens(&last_layout, bounds, token_elements, window, cx);
+
+        // The layout is published here, at the end of prepaint, not in paint.
+        // Under GPUI Fast a view drawn again from the last frame around a view
+        // built again was checked before the nested view paints, so a write
+        // while painting reads as a change to what it read, and it is built
+        // again on the next frame, every frame this input is painted.
+        let selected_range = *self.state.read(cx).active_selection();
+        self.state.update(cx, |state, cx| {
+            let geometry_changed = state.last_bounds != Some(bounds)
+                || state.input_bounds != input_bounds
+                || state.scroll_size != scroll_size
+                || state.last_layout.as_ref().is_none_or(|layout| {
+                    layout.cursor_bounds != last_layout.cursor_bounds
+                        || layout.line_height != last_layout.line_height
+                });
+            state.last_layout = Some(last_layout.clone());
+            state.last_bounds = Some(bounds);
+            state.last_cursor = Some(state.cursor());
+            state.set_input_bounds(input_bounds, cx);
+            state.last_selected_range = Some(selected_range);
+            state.scroll_size = scroll_size;
+            state.update_scroll_offset(Some(cursor_scroll_offset), cx);
+            state.deferred_scroll_offset = None;
+
+            // Layout consumers need changed geometry, not another notification
+            // for every paint of an unchanged input.
+            if geometry_changed {
+                cx.notify();
+            }
+        });
+
         PrepaintState {
             token_elements,
             hitbox,
@@ -3723,13 +3753,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let (focus_handle, show_cursor, disabled, selected_range, editor_style, editor_paddings) = {
+        let (focus_handle, show_cursor, disabled, editor_style, editor_paddings) = {
             let state = self.state.read(cx);
             (
                 state.focus_handle.clone(),
                 state.show_cursor(window, cx),
                 state.disabled,
-                *state.active_selection(),
                 state.editor_style.clone(),
                 state.editor_paddings,
             )
@@ -4026,30 +4055,6 @@ impl<M: InputModeKind> Element for TextElement<M> {
             window,
             cx,
         );
-
-        self.state.update(cx, |state, cx| {
-            let geometry_changed = state.last_bounds != Some(bounds)
-                || state.input_bounds != input_bounds
-                || state.scroll_size != prepaint.scroll_size
-                || state.last_layout.as_ref().is_none_or(|layout| {
-                    layout.cursor_bounds != prepaint.last_layout.cursor_bounds
-                        || layout.line_height != prepaint.last_layout.line_height
-                });
-            state.last_layout = Some(prepaint.last_layout.clone());
-            state.last_bounds = Some(bounds);
-            state.last_cursor = Some(state.cursor());
-            state.set_input_bounds(input_bounds, cx);
-            state.last_selected_range = Some(selected_range);
-            state.scroll_size = prepaint.scroll_size;
-            state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
-            state.deferred_scroll_offset = None;
-
-            // Layout consumers need changed geometry, not another notification
-            // for every paint of an unchanged input.
-            if geometry_changed {
-                cx.notify();
-            }
-        });
 
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref()
             && !window.modifiers().alt
@@ -4802,6 +4807,74 @@ mod tests {
             assert!(weak_menu.upgrade().is_none());
             assert!(selection_paths(window, cx).is_empty());
         });
+    }
+
+    /// A wheel over a list builds the view holding it again, and draws the
+    /// page around that view from the last frame. The page was checked before
+    /// the view in it painted, so an input in that view writing its layout
+    /// while painting would read as a change to what the page read, and the
+    /// page would be built again on the next frame. Only GPUI Fast draws a
+    /// view around another.
+    #[cfg(feature = "gpui-fast")]
+    #[gpui::test]
+    fn drawing_an_input_leaves_the_view_around_it_clean(cx: &mut TestAppContext) {
+        use gpui::{
+            InteractiveElement as _, ScrollDelta, ScrollEvent, StatefulInteractiveElement as _,
+        };
+        use std::{cell::Cell, rc::Rc};
+
+        struct Form(Entity<crate::input::InputState>);
+
+        impl Render for Form {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .child(div().w(px(200.)).child(crate::input::Input::new(&self.0)))
+                    .child(
+                        div()
+                            .id("list")
+                            .h(px(200.))
+                            .overflow_y_scroll()
+                            .child(div().h(px(1000.))),
+                    )
+            }
+        }
+
+        struct Page(Entity<Form>, Rc<Cell<usize>>);
+
+        impl Render for Page {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                self.1.set(self.1.get() + 1);
+                div().size_full().child(self.0.clone())
+            }
+        }
+
+        cx.update(crate::init);
+        let renders = Rc::new(Cell::new(0));
+        let window = cx.open_window(size(px(400.), px(300.)), |window, cx| {
+            let input = cx.new(|cx| crate::input::InputState::new(window, cx).default_value("a"));
+            Page(cx.new(|_| Form(input)), renders.clone())
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        // The input's first layout notifies it, for a second frame.
+        for _ in 0..2 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.run_until_parked();
+        }
+
+        let page_renders = renders.get();
+        for wheel in 0..3 {
+            // A test window draws as soon as the wheel leaves it dirty.
+            cx.simulate_event(ScrollEvent {
+                position: point(px(100.), px(150.)),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-8.))),
+                ..Default::default()
+            });
+            cx.run_until_parked();
+            // The next frame, with nothing dirty.
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(renders.get(), page_renders, "wheel {wheel}");
+        }
     }
 
     #[gpui::test]

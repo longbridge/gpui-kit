@@ -372,10 +372,8 @@ struct PasteTarget {
 
 /// Caret positioning geometry from the input's latest prepaint.
 ///
-/// Unlike `last_layout` (published at paint time), this is stashed during
-/// prepaint so caret-anchored popups can position themselves from the
-/// current frame's geometry in their deferred prepaint, instead of the
-/// previous frame's paint.
+/// Stashed during prepaint so caret-anchored popups can position themselves
+/// from the current frame's geometry in their deferred prepaint.
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
 pub struct PrepaintCaretGeometry {
@@ -489,8 +487,7 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Fresh caret geometry stashed during prepaint for caret-anchored popups.
     ///
     /// Popups are positioned in their deferred prepaint, which runs after the
-    /// input's prepaint but before its paint, so they read this instead of
-    /// the previous frame's `last_layout`.
+    /// input's prepaint but before its paint.
     pub(crate) prepaint_caret_geometry: Option<PrepaintCaretGeometry>,
     pub(super) last_cursor: Option<usize>,
     /// The input container bounds
