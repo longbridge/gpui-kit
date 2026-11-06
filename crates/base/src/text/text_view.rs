@@ -109,6 +109,46 @@ pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + 
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+pub(crate) type TaskToggleHandlerFn = dyn Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync;
+
+/// A click on the checkbox of a Markdown task list item, passed to the
+/// [`TextView::on_task_toggle`] handler.
+///
+/// The ranges are byte ranges in the view's source text.
+#[derive(Debug, Clone)]
+pub struct TaskToggleEvent {
+    checked: bool,
+    item_range: Range<usize>,
+    marker_range: Range<usize>,
+}
+
+impl TaskToggleEvent {
+    pub(crate) fn new(checked: bool, item_range: Range<usize>, marker_range: Range<usize>) -> Self {
+        Self {
+            checked,
+            item_range,
+            marker_range,
+        }
+    }
+
+    /// The checked state the item should now have: the opposite of the
+    /// state its checkbox shows.
+    pub fn checked(&self) -> bool {
+        self.checked
+    }
+
+    /// The list item's source span, starting at its list marker (`-`, `*`,
+    /// `1.`) and covering its content, nested lists included.
+    pub fn item_range(&self) -> Range<usize> {
+        self.item_range.clone()
+    }
+
+    /// The item's task marker: the `[ ]` or `[x]` itself, brackets included.
+    pub fn marker_range(&self) -> Range<usize> {
+        self.marker_range.clone()
+    }
+}
+
 /// Kept by the element only, so unlike the handlers the state carries, it
 /// may hold a `ScrollHandle`.
 pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
@@ -168,6 +208,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
     image_source: Option<Arc<ImageSourceFn>>,
     reveal_handler: Option<Rc<RevealHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
@@ -218,6 +259,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
             markdown_extensions: Arc::default(),
@@ -245,6 +287,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
             markdown_extensions: Arc::default(),
@@ -272,6 +315,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
             markdown_extensions: Arc::default(),
@@ -445,6 +489,22 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Make the checkboxes of Markdown task list items (`- [ ]`, `- [x]`)
+    /// clickable.
+    ///
+    /// The handler receives a [`TaskToggleEvent`] with the checked state the
+    /// item should now have and where the item and its `[ ]` / `[x]` marker
+    /// are in the source text. The view does not change its text: the caller
+    /// owns the source, replaces the marker and sets the new text. Without a
+    /// handler, the checkboxes are not interactive.
+    pub fn on_task_toggle<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.task_toggle_handler = Some(Arc::new(handler));
         self
     }
 
@@ -754,6 +814,7 @@ impl Element for TextView {
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.task_toggle_handler = self.task_toggle_handler.clone();
             state.image_source = self.image_source.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
             if let Some(motion) = &self.motion {
@@ -981,7 +1042,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use super::{TextView, TextViewPlugin};
+    use super::{TaskToggleEvent, TextView, TextViewPlugin};
     use crate::text::{SelectionFormat, TableData, TextViewState, TextViewStyle};
     use gpui::{
         AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
@@ -2502,6 +2563,126 @@ mod tests {
             );
             assert_eq!(data.span, Some(0..52));
         }
+    }
+
+    /// A task under each list marker, one of them nested.
+    const TASK_LIST: &str =
+        "- [ ] Open\n  - [x] Nested\n* [X] Star\n+ [ ] Plus\n1. [x] One\n2) [ ] Two\n";
+    const TASK_LABELS: [&str; 6] = ["Open", "Nested", "Star", "Plus", "One", "Two"];
+
+    type TaskToggles = Arc<std::sync::Mutex<Vec<TaskToggleEvent>>>;
+
+    struct TaskListTestRoot {
+        text_view: Entity<TextViewState>,
+        toggles: Option<TaskToggles>,
+        container_clicks: Arc<AtomicUsize>,
+    }
+
+    impl Render for TaskListTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let container_clicks = self.container_clicks.clone();
+            div()
+                .id("task-list-container")
+                .w(px(300.))
+                .text_size(px(16.))
+                .on_click(move |_, _, _| {
+                    container_clicks.fetch_add(1, Ordering::Relaxed);
+                })
+                .child(crate::TextSelectionLayer)
+                .child(TextView::new(&self.text_view).when_some(
+                    self.toggles.clone(),
+                    |this, toggles| {
+                        this.on_task_toggle(move |event, _, _| {
+                            toggles.lock().unwrap().push(event.clone());
+                        })
+                    },
+                ))
+        }
+    }
+
+    /// Clicks the checkbox of each item of [`TASK_LIST`], then the text of
+    /// its first item, and returns how many clicks reached the container.
+    fn click_task_list(toggles: Option<TaskToggles>, cx: &mut TestAppContext) -> usize {
+        cx.update(crate::init);
+        let container_clicks = Arc::new(AtomicUsize::new(0));
+        let (root, cx) = cx.add_window_view({
+            let container_clicks = container_clicks.clone();
+            move |_, cx| TaskListTestRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(TASK_LIST, cx)),
+                toggles,
+                container_clicks,
+            }
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let text = |label: &str, cx: &mut VisualTestContext| {
+            root.read_with(cx, |root, cx| {
+                root.text_view
+                    .read(cx)
+                    .selection_adapter
+                    .text_position(label, 0)
+            })
+        };
+        for label in TASK_LABELS {
+            // The checkbox sits just before the item's text.
+            let checkbox = text(label, cx) - point(px(16.), px(0.));
+            cx.simulate_click(checkbox, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        let open = text("Open", cx);
+        cx.simulate_click(open, Modifiers::default());
+        container_clicks.load(Ordering::Relaxed)
+    }
+
+    #[gpui::test]
+    fn task_checkbox_click_reports_its_new_state_item_and_marker(cx: &mut TestAppContext) {
+        let toggles = TaskToggles::default();
+        let container_clicks = click_task_list(Some(toggles.clone()), cx);
+
+        let reported: Vec<_> = toggles
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| (event.checked(), event.item_range(), event.marker_range()))
+            .collect();
+        let task = |checked, item: &str, marker: &str| {
+            let item_start = TASK_LIST.find(item).unwrap();
+            let marker_start = item_start + item.find(marker).unwrap();
+            (
+                checked,
+                item_start..item_start + item.len(),
+                marker_start..marker_start + marker.len(),
+            )
+        };
+        assert_eq!(
+            reported,
+            vec![
+                task(true, "- [ ] Open\n  - [x] Nested", "[ ]"),
+                task(false, "- [x] Nested", "[x]"),
+                task(false, "* [X] Star", "[X]"),
+                task(true, "+ [ ] Plus", "[ ]"),
+                task(false, "1. [x] One", "[x]"),
+                task(true, "2) [ ] Two", "[ ]"),
+            ],
+            "each checkbox reports the flipped state, its item with any nested \
+             list and exactly its `[ ]` / `[x]`, and a click on the item text \
+             toggles nothing",
+        );
+        assert_eq!(
+            container_clicks, 1,
+            "only the click on the text reaches the container"
+        );
+    }
+
+    #[gpui::test]
+    fn task_checkboxes_without_a_handler_are_not_interactive(cx: &mut TestAppContext) {
+        let container_clicks = click_task_list(None, cx);
+
+        assert_eq!(
+            container_clicks,
+            TASK_LABELS.len() + 1,
+            "every click, including those on a checkbox, reaches the container"
+        );
     }
 
     #[test]
