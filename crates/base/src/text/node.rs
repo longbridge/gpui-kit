@@ -4538,19 +4538,20 @@ impl BlockNode {
                     // Nothing to hold, as when a stream has just opened the fence.
                     return div().into_any_element();
                 }
-                let mut container = node_cx
-                    .markdown_extensions
-                    .render_block_surface(name, window, cx)
-                    .unwrap_or_else(div);
                 // Unless the container sets its own width, it takes the row's,
                 // as a blockquote does, so lists and tables in it wrap to the
                 // view instead of measuring at their unwrapped width.
-                if container.style().size.width.is_none() {
-                    container = container.w_full();
-                }
-                if container.style().min_size.width.is_none() {
-                    container = container.min_w_0();
-                }
+                let mut container = node_cx
+                    .markdown_extensions
+                    .render_block_surface(name, window, cx)
+                    .unwrap_or_else(div)
+                    .map(|mut this| {
+                        let style = this.style();
+                        let unset_width = style.size.width.is_none();
+                        let unset_min_width = style.min_size.width.is_none();
+                        this.when(unset_width, |this| this.w_full())
+                            .when(unset_min_width, |this| this.min_w_0())
+                    });
                 // Nested tables measure while rendering, before the container
                 // applies its text style.
                 let text_style = container.style().text.clone();
