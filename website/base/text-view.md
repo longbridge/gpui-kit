@@ -231,9 +231,11 @@ Inline math syntax is parsed by default. Register a plugin to customize its rend
 
 ## Block surfaces
 
-A block surface draws a run of top-level blocks inside a container of your own,
-such as a tinted summary panel, while they stay part of one document.
-Register it by name and fence the blocks with HTML comments:
+A block surface draws a blockquote's blocks inside a container of your own,
+such as a callout or a tinted summary panel, while they stay part of one
+document. Register it by name and open a top-level blockquote with the marker
+`[!name]` on a line of its own, as a [GitHub alert](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts)
+does:
 
 ```rust
 use gpui::{ParentElement as _, Styled as _, div, px};
@@ -250,21 +252,27 @@ let extensions = MarkdownExtensions::default().block_surface("summary", |_, cx| 
 
 TextView::markdown(
     "note",
-    "Intro\n\n<!-- surface:summary -->\n\n- First point\n- Second point\n\n<!-- /surface -->\n\nOutro",
+    "Intro\n\n> [!summary]\n> - First point\n> - Second point\n\nOutro",
 )
 .markdown_extensions(extensions)
 ```
 
-The blocks are appended to the container the callback returns, after anything
-it shows itself (that is not document text). Selection, find, range highlights,
-reveals and copy work across and inside the surface as if the fences were not
-there, and `rendered_text` does not change. Copying leaves the fences out.
+Names match ASCII-case-insensitively, so `> [!NOTE]` opens a surface registered
+as `note`. Renderers that don't know the name show an ordinary blockquote. The
+blocks are appended to the container the callback returns, after anything it
+shows itself; neither that nor the marker line is document text. Selection,
+find, range highlights and reveals work across and inside the surface. A
+select-all copies the source verbatim, and a partial source copy is quoted
+under the marker line, as a blockquote copy is quoted.
 
-Fences only count at the top level of a Markdown document and only for a
-registered name; any other comment stays a comment. Surfaces do not nest: an
-opening fence, or the end of the text, ends the surface before it. A surface is
-one row of a scrollable view, so keep it to a few screens. `mdx()` has no HTML
-comments, so it cannot use fences.
+Only a top-level blockquote with a registered name becomes a surface. A nested
+one stays a blockquote, and so does one with text after the marker on its line,
+such as Obsidian's `> [!note] Title`: the container shows its own title.
+Surfaces do not nest. A surface is one row of a scrollable view, so keep it to a
+few screens. While a streaming view appends to a surface, each append parses
+and measures the whole surface again, so streaming a long one costs time
+quadratic in its length; until its marker line is complete, it shows as a
+blockquote.
 
 ## Retained state and streaming updates
 

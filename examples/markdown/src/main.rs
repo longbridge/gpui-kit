@@ -1344,8 +1344,8 @@ impl Example {
     }
 
     /// Register the block surfaces used by `## Block surfaces` in the
-    /// fixture. The fenced blocks stay part of the document, so selection,
-    /// find and copy run across them; Source copies drop the fences.
+    /// fixture, `> [!note]` and `> [!card]`. Their blocks stay part of the
+    /// document, so selection, find and copy run across them.
     fn markdown_extensions() -> MarkdownExtensions {
         MarkdownExtensions::default()
             .block_surface("note", |_, cx| {
