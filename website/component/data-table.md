@@ -120,8 +120,12 @@ Column::new("price", "Price")
     .sortable()
 
 // Fixed column (pinned to left)
-Column::new("actions", "Actions")
+Column::new("name", "Name")
     .fixed(ColumnFixed::Left)
+
+// Fixed column (pinned to right), must be one of the last columns
+Column::new("actions", "Actions")
+    .fixed(ColumnFixed::Right)
     .resizable(false)
     .movable(false)
 
@@ -512,7 +516,7 @@ DataTable::new(&state)
     .header_row_height(px(48.))     // Taller header rows
     .stripe(true)                   // Alternating row colors
     .bordered(true)                 // Border around table
-    .fixed_cols_border(true)        // Border after the fixed columns
+    .fixed_cols_border(true)        // Border on the inner edge of the fixed columns
     .scrollbar_visible(true, true)  // Vertical, horizontal scrollbars
 ```
 
@@ -755,7 +759,8 @@ impl TableDelegate for MyTableDelegate {
 - `descending()` - Set default sort to descending
 - `text_right()` - Right-align column text
 - `text_center()` - Center-align column text
-- `fixed(ColumnFixed)` - Pin column to left
+- `fixed(ColumnFixed)` - Pin column to left or right; left-fixed columns come first and right-fixed columns last
+- `fixed_left()` / `fixed_right()` - Shorthand for `fixed(ColumnFixed::Left)` / `fixed(ColumnFixed::Right)`
 - `resizable(bool)` - Enable/disable column resizing
 - `movable(bool)` - Enable/disable column moving
 - `selectable(bool)` - Enable/disable column/cell selection
