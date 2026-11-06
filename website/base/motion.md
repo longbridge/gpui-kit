@@ -47,6 +47,8 @@ let opacity = transition(
 
 Retargeting starts at the currently sampled value. Direct reversal shortens the return duration, so reversing early does not spend a full duration retracing a short distance. `transition_with_status` additionally returns `Idle`, `Delayed`, `Running`, or `Finished`.
 
+Keyed state lives only while its element renders. For a transition that must survive an unmount, as in a row of a virtualized list that scrolls out and back, keep a `TransitionPlayback` with the data instead and call `sample` while rendering. It samples, retargets and reverses exactly as `transition_with_status` does, but holds no view or window and requests no frames: schedule them yourself while the status is `Delayed` or `Running`.
+
 `Easing` includes CSS keyword curves, cubic Bézier curves, all CSS step positions, and piecewise `linear()` stops. Invalid parameters return typed errors.
 
 ## Springs

@@ -47,6 +47,8 @@ let opacity = transition(
 
 运动中改变目标会从当前采样值继续；直接反向还会缩短返回时长。`transition_with_status` 额外返回 `Idle`、`Delayed`、`Running` 或 `Finished`。
 
+keyed state 只在元素渲染期间存在。若过渡需要在卸载后继续，例如虚拟列表中滚出又滚回的行，请把 `TransitionPlayback` 与数据一起保存，并在渲染时调用 `sample`。它的采样、改变目标和反向与 `transition_with_status` 完全一致，但不持有视图或窗口，也不请求帧：状态为 `Delayed` 或 `Running` 时请自行调度帧。
+
 `Easing` 支持 CSS 关键字曲线、cubic Bézier、全部 step position 和分段 `linear()` stops，无效参数会返回类型化错误。
 
 ## Spring
