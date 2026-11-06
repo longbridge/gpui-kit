@@ -418,6 +418,10 @@ impl SliderState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A NaN never equals itself, so it would read as a change below.
+        if !steppable(self.value, self.min, self.max) {
+            return;
+        }
         let value = step_thumb(self.value, start, delta, self.min, self.max, self.step);
         if value != self.value {
             self.set_value(value, window, cx);
@@ -1292,6 +1296,38 @@ mod tests {
         assert_eq!(changes.get(), 1);
         step(-1., cx);
         assert_eq!(changes.get(), 2);
+    }
+
+    #[gpui::test]
+    fn an_accessibility_step_leaves_an_invalid_value_alone(cx: &mut gpui::TestAppContext) {
+        let cases = [
+            SliderState::new().default_value(f32::NAN),
+            SliderState::new().default_value((60., 20.)),
+        ];
+        for state in cases {
+            let (state, cx) = sized(state, cx);
+            let before = state.read_with(cx, |state, _| state.value());
+            let changes = std::rc::Rc::new(std::cell::Cell::new(0));
+            cx.update(|_, cx| {
+                let changes = changes.clone();
+                cx.subscribe(&state, move |_, _: &SliderEvent, _| {
+                    changes.set(changes.get() + 1)
+                })
+                .detach();
+            });
+            for start in [false, true] {
+                state.update_in(cx, |state, window, cx| {
+                    state.step_thumb(start, 1., window, cx)
+                });
+            }
+            let after = state.read_with(cx, |state, _| state.value());
+            assert_eq!(
+                (after.start().to_bits(), after.end().to_bits()),
+                (before.start().to_bits(), before.end().to_bits()),
+                "{before:?} became {after:?}"
+            );
+            assert_eq!(changes.get(), 0, "{before:?} reported a change");
+        }
     }
 
     #[gpui::test]
