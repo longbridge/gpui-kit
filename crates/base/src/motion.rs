@@ -237,6 +237,12 @@ where
 #[derive(Clone)]
 struct ValueTransition<T> {
     from: T,
+    /// Where the running transition logically started, before any reversal
+    /// shortened it: what a CSS transition calls its reversing-adjusted start.
+    reversing_adjusted_start: T,
+    /// The policy the running transition started with, kept until it is
+    /// retargeted.
+    policy: Transition,
     target: T,
     started_at: Instant,
     reversing_factor: f32,
@@ -292,6 +298,8 @@ where
     let now = cx.background_executor().now();
     let state = window.use_keyed_state(id, cx, |_, _| ValueTransition {
         from: target.clone(),
+        reversing_adjusted_start: target.clone(),
+        policy: policy.clone(),
         target: target.clone(),
         started_at: now,
         reversing_factor: 1.0,
@@ -304,6 +312,8 @@ where
         if snapshot.from != target || snapshot.target != target {
             state.update(cx, |state, _| {
                 state.from = target.clone();
+                state.reversing_adjusted_start = target.clone();
+                state.policy = policy.clone();
                 state.target = target.clone();
                 state.started_at = now;
                 state.reversing_factor = 1.0;
@@ -317,31 +327,47 @@ where
     }
 
     let elapsed = now.saturating_duration_since(snapshot.started_at);
-    let (progress, status) = policy.progress(elapsed, snapshot.duration);
+    let (progress, status) = snapshot.policy.progress(elapsed, snapshot.duration);
     let sampled = snapshot
         .from
-        .interpolate(&snapshot.target, policy.sample(progress));
+        .interpolate(&snapshot.target, snapshot.policy.sample(progress));
 
     let (value, status) = if snapshot.target != target {
-        let reversing = target == snapshot.from;
+        // As CSS transitions do: only a running transition sent back to where
+        // it logically started is a reversal.
+        let reversing = matches!(status, MotionStatus::Running | MotionStatus::Delayed)
+            && target == snapshot.reversing_adjusted_start;
         let reversing_factor = if reversing {
-            (policy.sample(progress) * snapshot.reversing_factor
+            (snapshot.policy.sample(progress) * snapshot.reversing_factor
                 + (1.0 - snapshot.reversing_factor))
+                .abs()
                 .clamp(0.0, 1.0)
         } else {
             1.0
         };
         let duration = policy.duration.mul_f64(f64::from(reversing_factor));
+        // A reversal shortens a negative delay by the same factor.
+        let mut active_policy = policy.clone();
+        if reversing && let SignedDuration::Negative(delay) = policy.delay {
+            active_policy.delay =
+                SignedDuration::negative(delay.mul_f64(f64::from(reversing_factor)));
+        }
         state.update(cx, |state, _| {
+            state.reversing_adjusted_start = if reversing {
+                snapshot.target.clone()
+            } else {
+                sampled.clone()
+            };
+            state.policy = active_policy.clone();
             state.from = sampled.clone();
             state.target = target.clone();
             state.started_at = now;
             state.reversing_factor = reversing_factor;
             state.duration = duration;
         });
-        let (initial_progress, initial_status) = policy.progress(Duration::ZERO, duration);
+        let (initial_progress, initial_status) = active_policy.progress(Duration::ZERO, duration);
         (
-            sampled.interpolate(&target, policy.sample(initial_progress)),
+            sampled.interpolate(&target, active_policy.sample(initial_progress)),
             initial_status,
         )
     } else {
@@ -991,6 +1017,103 @@ mod tests {
         assert_eq!(fixture.render(cx, 0.0).value, 0.5);
         cx.executor().advance_clock(Duration::from_millis(25));
         assert_eq!(fixture.render(cx, 0.0).value, 0.25);
+    }
+
+    #[gpui::test]
+    fn repeated_reversals_keep_the_logical_start(cx: &mut TestAppContext) {
+        let fixture =
+            StatusFixture::open(cx, Transition::new(Duration::from_millis(1000)).ease(|t| t));
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        assert!((fixture.render(cx, 0.0).value - 0.4).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert!((fixture.render(cx, 1.0).value - 0.3).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert!((fixture.render(cx, 0.0).value - 0.4).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(401));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+        assert_eq!(fixture.render(cx, 0.0).value, 0.0);
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!((fixture.render(cx, 1.0).value - 0.5).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn reversal_scales_negative_delay(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .delay(SignedDuration::negative(Duration::from_millis(200)))
+                .ease(|t| t),
+        );
+        assert_eq!(fixture.render(cx, 1.0).value, 0.2);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        // At 0.4, reverse with duration 400ms and delay -80ms.
+        assert!((fixture.render(cx, 0.0).value - 0.32).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(321));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn reversal_uses_absolute_shortening_for_anticipation(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000)).ease(|t| if t < 0.5 { -t } else { t }),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(250));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Running);
+        cx.executor().advance_clock(Duration::from_millis(250));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn non_reversing_retarget_uses_full_duration(cx: &mut TestAppContext) {
+        let fixture =
+            StatusFixture::open(cx, Transition::new(Duration::from_millis(1000)).ease(|t| t));
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        fixture.render(cx, 0.0);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        fixture.render(cx, 2.0);
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!((fixture.render(cx, 2.0).value - 1.15).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn active_policy_is_retained_until_retarget(cx: &mut TestAppContext) {
+        let fixture =
+            StatusFixture::open(cx, Transition::new(Duration::from_millis(1000)).ease(|t| t));
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy = Transition::new(Duration::from_millis(1000))
+                    .ease(|t| t * t)
+                    .delay(SignedDuration::negative(Duration::from_millis(200)));
+            })
+            .unwrap();
+        assert!((fixture.render(cx, 1.0).value - 0.4).abs() < 1e-6);
+        // Old linear sample 0.4; new quadratic curve starts at 0.2^2.
+        assert!((fixture.render(cx, 2.0).value - 0.464).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn reversal_keeps_positive_delay(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .delay(Duration::from_millis(200))
+                .ease(|t| t),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(600));
+        assert!((fixture.render(cx, 0.0).value - 0.4).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Delayed);
+        cx.executor().advance_clock(Duration::from_millis(501));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
     }
 
     struct KeyframeView {
