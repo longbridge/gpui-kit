@@ -37,7 +37,7 @@ pub(super) struct TableOptions {
     pub(super) stripe: bool,
     /// Set to use border style of the table.
     pub(super) bordered: bool,
-    /// Draw the border on the right edge of the fixed columns.
+    /// Draw the border on the inner edge of the fixed columns.
     pub(super) fixed_cols_border: bool,
     /// The cell size of the table.
     pub(super) size: Size,
@@ -68,7 +68,7 @@ impl Default for TableOptions {
 /// - **Virtual Scrolling**: Efficient rendering of large datasets
 /// - **Resizable Columns**: Drag column borders to resize
 /// - **Movable Columns**: Drag column headers to reorder
-/// - **Fixed Columns**: Pin columns to the left side
+/// - **Fixed Columns**: Pin columns to the left or right side
 /// - **Sortable Columns**: Click column headers to sort
 /// - **Context Menus**: Right-click support for rows and cells
 ///
@@ -155,8 +155,9 @@ where
         self
     }
 
-    /// Set whether to draw the border on the right edge of the fixed columns,
-    /// default to true.
+    /// Set whether to draw the border on the inner edge of the fixed columns,
+    /// the right edge of left-fixed columns and the left edge of right-fixed
+    /// columns, default to true.
     ///
     /// Turn it off when the fixed cells draw that edge themselves, so the
     /// boundary is not drawn twice.

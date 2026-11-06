@@ -812,6 +812,7 @@ struct TableProbe {
     rows_count: usize,
     columns_count: usize,
     left_columns_count: usize,
+    right_columns_count: usize,
     visible_row_ranges: Vec<Range<usize>>,
     visible_column_ranges: Vec<Range<usize>>,
 }
@@ -821,6 +822,7 @@ impl TableProbe {
             rows_count,
             columns_count: 2,
             left_columns_count: 0,
+            right_columns_count: 0,
             visible_row_ranges: Vec::new(),
             visible_column_ranges: Vec::new(),
         }
@@ -839,6 +841,10 @@ impl TableDelegate for TableProbe {
             .when(col_ix < self.left_columns_count, |column| {
                 column.fixed_left()
             })
+            .when(
+                col_ix + self.right_columns_count >= self.columns_count,
+                |column| column.fixed_right(),
+            )
     }
     fn render_td(
         &mut self,
@@ -965,6 +971,55 @@ fn table_reports_one_scrollable_column_with_and_without_fixed_columns(cx: &mut T
         })
         .unwrap();
     }
+}
+
+/// Right-fixed columns stay at the right edge while the columns between the
+/// fixed ones scroll, and are left out of the scrollable column ranges.
+#[gpui_kit::test]
+fn table_pins_right_fixed_columns_while_scrolling(cx: &mut TestAppContext) {
+    let delegate = TableProbe {
+        columns_count: 8,
+        left_columns_count: 1,
+        right_columns_count: 1,
+        ..TableProbe::new(3)
+    };
+    let (handle, table) = open_table_probe_with_delegate(cx, delegate, false);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let left_cell = window.find("table-cell:0:0").bounds();
+        let right_cell = window.find("table-cell:0:7").bounds();
+        let right_header = window.find(("col-header", 7usize)).bounds();
+        assert_eq!(right_header.left(), right_cell.left());
+        assert!(
+            right_cell.right() > px(600.) && right_cell.right() <= px(640.),
+            "the right-fixed column is not at the right edge: {right_cell:?}"
+        );
+
+        // A right-fixed column is always in view, so scrolling to it keeps
+        // the offset.
+        table.update(cx, |table, cx| table.scroll_to_col(7, cx));
+        assert_eq!(table.read(cx).horizontal_scroll_handle.offset().x, px(0.));
+
+        table.update(cx, |table, cx| table.scroll_to_col(6, cx));
+        window.render_frame(cx);
+        assert!(table.read(cx).horizontal_scroll_handle.offset().x < px(0.));
+        assert_eq!(window.find("table-cell:0:0").bounds(), left_cell);
+        assert_eq!(window.find("table-cell:0:7").bounds(), right_cell);
+        assert_eq!(
+            window.find(("col-header", 7usize)).bounds().left(),
+            right_cell.left()
+        );
+
+        // Ranges count only the six columns between the fixed ones.
+        let ranges = table.read(cx).delegate().visible_column_ranges.clone();
+        assert!(!ranges.is_empty());
+        assert!(
+            ranges.iter().all(|range| range.end <= 6),
+            "reported a fixed column: {ranges:?}"
+        );
+        assert_eq!(ranges.last().map(|range| range.end), Some(6));
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]

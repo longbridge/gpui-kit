@@ -114,8 +114,11 @@ Column::new("price", "Price")
     .text_right()
     .sortable()
 
-Column::new("actions", "Actions")
+Column::new("name", "Name")
     .fixed(ColumnFixed::Left)
+
+Column::new("actions", "Actions")
+    .fixed(ColumnFixed::Right)
     .resizable(false)
     .movable(false)
 ```
@@ -124,7 +127,7 @@ Column::new("actions", "Actions")
 
 - `sortable()` 开启排序
 - `width()` 设置宽度
-- `fixed(ColumnFixed::Left)` 固定到左侧
+- `fixed(ColumnFixed::Left)` 固定到左侧，`fixed(ColumnFixed::Right)` 固定到右侧；左侧固定列须排在最前，右侧固定列须排在最后
 - `resizable(false)` 禁止调整列宽
 - `movable(false)` 禁止拖动列顺序
 - `text_right()` / `text_center()` 设置对齐
@@ -471,6 +474,7 @@ DataTable::new(&state)
 - `text_right()`
 - `text_center()`
 - `fixed(ColumnFixed)`
+- `fixed_left()` / `fixed_right()`
 - `resizable(bool)`
 - `movable(bool)`
 - `selectable(bool)`
