@@ -3772,6 +3772,19 @@ impl<M: InputModeKind> Element for TextElement<M> {
             ElementInputHandler::new(bounds, self.state.clone()),
             cx,
         );
+        // The platform's IME panel opens at the caret; tell it when that moves.
+        if focused {
+            let anchor = (bounds.origin, prepaint.last_layout.cursor_bounds);
+            let moved = self.state.update(cx, |state, _| {
+                state.ime_anchor.replace(anchor) != Some(anchor)
+            });
+            if moved {
+                window.invalidate_character_coordinates();
+            }
+        } else if self.state.read(cx).ime_anchor.is_some() {
+            // Focused again, it reports its caret again.
+            self.state.update(cx, |state, _| state.ime_anchor = None);
+        }
 
         // Paint multi line text
         let line_height = window.line_height();
@@ -4875,6 +4888,33 @@ mod tests {
             cx.update(|window, cx| window.draw(cx).clear(cx));
             assert_eq!(renders.get(), page_renders, "wheel {wheel}");
         }
+    }
+
+    #[gpui::test]
+    fn a_focused_input_reports_a_moved_caret_to_the_platform(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "alpha beta", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            // `invalidate_character_coordinates` asks for the caret on the
+            // next frame, which is what tells the platform where it is.
+            let frame = |window: &mut Window, cx: &mut App| {
+                window.draw(cx).clear(cx);
+                window.simulate_next_frame(cx)
+            };
+            frame(window, cx);
+            assert_eq!(frame(window, cx), 0, "not focused");
+            editor.update(cx, |state, cx| state.focus(window, cx));
+            assert_eq!(frame(window, cx), 1, "focused");
+            assert_eq!(frame(window, cx), 0, "the caret stands still");
+            editor.update(cx, |state, cx| state.set_selected_range(5..5, cx));
+            assert_eq!(frame(window, cx), 1, "the caret moved");
+            assert_eq!(frame(window, cx), 0, "the caret stands still");
+
+            cx.focus_handle().focus(window, cx);
+            assert_eq!(frame(window, cx), 0, "not focused");
+            editor.update(cx, |state, cx| state.focus(window, cx));
+            assert_eq!(frame(window, cx), 1, "focused again");
+        });
     }
 
     #[gpui::test]
