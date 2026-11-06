@@ -1,6 +1,6 @@
 # Hello, **World**!
 
-Inline image mix: larger PNG avatars <img src="https://avatars.githubusercontent.com/u/5518" alt="Jason Lee avatar" width="32" height="32" /> and <img src="https://avatars.githubusercontent.com/u/28998859" alt="GitHub avatar" width="32" height="32" /> stay inside the same text flow, and another SVG badge ![Rust](https://rust-lang.org/static/images/rust-logo-blk.svg) should wrap with nearby text when the window is resized.
+Inline image mix: larger PNG avatars <img src="https://avatars.githubusercontent.com/u/5518" alt="Jason Lee avatar" width="32" height="32" /> and <img src="https://avatars.githubusercontent.com/u/28998859" alt="GitHub avatar" width="32" height="32" /> stay inside the same text flow, and another SVG badge <img src="https://rust-lang.org/static/images/rust-logo-blk.svg" alt="Rust logo" width="20" height="20" /> should wrap with nearby text when the window is resized.
 
 This is first paragraph, there have **BOLD**, _italic_, and ~~strikethrough~~, `code` text [^1] [^2].
 

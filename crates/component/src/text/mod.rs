@@ -11,8 +11,8 @@ pub use frontmatter::FrontmatterPlugin;
 pub use gpui_base::text::{
     InlineElement, InlineRenderContext, MarkdownBlockParserFn, MarkdownBlockRenderFn,
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, RangeHighlight,
-    RangeHighlightError, RenderedText, SelectionFormat, TableData, TextViewMotion, TextViewState,
-    markdown_ast,
+    RangeHighlightError, RenderedText, SelectionFormat, TableData, TaskToggleEvent, TextViewMotion,
+    TextViewState, markdown_ast,
 };
 pub use style::TextViewStyle;
 
@@ -420,7 +420,8 @@ mod tests {
             .style(style)
             .selectable(true)
             .scrollable(true)
-            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())));
+            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())))
+            .on_task_toggle(|_event, _, _| {});
     }
 
     #[test]
