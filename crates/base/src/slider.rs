@@ -895,6 +895,8 @@ impl RenderOnce for SliderThumb {
                         },
                     ))
             })
+            // A caller can give a thumb a role of its own, as for a range's thumbs.
+            .a11y_disabled(self.disabled)
     }
 }
 
@@ -951,6 +953,37 @@ mod tests {
             .default_value(10.);
         let percentage = state.percentage().end;
         assert!((percentage - (1. / 3.)).abs() < 0.0001);
+    }
+
+    #[gpui::test]
+    fn a_disabled_thumb_marks_its_node_disabled(cx: &mut gpui::TestAppContext) {
+        struct Thumb {
+            state: Entity<SliderState>,
+            disabled: bool,
+        }
+
+        impl Render for Thumb {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                SliderThumb::new(&self.state)
+                    .role(Role::Slider)
+                    .disabled(self.disabled)
+            }
+        }
+
+        for disabled in [false, true] {
+            let (_, cx) = cx.add_window_view(|_, cx| Thumb {
+                state: cx.new(|_| SliderState::new()),
+                disabled,
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                let thumb = crate::test_support::snapshots(window)
+                    .into_iter()
+                    .find(|node| node.role() == Some(Role::Slider))
+                    .expect("a thumb node");
+                assert_eq!(thumb.disabled(), disabled.then_some(true));
+            });
+        }
     }
 
     #[gpui::test]
