@@ -229,6 +229,43 @@ For asynchronous resources, retain a `TextViewState`, update the application-own
 
 Inline math syntax is parsed by default. Register a plugin to customize its rendering; no separate syntax switch is needed. Inline code continues to protect dollar signs from math parsing. When no plugin claims a math node, TextView renders its original `$...$` source as literal text, so prose that merely contains dollar signs — `spent $5 and $10` — reads and copies back unchanged. Block math is parsed too: a `$$` fence becomes a block node, which a block plugin (`is_block() == true`) renders, and which falls back to a code block when no plugin claims it.
 
+## Block surfaces
+
+A block surface draws a run of top-level blocks inside a container of your own,
+such as a tinted summary panel, while they stay part of one document.
+Register it by name and fence the blocks with HTML comments:
+
+```rust
+use gpui::{ParentElement as _, Styled as _, div, px};
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().block_surface("summary", |_, cx| {
+    div()
+        // Read your theme here, so a theme change needs no new parse.
+        .bg(summary_background(cx))
+        .rounded(px(12.))
+        .p(px(16.))
+        .child("Summary")
+});
+
+TextView::markdown(
+    "note",
+    "Intro\n\n<!-- surface:summary -->\n\n- First point\n- Second point\n\n<!-- /surface -->\n\nOutro",
+)
+.markdown_extensions(extensions)
+```
+
+The blocks are appended to the container the callback returns, after anything
+it shows itself (that is not document text). Selection, find, range highlights,
+reveals and copy work across and inside the surface as if the fences were not
+there, and `rendered_text` does not change. Copying leaves the fences out.
+
+Fences only count at the top level of a Markdown document and only for a
+registered name; any other comment stays a comment. Surfaces do not nest: an
+opening fence, or the end of the text, ends the surface before it. A surface is
+one row of a scrollable view, so keep it to a few screens. `mdx()` has no HTML
+comments, so it cannot use fences.
+
 ## Retained state and streaming updates
 
 Use `TextViewState` when content changes without replacing the view:

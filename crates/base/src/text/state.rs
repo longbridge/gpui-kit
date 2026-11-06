@@ -78,7 +78,8 @@ pub enum SelectionFormat {
     Plain,
     /// The source of the selection.
     ///
-    /// Select-all returns the original source verbatim, a partial selection is
+    /// Select-all returns the original source verbatim, except the fences of
+    /// [block surfaces](MarkdownExtensions::block_surface); a partial selection is
     /// reconstructed as Markdown from the parsed nodes (e.g. selecting inside
     /// a `**bold**` run yields `**bold**`).
     Source,
@@ -93,7 +94,8 @@ pub enum SelectionFormat {
     /// boundaries, while a selection across that boundary, into a second
     /// block, or over an inline object copies like [`Self::Source`]. Two blocks
     /// count as two styles even when their marks match, since the source of
-    /// either spells out where one ends. Select-all copies the source verbatim.
+    /// either spells out where one ends. Select-all copies the source verbatim,
+    /// except the fences of [block surfaces](MarkdownExtensions::block_surface).
     SourceAcrossStyles,
 }
 
@@ -462,7 +464,7 @@ impl TextViewState {
 
         if self.select_all {
             if format != SelectionFormat::Plain {
-                return self.source().to_string();
+                return self.parsed_content.document.copied_source();
             }
 
             return self.parsed_content.document.text();

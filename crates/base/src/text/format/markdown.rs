@@ -990,15 +990,122 @@ fn ast_to_document(source: &str, root: mdast::Node, cx: &mut NodeContext) -> Par
         _ => panic!("expected root node"),
     };
 
-    let blocks = root
-        .children
-        .into_iter()
-        .map(|c| ast_to_node(source, c, cx))
-        .collect();
+    let blocks = if cx.markdown_extensions.has_block_surfaces() {
+        blocks_with_surfaces(source, root.children, cx)
+    } else {
+        root.children
+            .into_iter()
+            .map(|c| ast_to_node(source, c, cx))
+            .collect()
+    };
     ParsedDocument {
         source: source.to_string().into(),
         blocks: Arc::new(blocks),
     }
+}
+
+enum SurfaceFence {
+    Open(SharedString),
+    Close,
+}
+
+/// The block surface fence `node` is, if any. Comments naming a surface nobody
+/// registered remain plain comments.
+fn surface_fence(node: &Node, cx: &NodeContext) -> Option<SurfaceFence> {
+    let Node::Html(html) = node else {
+        return None;
+    };
+    let comment = html
+        .value
+        .trim()
+        .strip_prefix("<!--")?
+        .strip_suffix("-->")?
+        .trim();
+    if comment == "/surface" {
+        return Some(SurfaceFence::Close);
+    }
+    let name = comment.strip_prefix("surface:")?;
+    cx.markdown_extensions
+        .has_block_surface(name)
+        .then(|| SurfaceFence::Open(name.to_string().into()))
+}
+
+/// A surface whose closing fence has not been reached.
+struct OpenSurface {
+    name: SharedString,
+    children: Vec<BlockNode>,
+    span: Option<Span>,
+    content_start: Option<usize>,
+}
+
+impl OpenSurface {
+    /// Ends the surface where its last child ends, as the end of the text or
+    /// the next surface's fence does. A closing fence passes its own span.
+    fn close(self, closing: Option<Span>) -> BlockNode {
+        let end = self
+            .children
+            .last()
+            .and_then(BlockNode::span)
+            .or(self.span)
+            .map(|span| span.end);
+        let content_end = closing.map(|span| span.start).or(end);
+        let span_end = closing.map(|span| span.end).or(end);
+        BlockNode::Surface {
+            name: self.name,
+            children: self.children,
+            span: self.span.zip(span_end).map(|(open, end)| Span {
+                start: open.start,
+                end,
+            }),
+            content: self
+                .content_start
+                .zip(content_end)
+                .map(|(start, end)| Span { start, end }),
+        }
+    }
+}
+
+/// The top-level blocks, with those between surface fences gathered into one.
+///
+/// A surface is one block, with one span that starts at its opening fence, so
+/// the stream parser, which parses the last block again with what was appended,
+/// always sees the fence again.
+fn blocks_with_surfaces(source: &str, nodes: Vec<Node>, cx: &mut NodeContext) -> Vec<BlockNode> {
+    let mut blocks = Vec::with_capacity(nodes.len());
+    let mut open: Option<OpenSurface> = None;
+    for node in nodes {
+        let fence = surface_fence(&node, cx);
+        let span = new_span(node.position().cloned(), cx);
+        match fence {
+            Some(SurfaceFence::Open(name)) => {
+                if let Some(surface) = open.take() {
+                    blocks.push(surface.close(None));
+                }
+                open = Some(OpenSurface {
+                    name,
+                    children: Vec::new(),
+                    span,
+                    content_start: span.map(|span| span.end),
+                });
+            }
+            Some(SurfaceFence::Close) if open.is_some() => {
+                if let Some(surface) = open.take() {
+                    blocks.push(surface.close(span));
+                }
+            }
+            _ => {
+                let block = ast_to_node(source, node, cx);
+                match &mut open {
+                    Some(surface) => surface.children.push(block),
+                    None => blocks.push(block),
+                }
+            }
+        }
+    }
+    if let Some(surface) = open {
+        blocks.push(surface.close(None));
+    }
+    blocks
 }
 
 fn new_span(pos: Option<markdown::unist::Position>, cx: &NodeContext) -> Option<Span> {

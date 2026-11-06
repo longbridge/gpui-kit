@@ -206,6 +206,34 @@ TextView 测量元素的固有尺寸，将整个元素作为一个原子对象�
 
 默认解析 inline math 语法，通过 Plugin 自定义渲染，无需额外开关。行内代码里的美元符号仍保留为代码。没有 Plugin 认领某个 math 节点时，TextView 按原始 `$...$` 源码渲染为普通文本，因此正文中单纯出现美元符号的句子（`spent $5 and $10`）显示和复制都保持原样。块级公式同样会被解析：`$$` 围栏产生块级节点，由 Block plugin（`is_block() == true`）渲染；无人认领时降级为代码块。
 
+## Block surface
+
+block surface 把一段顶层块绘制在你自己的容器中（例如带底色的摘要面板），这些块仍属于同一篇文档。按名称注册，再用 HTML 注释包围这些块：
+
+```rust
+use gpui::{ParentElement as _, Styled as _, div, px};
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().block_surface("summary", |_, cx| {
+    div()
+        // 在这里读取主题颜色，切换主题时无需重新解析。
+        .bg(summary_background(cx))
+        .rounded(px(12.))
+        .p(px(16.))
+        .child("Summary")
+});
+
+TextView::markdown(
+    "note",
+    "Intro\n\n<!-- surface:summary -->\n\n- First point\n- Second point\n\n<!-- /surface -->\n\nOutro",
+)
+.markdown_extensions(extensions)
+```
+
+这些块会追加到回调返回的容器中，排在容器自身内容之后（容器自身内容不属于文档文本）。选区、查找、范围高亮、reveal 和复制都会像没有这些注释一样跨越并进入 surface，`rendered_text` 也不变。复制时不包含这些注释。
+
+注释只在 Markdown 文档的顶层、且名称已注册时生效；其他注释仍是普通注释。surface 不能嵌套：新的开始注释或文本结尾都会结束前一个 surface。surface 是可滚动视图中的一行，内容应控制在几屏之内。`mdx()` 不支持 HTML 注释，因此无法使用这种写法。
+
 ## 保留状态与动态更新
 
 内容需要持续更新时使用 `TextViewState`：

@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use gpui::{AnyElement, App, IntoElement, SharedString, Window};
+use gpui::{AnyElement, App, Div, IntoElement, SharedString, Window};
 use markdown::{ParseOptions, mdast};
 
 use super::{InlineElement, InlineRenderContext};
@@ -31,6 +31,9 @@ pub type MarkdownBlockParserFn =
 /// Type for a custom Markdown block renderer.
 pub type MarkdownBlockRenderFn =
     dyn Fn(&MarkdownNode, &mut Window, &mut App) -> AnyElement + Send + Sync;
+
+/// Builds the container of a [block surface](MarkdownExtensions::block_surface).
+pub type BlockSurfaceRenderFn = dyn Fn(&mut Window, &mut App) -> Div + Send + Sync;
 
 /// Parser for a single inline AST node; follows the block parser contract.
 type MarkdownInlineParserFn = MarkdownBlockParserFn;
@@ -250,6 +253,7 @@ pub struct MarkdownExtensions {
     block_renderers: HashMap<SharedString, Arc<MarkdownBlockRenderFn>>,
     inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
     inline_renderers: HashMap<SharedString, Arc<MarkdownInlineRenderFn>>,
+    block_surfaces: HashMap<SharedString, Arc<BlockSurfaceRenderFn>>,
     revision: u64,
     parser_revision: u64,
 }
@@ -307,6 +311,49 @@ impl MarkdownExtensions {
         self
     }
 
+    /// Draw the top-level blocks between two fences inside a container.
+    ///
+    /// ```markdown
+    /// <!-- surface:summary -->
+    /// Blocks of any kind, as many as you like.
+    ///
+    /// - They stay part of the document.
+    /// <!-- /surface -->
+    /// ```
+    ///
+    /// `render` runs each time the document renders and returns the container
+    /// with its background, shape, padding and text style, and any children to
+    /// show before the blocks, such as an icon and a title. The blocks are
+    /// appended to it and bring the view's paragraph gap, so a `gap` on the
+    /// container adds to that. Read theme colors in `render`, so a theme change
+    /// needs no new parse. What the container shows itself is not document text.
+    ///
+    /// The blocks remain the document's: selection, range highlights, reveals and
+    /// copy go across and inside the container as if the fences were not there,
+    /// and [`rendered_text`](super::TextViewState::rendered_text) is the same with
+    /// or without them. Fences are not copied. The surface is one row of a
+    /// scrollable view, so keep it to what fits a few screens.
+    ///
+    /// Fences work only at the top level of a Markdown view and only for a
+    /// registered `name`. Any other comment stays a comment. Surfaces do not nest:
+    /// an opening fence ends the surface before it, and so does the end of the
+    /// text. Two lists of one kind that only a fence kept apart copy as one list.
+    ///
+    /// Fences are markup, so a registered fence in text you don't control takes
+    /// effect: escape that text, as with any other Markdown. One unclosed fence
+    /// gathers the rest of the document into one row, which is no longer
+    /// virtualized. [`Self::mdx`] is not for these documents: MDX has no HTML
+    /// comments, so a fence fails the parse of the whole document, as any comment
+    /// does there.
+    pub fn block_surface<F>(mut self, name: impl Into<SharedString>, render: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) -> Div + Send + Sync + 'static,
+    {
+        self.block_surfaces.insert(name.into(), Arc::new(render));
+        self.bump_revision();
+        self
+    }
+
     /// Apply a reusable Markdown plugin.
     pub fn plugin<P>(self, plugin: P) -> Self
     where
@@ -356,6 +403,11 @@ impl MarkdownExtensions {
             && self.block_renderers.len() == other.block_renderers.len()
             && self.inline_parsers.len() == other.inline_parsers.len()
             && self.inline_renderers.len() == other.inline_renderers.len()
+            && self.block_surfaces.len() == other.block_surfaces.len()
+            && self
+                .block_surfaces
+                .keys()
+                .all(|name| other.block_surfaces.contains_key(name))
             && self
                 .inline_renderers
                 .keys()
@@ -406,6 +458,25 @@ impl MarkdownExtensions {
             options.constructs.mdx_jsx_text = true;
         }
         options
+    }
+
+    pub(crate) fn has_block_surfaces(&self) -> bool {
+        !self.block_surfaces.is_empty()
+    }
+
+    pub(crate) fn has_block_surface(&self, name: &str) -> bool {
+        self.block_surfaces.contains_key(name)
+    }
+
+    pub(crate) fn render_block_surface(
+        &self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Div> {
+        self.block_surfaces
+            .get(name)
+            .map(|render| render(window, cx))
     }
 
     pub(crate) fn parse_block(

@@ -166,15 +166,17 @@ impl ParsedDocument {
             return text;
         }
 
+        let covered = self.covered_blocks(first, last, &painted);
+        let last_covered = covered.len().saturating_sub(1);
         let mut out: Vec<String> = Vec::new();
-        for (ix, block) in self.blocks.iter().enumerate().take(last + 1).skip(first) {
+        for (ix, block) in covered.iter().copied().enumerate() {
             // The selection is one continuous range, so only the block it
             // starts in and the block it ends in can be partly selected.
             // Everything between them is covered whole, and so is any block
             // that reports nothing — it either scrolled past without painting,
             // or renders no selectable text run at all (a rule, a break, a
             // custom node, a standalone image).
-            let source = if (ix == first || ix == last) && painted[ix] {
+            let source = if (ix == 0 || ix == last_covered) && block.has_selection() {
                 block.selected_text(format)
             } else {
                 self.whole_source(block)
@@ -186,6 +188,30 @@ impl ParsedDocument {
             }
         }
         out.join("\n\n")
+    }
+
+    /// The blocks from top-level block `first` through `last`, with a block
+    /// surface's children in its place: they are blocks of the document, and
+    /// its source has them as such. A surface the selection ends in takes only
+    /// the children from or up to the end it painted.
+    fn covered_blocks(&self, first: usize, last: usize, painted: &[bool]) -> Vec<&BlockNode> {
+        let mut covered = Vec::with_capacity((last + 1).saturating_sub(first));
+        for (ix, block) in self.blocks.iter().enumerate().take(last + 1).skip(first) {
+            let BlockNode::Surface { children, .. } = block else {
+                covered.push(block);
+                continue;
+            };
+            let start = (ix == first && painted[ix])
+                .then(|| children.iter().position(BlockNode::has_selection))
+                .flatten()
+                .unwrap_or(0);
+            let end = (ix == last && painted[ix])
+                .then(|| children.iter().rposition(BlockNode::has_selection))
+                .flatten()
+                .map_or(children.len(), |end| end + 1);
+            covered.extend(&children[start..end]);
+        }
+        covered
     }
 
     /// The whole source of a block the selection covers.
@@ -203,6 +229,45 @@ impl ParsedDocument {
         }
 
         block.selected_text(SelectionFormat::Source)
+    }
+
+    /// The source a select-all copies: all of it, as written, except the
+    /// fences of block surfaces. What they stood between stays separate blocks,
+    /// except that two lists of one kind read as one list without a fence.
+    pub(super) fn copied_source(&self) -> String {
+        if !self
+            .blocks
+            .iter()
+            .any(|block| matches!(block, BlockNode::Surface { .. }))
+        {
+            return self.source.to_string();
+        }
+        let mut copied = String::new();
+        let mut push = |source: &str| {
+            let source = source.trim_matches(['\r', '\n']);
+            if source.is_empty() {
+                return;
+            }
+            if !copied.is_empty() {
+                copied.push_str("\n\n");
+            }
+            copied.push_str(source);
+        };
+        let mut end = 0;
+        for block in self.blocks.iter() {
+            if let BlockNode::Surface {
+                span: Some(span),
+                content: Some(content),
+                ..
+            } = block
+            {
+                push(&self.source[end..span.start]);
+                push(&self.source[content.start..content.end]);
+                end = span.end;
+            }
+        }
+        push(&self.source[end..]);
+        copied
     }
 
     pub(super) fn selected_source_range(&self) -> Option<Range<usize>> {
