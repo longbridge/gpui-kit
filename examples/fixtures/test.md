@@ -307,6 +307,27 @@ button:
 
 Ask [@huacnlee](mention:huacnlee) or [@madcodelife](mention:madcodelife) for a review. Hover over a mention to see the profile card.
 
+## Block surfaces
+
+The example registers two block surfaces. The blocks between the fences
+stay part of the document: select across a surface and copy it.
+
+<!-- surface:note -->
+
+Surfaces draw a run of top-level blocks in a container of your own, such as
+this callout with an icon and a title.
+
+<!-- /surface -->
+
+<!-- surface:card -->
+
+#### A card
+
+- Any block can go inside, **including** lists and `code`.
+- A copy in the Source selection format leaves the fences out.
+
+<!-- /surface -->
+
 ## Task markers
 
 The custom `MarkerHighlighter` (an LSP-style semantic tokens provider)
