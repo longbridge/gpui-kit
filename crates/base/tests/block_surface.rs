@@ -333,6 +333,29 @@ fn the_blocks_between_fences_draw_as_one_row_in_one_panel(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn a_flex_container_wraps_a_list_to_the_view(cx: &mut TestAppContext) {
+    // A column flex container, as a callout with a title row is, sizes a child
+    // to its content unless the surface takes the row's width.
+    let extensions = MarkdownExtensions::default().block_surface("summary", |_, _| {
+        div().flex().flex_col().bg(PANEL).p(px(PADDING))
+    });
+    let mut doc = open(
+        &fenced(&format!("- {}", words(80))),
+        tall(true, SelectionFormat::Plain),
+        extensions,
+        cx,
+    );
+    let panel = doc.quads(PANEL)[0];
+    assert!(panel.right() <= px(WIDTH), "{panel:?}");
+    let last = *doc.marked("w79").last().unwrap();
+    assert!(
+        last.right() <= panel.right() - px(PADDING) + px(0.5),
+        "{last:?} in {panel:?}"
+    );
+    assert!(last.top() > doc.marked("w0")[0].bottom(), "the item wraps");
+}
+
+#[gpui::test]
 fn fences_need_no_blank_lines(cx: &mut TestAppContext) {
     let mut doc = open(
         "<!-- surface:summary -->\ninside\n<!-- /surface -->\nafter",
