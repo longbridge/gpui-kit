@@ -339,12 +339,14 @@ impl SliderState {
     fn update_thumb_pos(&mut self) {
         match self.value {
             SliderValue::Single(value) => {
-                let percentage = self.value_to_percentage(value.clamp(self.min, self.max));
+                let percentage = self.value_to_percentage(value.min(self.max).max(self.min));
                 self.percentage = 0.0..percentage;
             }
             SliderValue::Range(start, end) => {
-                let clamped_start = start.clamp(self.min, self.max);
-                let clamped_end = end.clamp(self.min, self.max);
+                // Not `clamp`: while a builder is between its `min` and `max`, `min`
+                // can stand above `max`.
+                let clamped_start = start.min(self.max).max(self.min);
+                let clamped_end = end.min(self.max).max(self.min);
                 self.percentage =
                     self.value_to_percentage(clamped_start)..self.value_to_percentage(clamped_end);
             }
@@ -978,6 +980,19 @@ mod tests {
                 .expect("a slider node");
             assert_eq!(slider.focused(), Some(true));
         });
+    }
+
+    #[test]
+    fn min_can_be_set_above_the_default_max_before_max() {
+        let state = SliderState::new().min(150.).max(200.).default_value(175.);
+        assert_eq!(state.value(), SliderValue::Single(175.));
+        assert_eq!(state.percentage(), 0.0..0.5);
+
+        let state = SliderState::new()
+            .default_value((160., 180.))
+            .min(150.)
+            .max(200.);
+        assert_eq!(state.percentage(), 0.2..0.6);
     }
 
     #[test]

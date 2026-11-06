@@ -372,10 +372,8 @@ struct PasteTarget {
 
 /// Caret positioning geometry from the input's latest prepaint.
 ///
-/// Unlike `last_layout` (published at paint time), this is stashed during
-/// prepaint so caret-anchored popups can position themselves from the
-/// current frame's geometry in their deferred prepaint, instead of the
-/// previous frame's paint.
+/// Stashed during prepaint so caret-anchored popups can position themselves
+/// from the current frame's geometry in their deferred prepaint.
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
 pub struct PrepaintCaretGeometry {
@@ -489,10 +487,11 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Fresh caret geometry stashed during prepaint for caret-anchored popups.
     ///
     /// Popups are positioned in their deferred prepaint, which runs after the
-    /// input's prepaint but before its paint, so they read this instead of
-    /// the previous frame's `last_layout`.
+    /// input's prepaint but before its paint.
     pub(crate) prepaint_caret_geometry: Option<PrepaintCaretGeometry>,
     pub(super) last_cursor: Option<usize>,
+    /// Where the platform was last told the caret is, for its IME panel.
+    pub(super) ime_anchor: Option<(Point<Pixels>, Option<Bounds<Pixels>>)>,
     /// The input container bounds
     pub(super) input_bounds: Bounds<Pixels>,
     /// The text bounds
@@ -1030,6 +1029,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_input_edits: Vec::new(),
             column_select_start: None,
             last_cursor: None,
+            ime_anchor: None,
             scroll_handle: ScrollHandle::new(),
             scroll_bounce: crate::ScrollBounce::enabled_by_default(),
             overscroll: Overscroll::default(),
