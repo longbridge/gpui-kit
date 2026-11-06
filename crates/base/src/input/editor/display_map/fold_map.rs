@@ -214,6 +214,16 @@ impl FoldMap {
         }
     }
 
+    /// Change all candidates in one batch, including nested folds.
+    pub(super) fn set_all_folded(&mut self, folded: bool) {
+        self.folded = if folded {
+            self.candidates.clone()
+        } else {
+            Vec::new()
+        };
+        self.needs_rebuild = true;
+    }
+
     /// Toggle fold at the given start_line
     pub(super) fn toggle_fold(&mut self, start_line: usize) {
         let is_folded = self.is_folded_at(start_line);
@@ -442,5 +452,28 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod batch_fold_tests {
+    use super::{FoldMap, FoldRange};
+
+    #[test]
+    fn fold_all_preserves_nested_candidates_and_unfold_all_keeps_them_reusable() {
+        let candidates = vec![
+            FoldRange::new(0, 8),
+            FoldRange::new(2, 5),
+            FoldRange::new(10, 16),
+        ];
+        let mut map = FoldMap::new();
+        map.set_candidates(candidates.clone());
+        map.set_all_folded(true);
+        assert_eq!(map.folded_ranges(), candidates.as_slice());
+        map.set_all_folded(false);
+        assert!(map.folded_ranges().is_empty());
+        assert_eq!(map.fold_candidates(), candidates.as_slice());
+        map.set_all_folded(true);
+        assert_eq!(map.folded_ranges(), candidates.as_slice());
     }
 }
