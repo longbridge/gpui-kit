@@ -379,15 +379,15 @@ impl SliderState {
         };
 
         let value = self.percentage_to_value(percentage);
-        let value = (value / step).round() * step;
+        let value = snap_to_step(value, self.min, self.max, step);
 
         if is_start {
-            self.percentage.start = percentage;
             self.value.set_start(value);
         } else {
-            self.percentage.end = percentage;
             self.value.set_end(value);
         }
+        // The thumb stands at the value, on its step, not at the pointer.
+        self.update_thumb_pos();
         cx.emit(SliderEvent::Change(self.value));
         cx.notify();
     }
@@ -415,6 +415,17 @@ impl SliderState {
         self.dragging = false;
         cx.emit(SliderEvent::Release(self.value));
     }
+}
+
+/// `value` on the nearest step counted from `min`, kept inside the range. A step that is
+/// not a positive finite number leaves the value continuous.
+fn snap_to_step(value: f32, min: f32, max: f32, step: f32) -> f32 {
+    if !(step > 0. && step.is_finite()) {
+        return value;
+    }
+    (min + ((value - min) / step).round() * step)
+        .min(max)
+        .max(min)
 }
 
 #[derive(Clone)]
@@ -938,6 +949,96 @@ mod tests {
             .default_value(10.);
         let percentage = state.percentage().end;
         assert!((percentage - (1. / 3.)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn dragging_snaps_from_min() {
+        // Steps count from `min`: 3 + 5k, not multiples of 5.
+        assert_eq!(snap_to_step(9.4, 3., 100., 5.), 8.);
+        assert_eq!(snap_to_step(11., 3., 100., 5.), 13.);
+        // A step past the end stays inside the range.
+        assert_eq!(snap_to_step(99., 3., 100., 5.), 98.);
+        assert_eq!(snap_to_step(100., 0., 99., 10.), 99.);
+        // A step that is not a positive finite number leaves the value continuous.
+        assert_eq!(snap_to_step(42.5, 0., 100., 0.), 42.5);
+        assert_eq!(snap_to_step(42.5, 0., 100., -5.), 42.5);
+        assert_eq!(snap_to_step(42.5, 0., 100., f32::NAN), 42.5);
+        assert_eq!(snap_to_step(42.5, 0., 100., f32::INFINITY), 42.5);
+    }
+
+    struct Holder(Entity<SliderState>);
+
+    impl Render for Holder {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    /// A slider of `state`, 100px wide, in a window.
+    fn sized(
+        state: SliderState,
+        cx: &mut gpui::TestAppContext,
+    ) -> (Entity<SliderState>, &mut gpui::VisualTestContext) {
+        let (holder, cx) = cx.add_window_view(|_, cx| Holder(cx.new(|_| state)));
+        let state = holder.read_with(cx, |holder, _| holder.0.clone());
+        state.update(cx, |state, _| {
+            state.set_bounds(Bounds::new(
+                gpui::point(px(0.), px(0.)),
+                gpui::size(px(100.), px(10.)),
+            ));
+        });
+        (state, cx)
+    }
+
+    fn drag(state: &Entity<SliderState>, x: f32, start: bool, cx: &mut gpui::VisualTestContext) {
+        state.update_in(cx, |state, window, cx| {
+            let position = gpui::point(px(x), px(0.));
+            state.update_value_by_position(Axis::Horizontal, position, start, window, cx);
+        })
+    }
+
+    #[gpui::test]
+    fn a_drag_snaps_to_steps_counted_from_min(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = sized(SliderState::new().min(3.).max(103.).step(5.), cx);
+        // 9 is between the steps 8 and 13, not next to 10.
+        drag(&state, 6., false, cx);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value()),
+            SliderValue::Single(8.)
+        );
+    }
+
+    #[gpui::test]
+    fn a_dropped_thumb_stands_at_its_value(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = sized(SliderState::new().step(25.), cx);
+        drag(&state, 30., false, cx);
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.value(), SliderValue::Single(25.));
+            assert_eq!(state.percentage(), 0.0..0.25);
+        });
+
+        state.update_in(cx, |state, window, cx| {
+            state.set_value((25., 75.), window, cx);
+        });
+        drag(&state, 40., true, cx);
+        drag(&state, 60., false, cx);
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.value(), SliderValue::Range(50., 50.));
+            assert_eq!(state.percentage(), 0.5..0.5);
+        });
+    }
+
+    #[gpui::test]
+    fn a_zero_step_drags_continuously(cx: &mut gpui::TestAppContext) {
+        for step in [0., -5., f32::NAN, f32::INFINITY] {
+            let (state, cx) = sized(SliderState::new().step(step), cx);
+            drag(&state, 30., false, cx);
+            state.read_with(cx, |state, _| {
+                let value = state.value().end();
+                assert!((value - 30.).abs() < 1e-3, "step {step}: {value}");
+                assert!((state.percentage().end - 0.3).abs() < 1e-5, "step {step}");
+            });
+        }
     }
 
     #[test]
