@@ -12964,6 +12964,16 @@ impl InputBaseState<crate::input::EditorMode> {
         true
     }
 
+    /// Horizontal gap between source text and the line-number or folding gutter.
+    ///
+    /// This gap remains when line numbers and folding are disabled. It excludes
+    /// the input frame's padding and the width of any visible gutter contents.
+    /// Static source views can share this metric to preserve the text origin
+    /// when they mount an editor.
+    pub fn text_gutter_margin() -> Pixels {
+        super::element::LINE_NUMBER_RIGHT_MARGIN
+    }
+
     /// Set enable/disable line number.
     #[doc(hidden)]
     pub fn line_number(mut self, line_number: bool) -> Self {
