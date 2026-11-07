@@ -8,6 +8,7 @@ pub use gpui_base::input::{
 };
 pub use token::InputToken;
 pub mod language_config;
+mod list_popup;
 mod number_input;
 mod otp_input;
 mod overlay;
