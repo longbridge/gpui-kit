@@ -48,6 +48,15 @@ pub(crate) fn ensure_gtk(cx: &mut App) -> wry::Result<()> {
     Ok(())
 }
 
+/// WebKitGTK answers `prefers-color-scheme` from GTK's preference, which GTK 3 does not
+/// read from the desktop, so without this every page renders light.
+pub(crate) fn set_theme(theme: wry::Theme) {
+    use gtk::prelude::GtkSettingsExt as _;
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_application_prefer_dark_theme(matches!(theme, wry::Theme::Dark));
+    }
+}
+
 /// The GPUI window as the Xlib parent Wry requires; GPUI reports its X11 window through XCB.
 pub(crate) struct X11Parent(XlibWindowHandle);
 
@@ -147,17 +156,19 @@ pub(crate) fn forward_mouse_down(
         });
 }
 
-/// Zoom the page so its CSS pixels match GPUI's scale; GDK only supports integer scales.
-pub(crate) fn match_scale_factor(webview: &wry::WebView, scale_factor: f32) {
+/// Zoom the page so its CSS pixels match GPUI's scale (GDK only supports integer scales),
+/// times the page zoom the application asked for.
+pub(crate) fn match_scale_factor(webview: &wry::WebView, scale_factor: f32, zoom: f64) {
     use gtk::prelude::WidgetExt as _;
     use wry::WebViewExtUnix as _;
 
     let gdk_scale = webview.webview().scale_factor().max(1);
-    let _ = webview.zoom(f64::from(scale_factor) / f64::from(gdk_scale));
+    let _ = webview.zoom(f64::from(scale_factor) / f64::from(gdk_scale) * zoom);
 }
 
 /// A GPUI Fast composition surface hosting the webview: an X11 child window that GPUI cuts
 /// its overlays out of, so they render above the page.
+#[cfg(feature = "gpui-fast")]
 pub(crate) struct NativeWebViewSurface {
     surface: gpui::WindowCompositionSurface,
     scale_factor: std::cell::Cell<f32>,
@@ -165,6 +176,7 @@ pub(crate) struct NativeWebViewSurface {
     cx: gpui::AsyncApp,
 }
 
+#[cfg(feature = "gpui-fast")]
 impl NativeWebViewSurface {
     pub(crate) fn new(window: &Window, cx: &App) -> anyhow::Result<Self> {
         let surface = window
@@ -210,6 +222,20 @@ impl NativeWebViewSurface {
             position: PhysicalPosition::new(0, 0).into(),
             size: PhysicalSize::new(extent.width, extent.height).into(),
         })?;
+        Ok(())
+    }
+
+    pub(crate) fn set_geometry(
+        &self,
+        webview: &wry::WebView,
+        document: Bounds<Pixels>,
+        visible: Bounds<Pixels>,
+    ) -> anyhow::Result<()> {
+        self.surface
+            .platform_surface()?
+            .set_bounds(visible.to_device_pixels(self.scale_factor.get()))?;
+        let child = Bounds::new(document.origin - visible.origin, document.size);
+        webview.set_bounds(device_bounds(child, self.scale_factor.get()))?;
         Ok(())
     }
 

@@ -1,5 +1,5 @@
 //! Registers native elements without accepting a second description of their state.
-use gpui::{Element, Hitbox, InteractiveElement};
+use gpui::{Element, Hitbox, InteractiveElement, IntoElement, SharedString};
 
 #[doc(hidden)]
 #[cfg(feature = "test-support")]
@@ -37,6 +37,47 @@ pub trait TestSupportExt:
 }
 impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> TestSupportExt for E {}
 
+#[doc(hidden)]
+#[cfg(feature = "test-support")]
+pub type ObservedTextElement<E> = crate::test_support::ObservedText<E>;
+#[doc(hidden)]
+#[cfg(not(feature = "test-support"))]
+pub type ObservedTextElement<E> = E;
+
+/// Records the text an element displays, for text queries in UI tests.
+/// Text components call it with the text they render, so plain text needs
+/// no element id.
+pub trait TestTextExt: IntoElement + Sized {
+    /// With `test-support`, records `text` each time the element paints.
+    /// Otherwise returns the element it builds.
+    fn test_text(self, text: impl Into<SharedString>) -> ObservedTextElement<Self::Element> {
+        #[cfg(feature = "test-support")]
+        {
+            crate::test_support::ObservedText::new(self.into_element(), text.into(), false)
+        }
+        #[cfg(not(feature = "test-support"))]
+        {
+            let _ = text;
+            self.into_element()
+        }
+    }
+
+    /// Like [`Self::test_text`] for an image's alternative text, which
+    /// stands in for what the element draws.
+    fn test_alt_text(self, text: impl Into<SharedString>) -> ObservedTextElement<Self::Element> {
+        #[cfg(feature = "test-support")]
+        {
+            crate::test_support::ObservedText::new(self.into_element(), text.into(), true)
+        }
+        #[cfg(not(feature = "test-support"))]
+        {
+            let _ = text;
+            self.into_element()
+        }
+    }
+}
+impl<E: IntoElement> TestTextExt for E {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,5 +89,17 @@ mod tests {
         assert_eq!(Element::id(&element), Some("target".into()));
         #[cfg(not(feature = "test-support"))]
         let _: gpui::Stateful<gpui::Div> = element;
+    }
+
+    #[test]
+    fn text_observation_keeps_builder_methods() {
+        use gpui::{ParentElement as _, Styled as _};
+
+        let element = div()
+            .test_text("example")
+            .id("target")
+            .text_sm()
+            .child("example");
+        assert_eq!(Element::id(&element), Some("target".into()));
     }
 }

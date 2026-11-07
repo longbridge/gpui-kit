@@ -24,7 +24,9 @@ mod test_support;
 
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{App, AppContext as _, Context, Entity, SharedString, WeakEntity, Window, actions};
+use gpui::{
+    App, AppContext as _, Context, Entity, EventEmitter, SharedString, WeakEntity, Window, actions,
+};
 
 /// The behavior half of the panel traits, which every panel implements
 /// alongside [`Panel`]. Exported under this name because `Panel` in this
@@ -58,6 +60,59 @@ pub use tab_panel::DragPanelPreview;
 
 actions!(dock, [ToggleZoom, ClosePanel]);
 
+/// A dock that the user opened or closed with one of [`DockSkin`]'s controls:
+/// the collapse button in a tab bar, the strip of a collapsed bottom dock, or
+/// a resize handle dragged past the closed strip and released.
+///
+/// A [`DockArea`] drawn by [`DockSkin`] emits it after the dock has changed.
+/// [`DockArea::toggle_dock`] and the other dock setters do not, so an
+/// application can tell a user's toggle from one its own code made.
+pub struct DockToggleEvent {
+    placement: DockPlacement,
+    open: bool,
+}
+
+impl DockToggleEvent {
+    /// The dock that was toggled.
+    pub fn placement(&self) -> DockPlacement {
+        self.placement
+    }
+
+    /// Whether the dock is open now.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+}
+
+impl EventEmitter<DockToggleEvent> for DockArea {}
+
+/// Toggle a dock on the user's behalf and report it with [`DockToggleEvent`].
+/// A dock that refuses to close emits nothing.
+pub(crate) fn toggle_dock_by_user(
+    area: &mut DockArea,
+    placement: DockPlacement,
+    window: &mut Window,
+    cx: &mut Context<DockArea>,
+) {
+    let was_open = area.is_dock_open(placement);
+    area.toggle_dock(placement, window, cx);
+    report_user_toggle(area, placement, was_open, cx);
+}
+
+/// Emit [`DockToggleEvent`] if a user action moved the dock away from
+/// `was_open`.
+pub(crate) fn report_user_toggle(
+    area: &DockArea,
+    placement: DockPlacement,
+    was_open: bool,
+    cx: &mut Context<DockArea>,
+) {
+    let open = area.is_dock_open(placement);
+    if open != was_open {
+        cx.emit(DockToggleEvent { placement, open });
+    }
+}
+
 pub(crate) fn init(cx: &mut App) {
     // `gpui_base::dock::PanelRegistry::init` is crate-private, but the global
     // it installs is not: `DockArea::new` and `register_panel` both create it
@@ -82,6 +137,9 @@ pub(crate) struct SkinShared {
     close_button_visible: Cell<bool>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
+    /// Whether that dock was open when the drag began, so the release can
+    /// tell whether the drag opened or closed it.
+    resize_started_open: Cell<bool>,
 }
 
 impl SkinShared {
@@ -99,6 +157,10 @@ impl SkinShared {
 
     pub(crate) fn resizing_dock(&self) -> &Cell<Option<DockPlacement>> {
         &self.resizing_dock
+    }
+
+    pub(crate) fn resize_started_open(&self) -> &Cell<bool> {
+        &self.resize_started_open
     }
 
     /// Redraw the area after a setting changed. The skin is not an entity, so
@@ -157,6 +219,7 @@ impl DockSkin {
                 toggle_button_visible: Cell::new(true),
                 close_button_visible: Cell::new(false),
                 resizing_dock: Cell::new(None),
+                resize_started_open: Cell::new(false),
             }),
         })
     }

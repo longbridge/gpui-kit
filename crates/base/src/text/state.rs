@@ -23,7 +23,8 @@ use crate::{
     input::{self, SelectAll},
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TextViewStyle,
+        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TaskToggleHandlerFn,
+        TextViewStyle,
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
@@ -33,6 +34,7 @@ use crate::{
         selection_adapter::TextViewSelectionAdapter,
         stream_fade::{StreamFadeTracker, TextViewMotion},
     },
+    touch_selection::caret_line_box,
     v_flex,
 };
 
@@ -81,6 +83,19 @@ pub enum SelectionFormat {
     /// reconstructed as Markdown from the parsed nodes (e.g. selecting inside
     /// a `**bold**` run yields `**bold**`).
     Source,
+    /// The rendered text while the selection stays within one style, the
+    /// source as soon as it takes in several.
+    ///
+    /// A style is everything the source would spell out around the selected
+    /// text: the marks of an inline run (emphasis, code, a link's URL) and the
+    /// block it sits in (a heading's `#`, a list marker, a code fence). So
+    /// selecting inside a `**bold**` run, a link or a code block yields the
+    /// text alone, also when the selection reaches exactly up to the run's
+    /// boundaries, while a selection across that boundary, into a second
+    /// block, or over an inline object copies like [`Self::Source`]. Two blocks
+    /// count as two styles even when their marks match, since the source of
+    /// either spells out where one ends. Select-all copies the source verbatim.
+    SourceAcrossStyles,
 }
 
 /// One text element's laid-out vertical extent, reported by `Inline` during
@@ -117,6 +132,7 @@ pub struct TextViewState {
     pub(super) table_actions: Option<std::sync::Arc<TableActionsFn>>,
     pub(super) image_source: Option<std::sync::Arc<super::text_view::ImageSourceFn>>,
     pub(super) link_click_handler: Option<std::sync::Arc<LinkClickHandlerFn>>,
+    pub(super) task_toggle_handler: Option<std::sync::Arc<TaskToggleHandlerFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 
     pub(super) is_selecting: bool,
@@ -222,6 +238,7 @@ impl TextViewState {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             markdown_extensions: Arc::default(),
             is_selecting: false,
@@ -431,6 +448,12 @@ impl TextViewState {
         }
     }
 
+    /// A pending full replacement leaves the previous document on screen, but
+    /// that document must no longer supply clipboard content.
+    pub(super) fn has_current_copy_document(&self) -> bool {
+        self.committed_revision >= self.full_update_revision
+    }
+
     /// Return the selected text, with `blocks` bounding which top-level blocks
     /// the selection covers.
     ///
@@ -441,7 +464,7 @@ impl TextViewState {
         let format = self.effective_format();
 
         if self.select_all {
-            if format == SelectionFormat::Source {
+            if format != SelectionFormat::Plain {
                 return self.source().to_string();
             }
 
@@ -452,7 +475,7 @@ impl TextViewState {
         // past the block walk. Source mode cannot take it: the word it stored
         // has lost its markup. The click also set the inline selection it came
         // from, so the walk reconstructs the same range with the markup intact.
-        if format != SelectionFormat::Source
+        if format == SelectionFormat::Plain
             && let Some(text) = &self.selected_text_override
         {
             return text.clone();
@@ -504,6 +527,10 @@ impl TextViewState {
         if !append {
             self.full_update_revision = self.revision;
             self.selection_revision = self.selection_revision.wrapping_add(1);
+            // Old native layouts must not project a still-active gesture back
+            // into replaced content, including while a large parse is pending.
+            self.selection_adapter.clear_copy_projections(cx);
+            self.parsed_content.document.clear_selection();
         }
         let parse_synchronously = !append && text.len() <= MAX_SYNC_FULL_REPLACE_BYTES;
         let update_options = UpdateOptions {
@@ -880,11 +907,15 @@ impl TextViewState {
         cx.notify();
     }
 
+    /// Selects what a multi-click at `pos` selected, from the caret `start`
+    /// to the caret `end` in window coordinates. A drag from the click
+    /// extends it by the same unit.
     pub(crate) fn set_multi_click_selection(
         &mut self,
         pos: Point<Pixels>,
         kind: TextViewMultiClickKind,
         selected_text: String,
+        (start, end): (Bounds<Pixels>, Bounds<Pixels>),
         cx: &mut App,
     ) {
         self.preserve_inline_selection = false;
@@ -900,6 +931,21 @@ impl TextViewState {
         self.is_selecting = false;
         self.auto_scroll.stop();
         self.selection_adapter.set_local_selection(true, cx);
+        let click_count = match kind {
+            TextViewMultiClickKind::Word => 2,
+            TextViewMultiClickKind::Paragraph | TextViewMultiClickKind::Line => 3,
+        };
+        self.selection_adapter
+            .hold_multi_click(start, end, click_count, cx);
+    }
+
+    /// Hands a multi-click selection over to the window selection, which a
+    /// drag from the click has taken beyond what the click selected.
+    pub(super) fn end_multi_click_selection(&mut self, cx: &mut App) {
+        if self.multi_click_selection.take().is_some() {
+            self.selected_text_override = None;
+            self.selection_adapter.set_local_selection(false, cx);
+        }
     }
 
     pub(crate) fn set_multi_click_line(&mut self, bounds: Bounds<Pixels>, cx: &mut App) {
@@ -907,6 +953,10 @@ impl TextViewState {
             bounds.center(),
             TextViewMultiClickKind::Line,
             String::new(),
+            (
+                caret_line_box(bounds.origin, bounds.size.height),
+                caret_line_box(bounds.top_right(), bounds.size.height),
+            ),
             cx,
         );
         self.selected_text_override = None;
@@ -934,6 +984,19 @@ impl TextViewState {
             return None;
         }
         self.selection_adapter.selection_points(cx)
+    }
+
+    /// [`Self::selection_points`] for the text that paints now: a drag that
+    /// started in a table cell selects only in that cell. Call it only while
+    /// painting, so the cell the text is in is known.
+    pub(crate) fn painted_selection_points(
+        &self,
+        cx: &App,
+    ) -> Option<(Point<Pixels>, Point<Pixels>)> {
+        if !self.selectable {
+            return None;
+        }
+        self.selection_adapter.painted_selection_points(cx)
     }
 
     pub(crate) fn has_selection(&self, cx: &App) -> bool {
@@ -1075,10 +1138,12 @@ impl Render for TextViewState {
             code_block_highlighter: self.code_block_highlighter.clone(),
             table_actions: self.table_actions.clone(),
             link_click_handler: self.link_click_handler.clone(),
+            task_toggle_handler: self.task_toggle_handler.clone(),
             image_source: self.image_source.clone(),
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,
             range_highlights: self.range_highlights.clone(),
+            foregrounds: Default::default(),
             reveal,
             body_font_size,
         };

@@ -46,7 +46,8 @@ The command above supplies application initialization, window creation, and shar
 
 ## Accessibility
 
-Expose label, value, bounds, and keyboard-accessible step actions.
+Expose label, value, bounds, and keyboard-accessible step actions. The spinbutton has no visible text of
+its own, so name it with `.accessibility_label(...)`.
 
 ## Notes
 

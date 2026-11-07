@@ -246,6 +246,13 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Set the number of spaces per tab stop.
+    pub(crate) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) {
+        if self.wrap_map.set_tab_size(tab_size, cx) {
+            self.rebuild_fold_projection();
+        }
+    }
+
     /// Set font parameters
     pub fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrap_map.set_font(font, font_size, cx);
@@ -300,6 +307,13 @@ impl DisplayMap {
         self.wrap_map
             .wrapper()
             .offset_to_display_point_with_affinity(offset, line_end_affinity)
+    }
+
+    /// Resolve the caret's visual row through both wrapping and folded regions.
+    pub(crate) fn offset_to_display_row(&self, offset: usize, line_end_affinity: bool) -> usize {
+        let point = self.offset_to_wrap_display_point_with_affinity(offset, line_end_affinity);
+        self.wrap_row_to_display_row(point.row)
+            .unwrap_or_else(|| self.nearest_visible_display_row(point.row))
     }
 
     /// Convert wrap display point to byte offset.

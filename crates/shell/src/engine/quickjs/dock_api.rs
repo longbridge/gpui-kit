@@ -40,6 +40,7 @@
 //! read on the way out. Both are ordinary methods on the view class, because a
 //! panel *is* a view — there is no second object to introduce.
 
+use crate::engine::quickjs::js_error;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
@@ -49,7 +50,7 @@ use gpui::{
 use gpui_base::dock::{
     DockContext, DockEvent, DockPlacement, DropIndicator, PanelId, TabGroupContext,
 };
-use rquickjs::{Ctx, Exception, Object, Persistent, Result as JsResult, Value, function::Func};
+use rquickjs::{Ctx, Object, Persistent, Result as JsResult, Value, function::Func};
 use serde_json::{Value as Json, json};
 
 use crate::{
@@ -90,7 +91,7 @@ pub fn install(
                     .transpose()?
                     .map(|value| {
                         usize::try_from(value).map_err(|_| {
-                            Exception::throw_range(
+                            js_error::range_error(
                                 &ctx,
                                 "DockArea.new version exceeds this platform's index range",
                             )
@@ -111,7 +112,7 @@ pub fn install(
                         .map_err(|_| super::entity_api::entity_limit_reached(&ctx))
                 })
                 .ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "DockArea.new(id) needs a live host call; call it from init() or an \
                          event handler",
@@ -244,7 +245,7 @@ pub fn install(
                 let state = scope::with_current_app(|cx| area.read(cx).dump(cx))
                     .ok_or_else(|| needs_call(&ctx, "dump()"))?;
                 serde_json::to_string(&state).map_err(|error| {
-                    Exception::throw_type(&ctx, &format!("this layout has no JSON form: {error}"))
+                    js_error::type_error(&ctx, &format!("this layout has no JSON form: {error}"))
                 })
             },
         ),
@@ -267,7 +268,7 @@ pub fn install(
                     return Err(released(&ctx));
                 }
                 let state = serde_json::from_value(state.0).map_err(|error| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         &format!("this is not a layout written by dump(): {error}"),
                     )
@@ -518,11 +519,11 @@ pub(in crate::engine) struct PanelOptions {
 impl<'js> rquickjs::FromJs<'js> for PanelOptions {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
         let object = value.as_object().ok_or_else(|| {
-            Exception::throw_type(ctx, "add_panel(view, options) expects an options object")
+            js_error::type_error(ctx, "add_panel(view, options) expects an options object")
         })?;
         let name = object.get::<_, String>("name")?;
         if name.is_empty() {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "add_panel(view, options) expects a non-empty name",
             ));
@@ -556,7 +557,7 @@ struct PanelClass(Persistent<Object<'static>>);
 impl<'js> rquickjs::FromJs<'js> for PanelClass {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
         let class = value.as_object().ok_or_else(|| {
-            Exception::throw_type(
+            js_error::type_error(
                 ctx,
                 "register_panel(name, Class) expects the View subclass the panel is rebuilt from",
             )
@@ -881,7 +882,7 @@ fn install_elements(globals: &Object<'_>, runtime: std::rc::Weak<ShellRuntime>) 
             let runtime = alive(&ctx, &area)?;
             let live = { runtime.entities().dock(handle).is_some() };
             if !live {
-                return Err(Exception::throw_type(
+                return Err(js_error::type_error(
                     &ctx,
                     "this dock area has been released and can no longer be drawn",
                 ));
@@ -889,7 +890,7 @@ fn install_elements(globals: &Object<'_>, runtime: std::rc::Weak<ShellRuntime>) 
             runtime
                 .arena_mut()
                 .push_dock_area(handle)
-                .map_err(|error| Exception::throw_type(&ctx, &error.to_string()))
+                .map_err(|error| js_error::type_error(&ctx, &error.to_string()))
         }),
     )?;
 
@@ -912,7 +913,7 @@ fn subscribe_dock(
     handler: super::entity_api::Handler,
 ) -> JsResult<bool> {
     if name != "layout_changed" {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "unknown dock event `{name}`; the only one is \"layout_changed\", which fires on \
@@ -952,7 +953,7 @@ fn qualified_name(panel: &str) -> String {
 
 fn placement_of(ctx: &Ctx<'_>, name: &str) -> JsResult<DockPlacement> {
     dock_placement(name).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "`{name}` is not a dock placement; expected \"center\", \"left\", \"right\" or \
@@ -975,18 +976,18 @@ fn area_of(
 fn alive(ctx: &Ctx<'_>, runtime: &std::rc::Weak<ShellRuntime>) -> JsResult<Rc<ShellRuntime>> {
     runtime
         .upgrade()
-        .ok_or_else(|| Exception::throw_type(ctx, "the shell runtime is no longer available"))
+        .ok_or_else(|| js_error::type_error(ctx, "the shell runtime is no longer available"))
 }
 
 fn released(ctx: &Ctx<'_>) -> rquickjs::Error {
-    Exception::throw_type(
+    js_error::type_error(
         ctx,
         "this dock area has been released; a handle cannot be used after release()",
     )
 }
 
 fn needs_call(ctx: &Ctx<'_>, api: &str) -> rquickjs::Error {
-    Exception::throw_type(
+    js_error::type_error(
         ctx,
         &format!("{api} needs a live host call; call it from init() or an event handler"),
     )
@@ -994,7 +995,7 @@ fn needs_call(ctx: &Ctx<'_>, api: &str) -> rquickjs::Error {
 
 fn finite_number(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
     if !value.is_finite() {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("{api} expects a finite number"),
         ));
@@ -1005,7 +1006,7 @@ fn finite_number(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
 fn finite_non_negative(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
     finite_number(ctx, value, api)?;
     if value < 0.0 {
-        return Err(Exception::throw_range(
+        return Err(js_error::range_error(
             ctx,
             &format!("{api} expects a non-negative number"),
         ));
@@ -1016,7 +1017,7 @@ fn finite_non_negative(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
 fn non_negative_integer(ctx: &Ctx<'_>, value: f64, api: &str) -> JsResult<u64> {
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 9_007_199_254_740_991.0
     {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("{api} expects a whole, non-negative safe integer"),
         ));
@@ -1036,7 +1037,7 @@ fn refuse_in_render(ctx: &Ctx<'_>, api: &str) -> JsResult<()> {
         scope::current_phase(),
         Some(ScopePhase::Render | ScopePhase::Layout)
     ) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "{api} changes the layout and cannot be called while one is being described or \

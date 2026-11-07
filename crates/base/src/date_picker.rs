@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::{
     StyledExt as _,
+    a11y_disabled::A11yDisabledExt as _,
     actions::{Cancel, Confirm},
 };
 
@@ -108,5 +109,6 @@ impl RenderOnce for DatePicker {
             })
             .refine_style(&self.style)
             .children(self.children)
+            .a11y_disabled(disabled)
     }
 }

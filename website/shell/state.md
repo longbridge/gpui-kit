@@ -195,7 +195,20 @@ this.draft.on("submit", (event, cx) => this.add(cx));
 | `focus` | The field gained focus |
 | `blur` | It lost focus |
 
+In a `TextareaState`, Enter starts a new line and then reports `submit` as well, so the text a handler reads ends with that line break. A message box that sends on Enter calls `set_submit_on_enter(true)`: Enter then leaves the text alone, and Shift+Enter still starts a new line. Shift+Enter is still reported as `submit`, with `event.shift` set, so the handler returns early on it:
+
+```js
+this.draft = TextareaState.new({ rows: 3 });
+this.draft.set_submit_on_enter(true);
+this.draft.on("submit", (event, cx) => {
+  if (event.shift) return;
+  this.send(this.draft.value(), cx);
+});
+```
+
 Unlike a rendered `on_click`, this subscription **outlives the render that created it**. The subscription is owned by the runtime's handle store rather than by the script, because a script has nowhere to keep it and a handler that stops firing because a value was garbage collected is the kind of bug nobody finds. It is released when the handle is.
+
+`"gpui-component"`'s `InputState` and `TextareaState` answer `on` with the same events and the same payload, so a field moved between the two modules keeps its subscriptions. Each module's `Input` takes only its own module's state; passing a `gpui-base` `InputState` to the `gpui-component` `Input` is refused by name.
 
 A misspelled event name lists the valid ones:
 

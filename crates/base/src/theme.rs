@@ -2,7 +2,10 @@ use gpui::{App, Global};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{PlotMotion, ScrollbarMode, ScrollbarMotion, ScrollbarStyles, SemanticThemeTokens};
+use crate::{
+    PlotMotion, ScrollbarMode, ScrollbarMotion, ScrollbarStyles, SemanticThemeTokens,
+    input::CursorBlink,
+};
 
 /// Application-wide defaults for Base behavior modules.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -13,13 +16,18 @@ pub enum ThemeAppearance {
     Dark,
 }
 
+/// Construct with [`Theme::default`] and assign fields; new fields may be
+/// added without a breaking change.
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct Theme {
     pub appearance: ThemeAppearance,
     pub tokens: SemanticThemeTokens,
     pub scrollbar: ScrollbarTheme,
     pub resizable: ResizableTheme,
     pub plot: PlotTheme,
+    /// Application-wide caret blink behavior.
+    pub cursor_blink: CursorBlink,
 }
 
 impl Global for Theme {}
@@ -131,6 +139,7 @@ impl PlotTheme {
 /// project anything. Making them optional keeps the projection exactly as it
 /// was while giving the unprojected case an answer.
 #[derive(Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct ResizableTheme {
     pub handle: Option<gpui::Hsla>,
     pub active_handle: Option<gpui::Hsla>,

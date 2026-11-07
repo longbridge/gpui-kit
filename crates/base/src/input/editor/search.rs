@@ -169,15 +169,31 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// [`InputBaseState::previous_search_match`], read the count and the
     /// current index from [`InputBaseState::search_session`], and end the
     /// search with [`InputBaseState::close_search`].
+    ///
+    /// A changed query or case mode starts at the current viewport. Setting
+    /// the same query and case mode again retains the current occurrence.
     pub fn set_search_query(
         &mut self,
         query: impl Into<String>,
         case_insensitive: bool,
         cx: &mut Context<Self>,
     ) {
+        let query = query.into();
+        let query_changed = query != self.search_session.query
+            || case_insensitive != self.search_session.case_insensitive;
+        self.search_session.anchor_offset = if query_changed {
+            self.last_layout
+                .as_ref()
+                .map(|layout| layout.visible_range_offset.start)
+        } else {
+            None
+        };
         self.search_session.activate();
         self.search_session.update_query(query, case_insensitive);
         self.search_session.matcher.update(&self.text);
+        if query_changed && let Some(anchor) = self.search_session.anchor_offset {
+            self.search_session.matcher.update_cursor_by_offset(anchor);
+        }
         cx.notify();
     }
 

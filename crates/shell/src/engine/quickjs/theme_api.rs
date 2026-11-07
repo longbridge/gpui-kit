@@ -1,7 +1,8 @@
 //! JavaScript access to gpui-base's current semantic theme.
+use crate::engine::quickjs::js_error;
 use crate::{theme_tokens, value::Bridged};
 use gpui_base::{Theme, ThemeAppearance};
-use rquickjs::{Ctx, Exception, Object, Result as JsResult, Value, function::Func};
+use rquickjs::{Ctx, Object, Result as JsResult, Value, function::Func};
 use serde::Deserialize;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -107,36 +108,35 @@ fn set_theme<'js>(ctx: Ctx<'js>, value: Value<'js>) -> JsResult<()> {
         crate::scope::current_phase(),
         Some(crate::scope::ScopePhase::Render) | Some(crate::scope::ScopePhase::Layout)
     ) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             &ctx,
             "set_theme(theme) cannot run during render or layout; switch themes from an event handler or task",
         ));
     }
     let source = ctx
         .json_stringify(value)?
-        .ok_or_else(|| Exception::throw_type(&ctx, "set_theme(theme) expects an object"))?;
+        .ok_or_else(|| js_error::type_error(&ctx, "set_theme(theme) expects an object"))?;
     let source = source.to_string()?;
-    let supplied: ScriptTheme = serde_json::from_str(&source).map_err(|error| {
-        Exception::throw_type(&ctx, &format!("invalid theme snapshot: {error}"))
-    })?;
+    let supplied: ScriptTheme = serde_json::from_str(&source)
+        .map_err(|error| js_error::type_error(&ctx, &format!("invalid theme snapshot: {error}")))?;
     crate::scope::with_current_app(|cx| {
         let mut tokens = Theme::global(cx).tokens;
         apply_colors(&mut tokens.colors, &supplied.tokens.colors)
-            .map_err(|e| Exception::throw_type(&ctx, &e))?;
+            .map_err(|e| js_error::type_error(&ctx, &e))?;
         apply_scale(
             theme_tokens::spacing_token_names(),
             &supplied.tokens.spacing,
             |name, value| set_spacing(&mut tokens.spacing, name, value),
         )
-        .map_err(|e| Exception::throw_type(&ctx, &e))?;
+        .map_err(|e| js_error::type_error(&ctx, &e))?;
         apply_scale(
             theme_tokens::radius_token_names(),
             &supplied.tokens.radius,
             |name, value| set_radius(&mut tokens.radius, name, value),
         )
-        .map_err(|e| Exception::throw_type(&ctx, &e))?;
+        .map_err(|e| js_error::type_error(&ctx, &e))?;
         apply_typography(&mut tokens.typography, &supplied.tokens.typography)
-            .map_err(|e| Exception::throw_type(&ctx, &e))?;
+            .map_err(|e| js_error::type_error(&ctx, &e))?;
         let base = Theme::global_mut(cx);
         base.appearance = supplied.appearance;
         base.tokens = tokens;
@@ -145,7 +145,7 @@ fn set_theme<'js>(ctx: Ctx<'js>, value: Value<'js>) -> JsResult<()> {
         Ok::<(), rquickjs::Error>(())
     })
     .ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             &ctx,
             "set_theme(theme) needs a live host call; call it from an event handler",
         )

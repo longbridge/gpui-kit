@@ -266,7 +266,7 @@ A locked area cannot be rearranged or dropped into. Dock resizing stays availabl
 ## A complete example
 
 ```bash
-cargo run -p gpui-shell -- examples/js_dock
+cargo run -p gpui-shell -- run examples/js_dock
 ```
 
 `examples/js_dock/` is a workspace: a file list in the left dock, documents in the center, a tab bar and dock frame drawn in `ui.js`, and a layout written to `localStorage` on a timer. It is the shortest complete thing that uses every part of this page.

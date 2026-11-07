@@ -6,7 +6,7 @@ use gpui::{
 };
 
 use crate::{
-    spec::{BackgroundKind, BackgroundSpec, SpecOp},
+    spec::{BackgroundSpec, SpecOp},
     value::Bridged,
 };
 
@@ -84,34 +84,10 @@ impl NativePath {
         }
     }
 
+    /// An invalid colour draws nothing rather than failing the frame, as it
+    /// always has for a path.
     fn background(&self) -> Option<gpui::Background> {
-        let color = |value: &str| Bridged::Str(value.to_owned()).as_color().ok();
-        let background = match &self.background.kind {
-            BackgroundKind::Solid { color: value } => gpui::solid_background(color(value)?),
-            BackgroundKind::LinearGradient {
-                angle,
-                from,
-                to,
-                color_space,
-            } => gpui::linear_gradient(
-                *angle,
-                gpui::linear_color_stop(color(&from.0)?, from.1),
-                gpui::linear_color_stop(color(&to.0)?, to.1),
-            )
-            .color_space(match color_space.as_str() {
-                "oklab" => gpui::ColorSpace::Oklab,
-                _ => gpui::ColorSpace::Srgb,
-            }),
-            BackgroundKind::PatternSlash {
-                color: value,
-                width,
-                interval,
-            } => gpui::pattern_slash(color(value)?, *width, *interval),
-            BackgroundKind::Checkerboard { color: value, size } => {
-                gpui::checkerboard(color(value)?, *size)
-            }
-        };
-        Some(background.opacity(self.background.opacity))
+        self.background.resolve().ok()
     }
 
     fn build(&self, bounds: Bounds<Pixels>) -> Option<gpui::Path<Pixels>> {

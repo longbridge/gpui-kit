@@ -13,12 +13,19 @@ use crate::{
 };
 
 const CONTEXT: &str = "Popover";
+const CONTENT_CONTEXT: &str = "PopoverContent";
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
         KeyBinding::new("space", Confirm { secondary: false }, Some(CONTEXT)),
+        KeyBinding::new("escape", Cancel, Some(CONTENT_CONTEXT)),
+        // The content is still a descendant of the trigger's dispatch node.
+        // Leave activation to its controls, not the trigger or an outer dialog.
+        // More deeply scoped input bindings retain precedence.
+        KeyBinding::new("enter", gpui::NoAction, Some(CONTENT_CONTEXT)),
+        KeyBinding::new("space", gpui::NoAction, Some(CONTENT_CONTEXT)),
     ]);
 }
 
@@ -120,9 +127,14 @@ impl PopoverState {
                 );
         } else {
             self.dismiss_subscription = None;
-            if let Some(previous) = self.previous_focus_handle.take() {
-                if self.focus_handle.contains_focused(window, cx) {
-                    previous.focus(window, cx);
+            let previous = self.previous_focus_handle.take();
+            if self.focus_handle.contains_focused(window, cx) {
+                match previous {
+                    Some(previous) => previous.focus(window, cx),
+                    // Nothing had focus when the popover opened, so nothing has it now. Left
+                    // alone, focus would stay on the closed popover's own handle, which is no
+                    // longer in the tree.
+                    None => window.blur(cx),
                 }
             }
         }
@@ -168,6 +180,10 @@ type ContentBuilder =
     Box<dyn FnOnce(&mut PopoverState, &mut Window, &mut Context<PopoverState>) -> AnyElement>;
 
 /// An unstyled popover owning trigger interaction, open state, dismissal, and focus.
+///
+/// Enter and Space on the trigger toggle the popover. Inside its content, those
+/// keys belong to the focused control instead; Escape dismisses the popover and
+/// restores the previous focus.
 #[derive(IntoElement)]
 pub struct Popover {
     id: ElementId,
@@ -357,7 +373,7 @@ impl RenderOnce for Popover {
             .occlude()
             .tab_group()
             .track_focus(&focus_handle)
-            .key_context(CONTEXT)
+            .key_context(CONTENT_CONTEXT)
             .on_action(window.listener_for(&state, PopoverState::on_action_cancel))
             .when_some(self.content, |this, content| {
                 this.child(state.update(cx, |state, cx| (content)(state, window, cx)))
@@ -467,15 +483,26 @@ mod tests {
             }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| assert!(window.focused(cx).is_none(), "nothing has focus yet"));
 
         cx.simulate_click(point(px(20.), px(10.)), Default::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_some());
+        cx.update(|window, cx| assert!(window.focused(cx).is_some(), "the popover takes focus"));
 
         cx.simulate_click(point(px(300.), px(300.)), Default::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_none());
         assert_eq!(&*changes.borrow(), &[true, false]);
+        // Nothing had focus when the popover opened, so nothing has it now, not the closed
+        // popover's own handle.
+        cx.update(|window, cx| {
+            assert!(
+                window.focused(cx).is_none(),
+                "focus stays on {:?}",
+                window.focused(cx)
+            )
+        });
     }
 
     #[gpui::test]

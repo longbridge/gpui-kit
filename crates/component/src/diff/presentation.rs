@@ -1,6 +1,7 @@
-//! Presentation prepared on a background thread: theme-independent syntax
-//! captures and inline changes between paired lines.
-use std::{collections::HashMap, ops::Range};
+//! Presentation prepared on a background thread: syntax captures, as
+//! theme-independent highlight names or an application highlighter's styles,
+//! and inline changes between paired lines.
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 use gpui::{HighlightStyle, SharedString};
 use gpui_base::input::HighlightStyleResolver;
@@ -37,11 +38,25 @@ pub(crate) struct PresentationOptions {
 /// because building one compiles its language's queries.
 pub(crate) type SyntaxHighlighters = HashMap<SharedString, SyntaxHighlighter>;
 
+/// The application's highlighter, set with
+/// [`DiffState::with_syntax_highlighter`](super::DiffState::with_syntax_highlighter).
+pub(crate) type DiffSyntaxHighlighter =
+    Arc<dyn Fn(&str, &str) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync>;
+
+/// What a syntax span is painted with.
+#[derive(Clone, Copy)]
+enum SyntaxPaint {
+    /// A highlight name, resolved against the theme when the line paints.
+    Name(u16),
+    /// A style the application's highlighter returned.
+    Style(HighlightStyle),
+}
+
 /// Prepared presentation for one file.
 #[derive(Default)]
 pub(crate) struct FilePresentation {
     names: Vec<SharedString>,
-    syntax: [LineSpans<u16>; 2],
+    syntax: [LineSpans<SyntaxPaint>; 2],
     inline: [LineSpans<()>; 2],
 }
 
@@ -82,11 +97,13 @@ impl<T> LineSpans<T> {
 }
 
 impl FilePresentation {
-    /// Blocking; run it on a background thread.
+    /// Blocking; run it on a background thread. `custom` replaces the
+    /// built-in highlighters when the application set one.
     pub(crate) fn prepare(
         file: &DiffFile,
         options: PresentationOptions,
         highlighters: &mut SyntaxHighlighters,
+        custom: Option<&DiffSyntaxHighlighter>,
     ) -> Self {
         let mut presentation = Self::default();
         let mut name_ixs = HashMap::<SharedString, u16>::new();
@@ -95,13 +112,30 @@ impl FilePresentation {
                 file,
                 side,
                 options.syntax_max_line_length,
-                highlighters,
-                &mut |name| {
-                    let next = name_ixs.len().min(u16::MAX as usize) as u16;
-                    *name_ixs.entry(name.clone()).or_insert_with(|| {
-                        presentation.names.push(name.clone());
-                        next
-                    })
+                &mut |language, text| match custom {
+                    // A range that splits a character, such as one counted in
+                    // characters rather than bytes, cannot be painted.
+                    Some(highlight) => highlight(language, text)
+                        .into_iter()
+                        .filter(|(range, _)| {
+                            text.is_char_boundary(range.start) && text.is_char_boundary(range.end)
+                        })
+                        .map(|(range, style)| (range, SyntaxPaint::Style(style)))
+                        .collect(),
+                    None => highlighters
+                        .entry(language.clone())
+                        .or_insert_with(|| SyntaxHighlighter::new(language))
+                        .capture_names(&Rope::from_str(text))
+                        .into_iter()
+                        .map(|(range, name)| {
+                            let next = name_ixs.len().min(u16::MAX as usize) as u16;
+                            let ix = *name_ixs.entry(name.clone()).or_insert_with(|| {
+                                presentation.names.push(name.clone());
+                                next
+                            });
+                            (range, SyntaxPaint::Name(ix))
+                        })
+                        .collect(),
                 },
             );
             presentation.syntax[side as usize] = LineSpans::from_lines(per_line);
@@ -123,8 +157,11 @@ impl FilePresentation {
         self.syntax[side as usize]
             .line(ix)
             .iter()
-            .filter_map(|(range, name)| {
-                let style = theme.style(&self.names[*name as usize])?;
+            .filter_map(|(range, paint)| {
+                let style = match paint {
+                    SyntaxPaint::Name(name) => theme.style(&self.names[*name as usize])?,
+                    SyntaxPaint::Style(style) => *style,
+                };
                 Some((
                     line.display_range(range.start as usize..range.end as usize),
                     style,
@@ -153,11 +190,11 @@ fn syntax_spans(
     file: &DiffFile,
     side: DiffSide,
     max_line_length: usize,
-    highlighters: &mut SyntaxHighlighters,
-    name_ix: &mut dyn FnMut(&SharedString) -> u16,
-) -> Vec<Vec<(Range<u32>, u16)>> {
+    highlight: &mut dyn FnMut(&SharedString, &str) -> Vec<(Range<usize>, SyntaxPaint)>,
+) -> Vec<Vec<(Range<u32>, SyntaxPaint)>> {
     let lines = file.lines(side);
-    let mut per_line: Vec<Vec<(Range<u32>, u16)>> = (0..lines.len()).map(|_| Vec::new()).collect();
+    let mut per_line: Vec<Vec<(Range<u32>, SyntaxPaint)>> =
+        (0..lines.len()).map(|_| Vec::new()).collect();
     let language = match (file.language_override(), file.side_path(side)) {
         (Some(language), _) => language.clone(),
         (None, Some(path)) => detected_language(path),
@@ -166,9 +203,6 @@ fn syntax_spans(
     if language.as_str() == "text" || lines.is_empty() {
         return per_line;
     }
-    let highlighter = highlighters
-        .entry(language.clone())
-        .or_insert_with(|| SyntaxHighlighter::new(&language));
     let ranges = if file.hunks().is_empty() {
         vec![0..lines.len()]
     } else {
@@ -179,7 +213,7 @@ fn syntax_spans(
         let base = lines[range.start].source().start;
         let text = &source[base..lines[range.end - 1].source().end];
         let hunk_lines = &lines[range.clone()];
-        for (capture, name) in highlighter.capture_names(&Rope::from_str(text)) {
+        for (capture, paint) in highlight(&language, text) {
             let capture = capture.start + base..capture.end + base;
             let first = hunk_lines.partition_point(|line| line.source().end <= capture.start);
             for (offset, line) in hunk_lines[first..].iter().enumerate() {
@@ -195,7 +229,7 @@ fn syntax_spans(
                 if start < end {
                     per_line[range.start + first + offset].push((
                         (start - line_start) as u32..(end - line_start) as u32,
-                        name_ix(&name),
+                        paint,
                     ));
                 }
             }
@@ -375,7 +409,7 @@ mod tests {
         .unwrap()
         .remove(0);
         let presentation =
-            FilePresentation::prepare(&file, OPTIONS, &mut SyntaxHighlighters::default());
+            FilePresentation::prepare(&file, OPTIONS, &mut SyntaxHighlighters::default(), None);
         let ranges = |side, ix| {
             let line = &file.lines(side)[ix];
             presentation
@@ -391,7 +425,7 @@ mod tests {
         .unwrap()
         .remove(0);
         let presentation =
-            FilePresentation::prepare(&file, OPTIONS, &mut SyntaxHighlighters::default());
+            FilePresentation::prepare(&file, OPTIONS, &mut SyntaxHighlighters::default(), None);
         let ranges = |side, ix| {
             let line = &file.lines(side)[ix];
             presentation
@@ -406,12 +440,104 @@ mod tests {
             ..OPTIONS
         };
         let presentation =
-            FilePresentation::prepare(&file, off, &mut SyntaxHighlighters::default());
+            FilePresentation::prepare(&file, off, &mut SyntaxHighlighters::default(), None);
         assert_eq!(
             presentation
                 .inline_changes(&file.lines(DiffSide::Original)[0], DiffSide::Original, 0)
                 .count(),
             0
+        );
+    }
+
+    #[test]
+    fn an_application_highlighter_styles_each_hunk_side_on_its_own() {
+        use std::sync::Mutex;
+
+        struct NoTheme;
+        impl HighlightStyleResolver for NoTheme {
+            fn style(&self, _: &str) -> Option<HighlightStyle> {
+                None
+            }
+        }
+
+        let file = DiffFile::parse(
+            "--- a/a.rs\n+++ b/a.rs\n@@ -1,2 +1,2 @@\n-let a = 1;\n+let a = 2;\n /* open\n@@ -10,2 +10,2 @@\n close */\n-let old = 0;\n+let new = 0;\n",
+        )
+        .unwrap()
+        .remove(0);
+        let bold = HighlightStyle {
+            font_weight: Some(gpui::FontWeight::BOLD),
+            ..Default::default()
+        };
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let highlighter: DiffSyntaxHighlighter = Arc::new({
+            let calls = calls.clone();
+            move |language, text| {
+                calls
+                    .lock()
+                    .unwrap()
+                    .push((language.to_owned(), text.to_owned()));
+                text.match_indices("let")
+                    .map(|(ix, keyword)| (ix..ix + keyword.len(), bold))
+                    .collect()
+            }
+        });
+        let presentation = FilePresentation::prepare(
+            &file,
+            OPTIONS,
+            &mut SyntaxHighlighters::default(),
+            Some(&highlighter),
+        );
+
+        // Each side of each hunk alone, named by the file's language.
+        let calls = std::mem::take(&mut *calls.lock().unwrap());
+        assert_eq!(calls.len(), 4);
+        assert!(calls.iter().all(|(language, _)| language == "rust"));
+        assert!(
+            calls
+                .iter()
+                .all(|(_, text)| !(text.contains("open") && text.contains("close")))
+        );
+        let styles = |presentation: &FilePresentation, side, ix| {
+            presentation.syntax_highlights(&file.lines(side)[ix], side, ix, &NoTheme)
+        };
+        assert_eq!(styles(&presentation, DiffSide::Modified, 0), [(0..3, bold)]);
+        assert_eq!(styles(&presentation, DiffSide::Original, 3), [(0..3, bold)]);
+        assert!(styles(&presentation, DiffSide::Modified, 1).is_empty());
+
+        let short = PresentationOptions {
+            syntax_max_line_length: 5,
+            ..OPTIONS
+        };
+        let presentation = FilePresentation::prepare(
+            &file,
+            short,
+            &mut SyntaxHighlighters::default(),
+            Some(&highlighter),
+        );
+        assert!(styles(&presentation, DiffSide::Modified, 0).is_empty());
+
+        // `é` is two bytes, so 5..6 splits it: counted in characters, not bytes.
+        let file =
+            DiffFile::parse("--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-let é = 1;\n+let é = 2;\n")
+                .unwrap()
+                .remove(0);
+        let split: DiffSyntaxHighlighter =
+            Arc::new(move |_, _| vec![(0..3, bold), (5..6, bold), (4..6, bold)]);
+        let presentation = FilePresentation::prepare(
+            &file,
+            OPTIONS,
+            &mut SyntaxHighlighters::default(),
+            Some(&split),
+        );
+        assert_eq!(
+            presentation.syntax_highlights(
+                &file.lines(DiffSide::Modified)[0],
+                DiffSide::Modified,
+                0,
+                &NoTheme
+            ),
+            [(0..3, bold), (4..6, bold)]
         );
     }
 
@@ -426,12 +552,15 @@ mod tests {
         .unwrap()
         .remove(0);
         let presentation =
-            FilePresentation::prepare(&file, OPTIONS, &mut SyntaxHighlighters::default());
+            FilePresentation::prepare(&file, OPTIONS, &mut SyntaxHighlighters::default(), None);
         let names = |presentation: &FilePresentation, ix: usize| {
             presentation.syntax[DiffSide::Modified as usize]
                 .line(ix)
                 .iter()
-                .map(|(_, name)| presentation.names[*name as usize].to_string())
+                .filter_map(|(_, paint)| match paint {
+                    SyntaxPaint::Name(name) => Some(presentation.names[*name as usize].to_string()),
+                    SyntaxPaint::Style(_) => None,
+                })
                 .collect::<Vec<_>>()
         };
         assert!(names(&presentation, 0).iter().any(|name| name == "keyword"));
@@ -451,12 +580,12 @@ mod tests {
             ..OPTIONS
         };
         let presentation =
-            FilePresentation::prepare(&file, short, &mut SyntaxHighlighters::default());
+            FilePresentation::prepare(&file, short, &mut SyntaxHighlighters::default(), None);
         assert!(names(&presentation, 0).is_empty());
 
         let as_text = file.clone().with_language("text");
         let presentation =
-            FilePresentation::prepare(&as_text, OPTIONS, &mut SyntaxHighlighters::default());
+            FilePresentation::prepare(&as_text, OPTIONS, &mut SyntaxHighlighters::default(), None);
         assert!(names(&presentation, 0).is_empty());
     }
 }

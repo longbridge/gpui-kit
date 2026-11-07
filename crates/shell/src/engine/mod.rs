@@ -37,6 +37,10 @@
 //! ShellRuntime::dispatch_signal(&Rc<Self>, CallbackId, &mut Window, &mut App)
 //! ShellRuntime::render_virtual_items(&Rc<Self>, CallbackId, Range<usize>,
 //!     &mut Window, &mut App) -> Option<ItemSpecs>
+//! ShellRuntime::item_keys(&Rc<Self>, CallbackId, &mut Window, &mut App,
+//!     FnOnce(&mut dyn FnMut(usize) -> Option<String>) -> R) -> Option<R>
+//! ShellRuntime::dispatch_visible_range(&Rc<Self>, CallbackId, Range<usize>,
+//!     usize, &mut Window, &mut App)
 //!
 //! set_storage_path(PathBuf)
 //! set_development_mode(bool)
@@ -79,7 +83,10 @@
 //! which is the trade virtualization is; it never enters the script's
 //! `render`, so the counter above still means what it says; and it runs under
 //! `ScopePhase::Layout`, which forbids `notify`, forbids creating retained
-//! state, and refuses to register a handler. See `crate::materialize`.
+//! state, and refuses to register a handler. `item_keys` is part of the same
+//! exception: it is how a `list` asks its `get_key`, under the same scope,
+//! which item is at the top before and after its item count changes. See
+//! `crate::materialize`.
 //!
 //! # What this seam is, and what it is not
 //!

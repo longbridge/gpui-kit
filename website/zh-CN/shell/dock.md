@@ -266,7 +266,7 @@ area.release();
 ## 一个完整的例子
 
 ```bash
-cargo run -p gpui-shell -- examples/js_dock
+cargo run -p gpui-shell -- run examples/js_dock
 ```
 
 `examples/js_dock/` 是一个工作区：左侧 dock 里是文件列表，中间是文档，标签栏与 dock 外框画在 `ui.js` 里，布局用定时器写进 `localStorage`。它是用上本页每一部分的最短的完整程序。

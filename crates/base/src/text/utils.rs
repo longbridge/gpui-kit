@@ -3,9 +3,6 @@ use std::sync::Arc;
 use data_url::DataUrl;
 use gpui::{Image, ImageFormat};
 
-const NUMBERED_PREFIXES_1: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const NUMBERED_PREFIXES_2: &str = "abcdefghijklmnopqrstuvwxyz";
-
 const BULLETS: [&str; 5] = ["•", "◦", "▪", "‣", "⁃"];
 
 /// Returns an ordered-list item's ordinal, defaulting omitted starts to one.
@@ -28,24 +25,16 @@ pub(super) fn list_item_prefix(
             return format!("{ordinal}. ");
         }
 
-        let alpha_ix = ordinal.saturating_sub(1) as usize;
-        if depth == 1 {
-            return format!(
-                "{}. ",
-                NUMBERED_PREFIXES_1
-                    .chars()
-                    .nth(alpha_ix % NUMBERED_PREFIXES_1.len())
-                    .unwrap()
-            );
-        } else {
-            return format!(
-                "{}. ",
-                NUMBERED_PREFIXES_2
-                    .chars()
-                    .nth(alpha_ix % NUMBERED_PREFIXES_2.len())
-                    .unwrap()
-            );
+        let first_letter = if depth == 1 { b'A' } else { b'a' };
+        let mut remaining = ordinal;
+        let mut letters = Vec::new();
+        while remaining > 0 {
+            remaining -= 1;
+            letters.push((first_letter + (remaining % 26) as u8) as char);
+            remaining /= 26;
         }
+        let label: String = letters.into_iter().rev().collect();
+        return format!("{label}. ");
     } else {
         let depth = depth.min(BULLETS.len() - 1);
         let bullet = BULLETS[depth];
@@ -97,6 +86,40 @@ mod tests {
         assert!(data_url_image("data:text/plain;base64,aGVsbG8=").is_none());
         assert!(data_url_image("data:image/png;base64,not*base64").is_none());
         assert!(data_url_image("data:image/png").is_none());
+    }
+
+    #[test]
+    fn test_alphabetic_list_item_prefix() {
+        for (ordinal, label) in [
+            (1, "A"),
+            (26, "Z"),
+            (27, "AA"),
+            (28, "AB"),
+            (52, "AZ"),
+            (53, "BA"),
+            (702, "ZZ"),
+            (703, "AAA"),
+            (u32::MAX, "MWLQKWU"),
+        ] {
+            for depth in [1, 2, 3] {
+                let label = if depth == 1 {
+                    label.to_string()
+                } else {
+                    label.to_ascii_lowercase()
+                };
+                let expected = format!("{label}. ");
+                assert_eq!(list_item_prefix(0, Some(ordinal), true, depth), expected);
+                assert_eq!(
+                    list_item_prefix((ordinal - 1) as usize, None, true, depth),
+                    expected
+                );
+            }
+        }
+        assert_eq!(list_item_prefix(1, Some(26), true, 1), "AA. ");
+        assert_eq!(list_item_prefix(1, Some(26), true, 2), "aa. ");
+        assert_eq!(list_item_prefix(usize::MAX, Some(1), true, 1), "MWLQKWU. ");
+        assert_eq!(list_item_prefix(26, Some(1), true, 0), "27. ");
+        assert_eq!(list_item_prefix(27, Some(0), true, 1), "27. ");
     }
 
     #[test]

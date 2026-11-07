@@ -88,7 +88,11 @@ impl PaneTree {
     ///   old reader had no such rule: it looked "TabPanel" up in the panel
     ///   registry, found nothing, and rendered an `InvalidPanel` placeholder
     ///   where an empty tab group belonged. This rule is a genuine fix, not a
-    ///   preserved behavior.
+    ///   preserved behavior;
+    /// - a node named `StackPanel` carrying `PanelInfo::Panel` is the same
+    ///   defect in the old split writer, and is read as an empty split. Inside
+    ///   a tab group it is dropped: a placeholder built from it would dump the
+    ///   defective state back unchanged, so the layout could never heal.
     pub fn from_state(
         state: &PanelState,
         root_kind: RootKind,
@@ -155,9 +159,17 @@ fn build_node(tree: &mut PaneTree, state: &PanelState, builder: &mut dyn PanelBu
                 },
             )
         }
+        // A container name carrying a leaf info means the writer that produced
+        // this file had the empty-container defect.
+        PanelInfo::Panel(_) if state.panel_name == STACK_PANEL_NAME => PaneNode::new(
+            id,
+            NodeKind::Split {
+                axis: Axis::Horizontal,
+                children: Vec::new(),
+                sizes: Vec::new(),
+            },
+        ),
         PanelInfo::Panel(_) => {
-            // A container name carrying a leaf info means the writer that
-            // produced this file had the empty-group defect.
             let panels = if state.panel_name == TAB_PANEL_NAME {
                 Vec::new()
             } else {
@@ -174,13 +186,17 @@ fn build_node(tree: &mut PaneTree, state: &PanelState, builder: &mut dyn PanelBu
     }
 }
 
+fn is_container_name(panel_name: &str) -> bool {
+    panel_name == TAB_PANEL_NAME || panel_name == STACK_PANEL_NAME
+}
+
 /// Flatten one level of tab nesting, which the old writer could produce.
 fn collect_tab_panels(children: &[PanelState], builder: &mut dyn PanelBuilder) -> Vec<PanelId> {
     children
         .iter()
         .flat_map(|child| match &child.info {
             PanelInfo::Tabs { .. } => collect_tab_panels(&child.children, builder),
-            PanelInfo::Panel(_) if child.panel_name == TAB_PANEL_NAME => Vec::new(),
+            PanelInfo::Panel(_) if is_container_name(&child.panel_name) => Vec::new(),
             _ => vec![builder.build(child, &child.info)],
         })
         .collect()
@@ -424,6 +440,8 @@ mod tests {
             include_str!("fixtures/legacy_empty_tab_group.json"),
             include_str!("fixtures/unregistered_panel.json"),
             include_str!("fixtures/zero_size_sentinel.json"),
+            include_str!("fixtures/legacy_empty_stack_panel.json"),
+            include_str!("fixtures/placeholder_wrapped_empty_stack.json"),
         ] {
             let once = canonicalize(json);
             let twice = {
@@ -456,6 +474,39 @@ mod tests {
         // The empty group collapses, leaving the mandatory split root.
         assert_eq!(state.panel_name, "StackPanel");
         assert!(state.children.is_empty());
+    }
+
+    #[test]
+    fn the_legacy_empty_stack_panel_is_read_as_an_empty_split() {
+        let json = include_str!("fixtures/legacy_empty_stack_panel.json");
+        let state: DockAreaState = serde_json::from_str(json).unwrap();
+        let mut panels = PreservingPanels::default();
+        let tree = PaneTree::from_state(&state.center, RootKind::Split, &mut panels);
+
+        assert!(panels.states.is_empty(), "no placeholder is built for it");
+        let state = tree.to_state(&panels);
+        assert_eq!(state.panel_name, "StackPanel");
+        assert!(matches!(state.info, PanelInfo::Stack { .. }));
+        assert!(state.children.is_empty());
+    }
+
+    /// The shape a reader without the rule above saved back: the placeholder
+    /// it built sat in a tab group and dumped the defective state unchanged.
+    #[test]
+    fn an_empty_stack_panel_saved_inside_a_tab_group_is_dropped() {
+        let state = canonicalize(include_str!(
+            "fixtures/placeholder_wrapped_empty_stack.json"
+        ));
+        let group = &state.children[0];
+
+        assert_eq!(group.panel_name, "TabPanel");
+        assert_eq!(group.info, PanelInfo::tabs(0));
+        let names: Vec<_> = group
+            .children
+            .iter()
+            .map(|child| child.panel_name.as_str())
+            .collect();
+        assert_eq!(names, ["Alpha"]);
     }
 
     #[test]

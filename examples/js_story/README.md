@@ -1,16 +1,16 @@
 # JavaScript Story gallery
 
 This is the JavaScript Story gallery scaffold: an auditable, reviewable route
-catalog for the component-shell work.
+catalog for the gpui-shell component work.
 
 The gallery imports the registered public `gpui-component` surface through the
-completed public component-shell host. Infrastructure routes remain explicit
+public gpui-shell component catalog. Infrastructure routes remain explicit
 status panels rather than fabricated constructors.
 
 ## Coverage audit
 
-The independent coverage check derives all tracked component-shell surfaces
-from `crates/component-shell/component-inventory.json` and checks them against
+The independent coverage check derives all tracked gpui-shell component surfaces
+from `crates/shell/component-inventory.json` and checks them against
 the explicit imports, routes, and `coveredBy` metadata in `stories/coverage.js`:
 
 ```bash
@@ -59,11 +59,11 @@ so the list cannot quietly hide a component that has something to show.
 
 ## Editor checking
 
-`gpui-kit.d.ts` is generated from the public component-shell host's declaration
+`gpui-kit.d.ts` is generated from the public gpui-shell component host's declaration
 API and is not hand-authored by this example:
 
 ```bash
-cargo run -p gpui-component-shell --bin gpui-component-shell -- types examples/js_story
+cargo run -p gpui-shell -- types examples/js_story
 ```
 
 `jsconfig.json` enables strict JSDoc checking for the gallery and all family

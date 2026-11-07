@@ -27,7 +27,7 @@ gpui-kit             The one crate applications depend on
 
 `gpui-kit` pins the matching GPUI release and re-exports GPUI, base, component,
 and assets, so a Rust application lists a single dependency. JavaScript extension
-hosts add `gpui-shell` separately; `gpui-component-shell` supplies the styled catalog.
+hosts add `gpui-shell` separately; its default `components` feature supplies the styled catalog.
 
 See the [executable application recipe and AI-assisted development acceptance checks](examples/ai_recipes/README.md) for a tested starting point and verification commands.
 
@@ -252,6 +252,10 @@ Check out [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
 ## Compare to others
 
 See the [comparison with Iced, egui and Qt 6](https://gpui-kit.com/docs/comparison) on the site.
+
+## Related project: Native Shell
+
+[Native Shell](https://nsh.dev) ([source](https://github.com/longbridge/native-shell)) is a sibling project that lets AI generate UI and renders it natively on iOS, Android, Linux (GTK) and macOS (AppKit). Its GPUI desktop backend is in development and will be built on GPUI Kit.
 
 ## License
 

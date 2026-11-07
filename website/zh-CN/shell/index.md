@@ -1,6 +1,6 @@
 ---
 title: GPUI Shell
-description: 让 Rust 的 GPUI 应用可以用 JavaScript 扩展，界面仍由 GPUI 自己渲染——没有 WebView，也没有 DOM。首要目标是插件，其次才是纯脚本应用。
+description: 让 Rust 的 GPUI 应用可以用 JavaScript 扩展，界面仍由 GPUI 自己渲染——没有 WebView，也没有 DOM。应用可以先写成纯 JavaScript 的 gpui-shell Standalone App，需要更多能力时再引入 Rust。
 order: 1
 maturity: [preview]
 ---
@@ -11,7 +11,7 @@ maturity: [preview]
 
 **首要目标是插件扩展。** Host 应用编译一次、发布一次，此后新增一块面板、一个侧边工具或一段业务逻辑，都以脚本的形式加载进同一个进程——不必重新编译，不必重新分发二进制，想加一块面板的人也不必 fork 整个 Host。
 
-**次要目标是用 JavaScript 写完整的应用。** CLI 可以直接跑起一个应用目录。这本身就是一条能用的路径，同时也是插件的开发方式：先把脚本单独跑通，再挂进 Host。
+**它也可以用来写 gpui-shell Standalone App，而且推荐从这里起步。** Standalone App 完全用 JavaScript 编写，由 `gpui-shell` 直接运行一个应用目录：不需要 Rust，没有构建步骤，保存即热重载，现有能力已经覆盖文件、存储、网络、子进程，以及用默认应用打开文件。产品前期需要的绝大多数功能，这样就够了。之后需要只有 Rust 才能做的事情时，同一套脚本可以原样搬到一个嵌入了这个 crate 的 Rust 程序下面，不用重写——见[先写 Standalone App，再引入 Rust](#先写-standalone-app再引入-rust)。
 
 **它不是 Electron，也不是 Tauri。** 没有 WebView，没有 DOM，没有 HTML 与 CSS，没有浏览器引擎，也没有 Node.js。脚本 View 失效时会描述界面；GPUI 可以在之后的帧里复用这份描述，而不重新执行该 View 的脚本 `render`。这些帧使用的元素模型与渲染器和基于 `gpui-base` 的 Rust 应用相同。这不表示空闲窗口持续绘制，也不表示帧中的所有工作都不会进入 JavaScript：虚拟列表项与 Dock chrome 回调是例外。在实测构建里，带上整个运行时增加了 [13.5 MiB 二进制](./engine.md#链接它要付多少)。
 
@@ -58,6 +58,49 @@ export default class Counter extends View {
 }
 ```
 
+## 先写 Standalone App，再引入 Rust
+
+先把应用写成 gpui-shell Standalone App。`gpui-shell new` 创建应用，`gpui-shell dev` 运行它并在每次保存时重载，`gpui-shell bundle` 把它打包发布。整个过程不编译任何东西，脚本也不依赖由哪个程序来运行它。
+
+当产品需要脚本够不到的东西时——一个原生库、对 JavaScript 来说太重的解析或索引、运行时没有绑定的系统 API、已经用 Rust 写好的业务逻辑——就写一个嵌入 `gpui-shell` crate 的 Rust 程序。这一步改变的是**由谁来承载脚本**，而不是脚本本身：
+
+| 保持不变                                  | 原因                                                    |
+| ----------------------------------------- | ------------------------------------------------------- |
+| 所有 `.js` 文件、入口与 import            | 底下的运行时与 `gpui-shell` 命令是同一个 crate          |
+| `gpui-shell.json`：`id`、入口、能力、依赖 | 这个 Rust 程序可以复用命令自带的 Host，读取方式完全相同 |
+| 应用已存储的数据                          | 数据按 manifest 的 `id` 存放，与由哪个程序运行无关      |
+| `dev`、`check`、`types` 与 `agents`       | 这个 Rust 程序以自己的名字响应同样的命令                |
+
+Rust 这一侧新增的是 [`HostModule`](./host-module.md)：由 Host 用 Rust 写的函数，脚本像导入其他模块一样导入它们，类型也会出现在生成的 `gpui-kit.d.ts` 里。
+
+```rust
+use gpui_shell::{HostModule, HostValue, host::HostBrand};
+
+fn main() {
+    gpui_shell::export_module(
+        HostModule::new("native")
+            .declarations("export function greet(name: string): string;")
+            .function("greet", |arguments| {
+                let name = arguments.string(0)?;
+                Ok(HostValue::from(format!("Hello, {name}")))
+            }),
+    )
+    .expect("register the native module");
+
+    let components = gpui_shell::components::components().expect("component catalog");
+    gpui_shell::host::main_with_brand_and_components(
+        HostBrand::new("clock", env!("CARGO_PKG_VERSION")),
+        components,
+    );
+}
+```
+
+```js
+import { greet } from "native";
+```
+
+`main_with_brand_and_components` 就是完整的 `gpui-shell` 命令——同样的参数解析、manifest、授权、主题、窗口与诊断——只是换成了你给的名字，所以 `clock dev -d ./clock`、`clock check -d ./clock` 照常可用，只是现在能用到 `native` 了。当应用需要掌控进程里更多的东西——自己的窗口、和 Rust View 并排的脚本 View、多个授权不同的应用——就自己构建运行时；[Getting Started](./getting-started.md#迁移到-rust-host) 给出了这两步，[Hosting](./hosting.md) 讲完整的 Rust 接口。
+
 ## 为什么插件优先
 
 `crates/base/src/dock` 已经具备了插件系统所需的一半：布局是纯数据，`PanelRegistry` 能按持久化文件里的名字重建面板，每块面板还带着一份属于自己的 `serde_json::Value`。缺的另一半是——面板的实现必须编进 Host 的二进制，因此没有人能在不 fork 的前提下贡献一块面板。`gpui-shell` 补的正是这一半。
@@ -70,11 +113,11 @@ export default class Counter extends View {
 | 每个插件一份独立 `Policy`，卸载即取消它名下的全部任务 | 多个插件共用同一个运行时，授权之间不能相互渗透                                  |
 | 脚本出错是可恢复的异常，Host 进程存活                 | 一个插件写崩了，不该把整个应用一起带走                                          |
 | 重绘只重放快照，从不进入 VM                           | 帧预算由 Host 负责，插件的 JavaScript 不能压在上面                              |
-| `HostModule` 把 Host 自己的 Rust 借给脚本             | 只有脚本跑在 Host 内部时才有意义——独立应用没有 Host 可借                        |
+| `HostModule` 把 Host 自己的 Rust 借给脚本             | 只有脚本跑在 Host 内部时才有意义——Standalone App 没有 Host 可借                 |
 | Dock 面板在应用被卸载后仍保留位置与状态               | 插件会被装了又卸；重新装回来时，面板还在原来的位置，状态也还在                  |
 | 基座不提供任何视觉，呈现权整个交给脚本                | 插件要长得像 Host 的一部分，就必须能掌控每一个像素                              |
 
-独立脚本应用用得上其中的很少几条。它真正获得的是迭代速度——hot-reload、`check`，以及自动生成的 `gpui-kit.d.ts`。这也是它排在第二位的原因：它是插件被开发和验证的地方，而不是这套运行时的目的本身。
+Standalone App 用得上其中的很少几条，也不必用上：它真正获得的是迭代速度——hot-reload、`check`，以及自动生成的 `gpui-kit.d.ts`。两条路会在 Standalone App 不够用的时候汇合：应用变成自己的 Rust Host，走的正是插件 Host 走过的那一步，所以上面这些决策到那时都已经就位。
 
 文本编辑、语法高亮、LSP、虚拟化与动画采样都留在 Rust。这条线是职责划分，而不是对脚本的限制：所有必须贴着 GPU 与系统运行的部分都归 Host，插件因此不会成为应用性能与稳定性上的变量。
 
@@ -94,7 +137,7 @@ export default class Counter extends View {
 
 脚本拿到的，正是一个基于 `gpui-base` 的 Rust 应用能拿到的东西：元素与布局、链接与控件、建立在语义主题 token 之上的流式样式接口、通过 `init` / `render` / `cx.notify()` 管理的 View 状态、由 Host 留存的状态（例如文本输入的 rope 与选区）、dialog / sheet / toast、异步任务、原生 transition 与 spring，以及需要授权才能用的文件、存储、剪贴板、进程、HTTP、TCP 与 WebSocket 接口。
 
-围绕它的还有：`--watch` 保存文件即 hot-reload，`gpui-shell.json` 在代码运行前声明身份与最小权限，自动生成的 `gpui-kit.d.ts` 把整套 API 描述给编辑器或模型，`check` 则在应用跑起来之前就报出问题。
+围绕它的还有：`gpui-shell dev` 保存文件即 hot-reload，`gpui-shell.json` 在代码运行前声明身份与最小权限，自动生成的 `gpui-kit.d.ts` 把整套 API 描述给编辑器或模型，`check` 则在应用跑起来之前就报出问题。
 
 ::: tip
 `gpui-kit.d.ts` 可以加进 `.gitignore`，它是自动生成的。
@@ -118,7 +161,7 @@ export default class Counter extends View {
 
 脚本描述成本在该 View 失效时支付，而不是每一帧都支付。在实测的 443 节点基准里，执行 `render` 并把界面记进 Snapshot 用了 1.1 ms；缓存后的帧执行 GPUI 工作用了 1.3 ms，没有执行脚本 `render`。这些数字属于特定负载与机器，不能作为复杂应用的持续帧率保证。
 
-|               | 基准中每次请求帧的成本                                               |
+|               | 基准中每次请求帧的成本                                              |
 | ------------- | ------------------------------------------------------------------- |
 | 没有 Snapshot | 1.1 ms (JS render) + 1.3 ms (Rust render) = **2.4 ms/frame render** |
 | 有 Snapshot   | **1.3 ms**                                                          |
@@ -212,6 +255,6 @@ GPUI 的元素是**被消费**的值：`RenderOnce::render` 按值取走 `self`�
 
 ## 当前状态
 
-该 crate 处于 **M0** 里程碑：一条可行性基线，而不是稳定接口。它没有发布到 crates.io，脚本 API 预计还会变化。本节文档写到的都是已经实现并可用的部分；缺失的部分，会写在你最可能去找它的那一页上。
+该 crate 处于 **M0** 里程碑：一条可行性基线，而不是稳定接口。Rust crate 从 0.8.1 起发布到 crates.io；脚本 API 仍处于实验阶段，预计还会变化。本节文档写到的都是已经实现并可用的部分；缺失的部分，会写在你最可能去找它的那一页上。
 
 设计详见 [GPUI Shell 设计文档](https://github.com/longbridge/gpui-kit/blob/main/docs/gpui-shell.md)，代码位于 [`crates/shell`](https://github.com/longbridge/gpui-kit/tree/main/crates/shell)。

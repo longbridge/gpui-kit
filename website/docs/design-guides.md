@@ -894,6 +894,11 @@ the document visibly becomes saved.
 
 ## Internationalization and platform fit
 
+Accessibility (A11y) names and labels may remain in English; localization is
+not required for these strings. Keep the item's own label when naming a control
+that acts on it, even when that label is localized. This exception does not
+apply to visible UI copy.
+
 Copy must survive expansion, CJK typography, and different shortcut notation.
 Do not size a control from one English label. Keep text out of raster assets,
 avoid concatenating translated fragments, and let labels wrap or truncate only

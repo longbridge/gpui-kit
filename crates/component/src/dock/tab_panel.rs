@@ -30,7 +30,10 @@ use rust_i18n::t;
 use crate::{
     ActiveTheme as _, IconName, Selectable as _, Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
-    dock::{ClosePanel, PanelControl, PanelHandle, PanelStyle, SkinShared, ToggleZoom},
+    dock::{
+        ClosePanel, PanelControl, PanelHandle, PanelStyle, SkinShared, ToggleZoom,
+        toggle_dock_by_user,
+    },
     h_flex,
     menu::DropdownMenu as _,
     tab::{Tab, TabBar},
@@ -45,6 +48,10 @@ const CLOSE_BUTTON_SELECTOR: &str = "dock-tab-close-button";
 
 /// Debug-bounds selector prefix for a tab, suffixed with its panel index.
 const TAB_SELECTOR: &str = "dock-tab";
+
+/// Debug-bounds selector prefix for a dock's collapse button, suffixed with
+/// its placement.
+const DOCK_TOGGLE_SELECTOR: &str = "dock-toggle";
 
 /// The size the styled drag preview occupies, reported to base so a drop
 /// placeholder knows where to fly in from.
@@ -264,8 +271,11 @@ impl TabGroupSkin {
                     true => t!("Dock.Collapse"),
                     false => t!("Dock.Expand"),
                 })
+                .debug_selector(move || format!("{DOCK_TOGGLE_SELECTOR}-{placement:?}"))
                 .on_click(move |_, window, cx| {
-                    _ = area.update(cx, |area, cx| area.toggle_dock(placement, window, cx));
+                    _ = area.update(cx, |area, cx| {
+                        toggle_dock_by_user(area, placement, window, cx)
+                    });
                 }),
         )
     }
@@ -570,7 +580,12 @@ impl TabGroupSkin {
                                     // dock is how it is opened again.
                                     if is_bottom_dock && collapsed {
                                         _ = area.update(cx, |area, cx| {
-                                            area.toggle_dock(DockPlacement::Bottom, window, cx)
+                                            toggle_dock_by_user(
+                                                area,
+                                                DockPlacement::Bottom,
+                                                window,
+                                                cx,
+                                            )
                                         });
                                     }
                                 }
@@ -960,7 +975,7 @@ mod tests {
         });
         cx.run_until_parked();
         log.borrow_mut().draggable.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             log.borrow().draggable,
@@ -988,7 +1003,7 @@ mod tests {
         });
         cx.run_until_parked();
         log.borrow_mut().draggable.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             log.borrow().draggable,
@@ -1136,7 +1151,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         cx.debug_bounds(ZOOM_CONTROL_SELECTOR).is_some()
     }
 
@@ -1220,7 +1235,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let window_height = cx.update(|window, _| window.viewport_size().height);
         assert!(
@@ -1294,8 +1309,8 @@ mod tests {
         cx.run_until_parked();
         let draw = |cx: &mut VisualTestContext| {
             cx.update(|window, _| window.refresh());
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
         };
         draw(cx);
 
@@ -1456,7 +1471,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let window_height = cx.update(|window, _| window.viewport_size().height);
         let content = height.get();
@@ -1573,7 +1588,7 @@ mod tests {
                 area.update(cx, |area, cx| area.set_center(layout, window, cx));
             });
             cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
             height.get()
         };
 
@@ -1661,7 +1676,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         let button = cx.debug_bounds(CLOSE_BUTTON_SELECTOR);
         if enabled && closable {
             assert_eq!(
@@ -1723,7 +1738,7 @@ mod tests {
         for (visible, expected) in [(false, false), (true, true), (false, false)] {
             cx.update(|_, cx| skin.set_close_button_visible(visible, cx));
             cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
             assert_eq!(cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(), expected);
         }
     }
@@ -1758,7 +1773,7 @@ mod tests {
             (ids.0, ids.1, activated)
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert!(
             cx.update(|_, cx| area.read(cx).panel(closable_id).is_some()),
@@ -1806,7 +1821,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         // `debug_bounds` takes a `'static` selector.
         let tab = |cx: &mut VisualTestContext, ix: usize| {
@@ -1826,7 +1841,7 @@ mod tests {
             clipped.origin + gpui::point(px(4.), px(16.)),
             Modifiers::none(),
         );
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert_eq!(first_left(cx), start, "the first frame has not snapped");
 
         let mut lefts = Vec::new();
@@ -1835,7 +1850,7 @@ mod tests {
                 .advance_clock(std::time::Duration::from_millis(16));
             cx.update(|window, cx| {
                 window.simulate_next_frame(cx);
-                window.draw(cx).clear(cx);
+                crate::test_redraw(window, cx);
             });
             lefts.push(first_left(cx));
         }
@@ -1845,6 +1860,127 @@ mod tests {
             lefts.iter().any(|left| *left < start && *left > end),
             "the strip slid rather than jumped: {lefts:?}"
         );
+    }
+
+    /// The collapse button reports the user's toggle; a toggle made by code
+    /// does not.
+    #[gpui::test]
+    fn the_collapse_button_reports_the_toggle(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("toggle", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(gpui::size(px(800.), px(600.)));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let center = DockLayout::tabs().panel_view(panel_handle(Probe::new(cx)), cx);
+            let left = DockLayout::tabs().panel_view(panel_handle(Probe::new(cx)), cx);
+            area.update(cx, |area, cx| {
+                area.set_center(center, window, cx);
+                area.set_dock(DockPlacement::Left, left, window, cx);
+            });
+            let events = events.clone();
+            cx.subscribe(&area, move |_, event: &crate::dock::DockToggleEvent, _| {
+                events
+                    .borrow_mut()
+                    .push((event.placement(), event.is_open()));
+            })
+            .detach();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| crate::test_redraw(window, cx));
+
+        let selector = format!("{DOCK_TOGGLE_SELECTOR}-{:?}", DockPlacement::Left).leak();
+        let button = cx
+            .debug_bounds(selector)
+            .expect("the left dock offers a toggle");
+        cx.simulate_click(button.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert!(!cx.read(|cx| area.read(cx).is_dock_open(DockPlacement::Left)));
+        assert_eq!(*events.borrow(), vec![(DockPlacement::Left, false)]);
+
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.toggle_dock(DockPlacement::Left, window, cx)
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            events.borrow().len(),
+            1,
+            "a toggle made by code is not reported"
+        );
+    }
+
+    /// Clicking a tab on a collapsed bottom dock's strip opens the dock and
+    /// reports it.
+    #[gpui::test]
+    fn opening_the_bottom_strip_reports_the_toggle(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("strip", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(gpui::size(px(800.), px(600.)));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            // Two panels: a group with one panel draws its title, not a tab bar.
+            let layout = DockLayout::tabs()
+                .panel_view(panel_handle(Probe::new(cx)), cx)
+                .panel_view(panel_handle(Probe::new(cx)), cx);
+            area.update(cx, |area, cx| {
+                area.set_dock(DockPlacement::Bottom, layout, window, cx);
+                area.toggle_dock(DockPlacement::Bottom, window, cx);
+            });
+            let events = events.clone();
+            cx.subscribe(&area, move |_, event: &crate::dock::DockToggleEvent, _| {
+                events
+                    .borrow_mut()
+                    .push((event.placement(), event.is_open()));
+            })
+            .detach();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| crate::test_redraw(window, cx));
+        assert!(!cx.read(|cx| area.read(cx).is_dock_open(DockPlacement::Bottom)));
+
+        let tab = cx
+            .debug_bounds(format!("{TAB_SELECTOR}-0").leak())
+            .expect("the collapsed strip still draws its tab");
+        cx.simulate_click(tab.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(*events.borrow(), vec![(DockPlacement::Bottom, true)]);
+    }
+
+    /// A dock that refuses to close is not reported as toggled.
+    #[gpui::test]
+    fn a_refused_toggle_is_not_reported(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("refuse", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        let events = Rc::new(RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let layout = DockLayout::tabs().panel_view(panel_handle(Probe::new(cx)), cx);
+            area.update(cx, |area, cx| {
+                area.set_dock(DockPlacement::Left, layout, window, cx);
+                area.set_dock_collapsible(DockPlacement::Left, false, window, cx);
+            });
+            let events = events.clone();
+            cx.subscribe(&area, move |_, event: &crate::dock::DockToggleEvent, _| {
+                events
+                    .borrow_mut()
+                    .push((event.placement(), event.is_open()));
+            })
+            .detach();
+        });
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                toggle_dock_by_user(area, DockPlacement::Left, window, cx)
+            });
+        });
+        cx.run_until_parked();
+        assert!(cx.read(|cx| area.read(cx).is_dock_open(DockPlacement::Left)));
+        assert!(events.borrow().is_empty());
     }
 
     /// A collapsed group offers no close button, though the same group does
@@ -1876,7 +2012,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(),
             "an open group with two closable panels offers a close button"
@@ -1890,7 +2026,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_none(),
             "a collapsed group must not offer a close button"

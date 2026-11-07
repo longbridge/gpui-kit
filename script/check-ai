@@ -14,16 +14,17 @@ PROFILES = {
     ],
     "rust": [
         ["cargo", "test", "--locked", "-p", "gpui-component", "--no-default-features",
-         "--test", "controlled_change_callbacks", "--test", "legacy_controls_compat"],
+         "--test", "integration", "--", "controlled_change_callbacks::",
+         "legacy_controls_compat::"],
         ["cargo", "test", "--locked", "-p", "gpui-component", "--no-default-features",
          "--lib", "form::form::tests"],
     ],
     "shell": [
         ["cargo", "test", "--locked", "-p", "gpui-shell", "--lib", "typings"],
         ["cargo", "test", "--locked", "-p", "gpui-shell", "--lib", "tests::render"],
-        ["cargo", "test", "--locked", "-p", "gpui-component-shell", "--all-targets"],
-        ["npm", "--prefix", "crates/component-shell/tests/types", "ci"],
-        ["npm", "--prefix", "crates/component-shell/tests/types", "test"],
+        ["cargo", "test", "--locked", "-p", "gpui-shell", "--tests"],
+        ["npm", "--prefix", "crates/shell/tests/types", "ci"],
+        ["npm", "--prefix", "crates/shell/tests/types", "test"],
     ],
 }
 

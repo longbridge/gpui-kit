@@ -1,10 +1,10 @@
 [package]
 name = "gpui-shell"
 description = "A scriptable application runtime for GPUI, built on gpui-base."
-version = "0.7.1"
+version = "0.9.0"
 keywords = ["desktop", "gpui", "javascript", "runtime"]
 license = "Apache-2.0"
-publish = false
+publish = true
 edition.workspace = true
 repository = "https://github.com/longbridge/gpui-kit"
 homepage = "https://gpui-kit.com"
@@ -18,8 +18,25 @@ name = "gpui-shell"
 path = "src/bin/gpui-shell.rs"
 
 [features]
-gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform", "gpui-base/gpui-fast", "gpui-fps/gpui-fast"]
-default = ["quickjs"]
+gpui-fast = [
+    "dep:gpui-fast",
+    "dep:gpui-fast-platform",
+    "gpui-base/gpui-fast",
+    "gpui-fps/gpui-fast",
+    "gpui-component?/gpui-fast",
+    "gpui-kit/gpui-fast",
+    "gpui-webview?/gpui-fast",
+]
+default = ["quickjs", "components", "webview"]
+# The `gpui-component` catalog (`gpui_shell::components`), which scripts import
+# as `"gpui-component"`. Without it the runtime binds `gpui-base` only and does
+# not depend on the styled component library at all.
+components = ["dep:gpui-component"]
+# `WebView` and `WebViewState` in the `"gpui-component"` catalog: a native web
+# page, through `gpui-webview`. GPUI overlays render above the page only with
+# GPUI Fast's window composition, so this selects GPUI Fast for the whole
+# runtime; on Linux a page needs an X11 or XWayland window.
+webview = ["components", "gpui-fast", "dep:gpui-webview", "dep:wry"]
 # The scripting engine. See `src/engine/mod.rs` for the surface an engine has
 # to provide; QuickJS is the only implementation today, and the feature exists
 # so a second one can be added without the seam having to be invented first.
@@ -38,16 +55,23 @@ gpui_platform.workspace = true
 gpui-fast-platform = { workspace = true, optional = true }
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true
+gpui-component = { workspace = true, features = ["syntect"], optional = true }
+gpui-webview = { workspace = true, optional = true }
+# Not named in the source: `gpui-webview` takes its GPUI types from the Kit, whose backend
+# follows the runtime's `gpui-fast`. It stays non-optional because GPUI's macros route their
+# paths through `gpui_kit` whenever the manifest lists it, enabled or not.
+gpui-kit = { path = "../kit", version = "0.9.0", default-features = false }
+wry = { version = "0.53.3", package = "lb-wry", optional = true }
 
-# Keep the bindings, runtime, and LLRT compatibility facade on the same release.
-rquickjs = { package = "quickjs-jit", version = "0.12.11", git = "https://github.com/longbridge/quickjs-jit", rev = "96593cd7a54440ac060a391b8baea7e9a3cf1393", features = [
+# Keep bindings, JIT runtime and vendored standard modules on the same crates.io release.
+rquickjs = { package = "quickjs-jit", version = "=0.14.1", features = [
     "macro",
     "loader",
     "jit-abi",
 ], optional = true }
-rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.11", git = "https://github.com/longbridge/quickjs-jit", rev = "96593cd7a54440ac060a391b8baea7e9a3cf1393", features = ["compiler"], optional = true }
-# The stdlib facade pins LLRT modules and shares our VM through rquickjs-compat.
-quickjs-jit-stdlib = { version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "605da483611a3548edb8c33fdff602e3f5f42076", optional = true }
+rquickjs-jit = { package = "quickjs-jit-runtime", version = "=0.14.1", features = ["compiler"], optional = true }
+# Standard modules are vendored and use the same QuickJS VM as the bindings.
+quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "crypto", "path", "url", "zlib"], optional = true }
 # The date type `gpui_base::Date` is built from, for the calendar binding. Same
 # version as `gpui-base`'s, because the two exchange `NaiveDate` values.
 chrono = "0.4.38"
@@ -62,8 +86,12 @@ tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots", "url"],
 anyhow.workspace = true
 instant.workspace = true
 # Decode only bytes fetched through the document's network grant. Codec features
-# are shared with GPUI, whose image loader previously decoded these documents.
-image = { version = "0.25", default-features = false }
+# are shared with GPUI, whose image loader previously decoded these documents;
+# `png` is named because `bundle` also decodes and scales the icon it is given.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# `bundle`: the Linux archive and the Windows zip.
+flate2 = "1.1"
+tar = { version = "0.4", default-features = false }
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -77,6 +105,8 @@ tracing.workspace = true
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 gpui-fast = { workspace = true, features = ["test-support"] }
+gpui-base = { workspace = true, features = ["test-support"] }
+gpui-component = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -90,6 +120,9 @@ windows = { workspace = true, features = [
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }
+
+[package.metadata.cargo-machete]
+ignored = ["gpui-kit"]
 
 [lints]
 workspace = true

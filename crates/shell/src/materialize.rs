@@ -35,6 +35,13 @@
 //! matters; but a `list` of twenty visible rows costs twenty crossings where a
 //! virtual list costs one, and that is the price of not stating heights.
 //!
+//! A `list` also calls its `get_key` around its own layout: once for the item
+//! at the top whenever that item or the render changes, and, when the item
+//! count changes, near that item's old index until its key turns up again —
+//! one or two calls when items were added or removed on one side of it only,
+//! and the whole collection once if it is gone. That is what keeps the
+//! reader's place; [`components::list`] says why it needs the key.
+//!
 //! Three things confine it, and they are worth naming because each is what
 //! stops the exception from spreading:
 //!
@@ -290,17 +297,38 @@ fn takes_typed_children(component: &Component) -> bool {
 
 /// Behavior collected from a node's ops, applied after styling.
 /// Style refinements that apply only in a runtime state.
+///
+/// Each refinement is boxed, here and in [`Behavior`]: `materialize_node` holds
+/// both across its recursion into the children, so every inline refinement
+/// was paid once per level of the description whether the node used it or not.
 #[derive(Default)]
 struct StateStyles {
-    hover: Option<StyleRefinement>,
-    active: Option<StyleRefinement>,
-    focus: Option<StyleRefinement>,
+    hover: Option<Box<StyleRefinement>>,
+    active: Option<Box<StyleRefinement>>,
+    focus: Option<Box<StyleRefinement>>,
+    /// The name `group(name)` gave this element, which a `group_hover` on an
+    /// element inside it matches. Kept with the state styles rather than the
+    /// behavior because it lands where they do: on the interactive element,
+    /// through [`with_hover`].
+    group: Option<SharedString>,
+    group_hover: Option<Box<(SharedString, StyleRefinement)>>,
 }
 
 impl StateStyles {
-    /// `active` and `focus` need a stable element identity; `hover` does not.
+    /// `active` and `focus` need a stable element identity; `hover` does not,
+    /// and neither does a group or a group hover.
     fn needs_identity(&self) -> bool {
         self.active.is_some() || self.focus.is_some()
+    }
+
+    /// Whether the script asked for anything here, for the components that
+    /// have no interactive element to put it on and say so.
+    fn is_empty(&self) -> bool {
+        self.hover.is_none()
+            && self.active.is_none()
+            && self.focus.is_none()
+            && self.group.is_none()
+            && self.group_hover.is_none()
     }
 }
 
@@ -371,6 +399,8 @@ struct Behavior {
     on_mouse_down_out: Option<CallbackId>,
     /// Wheel and trackpad scrolling over this element.
     on_scroll_wheel: Option<CallbackId>,
+    /// A pinch-to-zoom gesture over this element.
+    on_pinch: Option<CallbackId>,
     /// Handlers for named actions, one entry per action listened for.
     ///
     /// A list because an element that responds to actions usually responds to
@@ -445,9 +475,15 @@ struct Behavior {
     /// the press itself. Registered on the list for the same reason
     /// `on_item_click` is.
     on_item_secondary_click: Option<CallbackId>,
+    /// Reports which items a `list` shows and how many it has, after a frame
+    /// in which either changed.
+    on_visible_range_change: Option<CallbackId>,
     /// Which item a `VirtualList` measures to infer its cross-axis size.
     /// `None` keeps base's own default, which is the first.
     item_to_measure_index: Option<usize>,
+    /// Whether a `list` follows its tail. `None` is GPUI's own default,
+    /// `FollowMode::Normal`.
+    follow_mode: Option<gpui::FollowMode>,
     /// The dock commands a chrome element carries — what base is asked to do
     /// when it is clicked or dragged.
     ///
@@ -489,7 +525,7 @@ struct Behavior {
     /// where it is comes from the state on every frame, because a fill the
     /// script positioned would be frozen at the value the render that
     /// positioned it saw.
-    range_style: Option<StyleRefinement>,
+    range_style: Option<Box<StyleRefinement>>,
     /// How every cell of an `OtpInput` looks, how the cell taking the next
     /// digit differs, and what the caret in it looks like.
     ///
@@ -499,9 +535,9 @@ struct Behavior {
     /// digit the render that described it saw. `cell_active_style` is layered
     /// on top of `cell_style` the way a hover is layered on a base style, so a
     /// script declares only what differs.
-    cell_style: Option<StyleRefinement>,
-    cell_active_style: Option<StyleRefinement>,
-    caret_style: Option<StyleRefinement>,
+    cell_style: Option<Box<StyleRefinement>>,
+    cell_active_style: Option<Box<StyleRefinement>>,
+    caret_style: Option<Box<StyleRefinement>>,
     /// Whether a `Collapsible` renders the element in its `content` slot, or
     /// whether a `Popover` is showing.
     ///
@@ -558,6 +594,9 @@ struct Behavior {
     /// focus — the highlighted option of a combobox whose input keeps the
     /// keyboard.
     aria_active_descendant: bool,
+    /// `InteractiveElement::window_control_area`: this element is the window's
+    /// drag area or one of its caption buttons.
+    window_control_area: Option<gpui::WindowControlArea>,
 }
 
 impl Behavior {
@@ -568,6 +607,7 @@ impl Behavior {
             || !self.on_mouse_up.is_empty()
             || self.on_mouse_down_out.is_some()
             || self.on_scroll_wheel.is_some()
+            || self.on_pinch.is_some()
     }
 
     /// Whether focus or accessibility gave this element a reason to be
@@ -593,8 +633,10 @@ impl Behavior {
             || !self.on_mouse_up.is_empty()
             || self.on_mouse_down_out.is_some()
             || self.on_scroll_wheel.is_some()
+            || self.on_pinch.is_some()
             || !self.on_action.is_empty()
             || self.key_context.is_some()
+            || self.window_control_area.is_some()
     }
 }
 
@@ -765,40 +807,36 @@ fn materialize_node(
     // A component that takes typed children is handed the descriptions instead:
     // flattening them here would throw away the very thing it needs. See
     // [`ChildSpecs`].
-    let children: Children = if takes_typed_children(&component)
-        || matches!(component, Component::Registered(_))
-    {
-        Children::new()
-    } else {
-        node.children()
-            .iter()
-            .map(|child| materialize_node(runtime, snapshot, arena, *child, inherited, window, cx))
-            .collect()
-    };
+    //
+    // Loops rather than iterator adapters: this is the recursion, and in an
+    // unoptimized build every adapter between two levels is another frame.
+    let mut children = Children::new();
+    if !takes_typed_children(&component) && !matches!(component, Component::Registered(_)) {
+        for child in node.children() {
+            children.push(materialize_node(
+                runtime, snapshot, arena, *child, inherited, window, cx,
+            ));
+        }
+    }
 
     // A slot's element is built here, beside the children, so it inherits the
     // same text color: where the component chooses to put it is the component's
     // business, but what it looks like should not depend on that choice.
-    let slots: Slots = if matches!(component, Component::Registered(_)) {
-        SmallVec::new()
-    } else if materializes_slots(&component, &behavior) {
-        slot_specs
-            .iter()
-            .filter(|(name, _)| {
-                !matches!(component, Component::Popover(_))
-                    || *name != "content"
-                    || behavior.open != Some(false)
-            })
-            .map(|(name, slot)| {
-                (
-                    *name,
-                    materialize_node(runtime, snapshot, arena, *slot, inherited, window, cx),
-                )
-            })
-            .collect()
-    } else {
-        SmallVec::new()
-    };
+    let mut slots = Slots::new();
+    if !matches!(component, Component::Registered(_)) && materializes_slots(&component, &behavior) {
+        for (name, slot) in &slot_specs {
+            if matches!(component, Component::Popover(_))
+                && *name == "content"
+                && behavior.open == Some(false)
+            {
+                continue;
+            }
+            slots.push((
+                *name,
+                materialize_node(runtime, snapshot, arena, *slot, inherited, window, cx),
+            ));
+        }
+    }
     // Every component that reads a slot reports its own leftovers, because only
     // it knows which names it read.
     if !matches!(
@@ -1266,7 +1304,7 @@ fn materialize_component(
             // `Switch` itself is not interactive — `SwitchTrack` is — so a
             // state style on the switch root has nowhere to land. Saying so is
             // better than dropping it without a word.
-            if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+            if !states.is_empty() {
                 tracing::warn!(
                     "state styles on a Switch are ignored; style the row around it instead"
                 );
@@ -1588,25 +1626,39 @@ where
 /// has; `div()` becomes stateful lazily and Button already is, so the two arms
 /// differ. Components that are not interactive silently ignore state styles
 /// rather than failing the render — the script gets a `tracing` warning.
+///
+/// A group and a group hover land here too: GPUI keeps both on the same
+/// `Interactivity` a hover does and resolves them natively, so a pointer
+/// crossing a list of grouped rows runs no script either.
 fn with_hover<E: InteractiveElement>(element: E, states: &StateStyles) -> E {
-    match states.hover.clone() {
-        Some(hover) => element.hover(move |mut style| {
+    let mut element = element;
+    if let Some(hover) = states.hover.as_deref().cloned() {
+        element = element.hover(move |mut style| {
             style.refine(&hover);
             style
-        }),
-        None => element,
+        });
     }
+    if let Some(group) = states.group.clone() {
+        element = element.group(group);
+    }
+    if let Some((group, hover)) = states.group_hover.as_deref().cloned() {
+        element = element.group_hover(group, move |mut style| {
+            style.refine(&hover);
+            style
+        });
+    }
+    element
 }
 
 fn with_active_and_focus<E: StatefulInteractiveElement>(element: E, states: &StateStyles) -> E {
     let mut element = element;
-    if let Some(active) = states.active.clone() {
+    if let Some(active) = states.active.as_deref().cloned() {
         element = element.active(move |mut style| {
             style.refine(&active);
             style
         });
     }
-    if let Some(focus) = states.focus.clone() {
+    if let Some(focus) = states.focus.as_deref().cloned() {
         element = element.focus(move |mut style| {
             style.refine(&focus);
             style
@@ -1782,7 +1834,7 @@ where
         if let Some(callback) = behavior.on_scroll_wheel {
             let runtime = Rc::downgrade(runtime);
             let bounds = Rc::clone(&bounds);
-            element = element.on_scroll_wheel(move |event, window, cx| {
+            element = element.on_scroll(move |event, window, cx| {
                 let Some(runtime) = runtime.upgrade() else {
                     return;
                 };
@@ -1800,6 +1852,15 @@ where
                     window,
                     cx,
                 );
+            });
+        }
+        if let Some(callback) = behavior.on_pinch {
+            let runtime = Rc::downgrade(runtime);
+            let bounds = Rc::clone(&bounds);
+            element = element.on_pinch(move |event, window, cx| {
+                if let Some(runtime) = runtime.upgrade() {
+                    runtime.dispatch_pinch(callback, event, bounds.get(), window, cx);
+                }
             });
         }
     }
@@ -1946,6 +2007,7 @@ fn warn_unhonoured_input(component: &Component, behavior: &Behavior) {
         ("on_mouse_up", !behavior.on_mouse_up.is_empty()),
         ("on_mouse_down_out", behavior.on_mouse_down_out.is_some()),
         ("on_scroll_wheel", behavior.on_scroll_wheel.is_some()),
+        ("on_pinch", behavior.on_pinch.is_some()),
         ("on_action", !behavior.on_action.is_empty()),
         ("key_context", behavior.key_context.is_some()),
     ];
@@ -2004,6 +2066,42 @@ fn with_aria<E: StatefulInteractiveElement>(element: E, behavior: &Behavior) -> 
     element
 }
 
+/// Marks the element as a window control area, the way gpui-component's
+/// `TitleBar` does.
+///
+/// GPUI's `window_control_area` is a hit-test answer for the platform, and only
+/// Windows asks it. The host opens its window with an application-drawn title
+/// bar on every platform, so a drag area also moves the window itself: a left
+/// press dragged across it starts the platform move, and a double-click does
+/// what a native title bar's would — `titlebar_double_click` on macOS, a zoom on
+/// Linux. Windows keeps its native behaviour through the hit test.
+fn with_window_control<E: StatefulInteractiveElement>(element: E, behavior: &Behavior) -> E {
+    let Some(area) = behavior.window_control_area else {
+        return element;
+    };
+    let element = element.window_control_area(area);
+    if area != gpui::WindowControlArea::Drag || cfg!(target_os = "windows") {
+        return element;
+    }
+    element
+        // `on_mouse_move` reaches only the hovered element, so a move with the
+        // left button held is a press that is being dragged across this area.
+        .on_mouse_move(|event, window, _| {
+            if event.pressed_button == Some(MouseButton::Left) {
+                window.start_window_move();
+            }
+        })
+        .on_mouse_down(MouseButton::Left, |event, window, _| {
+            if event.click_count == 2 {
+                if cfg!(target_os = "macos") {
+                    window.titlebar_double_click();
+                } else {
+                    window.zoom_window();
+                }
+            }
+        })
+}
+
 /// Reports focus and accessibility calls a component cannot honour.
 ///
 /// Each bound component wires the subset base gives it a builder for; the rest
@@ -2022,6 +2120,10 @@ fn warn_unhonoured_a11y(behavior: &Behavior, component: &str, honoured: &[&str])
         ("role", behavior.role.is_some()),
         ("aria_selected", behavior.aria_selected.is_some()),
         ("aria_active_descendant", behavior.aria_active_descendant),
+        (
+            "window_control_area",
+            behavior.window_control_area.is_some(),
+        ),
     ];
     for (method, called) in asked {
         if called && !honoured.contains(&method) {
@@ -2069,6 +2171,7 @@ fn flex_element(
         && behavior.on_mouse_up.is_empty()
         && behavior.on_mouse_down_out.is_none()
         && behavior.on_scroll_wheel.is_none()
+        && behavior.on_pinch.is_none()
         && behavior.on_action.is_empty()
         && behavior.key_context.is_none()
         && !behavior.scroll_x
@@ -2090,6 +2193,7 @@ fn flex_element(
     let stateful = with_input_handlers(stateful, &behavior, runtime);
     let stateful = components::dock::with_commands(stateful, &behavior, runtime, cx);
     let stateful = with_aria(stateful, &behavior);
+    let stateful = with_window_control(stateful, &behavior);
     let mut stateful = with_active_and_focus(stateful, &states);
     if !behavior.disabled
         && let Some(callback) = behavior.on_click
@@ -2253,7 +2357,7 @@ pub(in crate::materialize) fn resolve_slot(
         window,
         cx,
     );
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {part} are ignored: it is rebuilt from its description as a \
              value, so there is no interactive element here for a hover or a press to land \
@@ -2472,6 +2576,14 @@ pub(in crate::materialize) fn resolve_ops(
                     );
                 }
             }
+            // A group is applied with the state styles, which is where the
+            // group hovers that match it are, rather than with the behavior.
+            SpecOp::Method("group", args) => {
+                states.group = args
+                    .first()
+                    .and_then(|value| value.as_str().ok())
+                    .map(SharedString::from);
+            }
             SpecOp::Method(name, args) => {
                 if !matches!(
                     *name,
@@ -2487,7 +2599,7 @@ pub(in crate::materialize) fn resolve_ops(
                 }
             }
             SpecOp::StateStyle(name, node) => {
-                let resolved = resolve_state(arena, *node);
+                let resolved = Box::new(resolve_state(arena, *node));
                 match *name {
                     "hover" => states.hover = Some(resolved),
                     "active" => states.active = Some(resolved),
@@ -2505,6 +2617,11 @@ pub(in crate::materialize) fn resolve_ops(
                     "caret_style" => behavior.caret_style = Some(resolved),
                     other => tracing::error!("unhandled state style `{other}`"),
                 }
+            }
+            // GPUI holds one group hover per element, so a second call replaces
+            // the first, as a second `hover` does.
+            SpecOp::GroupHover(group, node) => {
+                states.group_hover = Some(Box::new((group.clone(), resolve_state(arena, *node))));
             }
             SpecOp::Callback(name, id) => match *name {
                 "on_click" => behavior.on_click = Some(*id),
@@ -2526,6 +2643,7 @@ pub(in crate::materialize) fn resolve_ops(
                 "on_mouse_up_middle" => behavior.on_mouse_up.push((MouseButton::Middle, *id)),
                 "on_mouse_down_out" => behavior.on_mouse_down_out = Some(*id),
                 "on_scroll_wheel" => behavior.on_scroll_wheel = Some(*id),
+                "on_pinch" => behavior.on_pinch = Some(*id),
                 "on_resize" => behavior.on_resize = Some(*id),
                 "on_change" => behavior.on_change = Some(*id),
                 "token" => behavior.token = Some(*id),
@@ -2537,6 +2655,7 @@ pub(in crate::materialize) fn resolve_ops(
                 "on_dismiss" => behavior.on_dismiss = Some(*id),
                 "on_item_click" => behavior.on_item_click = Some(*id),
                 "on_item_secondary_click" => behavior.on_item_secondary_click = Some(*id),
+                "on_visible_range_change" => behavior.on_visible_range_change = Some(*id),
                 "tab_bar" => behavior.dock_chrome.tab_bar = Some(*id),
                 "empty_group" => behavior.dock_chrome.empty_group = Some(*id),
                 "drop_indicator" => behavior.dock_chrome.drop_indicator = Some(*id),
@@ -2830,7 +2949,7 @@ fn warn_without_surface(
              you gave to `trigger`, or the one you gave to `content`"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {component} are ignored; put them on the element you gave to \
              `trigger`"
@@ -3111,6 +3230,16 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                 .filter(|index| *index >= 0.0 && index.fract() == 0.0)
                 .map(|index| index as usize);
         }
+        "with_follow_mode" => {
+            behavior.follow_mode =
+                args.first()
+                    .and_then(|value| value.as_str().ok())
+                    .and_then(|mode| match mode {
+                        "normal" => Some(gpui::FollowMode::Normal),
+                        "tail" => Some(gpui::FollowMode::Tail),
+                        _ => None,
+                    });
+        }
         "track_focus" => {
             behavior.focus_handle = match args.first() {
                 Some(Bridged::Number(handle)) if *handle >= 0.0 && handle.fract() == 0.0 => {
@@ -3142,6 +3271,21 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
         }
         "aria_selected" => behavior.aria_selected = Some(flag.unwrap_or(true)),
         "aria_active_descendant" => behavior.aria_active_descendant = true,
+        "window_control_area" => {
+            behavior.window_control_area = match args.first().and_then(|value| value.as_str().ok())
+            {
+                Some("drag") => Some(gpui::WindowControlArea::Drag),
+                Some("close") => Some(gpui::WindowControlArea::Close),
+                Some("max") => Some(gpui::WindowControlArea::Max),
+                Some("min") => Some(gpui::WindowControlArea::Min),
+                other => {
+                    tracing::error!(
+                        "`window_control_area` takes \"drag\", \"close\", \"max\" or \"min\", not {other:?}; the area is dropped"
+                    );
+                    None
+                }
+            };
+        }
         "row_count" => behavior.row_count = whole_count(args),
         "column_count" => behavior.column_count = whole_count(args),
         "open" => behavior.open = Some(flag.unwrap_or(true)),

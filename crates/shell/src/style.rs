@@ -60,9 +60,6 @@ use crate::value::{Bridged, arg};
 ///
 /// Deliberately **not** bound, and why:
 ///
-/// * `shadow` — takes a `Vec<BoxShadow>`; the `shadow_*` presets are nullary and
-///   already reflected, and a real shadow API belongs with the animation and
-///   token work in §13.5 rather than as a positional argument list.
 /// * `cursor`, `text_align`, `text_overflow` — take GPUI enums. They need an
 ///   enum-name mapping of their own; every variant already has a nullary form
 ///   (`cursor_pointer`, `text_center`, …). `font_weight` is bound separately
@@ -73,6 +70,12 @@ use crate::value::{Bridged, arg};
 /// `text_bg`, `min_size` and `max_size` are bound even though the design doc
 /// does not name them: they are the same one-line shape as their neighbours and
 /// leaving them out would be an arbitrary hole in the surface.
+///
+/// `bg` and `shadow` are the two that take a structured value rather than a
+/// primitive: `bg` also accepts a `Background` from the script's builder, and
+/// `shadow` takes a list of CSS-like shadow records (`{ x, y, blur, spread,
+/// color, inset }`), carried as [`Bridged::Background`] and
+/// [`Bridged::Shadows`]. The `shadow_*` presets stay nullary and reflected.
 /// Style methods that take an argument, with the sentence the declarations show.
 ///
 /// The description is written here rather than reflected because these methods
@@ -139,7 +142,14 @@ const PARAM_STYLES: &[(&str, &str)] = &[
         "Sets the size this child starts from before growing or shrinking.",
     ),
     // Paint.
-    ("bg", "Sets the background colour."),
+    (
+        "bg",
+        "Sets the background: a colour, or a `Background` such as `Background.linear_gradient(...)`, drawn inside the rounded corners.",
+    ),
+    (
+        "shadow",
+        "Sets the box shadows, CSS-like: the first in the list paints on top, and `[]` removes them. An inset shadow paints above the fill but beneath the children and the border.",
+    ),
     (
         "text_color",
         "Sets the text colour, which children inherit.",
@@ -156,7 +166,7 @@ const PARAM_STYLES: &[(&str, &str)] = &[
     ),
     (
         "line_height",
-        "Sets the line height. A bare number is a multiplier (`1.45`), not pixels; a string is a length.",
+        "Sets the line height. A bare number is a multiplier of the font size, as in CSS (`1.45`); a string is a length (`\"18px\"`).",
     ),
     (
         "opacity",
@@ -414,6 +424,17 @@ pub fn apply_param(
     args: &[Bridged],
     refinement: StyleRefinement,
 ) -> ShellResult<StyleRefinement> {
+    // A script that drops the argument passes `undefined`, which crosses the
+    // bridge as nil; every coercion below would then report a nil with no
+    // method name, so a missing argument is answered here, in one place.
+    if args
+        .first()
+        .is_none_or(|value| matches!(value, Bridged::Nil))
+        && param_style_name(name).is_some()
+    {
+        return Err(missing_argument(name));
+    }
+
     /// Reads argument 0 as a `Length` (`"auto"` allowed).
     macro_rules! length {
         () => {
@@ -485,7 +506,8 @@ pub fn apply_param(
         "flex_shrink" => refinement.flex_shrink(number!()),
         "flex_basis" => refinement.flex_basis(length!()),
 
-        "bg" => refinement.bg(color!()),
+        "bg" => refinement.bg(arg(args, 0, name)?.as_background()?),
+        "shadow" => refinement.shadow(arg(args, 0, name)?.as_shadows()?),
         "text_color" => refinement.text_color(color!()),
         "text_bg" => refinement.text_bg(color!()),
         "text_size" => refinement.text_size(absolute!()),
@@ -543,6 +565,30 @@ pub fn suggest(name: &str) -> Option<&'static str> {
         }
     }
     best.map(|(_, candidate)| candidate)
+}
+
+/// The error for a parametric style called without its argument.
+///
+/// GPUI spells the argument-free forms as separate methods (`flex_shrink_0`,
+/// `flex_grow`, `border_1`, `rounded_md`), so `flex_shrink()` is a natural guess
+/// that does not exist there either. Naming those siblings turns the guess into
+/// the call that was meant.
+fn missing_argument(name: &str) -> ShellError {
+    let prefix = format!("{name}_");
+    let siblings: Vec<String> = known_names()
+        .into_iter()
+        .filter(|candidate| candidate.starts_with(&prefix) && param_style_name(candidate).is_none())
+        .take(4)
+        .map(|candidate| format!("`{candidate}()`"))
+        .collect();
+    let mut message = format!("`{name}` expects 1 argument, got none");
+    if !siblings.is_empty() {
+        message.push_str(&format!(
+            "; the forms without an argument are {}",
+            siblings.join(", ")
+        ));
+    }
+    ShellError::runtime(message)
 }
 
 /// Every known style method name (nullary + parametric), for diagnostics.
@@ -687,6 +733,7 @@ fn edit_distance(left: &str, right: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::{BackgroundKind, BackgroundSpec, ShadowSpec};
     use gpui::{Fill, Hsla};
 
     #[test]
@@ -731,6 +778,123 @@ mod tests {
 
         let expected: Fill = Hsla::from(gpui::rgba(0xff0000ff)).into();
         assert_eq!(styled.background, Some(expected));
+    }
+
+    fn gradient(from: &str) -> Bridged {
+        Bridged::Background(Box::new(BackgroundSpec {
+            kind: BackgroundKind::LinearGradient {
+                angle: 180.,
+                from: (from.into(), 0.),
+                to: ("#fdcd12".into(), 1.),
+                color_space: "srgb".into(),
+            },
+            opacity: 1.,
+        }))
+    }
+
+    fn shadow(color: &str, inset: bool) -> ShadowSpec {
+        ShadowSpec {
+            x: 0.,
+            y: 1.,
+            blur: 4.,
+            spread: -1.,
+            color: color.into(),
+            inset,
+        }
+    }
+
+    #[test]
+    fn bg_takes_a_background_from_the_builder() {
+        let styled = apply_param("bg", &[gradient("#f7da74")], StyleRefinement::default()).unwrap();
+
+        let expected: Fill = gpui::linear_gradient(
+            180.,
+            gpui::linear_color_stop(Hsla::from(gpui::rgba(0xf7da74ff)), 0.),
+            gpui::linear_color_stop(Hsla::from(gpui::rgba(0xfdcd12ff)), 1.),
+        )
+        .into();
+        assert_eq!(styled.background, Some(expected));
+    }
+
+    #[test]
+    fn bg_reports_a_bad_colour_inside_a_background() {
+        let error = apply_param("bg", &[gradient("gold")], StyleRefinement::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("`gold` is not a color value"), "{error}");
+    }
+
+    #[test]
+    fn shadow_takes_css_records_first_on_top_and_halves_the_blur() {
+        let styled = apply_param(
+            "shadow",
+            &[Bridged::Shadows(vec![
+                shadow("#0d0d0f", false),
+                shadow("#ffffff10", true),
+            ])],
+            StyleRefinement::default(),
+        )
+        .unwrap();
+
+        let shadows = styled.box_shadow.expect("shadow sets the box shadows");
+        assert_eq!(shadows.len(), 2);
+        // CSS paints the first shadow on top and GPUI the last, so the list
+        // arrives reversed.
+        let (ring, highlight) = (&shadows[1], &shadows[0]);
+        assert_eq!(ring.offset, gpui::point(px(0.), px(1.)));
+        // CSS blur is twice the gaussian deviation GPUI's shader takes.
+        assert_eq!(ring.blur_radius, px(2.));
+        assert_eq!(ring.spread_radius, px(-1.));
+        assert_eq!(ring.color, Hsla::from(gpui::rgba(0x0d0d0fff)));
+        assert!(!ring.inset);
+        assert!(highlight.inset);
+        assert_eq!(highlight.color, Hsla::from(gpui::rgba(0xffffff10)));
+    }
+
+    #[test]
+    fn an_empty_shadow_list_removes_the_shadows() {
+        let styled = apply_param(
+            "shadow",
+            &[Bridged::Shadows(Vec::new())],
+            StyleRefinement::default().shadow_md(),
+        )
+        .unwrap();
+        assert_eq!(styled.box_shadow, Some(Vec::new()));
+    }
+
+    #[test]
+    fn shadow_names_the_entry_with_a_bad_colour_and_refuses_other_shapes() {
+        let error = apply_param(
+            "shadow",
+            &[Bridged::Shadows(vec![
+                shadow("#000", false),
+                shadow("black", false),
+            ])],
+            StyleRefinement::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("shadow 1"), "{error}");
+        assert!(error.contains("`black` is not a color value"), "{error}");
+
+        let error = apply_param(
+            "shadow",
+            &[Bridged::Str("#000".into())],
+            StyleRefinement::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("expected an array of shadows"), "{error}");
+
+        // A shadow list is not a colour anywhere else.
+        let error = apply_param(
+            "border_color",
+            &[Bridged::Shadows(Vec::new())],
+            StyleRefinement::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("got a shadow list"), "{error}");
     }
 
     #[test]
@@ -784,7 +948,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("expected a string"),
+            error.contains("expected a color or a Background"),
             "error should name the expected type, got: {error}"
         );
 
@@ -806,7 +970,37 @@ mod tests {
         let error = apply_param("p", &[], StyleRefinement::default())
             .unwrap_err()
             .to_string();
-        assert!(error.contains("`p` expects at least 1 argument"), "{error}");
+        assert!(error.contains("`p` expects 1 argument"), "{error}");
+    }
+
+    #[test]
+    fn a_bare_line_height_is_a_multiplier_as_in_css() {
+        let multiple = apply_param(
+            "line_height",
+            &[Bridged::Number(1.5)],
+            StyleRefinement::default(),
+        )
+        .unwrap();
+        assert_eq!(multiple.text.line_height, Some(relative(1.5)));
+        let fixed = apply_param(
+            "line_height",
+            &[Bridged::Str("18px".into())],
+            StyleRefinement::default(),
+        )
+        .unwrap();
+        assert_eq!(fixed.text.line_height, Some(px(18.).into()));
+    }
+
+    #[test]
+    fn an_undefined_argument_names_the_method_and_its_argument_free_forms() {
+        let error = apply_param("flex_shrink", &[Bridged::Nil], StyleRefinement::default())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("`flex_shrink` expects 1 argument"),
+            "{error}"
+        );
+        assert!(error.contains("`flex_shrink_0()`"), "{error}");
     }
 
     #[test]

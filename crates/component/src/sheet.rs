@@ -24,6 +24,7 @@ pub(crate) fn init(_: &mut App) {}
 
 /// The settings for sheets.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct SheetSettings {
     /// The margin top for the sheet, default is [`TITLE_BAR_HEIGHT`].
     pub margin_top: Pixels,
@@ -136,6 +137,13 @@ impl RenderOnce for Sheet {
         let placement = self.placement;
         let selection_scope = self.selection_scope;
         let frame_insets = crate::window_border::window_content_insets(window);
+        let safe_insets = crate::window_border::window_safe_insets(window);
+        let frame_insets = Edges {
+            top: frame_insets.top.max(safe_insets.top),
+            right: frame_insets.right.max(safe_insets.right),
+            bottom: frame_insets.bottom.max(safe_insets.bottom),
+            left: frame_insets.left.max(safe_insets.left),
+        };
         let size = window.viewport_size()
             - gpui::size(
                 frame_insets.left + frame_insets.right,
@@ -202,6 +210,7 @@ impl RenderOnce for Sheet {
                             .small()
                             .ghost()
                             .icon(IconName::Close)
+                            .accessibility_label("Close")
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(Cancel), cx);
                             }),

@@ -554,3 +554,77 @@ fn patch_navigation_and_selection_use_supplied_source_coordinates(cx: &mut TestA
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn setting_or_clearing_a_syntax_highlighter_prepares_the_files_again(cx: &mut TestAppContext) {
+    use gpui::{FontStyle, FontWeight, HighlightStyle};
+    use gpui_base::input::HighlightStyleResolver;
+    use std::ops::Range;
+
+    /// Paints GPUI Kit's `keyword` captures italic and nothing else.
+    struct KeywordTheme;
+    impl HighlightStyleResolver for KeywordTheme {
+        fn style(&self, name: &str) -> Option<HighlightStyle> {
+            (name == "keyword").then(|| HighlightStyle {
+                font_style: Some(FontStyle::Italic),
+                ..Default::default()
+            })
+        }
+    }
+    let first_word = |weight| {
+        let style = HighlightStyle {
+            font_weight: Some(weight),
+            ..Default::default()
+        };
+        move |_: &str, text: &str| -> Vec<(Range<usize>, HighlightStyle)> {
+            vec![(0..text.find(' ').unwrap_or(text.len()), style)]
+        }
+    };
+    let file = document("let a = 1;\n", "let a = 2;\n").with_language("rust");
+    let state = cx.new(|cx| {
+        DiffState::new([file.clone()], cx).with_syntax_highlighter(first_word(FontWeight::BOLD))
+    });
+    let styles = |cx: &mut TestAppContext| {
+        state.update(cx, |state, cx| {
+            state.ensure_presentation(cx);
+        });
+        cx.run_until_parked();
+        state.read_with(cx, |state, _| {
+            let presentation = state.presentations()[0]
+                .as_ref()
+                .expect("the file is prepared");
+            let line = &file.lines(DiffSide::Modified)[0];
+            presentation
+                .syntax_highlights(line, DiffSide::Modified, 0, &KeywordTheme)
+                .into_iter()
+                .map(|(_, style)| style)
+                .collect::<Vec<_>>()
+        })
+    };
+    let weights = |styles: &[HighlightStyle]| {
+        styles
+            .iter()
+            .filter_map(|style| style.font_weight)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(weights(&styles(cx)), [FontWeight::BOLD]);
+
+    state.update(cx, |state, cx| {
+        state.set_syntax_highlighter(first_word(FontWeight::LIGHT), cx);
+    });
+    assert_eq!(weights(&styles(cx)), [FontWeight::LIGHT]);
+
+    state.update(cx, |state, cx| state.clear_syntax_highlighter(cx));
+    let cleared = styles(cx);
+    assert!(
+        weights(&cleared).is_empty(),
+        "the application's styles are gone"
+    );
+    // With the grammar, GPUI Kit highlights `let` again.
+    #[cfg(feature = "tree-sitter-rust")]
+    assert!(
+        cleared
+            .iter()
+            .any(|style| style.font_style == Some(FontStyle::Italic))
+    );
+}

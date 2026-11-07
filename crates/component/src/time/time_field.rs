@@ -111,7 +111,6 @@ impl RenderOnce for TimeField {
             .rounded(cx.theme().radius)
             .input_text_size(self.size)
             .input_h(self.size)
-            .px_1()
             .when(self.disabled, |this| this.opacity(0.5))
             .when(focused && !self.disabled, |this| {
                 this.focus_ring_style(window, cx)
@@ -120,8 +119,11 @@ impl RenderOnce for TimeField {
             .child(
                 BaseTimeField::new(self.id, &self.state)
                     .disabled(self.disabled)
+                    // The base field fills the frame, so a press anywhere inside it lands on the
+                    // field rather than on the frame around it.
                     .flex()
-                    .h_full()
+                    .size_full()
+                    .px_1()
                     .items_center()
                     .render_segment(move |segment, state, _, cx| {
                         segment
@@ -167,5 +169,66 @@ mod tests {
         assert_eq!(field.size, Size::Large);
         assert!(field.disabled);
         assert!(field.invalid);
+    }
+
+    #[cfg(feature = "test-support")]
+    struct FieldHarness {
+        state: Entity<TimeFieldState>,
+    }
+
+    #[cfg(feature = "test-support")]
+    impl gpui::Render for FieldHarness {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div().child(TimeField::new(&self.state).with_id("time").w(px(200.)))
+        }
+    }
+
+    #[cfg(feature = "test-support")]
+    fn click_at(cx: &mut gpui::VisualTestContext, position: gpui::Point<gpui::Pixels>) {
+        cx.simulate_click(position, gpui::Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn pressing_outside_the_segments_focuses_the_first_segment(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| FieldHarness {
+            state: cx.new(|cx| TimeFieldState::new(window, cx)),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let state = cx.update(|_, cx| view.read(cx).state.clone());
+        let segment = |cx: &mut gpui::VisualTestContext, id: &'static str| {
+            cx.update(|window, _| {
+                gpui_base::test_support::find(window, &[], &ElementId::from(id))
+                    .expect("segment is painted")
+                    .bounds()
+                    .center()
+            })
+        };
+        let blank = gpui::point(px(180.), segment(cx, "hour").y);
+
+        click_at(cx, blank);
+        cx.update(|window, cx| {
+            assert!(state.read(cx).focus_handle(cx).is_focused(window));
+        });
+        assert_eq!(
+            cx.update(|_, cx| state.read(cx).selected_segment()),
+            TimeSegment::Hour
+        );
+
+        // A press on a segment still selects that segment, not the first one.
+        let minute = segment(cx, "minute");
+        click_at(cx, minute);
+        assert_eq!(
+            cx.update(|_, cx| state.read(cx).selected_segment()),
+            TimeSegment::Minute
+        );
+
+        click_at(cx, blank);
+        assert_eq!(
+            cx.update(|_, cx| state.read(cx).selected_segment()),
+            TimeSegment::Hour
+        );
     }
 }

@@ -91,8 +91,11 @@ Checkbox::new("checkbox")
 
 ### 不带标签
 
+没有可见文字的 Checkbox 没有无障碍名称，屏幕阅读器无法将它与其他复选框区分开。用 `.accessibility_label(...)` 设置名称；这不会添加可见标签：
+
 ```rust
-Checkbox::new("checkbox")
+Checkbox::new("remember")
+    .accessibility_label("Remember me")
     .checked(true)
 ```
 

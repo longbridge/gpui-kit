@@ -452,7 +452,9 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
                         .px_3()
                         .gap_y_3()
                         .when(layout.icon_collapsed, |this| this.p_2())
-                        .child(
+                        .child(gpui_base::ScrollBounce::new(
+                            "bounce",
+                            &list_state,
                             list(list_state.clone(), {
                                 move |ix, window, cx| {
                                     let group = self.content.get(ix).cloned();
@@ -475,7 +477,7 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
                                 }
                             })
                             .size_full(),
-                        )
+                        ))
                         .vertical_scrollbar(&list_state),
                 ),
             )

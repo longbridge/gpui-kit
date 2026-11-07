@@ -13,7 +13,13 @@ mod input_adapter;
 #[cfg(feature = "tree-sitter")]
 pub(crate) use input_adapter::input_highlighter_factory;
 
-#[cfg(not(feature = "tree-sitter"))]
+// The lighter highlighter, used when tree-sitter is not enabled.
+#[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
+mod syntect_backend;
+#[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
+pub(crate) use syntect_backend::{highlight_code, input_highlighter_factory};
+
+#[cfg(not(any(feature = "tree-sitter", feature = "syntect")))]
 pub(crate) fn input_highlighter_factory() -> gpui_base::input::InputHighlighterFactory {
     std::rc::Rc::new(|_| None)
 }

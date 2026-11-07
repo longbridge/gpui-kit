@@ -142,6 +142,15 @@ Slider::new(&slider_state)
     .disabled(true)
 ```
 
+### 可访问性
+
+使用 `.accessibility_label(...)` 为现有 Slider 无障碍节点设置名称。这不会添加可见标签。
+
+```rust
+Slider::new(&slider_state)
+    .accessibility_label("Corner radius")
+```
+
 ### 自定义样式
 
 ```rust

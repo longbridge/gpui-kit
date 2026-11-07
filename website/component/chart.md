@@ -423,6 +423,16 @@ PieChart::new(data)
     .inner_radius(60.) // Creates donut effect
 ```
 
+To size the hole as a share of the ring rather than in pixels, use `inner_radius_ratio`. The ring's radius is the one set with `outer_radius`, or 40% of the chart's height when none is set, so the donut keeps its proportions in a panel whose size is unknown or changes:
+
+```rust
+PieChart::new(data)
+    .value(|d| d.amount as f32)
+    .inner_radius_ratio(0.6) // The hole is 60% of the ring's radius
+```
+
+`inner_radius` and `inner_radius_ratio` replace each other, and the last one set applies. The ratio is clamped to `0.` through `1.`. Unlike Recharts' `innerRadius="60%"`, which is a percentage of half the chart's smaller side, the ratio is a share of the ring's own outer radius.
+
 #### Pie Chart Customization
 
 ```rust

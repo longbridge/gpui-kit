@@ -23,6 +23,8 @@ struct RetainedStateEntry {
     kind: &'static str,
     owner: Option<Rc<crate::runtime::ApplicationGeneration>>,
     value: RetainedState,
+    /// Script subscriptions to the state's events, which end with the slot.
+    subscriptions: Vec<gpui::Subscription>,
 }
 
 impl RetainedStateStore {
@@ -49,9 +51,63 @@ impl RetainedStateStore {
             .next_handle
             .checked_add(1)
             .ok_or_else(|| "retained component state handle space exhausted".to_owned())?;
-        self.values
-            .insert(handle, RetainedStateEntry { kind, owner, value });
+        self.values.insert(
+            handle,
+            RetainedStateEntry {
+                kind,
+                owner,
+                value,
+                subscriptions: Vec::new(),
+            },
+        );
         Ok(handle)
+    }
+
+    /// Keeps `subscription` alive for as long as the state at `handle` is.
+    pub fn attach(&mut self, handle: u64, subscription: gpui::Subscription) -> anyhow::Result<()> {
+        let entry = self
+            .values
+            .get_mut(&handle)
+            .ok_or_else(|| anyhow::anyhow!("retained state handle has been released"))?;
+        entry.subscriptions.push(subscription);
+        Ok(())
+    }
+
+    /// Subscribes to the input events of the state at `handle`, through its
+    /// descriptor's [`StateDescriptor::with_input_events`].
+    pub(crate) fn subscribe(
+        &self,
+        handle: u64,
+        descriptor: &StateDescriptor,
+        event: crate::entities::InputEventName,
+        handler: InputEventHandler,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<gpui::Subscription> {
+        let subscribe = descriptor
+            .events
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("`{}` has no events", descriptor.export))?;
+        let entry = self
+            .values
+            .get(&handle)
+            .ok_or_else(|| anyhow::anyhow!("retained state handle has been released"))?;
+        anyhow::ensure!(
+            entry.owner.as_ref().is_none_or(|owner| owner.is_active()),
+            "retained state owner has been released"
+        );
+        anyhow::ensure!(
+            entry.kind == descriptor.kind,
+            "retained state kind mismatch: expected `{}`, found `{}`",
+            descriptor.kind,
+            entry.kind
+        );
+        subscribe(&entry.value, event, handler, window, cx).ok_or_else(|| {
+            anyhow::anyhow!(
+                "adapter state type does not match registered kind `{}`",
+                descriptor.kind
+            )
+        })
     }
 
     pub fn kind(&self, handle: u64) -> Option<&'static str> {
@@ -112,6 +168,21 @@ impl RetainedStateStore {
             anyhow::anyhow!("adapter state type does not match registered kind `{kind}`")
         })?;
         Ok(body(value))
+    }
+
+    /// Drops one state of `kind` ahead of its application, with its
+    /// subscriptions. Returns whether it was still live.
+    pub fn remove(&mut self, handle: u64, kind: &'static str) -> bool {
+        if self
+            .values
+            .get(&handle)
+            .is_none_or(|entry| entry.kind != kind)
+        {
+            return false;
+        }
+        self.values
+            .remove(&handle)
+            .is_some_and(|entry| entry.owner.as_ref().is_none_or(|owner| owner.is_active()))
     }
 
     pub fn release_application(&mut self, application: &Rc<crate::runtime::ApplicationGeneration>) {
@@ -361,6 +432,19 @@ type StateFactory = dyn Fn(&[ComponentArgument], &mut Window, &mut App) -> Resul
     + Sync
     + 'static;
 
+pub(crate) type InputEventHandler =
+    Box<dyn Fn(&gpui_base::input::InputEvent, &mut Window, &mut App)>;
+
+type SubscribeInputEvents = dyn Fn(
+        &RetainedState,
+        crate::entities::InputEventName,
+        InputEventHandler,
+        &mut Window,
+        &mut App,
+    ) -> Option<gpui::Subscription>
+    + Send
+    + Sync;
+
 type PreparedStateCall =
     Box<dyn FnOnce(&mut Window, &mut App) -> anyhow::Result<ComponentDataValue>>;
 type PrepareStateCall = dyn Fn(
@@ -440,6 +524,7 @@ pub struct StateDescriptor {
     arguments: Vec<ArgumentDescriptor>,
     documentation: Option<&'static str>,
     factory: Arc<StateFactory>,
+    events: Option<Arc<SubscribeInputEvents>>,
 }
 
 impl StateDescriptor {
@@ -466,12 +551,38 @@ impl StateDescriptor {
             arguments,
             documentation: None,
             factory: Arc::new(factory),
+            events: None,
         }
     }
 
     pub fn with_documentation(mut self, documentation: &'static str) -> Self {
         self.documentation = Some(documentation);
         self
+    }
+
+    /// Gives the state `on(event, handler)`, for a state whose value is an
+    /// `Entity<InputBaseState<M>>` — the text engine `gpui-base`'s
+    /// `InputState` and `TextareaState` script bindings sit on.
+    ///
+    /// The events, their names and their payloads are the ones those bindings
+    /// already answer: `change`, `submit` (Enter, with `secondary` and
+    /// `shift`), `focus` and `blur`. A script moving an input between the two
+    /// modules keeps its subscriptions as they are.
+    pub fn with_input_events<M: gpui_base::input::InputModeKind>(mut self) -> Self {
+        self.events = Some(Arc::new(|value, event, handler, window, cx| {
+            let state =
+                value.downcast_ref::<gpui::Entity<gpui_base::input::InputBaseState<M>>>()?;
+            Some(crate::entities::subscribe_to_events(
+                state, event, window, cx, handler,
+            ))
+        }));
+        self
+    }
+
+    /// Whether the state answers `on(event, handler)`; see
+    /// [`Self::with_input_events`].
+    pub fn has_input_events(&self) -> bool {
+        self.events.is_some()
     }
 
     pub fn with_methods(mut self, methods: Vec<StateMethodDescriptor>) -> Self {
@@ -2125,7 +2236,11 @@ impl ComponentRegistry {
         }
         let mut method_names = HashSet::new();
         for method in &descriptor.methods {
-            if !is_javascript_identifier(method.name) || !method_names.insert(method.name) {
+            // Every state object already answers `release()`.
+            if !is_javascript_identifier(method.name)
+                || method.name == "release"
+                || !method_names.insert(method.name)
+            {
                 return Err(RegistryError::InvalidMethod {
                     component: descriptor.kind,
                     method: method.name,
@@ -2384,9 +2499,15 @@ impl FrozenComponentRegistry {
             for method in state.methods() {
                 source.push_str(&format!("{:?}: (...args) => globalThis.__gpui_components[{:?}](__stateProof, handle, args),", method.name(), format!("{}.{}", state.export(), method.name())));
             }
-            source.push_str("}); __stateHandles.set(value, handle); return value; }\nexport { ");
-            source.push_str(state.export);
-            source.push_str(" };\n");
+            if state.has_input_events() {
+                source.push_str(&format!("on: (event, handler) => globalThis.__gpui_components[{:?}](__stateProof, handle, event, handler),", format!("{}.on", state.export())));
+            }
+            source.push_str(&format!(
+                "release: () => globalThis.__gpui_components[{:?}](__stateProof, handle),",
+                format!("{}.release", state.export())
+            ));
+            source.push_str("}); __stateHandles.set(value, handle); return value; }\n");
+            push_new_alias(&mut source, state.export);
         }
         for descriptor in self.descriptors() {
             for constructor in &descriptor.constructors {
@@ -2396,13 +2517,21 @@ impl FrozenComponentRegistry {
                     "(...args) { return globalThis.__gpui.__element(globalThis.__gpui_components[",
                 );
                 source.push_str(&format!("{:?}", constructor.export));
-                source.push_str("](args.map(__unwrapState))); }\nexport { ");
-                source.push_str(constructor.export);
-                source.push_str(" };\n");
+                source.push_str("](args.map(__unwrapState))); }\n");
+                push_new_alias(&mut source, constructor.export);
             }
         }
         source
     }
+}
+
+/// Exports `name` callable as `name(...)`, `new name(...)` and `name.new(...)`.
+///
+/// `gpui-base` constructs with `Type.new(...)`, as in Rust, and a script that
+/// imports from both modules should not have to remember which one it is
+/// calling. The plain call and `new` keep working for scripts written before.
+fn push_new_alias(source: &mut String, name: &str) {
+    source.push_str(&format!("{name}.new = {name};\nexport {{ {name} }};\n"));
 }
 
 #[cfg(test)]

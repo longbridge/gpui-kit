@@ -88,6 +88,7 @@ struct SelectOptions {
     search_placeholder: Option<SharedString>,
     menu_width: Length,
     menu_max_h: Length,
+    scroll_bounce: Option<bool>,
     disabled: bool,
     appearance: bool,
     focus_ring_enabled: bool,
@@ -105,6 +106,7 @@ impl Default for SelectOptions {
             title_prefix: None,
             menu_width: Length::Auto,
             menu_max_h: rems(20.).into(),
+            scroll_bounce: None,
             disabled: false,
             appearance: true,
             focus_ring_enabled: true,
@@ -354,13 +356,38 @@ where
     }
 
     /// Replace the delegate (item data) for the select state.
-    pub fn set_items(&mut self, items: D, _: &mut Window, cx: &mut Context<Self>)
+    pub fn set_items(&mut self, items: D, window: &mut Window, cx: &mut Context<Self>)
     where
         D: SearchableListDelegate + 'static,
     {
-        self.state.list.update(cx, |list, _| {
+        let mut selection = self.state.selection.clone();
+        self.state.list.update(cx, |list, cx| {
+            let cursor = list
+                .selected_index()
+                .and_then(|ix| list.delegate().delegate.item(ix))
+                .and_then(|item| items.position(item.value()));
+            // A value the new items no longer have is dropped, as
+            // `set_selected_value` does, rather than kept at an index that
+            // now points at another item.
+            selection.retain_mut(|(ix, item)| {
+                let Some(position) = items.position(item.value()) else {
+                    return false;
+                };
+                let Some(replacement) = items.item(position) else {
+                    return false;
+                };
+                *ix = position;
+                *item = replacement.clone();
+                true
+            });
             list.delegate_mut().delegate = items;
+            list.set_selected_index(cursor, window, cx);
+            list.delegate_mut()
+                .update_selection_snapshot(selection.clone());
+            cx.notify();
         });
+        self.state.selection = selection;
+        cx.notify();
     }
 
     /// Get the current selected index.
@@ -627,6 +654,9 @@ where
                                         )
                                         .with_size(self.state.size)
                                         .max_h(self.state.menu_max_h)
+                                        .when_some(self.state.scroll_bounce, |list, on| {
+                                            list.scroll_bounce(on)
+                                        })
                                         .paddings(Edges::all(DROPDOWN_LIST_PADDING)),
                                 )
                                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
@@ -711,6 +741,13 @@ where
     /// Set the placeholder text for the search input.
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Bounce the dropdown list at its vertical boundaries. On by default on iOS,
+    /// Android and macOS, off elsewhere; reduced motion disables displacement.
+    pub fn scroll_bounce(mut self, enabled: bool) -> Self {
+        self.options.scroll_bounce = Some(enabled);
         self
     }
 
@@ -822,6 +859,7 @@ where
             this.state.search_placeholder = opts.search_placeholder;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
+            this.state.scroll_bounce = opts.scroll_bounce;
             this.state.disabled = opts.disabled;
             this.state.appearance = opts.appearance;
             this.focus_ring_enabled = opts.focus_ring_enabled;
@@ -1023,5 +1061,158 @@ mod tests {
                 rust_i18n::t!("Select.placeholder").to_string(),
             );
         });
+    }
+
+    #[gpui::test]
+    fn replacing_items_reconciles_the_cursor_and_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| {
+                SelectState::new(
+                    vec!["main", "topic", "release"],
+                    Some(IndexPath::new(0)),
+                    window,
+                    cx,
+                )
+            });
+            let list = state.read(cx).state.list.clone();
+            list.update(cx, |list, cx| {
+                list.set_selected_index(Some(IndexPath::new(1)), window, cx)
+            });
+            state.update(cx, |state, cx| {
+                state.set_items(vec!["release", "main", "topic"], window, cx)
+            });
+            assert_eq!(state.read(cx).selected_index(cx), Some(IndexPath::new(2)));
+            assert_eq!(state.read(cx).selected_value(), Some(&"main"));
+            assert_eq!(state.read(cx).state.selection[0].0, IndexPath::new(1));
+            assert_eq!(
+                list.read(cx).delegate().selection_snapshot[0].0,
+                IndexPath::new(1)
+            );
+            state.update(cx, |state, cx| {
+                state.set_items(vec!["main", "replacement"], window, cx)
+            });
+            assert_eq!(state.read(cx).selected_index(cx), None);
+            assert_eq!(state.read(cx).selected_value(), Some(&"main"));
+
+            // A selected value the new items no longer have is dropped.
+            state.update(cx, |state, cx| {
+                state.set_items(vec!["replacement", "other"], window, cx)
+            });
+            assert_eq!(state.read(cx).selected_value(), None);
+            assert!(state.read(cx).state.selection.is_empty());
+            assert!(list.read(cx).delegate().selection_snapshot.is_empty());
+        });
+    }
+
+    #[derive(Clone)]
+    struct RemoteChoice {
+        value: &'static str,
+        title: &'static str,
+        unavailable: bool,
+    }
+
+    impl super::SelectItem for RemoteChoice {
+        type Value = &'static str;
+        fn value(&self) -> &&'static str {
+            &self.value
+        }
+        fn title(&self) -> gpui::SharedString {
+            self.title.into()
+        }
+        fn disabled(&self) -> bool {
+            self.unavailable
+        }
+    }
+
+    #[gpui::test]
+    fn disabled_items_cannot_be_confirmed(cx: &mut TestAppContext) {
+        use crate::list::ListDelegate as _;
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        for unavailable in [true, false] {
+            let state = cx.update(|window, cx| {
+                let state = cx.new(|cx| {
+                    SelectState::new(
+                        vec![RemoteChoice {
+                            value: "main",
+                            title: "Main",
+                            unavailable,
+                        }],
+                        Some(IndexPath::new(0)),
+                        window,
+                        cx,
+                    )
+                });
+                state.update(cx, |state, cx| state.set_open(true, cx));
+                let list = state.read(cx).state.list.clone();
+                list.update(cx, |list, cx| {
+                    list.delegate_mut().confirm(false, window, cx)
+                });
+                state
+            });
+            cx.run_until_parked();
+            cx.update(|_, cx| assert_eq!(state.read(cx).state.open, unavailable));
+        }
+    }
+
+    /// A page holding a select under retained views.
+    #[cfg(feature = "gpui-fast")]
+    mod retained {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{
+            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+            TestAppContext, Window, div, px,
+        };
+
+        use crate::{
+            searchable_list::SearchableVec,
+            select::{Select, SelectState},
+        };
+
+        /// A page that shows a select and what it selected, counting its
+        /// renders.
+        struct Page {
+            state: Entity<SelectState<SearchableVec<&'static str>>>,
+            renders: Rc<Cell<usize>>,
+        }
+
+        impl Render for Page {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                let selected = self.state.read(cx).selected_index(cx);
+                div()
+                    .w(px(240.))
+                    .child(Select::new(&self.state))
+                    .child(format!("{selected:?}"))
+            }
+        }
+
+        /// Drawing a select again changes nothing in it: the page around it,
+        /// which reads its selection, is not built again for it.
+        #[gpui::test]
+        fn drawing_a_select_again_leaves_the_page_around_it_retained(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let renders = Rc::new(Cell::new(0));
+            let (_, cx) = cx.add_window_view({
+                let renders = renders.clone();
+                move |window, cx| {
+                    let items = SearchableVec::new(vec!["Rust", "Go", "C++"]);
+                    Page {
+                        state: cx.new(|cx| SelectState::new(items, None, window, cx)),
+                        renders,
+                    }
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let rendered = renders.get();
+            for _ in 0..3 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert_eq!(renders.get(), rendered, "the page was built again");
+        }
     }
 }

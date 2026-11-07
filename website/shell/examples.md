@@ -29,7 +29,7 @@ JavaScript, and it is the largest thing written against this runtime.
 ## The todo list
 
 ```bash
-cargo run -p gpui-shell -- examples/js_todolist
+cargo run -p gpui-shell -- run examples/js_todolist
 ```
 
 `examples/js_todolist/` exists to exercise the whole runtime rather than to be minimal — if something in `gpui-shell` is broken, this is where it shows first.
@@ -84,7 +84,7 @@ export function load() {
 ## The workspace
 
 ```bash
-cargo run -p gpui-shell -- examples/js_dock
+cargo run -p gpui-shell -- run examples/js_dock
 ```
 
 `examples/js_dock/` is a dockable workspace — a file list on the left, documents in the center, and a layout that comes back the way you left it.
