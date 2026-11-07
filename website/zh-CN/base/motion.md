@@ -47,6 +47,8 @@ let opacity = transition(
 
 运动中改变目标会从当前采样值继续；直接反向还会缩短返回时长。`transition_with_status` 额外返回 `Idle`、`Delayed`、`Running` 或 `Finished`。
 
+keyed state 只在元素渲染期间存在。若过渡需要在卸载后继续，例如虚拟列表中滚出又滚回的行，请把 `TransitionPlayback` 与数据一起保存，并在渲染时调用 `sample`。它的采样、改变目标和反向与 `transition_with_status` 完全一致，但不持有视图或窗口，也不请求帧：状态为 `Delayed` 或 `Running` 时请自行调度帧。
+
 `Easing` 支持 CSS 关键字曲线、cubic Bézier、全部 step position 和分段 `linear()` stops，无效参数会返回类型化错误。
 
 ## Spring
@@ -110,7 +112,7 @@ Sequence::new(("row", index), px(12.))
 
 ## Reduced motion 与性能
 
-Transition、spring、keyframes、presence 和 reveal 控件都遵守 GPUI 的 reduced-motion 偏好。有限动画会直接同步目标、更新 retained state，并且不留下待处理 frame。动画不能成为表达状态的唯一方式。
+Transition、spring、keyframes、presence 和 reveal 控件都遵守 GPUI 的 reduced-motion 偏好。有限动画会直接同步目标、更新 retained state，并且不留下待处理 frame。值 transition（`transition`、`transition_with_status`）若以 `.reduced_motion(ReducedMotion::Continue)` 构建其 `Transition`，则保留其时序；只应将它用于淡入淡出等非空间效果。动画不能成为表达状态的唯一方式。
 
 这个偏好来自操作系统。`gpui_base::init`（因此 `gpui_component::init` 也一样）会把系统设置读入 `App::set_reduce_motion`：macOS 的「减弱动态效果」（`NSWorkspace.accessibilityDisplayShouldReduceMotion`）、Windows 的「动画效果」（`SPI_GETCLIENTAREAANIMATION`，关闭即为减弱动效），以及 Linux 上 XDG desktop portal `org.freedesktop.appearance` 命名空间的 `reduced-motion` 键——它经 D-Bus 在 `init` 返回后片刻送达，之后持续跟随其变化。其他目标（包括 wasm）不改动这个标志。应用一旦自己调用 `cx.set_reduce_motion(...)`，就接管了这个标志：Base 只在标志仍是自己上次写入的值时才会写入。macOS 和 Windows 只在 `init` 时读取一次；需要重新读取时调用 `gpui_base::apply_system_reduce_motion(cx)`。
 

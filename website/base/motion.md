@@ -47,6 +47,8 @@ let opacity = transition(
 
 Retargeting starts at the currently sampled value. Direct reversal shortens the return duration, so reversing early does not spend a full duration retracing a short distance. `transition_with_status` additionally returns `Idle`, `Delayed`, `Running`, or `Finished`.
 
+Keyed state lives only while its element renders. For a transition that must survive an unmount, as in a row of a virtualized list that scrolls out and back, keep a `TransitionPlayback` with the data instead and call `sample` while rendering. It samples, retargets and reverses exactly as `transition_with_status` does, but holds no view or window and requests no frames: schedule them yourself while the status is `Delayed` or `Running`.
+
 `Easing` includes CSS keyword curves, cubic Bézier curves, all CSS step positions, and piecewise `linear()` stops. Invalid parameters return typed errors.
 
 ## Springs
@@ -132,7 +134,7 @@ Sequence::new(("row", index), px(12.))
 
 ## Reduced motion and performance
 
-Transitions, springs, keyframes, presence, and reveal-compatible controls honor GPUI's reduced-motion preference. Finite motion snaps to the target, synchronizes retained state, and leaves no pending animation frame. Motion must never be the only way state is communicated.
+Transitions, springs, keyframes, presence, and reveal-compatible controls honor GPUI's reduced-motion preference. Finite motion snaps to the target, synchronizes retained state, and leaves no pending animation frame. A value transition (`transition`, `transition_with_status`) whose `Transition` is built with `.reduced_motion(ReducedMotion::Continue)` keeps its timing instead; use it only for non-spatial effects such as a fade. Motion must never be the only way state is communicated.
 
 The preference is the operating system's. `gpui_base::init` (and so `gpui_component::init`) reads the system setting into `App::set_reduce_motion` — macOS's "Reduce motion" (`NSWorkspace.accessibilityDisplayShouldReduceMotion`), Windows' "Animation effects" (`SPI_GETCLIENTAREAANIMATION`, off means reduce), and on Linux the XDG desktop portal's `org.freedesktop.appearance` `reduced-motion` key, which arrives over D-Bus a moment after `init` and is then followed as it changes. Other targets, wasm included, leave the flag alone. An application that calls `cx.set_reduce_motion(...)` itself owns the flag from then on: Base only writes it while it still holds what Base last wrote. macOS and Windows are read once, at `init`; call `gpui_base::apply_system_reduce_motion(cx)` to read them again.
 
