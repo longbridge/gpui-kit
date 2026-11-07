@@ -446,7 +446,6 @@ impl Input {
         let focus_handle = state.presentation(cx).focus_handle().clone();
 
         let dispatch = {
-            let focus_handle = focus_handle.clone();
             move |action: &dyn gpui::Action, window: &mut Window, cx: &mut App| {
                 focus_handle.dispatch_action(action, window, cx);
             }

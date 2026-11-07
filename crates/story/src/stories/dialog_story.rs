@@ -180,7 +180,6 @@ impl DialogStory {
                     .overlay_closable(overlay_closable)
                     .entrance(self.entrance)
                     .on_ok({
-                        let view = view.clone();
                         let input1 = input1.clone();
                         let date = date.clone();
                         move |_, window, cx| {

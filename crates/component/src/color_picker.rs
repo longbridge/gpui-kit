@@ -515,7 +515,7 @@ impl RenderOnce for ColorPicker {
                         tooltip: if display_title.is_empty() || self.field {
                             None
                         } else {
-                            Some(display_title.clone())
+                            Some(display_title)
                         },
                         icon: self.icon.clone(),
                         selected: false,

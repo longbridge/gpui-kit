@@ -524,7 +524,7 @@ pub(crate) fn reload(
             cx,
             scope::ScopePhase::Task,
             Some(view.clone()),
-            policy.clone(),
+            policy,
         );
         runtime
             .load_app(directory, entry)

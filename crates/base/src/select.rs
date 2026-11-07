@@ -201,6 +201,12 @@ impl RenderOnce for Select {
             }
         });
 
+        #[expect(
+            clippy::redundant_clone,
+            reason = "FocusHandle::clone refreshes tab metadata from the focus map"
+        )]
+        let focus_handle = focus_handle.clone().filter(|_| !disabled);
+
         self.base
             .role(Role::ComboBox)
             .aria_expanded(open)
@@ -211,10 +217,9 @@ impl RenderOnce for Select {
                 this.aria_value(value)
             })
             .key_context(self.key_context)
-            .when_some(
-                focus_handle.clone().filter(|_| !disabled),
-                |this, handle| this.track_focus(&handle.tab_stop(true)),
-            )
+            .when_some(focus_handle, |this, handle| {
+                this.track_focus(&handle.tab_stop(true))
+            })
             .when(!disabled, |this| {
                 let on_open_change = on_open_change.clone();
                 let content_focus_handle = content_focus_handle.clone();

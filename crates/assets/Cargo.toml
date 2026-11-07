@@ -14,6 +14,9 @@ version = "0.9.0"
 # Retain Cargo icon-directory metadata for existing build-script consumers.
 links = "gpui-kit-default-icons"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 gpui.workspace = true

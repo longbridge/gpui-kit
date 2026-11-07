@@ -25,7 +25,7 @@ impl MenuItemElement {
     pub(crate) fn new(id: impl Into<ElementId>) -> Self {
         let id: ElementId = id.into();
         Self {
-            id: id.clone(),
+            id,
             aria_label: None,
             style: StyleRefinement::default(),
             disabled: false,

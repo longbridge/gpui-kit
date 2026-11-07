@@ -105,9 +105,7 @@ pub trait TableDelegate: Sized + 'static {
         window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(self.column(col_ix, cx).name.clone())
+        div().size_full().child(self.column(col_ix, cx).name)
     }
 
     /// Render the row at the given row and column.

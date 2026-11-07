@@ -324,7 +324,7 @@ impl Render for DatePickerStory {
                             .w(px(280.))
                             .placeholder("Range mode picker")
                             .cleanable(true)
-                            .presets(range_presets.clone()),
+                            .presets(range_presets),
                     ),
             )
             .child(

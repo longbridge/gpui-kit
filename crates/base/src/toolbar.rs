@@ -175,9 +175,7 @@ impl RenderOnce for Toolbar {
         // key handler refer to the same dispatch-tree node; button.rs uses
         // the same keyed-state pattern for its own focus handle.
         let focus_handle = window
-            .use_keyed_state(self.id.clone(), cx, |_, cx| {
-                cx.focus_handle().tab_stop(false)
-            })
+            .use_keyed_state(self.id, cx, |_, cx| cx.focus_handle().tab_stop(false))
             .read(cx)
             .clone();
         let key_handler = {

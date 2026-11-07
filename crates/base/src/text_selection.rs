@@ -2762,7 +2762,7 @@ impl WindowSelectionState {
             .borrow()
             .get(&participant.entity_id())?
             .clone();
-        Some((participant, registration.registration.clone()))
+        Some((participant, registration.registration))
     }
 
     fn prune_dead_participants(&mut self) {
@@ -5561,7 +5561,7 @@ mod tests {
         let clear_count = Rc::new(Cell::new(0));
         cx.update(|window, cx| {
             let state = WindowSelectionState::ensure(window, cx);
-            let state_for_clear = state.clone();
+            let state_for_clear = state;
             let count = clear_count.clone();
             let selection = view.read(cx).selection.clone();
             selection

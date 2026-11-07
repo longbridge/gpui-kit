@@ -201,7 +201,7 @@ impl BrushStory {
         let show_grid_for_prepaint = self.show_grid;
         let theme_for_prepaint = theme.clone();
 
-        let state_entity = cx.entity().clone();
+        let state_entity = cx.entity();
 
         let base_div = div()
             .id("canvas")
