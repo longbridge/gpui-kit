@@ -490,8 +490,6 @@ pub struct InputBaseState<M: InputModeKind> {
     /// input's prepaint but before its paint.
     pub(crate) prepaint_caret_geometry: Option<PrepaintCaretGeometry>,
     pub(super) last_cursor: Option<usize>,
-    /// Where the platform was last told the caret is, for its IME panel.
-    pub(super) ime_anchor: Option<(Point<Pixels>, Option<Bounds<Pixels>>)>,
     /// The input container bounds
     pub(super) input_bounds: Bounds<Pixels>,
     /// The text bounds
@@ -1029,7 +1027,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_input_edits: Vec::new(),
             column_select_start: None,
             last_cursor: None,
-            ime_anchor: None,
             scroll_handle: ScrollHandle::new(),
             scroll_bounce: crate::ScrollBounce::enabled_by_default(),
             overscroll: Overscroll::default(),
