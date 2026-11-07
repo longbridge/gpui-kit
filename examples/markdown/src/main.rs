@@ -1506,7 +1506,7 @@ impl Render for Example {
                                                     )
                                                     .child(
                                                         Clipboard::new("copy-table")
-                                                            .value(markdown.clone())
+                                                            .value(markdown)
                                                             .tooltip("Copy as Markdown"),
                                                     )
                                                     .child(

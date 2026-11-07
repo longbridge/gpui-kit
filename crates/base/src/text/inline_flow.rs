@@ -2078,7 +2078,7 @@ mod tests {
         };
         let items = vec![
             MeasureItem::Text {
-                text: lead.clone(),
+                text: lead,
                 links: vec![],
                 highlights: vec![],
             },
@@ -2090,7 +2090,7 @@ mod tests {
             MeasureItem::Text {
                 text: SharedString::from(tail_text),
                 links: vec![],
-                highlights: vec![(code_range.clone(), code_highlight)],
+                highlights: vec![(code_range, code_highlight)],
             },
         ];
         let image_size = size(px(10.), px(10.));

@@ -1830,7 +1830,7 @@ impl ShellRuntime {
                 }
             });
             slot.insert(ComponentAppEffectGeneration {
-                application: application.clone(),
+                application,
                 view: view.downgrade(),
                 pending: HashMap::new(),
                 installed: HashMap::new(),
@@ -2443,7 +2443,7 @@ impl ShellRuntime {
             window,
             cx,
             ScopePhase::Event,
-            Some(view.clone()),
+            Some(view),
             policy,
             application,
         );
@@ -2508,7 +2508,7 @@ impl ShellRuntime {
                 owner: parent,
                 view_type: ViewType {
                     value: class,
-                    module_lease: provenance.module_lease.clone(),
+                    module_lease: provenance.module_lease,
                     application,
                 },
                 policy,
@@ -2764,7 +2764,7 @@ impl ShellRuntime {
                             ScopePhase::Event,
                             scope::current_view(),
                             provenance.policy.clone(),
-                            provenance.application.clone(),
+                            provenance.application,
                         );
                         dock_api::apply_edit(&runtime, dock, *edit, window, cx)
                     }
@@ -3370,7 +3370,7 @@ impl ShellRuntime {
                         roots.first().copied().unwrap_or_default(),
                         arena,
                         entry.application.clone(),
-                        entry.view.clone(),
+                        entry.view,
                     );
                     Some(crate::spec::ItemSpecs::recorded(snapshot, roots, keys))
                 }
@@ -7981,7 +7981,7 @@ impl ShellRuntime {
             host_modules::install(ctx)?;
             theme_api::install(ctx, &module)?;
             entity_api::install(ctx, &module, runtime.clone())?;
-            dock_api::install(ctx, &module, runtime.clone())?;
+            dock_api::install(ctx, &module, runtime)?;
             scheduler::install(ctx, &module)?;
             // Standard Runtime constructors and prototypes must exist before
             // the sandbox freezes built-ins, or they would remain mutable.
@@ -10892,7 +10892,7 @@ export default class Panel extends View { render() { return div(); } }
         let root = std::env::temp_dir().join("gpui-shell-module-lifecycle");
 
         let first = modules.register(root.clone());
-        let second = modules.register(root.clone());
+        let second = modules.register(root);
 
         assert_ne!(first.generation(), second.generation());
         assert_eq!(modules.registration_count(), 2);

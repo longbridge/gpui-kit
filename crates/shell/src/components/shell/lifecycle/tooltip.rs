@@ -30,7 +30,7 @@ impl ComponentMaterializer for TooltipMaterializer {
         request.finish(
             Button::new(payload.id.clone())
                 .label(payload.label.clone())
-                .tooltip(payload.text.clone()),
+                .tooltip(payload.text),
         )
     }
 }

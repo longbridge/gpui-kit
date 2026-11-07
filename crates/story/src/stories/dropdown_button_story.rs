@@ -197,7 +197,6 @@ impl Render for DropdownButtonStory {
                                 .ghost()
                                 .small()
                                 .on_click({
-                                    let view = view.clone();
                                     move |_, _, cx| {
                                         view.update(cx, |this, cx| {
                                             this.last_action = "Opened latest file".into();

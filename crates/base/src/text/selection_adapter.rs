@@ -198,7 +198,7 @@ impl TextViewSelectionAdapter {
         );
 
         let view_for_copy = view.clone();
-        let blocks_for_copy = virtual_blocks.clone();
+        let blocks_for_copy = virtual_blocks;
         let frame_for_copy = frame.clone();
         selection.copy_with(
             move |cx| {

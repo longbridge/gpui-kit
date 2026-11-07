@@ -3453,9 +3453,14 @@ mod motion_identity_tests {
         let _ = with_gpui_focus(div().id("custom"), &behavior, Some(&handle));
         // Cloning re-reads the window's focus map, which is where the builders
         // write and where the tab order is read from.
-        assert_eq!(handle.clone().tab_index, 3);
+        #[expect(
+            clippy::redundant_clone,
+            reason = "FocusHandle::clone refreshes tab metadata from the focus map"
+        )]
+        let handle = handle.clone();
+        assert_eq!(handle.tab_index, 3);
         assert!(
-            handle.clone().tab_stop,
+            handle.tab_stop,
             "a tab index implies a tab stop, as GPUI's own does"
         );
 
@@ -3464,7 +3469,12 @@ mod motion_identity_tests {
         apply_behavior(&mut behavior, "tab_index", &[Bridged::Number(3.0)]);
         apply_behavior(&mut behavior, "tab_stop", &[Bridged::Bool(false)]);
         let _ = with_gpui_focus(div().id("custom"), &behavior, Some(&handle));
-        assert!(!handle.clone().tab_stop);
+        #[expect(
+            clippy::redundant_clone,
+            reason = "FocusHandle::clone refreshes tab metadata from the focus map"
+        )]
+        let handle = handle.clone();
+        assert!(!handle.tab_stop);
     }
 
     /// One written list of anchors serves the parser, the check the prelude

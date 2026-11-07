@@ -1084,7 +1084,7 @@ impl Theme {
                 appearance: config.mode,
                 style: style.clone(),
             });
-            self.highlight_theme = highlight_theme.clone();
+            self.highlight_theme = highlight_theme;
         }
 
         let default_colors = if config.mode.is_dark() {

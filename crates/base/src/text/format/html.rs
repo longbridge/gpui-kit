@@ -379,7 +379,7 @@ fn parse_paragraph(paragraph: &mut HtmlParagraph, node: &Rc<Node>) {
             }
         }
 
-        push_merged(paragraph, merged_text, merged_marks, new_mark.clone());
+        push_merged(paragraph, merged_text, merged_marks, new_mark);
         if let Some(ends_with_break) = ends_with_break {
             paragraph.ends_with_break = ends_with_break;
         }

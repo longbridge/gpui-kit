@@ -141,7 +141,7 @@ impl ComponentMaterializer for KbdMaterializer {
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<KbdOp>().cloned())
             .collect::<Vec<_>>();
-        let mut component = Kbd::new(stroke.clone());
+        let mut component = Kbd::new(stroke);
         for operation in operations {
             component = match operation {
                 KbdOp::Appearance(value) => component.appearance(value),

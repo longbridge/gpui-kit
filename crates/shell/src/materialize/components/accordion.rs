@@ -147,7 +147,7 @@ fn accordion_header(
     if let Some(level) = behavior.aria_level {
         header = header.level(level);
     }
-    if let Some(key) = behavior.key.clone() {
+    if let Some(key) = behavior.key {
         header = header.id(key);
     }
     header.style().refine(&refinement);
@@ -235,7 +235,7 @@ fn accordion_panel(
     if behavior.keep_mounted {
         panel = panel.keep_mounted(true);
     }
-    if let Some(key) = behavior.key.clone() {
+    if let Some(key) = behavior.key {
         panel = panel.id(key);
     }
     panel.style().refine(&refinement);
