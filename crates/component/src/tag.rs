@@ -252,8 +252,12 @@ impl RenderOnce for Tag {
             .flex()
             .items_center()
             .border_1()
-            .line_height(relative(1.))
-            .text_xs()
+            .line_height(relative(1.25))
+            .map(|this| match self.size {
+                Size::XSmall | Size::Small => this.text_size(rems(0.625)),
+                Size::Large => this.text_sm(),
+                _ => this.text_xs(),
+            })
             .map(|this| match self.size {
                 Size::XSmall | Size::Small => this.px_1p5().py_0p5(),
                 _ => this.px_2p5().py_1(),

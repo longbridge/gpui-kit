@@ -66,7 +66,7 @@ impl Render for StatusBarStory {
                     .description(
                         "Places repository state on the left and document state on the right.",
                     )
-                    .w(px(760.))
+                    .max_w(px(760.))
                     .child(
                         v_flex().w_full().child(
                             StatusBar::new()
@@ -144,7 +144,7 @@ impl Render for StatusBarStory {
             .child(
                 section("Application")
                     .description("Combines connectivity, progress, save state, and notifications.")
-                    .w(px(760.))
+                    .max_w(px(760.))
                     .child(
                         v_flex().w_full().child(
                             StatusBar::new()
@@ -181,7 +181,7 @@ impl Render for StatusBarStory {
             .child(
                 section("Alignment")
                     .description("Center content adapts when either side is empty or populated.")
-                    .w(px(760.))
+                    .max_w(px(760.))
                     .child(
                         v_flex()
                             .w_full()

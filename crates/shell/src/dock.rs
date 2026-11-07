@@ -18,8 +18,8 @@
 //!   written before a restart comes back with the panel in place.
 //! - [`ScriptDockSkin`] is the appearance. Base draws no chrome at all — an
 //!   area with no renderer docks, drags, resizes and persists while painting
-//!   nothing but the panels — so every tab bar, dock frame and tile drag bar
-//!   a script wants has to come back through the three renderer traits. The
+//!   nothing but the panels — so every tab bar and dock frame a script wants
+//!   has to come back through the two renderer traits. The
 //!   skin forwards each one to [`DockChrome`], and a skin with no chrome is
 //!   still a working dock.
 //! - A **dock command** is what a chrome element *does*. A chrome description
@@ -46,14 +46,14 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, Context, Div, Empty, Entity, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    Stateful, Styled as _, Window, div,
+    AnyElement, AnyView, App, AppContext as _, Context, Empty, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
+    Window, div,
 };
 use gpui_base::dock::{
     DockAreaRenderer, DockContext, DockPlacement, DropIndicator, DropPlaceholderBounds, Panel,
-    PanelBuildContext, PanelEvent, PanelId, PanelInfo, PanelState, PanelView, ResizeSide,
-    TabGroupContext, TabGroupRenderer, TileContext, TilesRenderer,
+    PanelBuildContext, PanelEvent, PanelId, PanelInfo, PanelState, PanelView, TabGroupContext,
+    TabGroupRenderer,
 };
 use serde_json::{Value, json};
 
@@ -485,9 +485,9 @@ impl Render for RetainedPanel {
 /// event, a mouse position or a hit test — base attaches all of that to the
 /// elements it gets back — so the script's job is to turn state into elements
 /// and to call the context's own callbacks (`select_tab`, `close`,
-/// `toggle_zoom`, `resize_to`) rather than reimplement them. [`tab_group_data`],
-/// [`dock_data`] and [`tile_data`] convert the state half into plain JSON,
-/// which is the form the engine hands to script code.
+/// `toggle_zoom`, `resize_to`) rather than reimplement them. [`tab_group_data`]
+/// and [`dock_data`] convert the state half into plain JSON, which is the form
+/// the engine hands to script code.
 #[allow(unused_variables)]
 pub trait DockChrome: 'static {
     /// The tab bar above a group's displayed panel.
@@ -535,24 +535,6 @@ pub trait DockChrome: 'static {
     ) -> AnyElement {
         content
     }
-
-    /// The strip a tile is dragged by. Its height is fixed at
-    /// [`DRAG_BAR_HEIGHT`](gpui_base::dock::DRAG_BAR_HEIGHT), which base's
-    /// snapping arithmetic assumes and the script must match.
-    fn tile_drag_bar(&self, tile: &TileContext, window: &mut Window, cx: &mut App) -> AnyElement {
-        Empty.into_any_element()
-    }
-
-    /// A tile's resize affordances, whose hit size is
-    /// [`HANDLE_SIZE`](gpui_base::dock::HANDLE_SIZE).
-    fn tile_resize_handles(
-        &self,
-        tile: &TileContext,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Option<AnyElement> {
-        None
-    }
 }
 
 /// A [`DockChrome`] that draws nothing, which is also base's own behavior.
@@ -570,8 +552,6 @@ pub(crate) struct DockChromeHooks {
     pub(crate) empty_group: Option<CallbackId>,
     pub(crate) drop_indicator: Option<CallbackId>,
     pub(crate) dock: Option<CallbackId>,
-    pub(crate) tile_drag_bar: Option<CallbackId>,
-    pub(crate) tile_resize_handles: Option<CallbackId>,
 }
 
 /// The chrome handlers in force for the frame being drawn.
@@ -621,10 +601,6 @@ pub(crate) struct DockContexts {
     /// a number, and a number is what comes back from script.
     tab_groups: RefCell<HashMap<u64, TabGroupContext>>,
     docks: RefCell<HashMap<DockPlacement, DockContext>>,
-    /// Keyed by the tile's panel, which is what identifies a tile — a canvas
-    /// holds one tile per panel, and the panel id is the one a script already
-    /// has from [`tile_data`].
-    tiles: RefCell<HashMap<u64, TileContext>>,
 }
 
 impl DockContexts {
@@ -633,7 +609,6 @@ impl DockContexts {
     pub(crate) fn clear(&self) {
         self.tab_groups.borrow_mut().clear();
         self.docks.borrow_mut().clear();
-        self.tiles.borrow_mut().clear();
     }
 
     fn record_tab_group(&self, group: &TabGroupContext) {
@@ -648,22 +623,12 @@ impl DockContexts {
             .insert(dock.placement(), dock.clone());
     }
 
-    fn record_tile(&self, tile: &TileContext) {
-        self.tiles
-            .borrow_mut()
-            .insert(tile.panel_id().as_u64(), tile.clone());
-    }
-
     pub(crate) fn tab_group(&self, node: u64) -> Option<TabGroupContext> {
         self.tab_groups.borrow().get(&node).cloned()
     }
 
     pub(crate) fn dock(&self, placement: DockPlacement) -> Option<DockContext> {
         self.docks.borrow().get(&placement).cloned()
-    }
-
-    pub(crate) fn tile(&self, panel: u64) -> Option<TileContext> {
-        self.tiles.borrow().get(&panel).cloned()
     }
 }
 
@@ -782,49 +747,22 @@ pub(crate) enum DockCommand {
     ToggleDock { placement: DockPlacement },
     /// Drag this dock's edge. Base clamps the size it is given.
     ResizeDock { placement: DockPlacement },
-    /// Drag this tile around its canvas.
-    MoveTile { panel: u64 },
-    /// Drag one edge or corner of this tile.
-    ResizeTile { panel: u64, side: ResizeSide },
-    /// Bring this tile above the others.
-    RaiseTile { panel: u64 },
-    /// Zoom this tile to fill its dock, or back out.
-    ToggleTileZoom { panel: u64 },
-    /// Close this tile.
-    CloseTile { panel: u64 },
 }
 
-/// The drag GPUI carries while a tile is being moved, identified by its panel.
+/// The drag GPUI carries while a dock's edge is being dragged.
 ///
-/// A marker rather than a payload: base already holds the gesture — where the
-/// tile started, where the pointer is, what it snaps to — and all this has to
-/// do is tell one tile's `on_drag_move` from another's.
-#[derive(Clone, Copy)]
-pub(crate) struct MovingTile(pub(crate) u64);
-
-/// The same, while a tile is being resized.
-#[derive(Clone, Copy)]
-pub(crate) struct ResizingTile(pub(crate) u64);
-
-/// The same, while a dock's edge is being dragged.
+/// A marker rather than a payload: base already holds the gesture, and all
+/// this has to do is tell one dock's `on_drag_move` from another's.
 #[derive(Clone, Copy)]
 pub(crate) struct ResizingDock(pub(crate) DockPlacement);
 
-macro_rules! invisible_drag {
-    ($name:ident) => {
-        impl Render for $name {
-            /// A drag GPUI does not paint: the feedback is the tile or the dock
-            /// moving under the pointer, which base is already doing.
-            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-                Empty
-            }
-        }
-    };
+impl Render for ResizingDock {
+    /// A drag GPUI does not paint: the feedback is the dock edge moving under
+    /// the pointer, which base is already doing.
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
 }
-
-invisible_drag!(MovingTile);
-invisible_drag!(ResizingTile);
-invisible_drag!(ResizingDock);
 
 /// One command together with the area it belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -851,10 +789,10 @@ impl DockAction {
 ///
 /// Install it with
 /// [`DockArea::with_renderer`](gpui_base::dock::DockArea::with_renderer). One
-/// value implements all three renderer traits and hands out clones of itself
-/// for the per-container ones, because the only thing a container renderer
-/// needs is the same chrome handle — and the same context table, so a command
-/// from a tile finds the tile a *tiles* renderer recorded.
+/// value implements both renderer traits and hands out clones of itself for
+/// the per-container one, because the only thing a container renderer needs is
+/// the same chrome handle — and the same context table, so a command from a
+/// tab finds the group a *tab group* renderer recorded.
 pub struct ScriptDockSkin {
     chrome: Rc<dyn DockChrome>,
     contexts: Rc<DockContexts>,
@@ -943,10 +881,6 @@ impl DockAreaRenderer for ScriptDockSkin {
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
         Rc::new(self.clone_skin())
     }
-
-    fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
-        Rc::new(self.clone_skin())
-    }
 }
 
 impl TabGroupRenderer for ScriptDockSkin {
@@ -1004,33 +938,6 @@ impl TabGroupRenderer for ScriptDockSkin {
     ) -> Option<AnyElement> {
         in_layout_scope(window, cx, |window, cx| {
             self.chrome.drop_indicator(indicator, window, cx)
-        })
-    }
-}
-
-impl TilesRenderer for ScriptDockSkin {
-    fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
-        div().id("script-tiles")
-    }
-
-    fn render_drag_bar(&self, tile: &TileContext, window: &mut Window, cx: &mut App) -> AnyElement {
-        self.contexts.record_tile(tile);
-        in_layout_scope(window, cx, |window, cx| {
-            self.chrome.tile_drag_bar(tile, window, cx)
-        })
-    }
-
-    fn render_resize_handles(
-        &self,
-        tile: &TileContext,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> AnyElement {
-        self.contexts.record_tile(tile);
-        in_layout_scope(window, cx, |window, cx| {
-            self.chrome
-                .tile_resize_handles(tile, window, cx)
-                .unwrap_or_else(|| Empty.into_any_element())
         })
     }
 }
@@ -1158,47 +1065,6 @@ pub fn dock_data(dock: &DockContext) -> Value {
         "size": f32::from(dock.size()),
         "open": dock.is_open(),
         "collapsible": dock.is_collapsible(),
-    })
-}
-
-/// One tile's state as plain JSON:
-///
-/// ```json
-/// {
-///   "node": 3,
-///   "panel": { "name": "shell:mail/inbox", "id": 42, "visible": true },
-///   "bounds": { "x": 10.0, "y": 10.0, "width": 200.0, "height": 200.0 },
-///   "z_index": 0,
-///   "moving": false, "resizing": false,
-///   "closable": true, "zoomed": false, "zoomable": true
-/// }
-/// ```
-///
-/// `bounds` are already resolved — base snaps, clamps and rounds before a skin
-/// sees them, so the script positions nothing itself. A zoomed tile fills the
-/// dock and ignores its stored bounds.
-pub fn tile_data(tile: &TileContext, cx: &App) -> Value {
-    let bounds = tile.bounds();
-
-    json!({
-        "node": tile.node().as_u64(),
-        "panel": {
-            "name": tile.panel().panel_name(cx),
-            "id": tile.panel_id().as_u64(),
-            "visible": tile.panel().visible(cx),
-        },
-        "bounds": {
-            "x": f32::from(bounds.origin.x),
-            "y": f32::from(bounds.origin.y),
-            "width": f32::from(bounds.size.width),
-            "height": f32::from(bounds.size.height),
-        },
-        "z_index": tile.z_index(),
-        "moving": tile.is_moving(),
-        "resizing": tile.is_resizing(),
-        "closable": tile.is_closable(),
-        "zoomed": tile.is_zoomed(),
-        "zoomable": tile.is_zoomable(),
     })
 }
 

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "bootstrap",
+    "source": "examples/ai_recipes/src/bootstrap.rs",
+    "documents": [
+      "website/component/root.md",
+      "website/zh-CN/component/root.md"
+    ],
+    "trust": "Tested consumer recipe"
+  },
+  {
+    "id": "command-control",
+    "source": "examples/ai_recipes/src/command_control.rs",
+    "documents": [
+      "website/component/button.md",
+      "website/zh-CN/component/button.md"
+    ],
+    "trust": "Tested consumer recipe"
+  },
+  {
+    "id": "controlled-value",
+    "source": "examples/ai_recipes/src/controlled_value.rs",
+    "documents": [
+      "website/component/checkbox.md",
+      "website/zh-CN/component/checkbox.md"
+    ],
+    "trust": "Tested consumer recipe"
+  },
+  {
+    "id": "settings",
+    "source": "examples/ai_recipes/src/settings.rs",
+    "documents": [
+      "website/docs/getting-started.md",
+      "website/zh-CN/docs/getting-started.md",
+      "skills/gpui-kit/references/recipes.md"
+    ],
+    "trust": "Tested consumer recipe"
+  }
+]

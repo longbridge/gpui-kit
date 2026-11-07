@@ -1,0 +1,22 @@
+[
+  {
+    "browser": "Chrome",
+    "share": 63.4
+  },
+  {
+    "browser": "Safari",
+    "share": 19.8
+  },
+  {
+    "browser": "Edge",
+    "share": 7.6
+  },
+  {
+    "browser": "Firefox",
+    "share": 5.9
+  },
+  {
+    "browser": "Other",
+    "share": 3.3
+  }
+]

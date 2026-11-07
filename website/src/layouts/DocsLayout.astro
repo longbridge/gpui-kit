@@ -3,11 +3,13 @@ import BaseLayout from './BaseLayout.astro';
 import Nav from '../components/Nav.astro';
 import Sidebar from '../components/Sidebar.astro';
 import SiteFooter from '../components/SiteFooter.astro';
+import DocsLicense from '../components/DocsLicense.astro';
 import Toc from '../components/Toc.astro';
 import type { Heading } from '../components/Toc.astro';
 import type { SidebarItem } from '../lib/sidebar';
 import { fetchStarCount } from '../lib/github';
 import { SITE_URL } from '../lib/site';
+import { currentVersionPath } from '../lib/versions';
 
 export interface Props {
   title?: string;
@@ -24,6 +26,8 @@ const pathname = Astro.url.pathname;
 const base = import.meta.env.BASE_URL;
 
 const canonical = `${SITE_URL}${pathname}`;
+const contentPath = currentVersionPath(pathname, base);
+const isDocumentationPage = /^\/(?:zh-CN\/)?(?:docs|base|component|shell)(?:\/|$)/.test(contentPath);
 
 let starCount = 0;
 try {
@@ -69,6 +73,7 @@ const structuredData = [
       <article class="doc-content" data-pagefind-body>
         <slot />
       </article>
+      {isDocumentationPage && <DocsLicense lang={lang} sourceUrl={canonical} />}
     </main>
 
     {hasSidebar && <Toc headings={headings} lang={lang} />}
@@ -80,23 +85,65 @@ const structuredData = [
 </BaseLayout>
 
 <script>
-  // The sidebar scrollbar is transparent at rest and appears only while the
-  // reader is scrolling it, so a long navigation tree does not carry a
-  // permanent rail beside it.
-  const sidebar = document.querySelector<HTMLElement>('.docs-sidebar');
-  if (sidebar) {
-    let hideTimer: number | undefined;
-    sidebar.addEventListener(
-      'scroll',
-      () => {
-        sidebar.dataset.scrollbarVisible = '';
-        window.clearTimeout(hideTimer);
-        hideTimer = window.setTimeout(() => {
-          delete sidebar.dataset.scrollbarVisible;
-        }, 800);
-      },
-      { passive: true },
-    );
+  const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+  const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
+  const isZh = document.documentElement.lang === 'zh-CN';
+
+  for (const pre of document.querySelectorAll<HTMLPreElement>('.doc-content pre')) {
+    const code = pre.querySelector('code');
+    if (!code) continue;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'doc-code-copy';
+    button.setAttribute('aria-label', isZh ? '复制代码' : 'Copy code');
+    button.innerHTML = copyIcon;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '');
+        button.dataset.copied = '';
+        button.setAttribute('aria-label', isZh ? '已复制' : 'Copied');
+        button.innerHTML = checkIcon;
+        clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => {
+          delete button.dataset.copied;
+          button.setAttribute('aria-label', isZh ? '复制代码' : 'Copy code');
+          button.innerHTML = copyIcon;
+        }, 1600);
+      } catch {}
+    });
+
+    pre.append(button);
+  }
+
+  for (const demo of document.querySelectorAll<HTMLElement>('.keybinding-demo')) {
+    for (const button of demo.querySelectorAll<HTMLButtonElement>('[data-focus-target]')) {
+      button.addEventListener('click', () => {
+        demo.dataset.focus = button.dataset.focusTarget;
+        for (const target of demo.querySelectorAll<HTMLButtonElement>('[data-focus-target]')) {
+          target.setAttribute('aria-pressed', String(target === button));
+        }
+      });
+    }
+  }
+
+  for (const timeline of document.querySelectorAll<HTMLElement>('[data-frame-timeline]')) {
+    const toggle = timeline.querySelector<HTMLButtonElement>('[data-frame-timeline-toggle]');
+    if (!toggle) continue;
+
+    const pauseLabel = isZh ? '暂停动画' : 'Pause animation';
+    const playLabel = isZh ? '播放动画' : 'Play animation';
+    const setPaused = (paused: boolean) => {
+      timeline.dataset.paused = String(paused);
+      toggle.setAttribute('aria-pressed', String(paused));
+      toggle.textContent = paused ? playLabel : pauseLabel;
+    };
+
+    setPaused(false);
+    timeline.dataset.ready = '';
+    toggle.addEventListener('click', () => setPaused(timeline.dataset.paused !== 'true'));
   }
 </script>
 

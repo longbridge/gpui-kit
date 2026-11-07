@@ -3,7 +3,12 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, relative,
 };
 
-use crate::{ActiveTheme as _, StyledExt as _, dialog::Confirm, h_flex};
+use crate::{
+    ActiveTheme as _, StyledExt as _,
+    button::Button,
+    dialog::{Confirm, DialogDispatchAnchor},
+    h_flex,
+};
 
 /// Footer section of a dialog, typically contains action buttons.
 ///
@@ -11,7 +16,7 @@ use crate::{ActiveTheme as _, StyledExt as _, dialog::Confirm, h_flex};
 ///
 /// ```ignore
 /// DialogFooter::new()
-///     .child(DialogClose::new().child(Button::new("cancel").label("Cancel")))
+///     .child(DialogClose::new().trigger(|button| button.label("Cancel")))
 ///     .child(Button::new("confirm").label("Confirm"))
 /// ```
 #[derive(IntoElement)]
@@ -46,7 +51,7 @@ impl RenderOnce for DialogFooter {
         h_flex()
             .gap_2()
             .justify_end()
-            .line_height(relative(1.))
+            .line_height(relative(1.25))
             .rounded_b(cx.theme().radius_lg)
             .refine_style(&self.style)
             .children(self.children)
@@ -72,6 +77,14 @@ impl DialogClose {
         Self {
             base: gpui_base::DialogClose::new(),
         }
+    }
+
+    /// Styles a close button whose accessibility and activation are owned by Base.
+    pub fn trigger<E: IntoElement>(mut self, build: impl FnOnce(Button) -> E) -> Self {
+        self.base = self
+            .base
+            .trigger(|button| build(Button::new("close").with_base(button)));
+        self
     }
 }
 
@@ -107,12 +120,14 @@ impl ParentElement for DialogAction {
 }
 
 impl RenderOnce for DialogAction {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let anchor = DialogDispatchAnchor::new("dialog-action-anchor", window, cx);
         div()
             .size_full()
             .id("dialog-action")
+            .child(anchor.element())
             .on_click(move |_, window, cx| {
-                window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+                anchor.dispatch(&Confirm { secondary: false }, window, cx)
             })
             .children(self.children)
     }

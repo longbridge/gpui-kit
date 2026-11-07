@@ -168,9 +168,7 @@
 	"?:"
 	"!!"
 	"is"
-	"!is"
 	"in"
-	"!in"
 	"as"
 	"as?"
 	".."
@@ -191,13 +189,13 @@
 	"::"
 ] @punctuation.delimiter
 
-(string_literal
-	"$" @punctuation.special
-	(interpolated_identifier) @variable)
-(string_literal
-	"${" @punctuation.special
-	(interpolated_expression)
-	"}" @punctuation.special)
+[
+	(interpolation_identifier_start)
+	(interpolation_expression_start)
+	(interpolation_expression_end)
+] @punctuation.special
+
+(interpolated_identifier) @variable
 
 ;;; Types
 

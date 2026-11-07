@@ -40,7 +40,12 @@ SliderState 持久保存值和范围，拖动及键盘操作更新它。
 
 ## 可访问性
 
-暴露范围、当前值和方向，并保留方向键、Page Up/Down 等键盘操作。
+Slider 暴露当前值、范围、步长和方向，并处理无障碍 Increment、Decrement 操作。用 `.accessibility_label(...)` 设置名称；这不会添加可见标签。
+
+```rust
+Slider::new(&slider_state)
+    .accessibility_label("Corner radius")
+```
 
 ## 注意事项
 

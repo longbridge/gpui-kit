@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use gpui::{Action, App, AssetSource, ImageFormat, Pixels, Point, SharedString, Window};
+use gpui::{Action, App, AssetSource, ImageFormat, Pixels, Point, Window};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{BOOL, GlobalFree, HANDLE, HWND, POINT};
 use windows::Win32::Graphics::Gdi::{
@@ -17,7 +17,9 @@ use windows::Win32::Graphics::GdiPlus::{
     GdipGetImageThumbnail, GdiplusShutdown, GdiplusStartup, GdiplusStartupInput, GpBitmap, GpImage,
 };
 use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::{
+    GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW,
+};
 use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, HMENU, MENUITEMINFOW, MF_CHECKED, MF_GRAYED,
@@ -147,9 +149,16 @@ unsafe fn apply_menu_theme(hwnd: HWND, dark_mode: bool) {
 
     static UXTHEME_MODULE: OnceLock<isize> = OnceLock::new();
     let module = *UXTHEME_MODULE.get_or_init(|| {
-        unsafe { LoadLibraryW(windows::core::w!("uxtheme.dll")) }
-            .map(|module| module.0 as isize)
-            .unwrap_or_default()
+        // Restrict this system DLL to System32 to prevent application-directory DLL planting.
+        unsafe {
+            LoadLibraryExW(
+                windows::core::w!("uxtheme.dll"),
+                HANDLE::default(),
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        }
+        .map(|module| module.0 as isize)
+        .unwrap_or_default()
     });
     if module == 0 {
         return;
@@ -228,9 +237,7 @@ unsafe fn build_menu<'a>(
                 };
                 let _ = unsafe { AppendMenuW(menu, flags, id, PCWSTR(wide.as_ptr())) };
                 if let Some(icon) = icon {
-                    if let Some(bitmap) =
-                        unsafe { load_hbitmap(icon.path_ref(), asset_source, image_px) }
-                    {
+                    if let Some(bitmap) = unsafe { load_hbitmap(icon, asset_source, image_px) } {
                         let info = MENUITEMINFOW {
                             cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
                             fMask: MIIM_BITMAP,
@@ -316,11 +323,11 @@ impl Drop for GdiplusSession {
 /// # Safety
 /// Calls GDI+ /GDI flat APIs; the returned handle is owned by the caller.
 unsafe fn load_hbitmap(
-    path: &SharedString,
+    icon: &crate::Icon,
     asset_source: &dyn AssetSource,
     image_px: u32,
 ) -> Option<HBITMAP> {
-    let image = resolve_icon_image(path, asset_source)?;
+    let image = resolve_icon_image(icon, asset_source)?;
     if image.bytes.is_empty() {
         return None;
     }

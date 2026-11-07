@@ -1,19 +1,25 @@
 //! Compatibility facade for rich text now owned by `gpui-base`.
 
 mod compat;
+mod frontmatter;
 mod style;
 
 pub use compat::{
     Text, TextView, TextViewLayoutState, TextViewPlugin, TextViewPrepaintState, html, markdown,
 };
+pub use frontmatter::FrontmatterPlugin;
 pub use gpui_base::text::{
-    MarkdownBlockParserFn, MarkdownBlockRenderFn, MarkdownExtensions, MarkdownNode,
-    MarkdownParseContext, MarkdownPlugin, SelectionFormat, TableData, TextViewState, markdown_ast,
+    InlineElement, InlineRenderContext, MarkdownBlockParserFn, MarkdownBlockRenderFn,
+    MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, RangeHighlight,
+    RangeHighlightError, RenderedText, SelectionFormat, TableData, TaskToggleEvent, TextViewMotion,
+    TextViewState, markdown_ast,
 };
 pub use style::TextViewStyle;
 
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
+use std::cell::RefCell;
 #[cfg(feature = "tree-sitter")]
-use std::{cell::RefCell, collections::HashMap};
+use std::collections::HashMap;
 
 use gpui::Styled as _;
 #[cfg(feature = "tree-sitter")]
@@ -51,6 +57,7 @@ pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewS
         .with_code_block(code_block)
         .with_table(table)
         .with_table_head(table_head)
+        .with_table_row_hover(theme.table_hover)
         .with_inline_code(gpui::HighlightStyle {
             background_color: Some(theme.accent),
             ..Default::default()
@@ -59,9 +66,13 @@ pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewS
 }
 
 pub(crate) fn install_text_view_defaults(theme: &crate::Theme, cx: &mut gpui::App) {
-    let defaults = gpui_base::TextViewDefaults::new().with_style(base_text_view_style(theme));
+    // Component's Root sets the theme foreground, so every container that
+    // sets its own text color is one a text view should follow.
+    let defaults = gpui_base::TextViewDefaults::new()
+        .with_style(base_text_view_style(theme))
+        .with_inherit_text_color(true);
 
-    #[cfg(feature = "tree-sitter")]
+    #[cfg(any(feature = "tree-sitter", feature = "syntect"))]
     let defaults = defaults.with_code_block_highlighter(component_code_block_highlighter(
         theme.highlight_theme.clone(),
     ));
@@ -114,13 +125,137 @@ pub(crate) fn component_code_block_highlighter(
     }
 }
 
+/// The syntect counterpart: syntect keeps no state between calls, and the
+/// highlights of an unchanged block are cached by the text view itself.
+#[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
+pub(crate) fn component_code_block_highlighter(
+    highlight_theme: std::sync::Arc<crate::highlighter::HighlightTheme>,
+) -> impl Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
++ Send
++ Sync
++ 'static {
+    move |block| match block.lang() {
+        Some(lang) => crate::highlighter::highlight_code(
+            lang.as_ref(),
+            block.code().as_ref(),
+            highlight_theme.as_ref(),
+        ),
+        None => Vec::new(),
+    }
+}
+
+/// The type [`shared_code_block_highlighter`] returns.
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
+pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
+    + Send
+    + Sync;
+
+/// The [`component_code_block_highlighter`] for `highlight_theme`, built once
+/// and handed out again for the same theme.
+///
+/// A code block reuses its highlights only while the highlighter is the same
+/// `Arc`, and a text view with a custom theme is laid out every frame, so a
+/// fresh highlighter per frame reparsed every code block with tree-sitter on
+/// every frame. Each entry keeps its theme alive, so only the most recent few
+/// themes are kept.
+///
+/// Entries are also keyed on the [`LanguageRegistry`] generation: registering
+/// a language drops them, so the next frame gets a new highlighter and code
+/// blocks painted before the language existed are highlighted again.
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
+pub(crate) fn shared_code_block_highlighter(
+    highlight_theme: &std::sync::Arc<crate::highlighter::HighlightTheme>,
+) -> std::sync::Arc<SharedCodeBlockHighlighter> {
+    // Syntect's languages are fixed at build time, so its entries never go stale.
+    #[cfg(feature = "tree-sitter")]
+    let generation = LanguageRegistry::singleton().generation();
+    #[cfg(not(feature = "tree-sitter"))]
+    let generation = 0;
+    shared_code_block_highlighter_at(highlight_theme, generation)
+}
+
+/// [`shared_code_block_highlighter`] at an explicit registry `generation`.
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
+fn shared_code_block_highlighter_at(
+    highlight_theme: &std::sync::Arc<crate::highlighter::HighlightTheme>,
+    generation: u64,
+) -> std::sync::Arc<SharedCodeBlockHighlighter> {
+    use std::sync::Arc;
+
+    use crate::highlighter::HighlightTheme;
+
+    /// The registry generation the entries were built at, and the entries.
+    type SharedHighlighters = (
+        u64,
+        Vec<(Arc<HighlightTheme>, Arc<SharedCodeBlockHighlighter>)>,
+    );
+
+    const CAPACITY: usize = 4;
+    thread_local! {
+        static SHARED: RefCell<SharedHighlighters> = const { RefCell::new((0, Vec::new())) };
+    }
+
+    SHARED.with(|cache| {
+        let (cached_generation, shared) = &mut *cache.borrow_mut();
+        if *cached_generation != generation {
+            *cached_generation = generation;
+            shared.clear();
+        }
+        if let Some((_, highlighter)) = shared
+            .iter()
+            .find(|(theme, _)| Arc::ptr_eq(theme, highlight_theme))
+        {
+            return highlighter.clone();
+        }
+
+        let highlighter: Arc<SharedCodeBlockHighlighter> =
+            Arc::new(component_code_block_highlighter(highlight_theme.clone()));
+        if shared.len() == CAPACITY {
+            shared.remove(0);
+        }
+        shared.push((highlight_theme.clone(), highlighter.clone()));
+        highlighter
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use gpui::{StyleRefinement, Styled as _, px};
+
     use crate::Theme;
 
     /// The component highlighter is the only place that still knows about
     /// `LanguageRegistry` and `HighlightTheme`, so these two cases follow it
     /// here from the code block it used to live in.
+    /// A Markdown code fence in a language tree-sitter is not built with —
+    /// TOML here — is highlighted by syntect in a build that chose it.
+    #[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
+    #[test]
+    fn syntect_highlights_a_code_fence() {
+        use gpui_base::text::CodeBlock;
+
+        use crate::highlighter::HighlightTheme;
+
+        let code = "[package]\nname = \"demo\"\n";
+        let highlighter = super::component_code_block_highlighter(HighlightTheme::default_light());
+        let styles = highlighter(&CodeBlock::from_code(code, Some("toml")));
+        let string = code.find("\"demo\"").unwrap();
+        assert!(
+            styles
+                .iter()
+                .any(|(range, style)| range.contains(&string) && style.color.is_some()),
+            "the string must be colored: {styles:?}"
+        );
+        assert_eq!(
+            styles.last().map(|(range, _)| range.end),
+            Some(code.len()),
+            "the runs cover the whole block"
+        );
+        assert!(highlighter(&CodeBlock::from_code(code, Some("no-such-language"))).is_empty());
+    }
+
     #[cfg(feature = "tree-sitter")]
     mod code_block_highlighter {
         use std::ops::Range;
@@ -203,6 +338,36 @@ mod tests {
                 "a theme change must not reuse syntax styles from the previous theme"
             );
         }
+
+        #[test]
+        fn shared_highlighter_is_reused_for_the_same_theme() {
+            // An explicit generation, so registrations by tests running in
+            // parallel cannot drop the entries between calls.
+            const GENERATION: u64 = u64::MAX;
+            let light = HighlightTheme::default_light();
+            let dark = HighlightTheme::default_dark();
+
+            let first = super::super::shared_code_block_highlighter_at(&light, GENERATION);
+            let again = super::super::shared_code_block_highlighter_at(&light, GENERATION);
+            let other = super::super::shared_code_block_highlighter_at(&dark, GENERATION);
+
+            // Code blocks keep their highlights only while the highlighter is
+            // the same `Arc`.
+            assert!(std::sync::Arc::ptr_eq(&first, &again));
+            assert!(!std::sync::Arc::ptr_eq(&first, &other));
+        }
+
+        #[test]
+        fn registering_a_language_replaces_the_shared_highlighter() {
+            let light = HighlightTheme::default_light();
+
+            let before = super::super::shared_code_block_highlighter_at(&light, u64::MAX - 1);
+            let after = super::super::shared_code_block_highlighter_at(&light, u64::MAX - 2);
+
+            // A new `Arc` makes code blocks painted before the registration
+            // highlight again.
+            assert!(!std::sync::Arc::ptr_eq(&before, &after));
+        }
     }
 
     #[test]
@@ -215,6 +380,7 @@ mod tests {
         assert_eq!(style.link(), theme.link);
         assert_eq!(style.selection(), theme.selection);
         assert_eq!(style.inline_code().background_color, Some(theme.accent));
+        assert_eq!(style.table_row_hover(), Some(theme.table_hover));
         let radius = theme.semantic_tokens().radius.md;
         assert_eq!(style.table().corner_radii.top_left, Some(radius.into()));
         assert_eq!(style.table().corner_radii.top_right, Some(radius.into()));
@@ -246,14 +412,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_text_paths_reexport_base_implementation() {
+    fn test_text_view_builder() {
         let mut style = super::TextViewStyle::default();
         style.highlight_theme = crate::highlighter::HighlightTheme::default_dark();
 
         let _: super::TextView = super::markdown("# compatible")
             .style(style)
             .selectable(true)
-            .scrollable(true);
+            .scrollable(true)
+            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())))
+            .on_task_toggle(|_event, _, _| {});
     }
 
     #[test]
@@ -333,6 +501,21 @@ mod tests {
         assert_eq!(
             style.inline_code().font_style,
             Some(gpui::FontStyle::Italic)
+        );
+    }
+
+    #[test]
+    fn legacy_heading_configuration_maps_to_base_heading_refinements() {
+        let theme = Theme::default();
+        let mut legacy = super::TextViewStyle::default();
+        legacy.heading_base_font_size = px(10.);
+        legacy.heading_font_size = Some(Arc::new(|level, base| base * level as f32));
+
+        let style = super::compat::resolve_component_style(&theme, legacy);
+
+        assert_eq!(
+            style.heading(2),
+            StyleRefinement::default().text_size(px(20.))
         );
     }
 }

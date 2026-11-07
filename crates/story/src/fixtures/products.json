@@ -1,0 +1,26 @@
+[
+  {
+    "product": "Pro plan",
+    "sales": 3240
+  },
+  {
+    "product": "Team plan",
+    "sales": 2410
+  },
+  {
+    "product": "Starter plan",
+    "sales": 1980
+  },
+  {
+    "product": "Add-on storage",
+    "sales": 1120
+  },
+  {
+    "product": "Priority support",
+    "sales": 640
+  },
+  {
+    "product": "Training",
+    "sales": 310
+  }
+]

@@ -1,7 +1,7 @@
 ---
 title: Design Guides
 description: Product and interaction design guidance for GPUI Kit applications
-order: -2.1
+order: -12
 ---
 
 # Design Guides
@@ -17,7 +17,7 @@ and **may** is an optional technique. Component API documentation remains the
 authority for individual methods.
 
 The rules build on behavior in `gpui-base`, the GPUI Component theme and
-component system, and familiar desktop interaction. Shadcn contributes useful
+component system, and familiar desktop interaction. <a href="https://ui.shadcn.com/docs" target="_blank" rel="noopener noreferrer">shadcn/ui</a> contributes useful
 methods—open code, composition, and dependable defaults—but does not determine
 how a GPUI application should look. When influences conflict, preserve GPUI's
 lifecycle constraints and the interaction people already understand.
@@ -34,12 +34,17 @@ than compete with them.
    compose them into product-specific workflows. Create a new primitive only
    when its behavior is genuinely new.
 3. **Tokens before values.** Colors, radii, typography, and spacing should form
-   a system. Avoid isolated literals that cannot respond to themes.
+   a system. Avoid isolated literals that cannot respond to themes. See
+   [Style](./style) for GPUI's styling API.
 4. **Desktop before web convention.** Preserve keyboard access, window chrome,
    menus, dense data views, resizable regions, and persistent navigation where
    the task benefits from them.
 5. **State must be visible.** Hover, focus, selection, disabled, loading,
    validation, and destructive states need distinct and consistent treatment.
+6. **Geometry explains containment.** Radii, insets, and boundaries should
+   describe one coherent hierarchy, even where surfaces overlap.
+7. **Feedback reflects reality.** Loading, tooltips, and motion should clarify
+   a real state or transition, not add ceremony to an immediate action.
 
 ## Learning from Shadcn
 
@@ -158,9 +163,32 @@ or in audited data/raster content whose color is itself the data.
 
 ### Radius, spacing, and density
 
-Derive corner radii from the active theme. This preserves a product's ability
-to become square or more rounded as one coherent system. Use `radius_full()`
-for circles and pills rather than a literal maximum radius.
+Use a finite radius scale, as with type and control sizes. Choose from the
+theme's named tiers (`sm`, `md`, `lg`, `xl`, and larger surface tiers) instead
+of inventing a radius for each element. Large containers may use a softer tier
+than the controls they contain; compact controls and overlays use tighter
+tiers. For an ordinary rectangle, the radius should remain visibly smaller
+than half its shorter side. Use `radius_full()` only for intentional circles
+and pills; a tooltip must not become a capsule by accident.
+
+Nested surfaces should read as concentric shapes. Use
+`inner radius ≈ max(0, outer radius − gap)` to choose the closest suitable
+theme tier; the visible band should remain even through the turn. Add a
+named application token if a repeated composition needs an intermediate
+value. A segmented control is one silhouette: its end segments follow the container's inner
+corners, its middle segments remain square, and each boundary has one divider
+of consistent thickness.
+
+<img class="alignment-light" src="/radius-hierarchy.svg?v=20260923-easing" alt="Light theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+<img class="alignment-dark" src="/radius-hierarchy-dark.svg?v=20260923-easing" alt="Dark theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+
+A radius must govern the entire visible surface, not just its border. Exposed
+corners remain transparent to the surface behind them; child backgrounds,
+selection fills, and scrolling content must also follow the boundary. In GPUI,
+do not assume a rounded parent clips its descendants. Give inner surfaces their
+own radius or an appropriate clip, then inspect the composition against a
+contrasting background in both themes. Preserve outward focus rings when
+choosing a clip.
 
 Use a compact spacing scale and repeat it. Related label/control pairs should
 be closer than separate groups; separate groups should be closer than separate
@@ -358,7 +386,7 @@ Zoom is successful when the relationship between title and body, control and
 icon, inner and outer spacing, primary and secondary regions still feels the
 same at every scale—not merely when every object becomes larger.
 
-GPUI Component adopts the relative-scale idea familiar from Tailwind. The
+GPUI Component adopts the relative-scale idea familiar from <a href="https://tailwindcss.com/docs/theme" target="_blank" rel="noopener noreferrer">Tailwind CSS</a>. The
 theme's base `font_size` becomes the window's `rem` through `Root`, and GPUI
 scale helpers such as `text_sm()`, `gap_2()`, `p_4()`, `h_8()`, and `size_4()`
 resolve against it. This gives typography, spacing, controls, and icons one
@@ -414,9 +442,10 @@ identifiers, shortcuts, and aligned numeric data. Keep body text readable and
 avoid excessive uppercase or letter spacing, especially for CJK text.
 
 Use one icon family in a product. Icons supplement labels; they should not
-replace unfamiliar actions with guesswork. Icon-only buttons require a tooltip
-and an accessible name. Use filled or colored icons to communicate a state,
-not merely to make a toolbar lively.
+replace unfamiliar actions with guesswork. Icon-only buttons always need an
+accessible name. Their visual explanation follows the tooltip policy below.
+Use filled or colored icons to communicate a state, not merely to make a
+toolbar lively.
 
 ## Layout patterns
 
@@ -435,6 +464,10 @@ the remaining space with `flex_1()` and `min_w_0()` / `min_h_0()` where
 overflowing children must shrink. Use `Scrollable`, `VirtualList`, `Table`, or
 `DockArea` for their intended behavior instead of rebuilding scrolling or pane
 management from nested `div`s.
+
+The title bar is window chrome first. Preserve its drag region and avoid
+binding ordinary title clicks to infrequent editing commands. Rename belongs
+behind an explicit object command, with a keyboard path where appropriate.
 
 ### Responsive desktop windows
 
@@ -466,6 +499,10 @@ choices, `RadioGroup` for a small visible set, `Select` for a longer set, and
 Disable submission while an operation is in flight, keep the user's input, and
 show the result near the action. Reserve dialogs for short, focused decisions;
 use a full page or sheet for workflows that need exploration or many fields.
+
+A loading treatment must represent actual waiting. Switching between settings
+panels whose content is already available should be immediate; a skeleton is
+appropriate only while content is genuinely loading and its shape is known.
 
 ## Components and composition
 
@@ -535,6 +572,17 @@ show a persistent selected state. A Button that owns a dropdown must remain
 visibly pressed or open until the popup closes; hover alone cannot explain the
 relationship between trigger and surface.
 
+In a segmented control, the selected fill and unselected surface must share
+the container's silhouette. Neither may square off an end corner or make a
+boundary appear heavier than its peers.
+
+Show a selected navigation item, list row, or tab through the item's own
+surface: a selected fill, stronger foreground, or heavier weight. Do not add a
+leading-edge bar or one-sided border as the selection marker. It is a web
+template habit, not a desktop convention; it breaks the item's rounded
+silhouette and adds a second, competing edge to a column that already aligns
+on its text.
+
 For destructive actions, distinguish between reversible and irreversible work.
 Prefer undo or a temporary notification for reversible changes. Use an
 `AlertDialog` when the consequence is serious and cannot be undone; name the
@@ -562,7 +610,7 @@ Use command frequency and scope to choose where an action lives:
 - put secondary actions for the current region behind a visible
   `DropdownMenu` trigger;
 - put commands that act on the object under the pointer in a `ContextMenu`;
-- expose the same important command through an Action/key binding when it has a
+- expose the same important command through an [Action](./action)/[key binding](./keybinding) when it has a
   natural keyboard form;
 - use a hover-revealed icon only as a shortcut to a command that remains
   reachable elsewhere.
@@ -596,7 +644,8 @@ hierarchy:
 - default Button for ordinary visible actions;
 - outline Button when an action needs a clear boundary with less emphasis;
 - ghost Button for familiar, low-emphasis toolbar and inline actions;
-- icon Button only for a well-known symbol, with an accessible name and tooltip.
+- icon Button only for a well-known symbol, with an accessible name and a
+  tooltip when meaning or scope is unclear.
 
 Do not assign primary because a Button is the only action on screen, because it
 is placed at the top right, or because the team wants more clicks. Primary
@@ -634,6 +683,12 @@ Choose the smallest surface that fits the decision:
 - alert dialog: explicit confirmation of a consequential action;
 - sheet: supplementary work that benefits from more persistent space.
 
+A tooltip supplies missing meaning; it does not restate an obvious action.
+Reserve it for an unfamiliar symbol, ambiguous scope, or a useful shortcut
+that is otherwise hidden. Repeated, recognizable commands such as Copy and
+Download in a message footer need accessible names and keyboard access, but
+their hover labels add interruption rather than clarity.
+
 An Alert interrupts the visual hierarchy even when it does not open a modal.
 Use it for important, exceptional information that needs attention in the
 current task, not as a decorated container for ordinary descriptions, tips, or
@@ -669,6 +724,11 @@ lifecycle mechanism or geometry needed for a transition, but it should not
 decide that every product fades or slides. Give independently animated values
 stable identity, and make interruption reverse smoothly from the currently
 sampled value rather than restarting from an old endpoint.
+
+Motion follows the continuity of the interaction. While a pointer or scroll
+position moves among related targets, keep the preview surface stable and
+update its content or position in place. Dismiss it only after the interaction
+ends; repeated fade-out and re-entry on each update reads as flicker.
 
 ## Designing data-heavy interfaces
 
@@ -741,6 +801,19 @@ translation would be less precise. Keep API identifiers in their original form
 and format them as code. Do not retain ordinary foreign words merely to sound
 technical. Explain a retained term on first use when needed, then use the same
 form throughout the interface, documentation, and API examples.
+
+In documentation, use the exact English name for a named API, component,
+source file, or guide in link text, including localized pages. For example,
+write `Font`, `Render`, `Input element`, and `Plot label` rather than translating
+their names or adding a redundant `GPUI Kit` prefix. Keep surrounding explanations in the
+page's language. Link only the named target; place words such as “source”
+outside the link when they describe why it is cited.
+
+In a technical comparison table shared across locales, keep capability names,
+framework names, API names, and model names in their established English form.
+Translate the explanation around the table, not its technical labels. Common
+interface words with an established local name may still be localized outside
+that comparison context.
 
 ### Buttons and confirmation dialogs
 
@@ -821,6 +894,11 @@ the document visibly becomes saved.
 
 ## Internationalization and platform fit
 
+Accessibility (A11y) names and labels may remain in English; localization is
+not required for these strings. Keep the item's own label when naming a control
+that acts on it, even when that label is localized. This exception does not
+apply to visible UI copy.
+
 Copy must survive expansion, CJK typography, and different shortcut notation.
 Do not size a control from one English label. Keep text out of raster assets,
 avoid concatenating translated fragments, and let labels wrap or truncate only
@@ -852,7 +930,8 @@ Before considering a screen complete, verify that:
 - every action is reachable and operable by keyboard;
 - focus order follows visual and task order;
 - focus remains visible and is restored after overlays;
-- controls have names, and icon-only controls have tooltips;
+- controls have accessible names; icon-only controls use tooltips when their
+  meaning, scope, or shortcut needs explanation;
 - text and meaningful boundaries have sufficient contrast;
 - status is not communicated by color alone;
 - disabled and read-only states are distinguishable;

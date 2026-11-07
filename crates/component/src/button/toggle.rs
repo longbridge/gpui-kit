@@ -1,9 +1,9 @@
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 use gpui::{
     AnyElement, App, Axis, Corners, Edges, ElementId, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
-    Window, prelude::FluentBuilder as _,
+    Window, prelude::FluentBuilder as _, relative,
 };
 use gpui_base::{Toggle as BaseToggle, ToggleGroup as BaseToggleGroup};
 use smallvec::{SmallVec, smallvec};
@@ -71,6 +71,14 @@ impl Toggle {
     /// Set tooltip text for the toggle.
     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
         self.tooltip.text = Some((tooltip.into(), None));
+        self
+    }
+
+    /// Overrides how long the pointer must rest before the tooltip shows.
+    ///
+    /// Defaults to [`gpui_base::TooltipDefaults::show_delay`].
+    pub fn tooltip_show_delay(mut self, delay: Duration) -> Self {
+        self.tooltip.show_delay = Some(delay);
         self
     }
 
@@ -168,13 +176,14 @@ impl RenderOnce for Toggle {
             })
             .flex()
             .flex_row()
+            .line_height(relative(1.25))
             .items_center()
             .justify_center()
             .map(|this| match self.size {
                 Size::XSmall => this.min_w_5().h_5().px_0p5().text_xs(),
                 Size::Small => this.min_w_6().h_6().px_1().text_sm(),
-                Size::Large => this.min_w_9().h_9().px_3().text_lg(),
-                _ => this.min_w_8().h_8().px_2(),
+                Size::Large => this.min_w_9().h_9().px_3().text_base(),
+                _ => this.min_w_8().h_8().px_2().text_sm(),
             })
             .when(self.border_corners.top_left, |this| {
                 this.rounded_tl(rounding)
@@ -196,11 +205,16 @@ impl RenderOnce for Toggle {
                     .border_color(cx.theme().border)
                     .bg(cx.theme().tokens.background)
             })
-            .when(hoverable, |this| {
-                this.hover(|this| {
-                    this.bg(cx.theme().tokens.accent)
-                        .text_color(cx.theme().accent_foreground)
-                })
+            // Always register the hover style: GPUI only refreshes the cached
+            // hover state while one is present. If a checked toggle skipped it,
+            // the stale state would paint its label in the hover color once
+            // something else unchecks it while the pointer rests elsewhere.
+            .hover(|this| {
+                if !hoverable {
+                    return this;
+                }
+                this.bg(cx.theme().tokens.accent)
+                    .text_color(cx.theme().accent_foreground)
             })
             .styles(|styles| {
                 styles.pressed(|style| {
@@ -225,6 +239,7 @@ pub struct ToggleGroup {
     variant: ToggleVariant,
     disabled: bool,
     segmented: bool,
+    single: bool,
     items: Vec<Toggle>,
     on_click: Option<Rc<dyn Fn(&Vec<bool>, &mut Window, &mut App) + 'static>>,
 }
@@ -239,6 +254,7 @@ impl ToggleGroup {
             variant: ToggleVariant::default(),
             disabled: false,
             segmented: false,
+            single: false,
             items: Vec::new(),
             on_click: None,
         }
@@ -259,6 +275,7 @@ impl ToggleGroup {
     /// Set the callback to be called when the toggle group changes.
     ///
     /// The `&Vec<bool>` parameter represents the new check state of each [`Toggle`] in the group.
+    /// In a [`single`](Self::single) group at most one of them is `true`.
     pub fn on_click(
         mut self,
         on_click: impl Fn(&Vec<bool>, &mut Window, &mut App) + 'static,
@@ -269,10 +286,22 @@ impl ToggleGroup {
 
     /// Render the group as a connected segmented control.
     ///
-    /// This keeps the existing multi-toggle behavior, but removes the default
-    /// gap and joins adjacent item borders into a single segmented outline.
+    /// This only changes the look: it removes the default gap and joins
+    /// adjacent item borders into a single segmented outline. Pair it with
+    /// [`single`](Self::single) for an exclusive choice.
     pub fn segmented(mut self) -> Self {
         self.segmented = true;
+        self
+    }
+
+    /// Let at most one item be checked at a time.
+    ///
+    /// A click on an unchecked item checks it and clears the others. A click
+    /// on the checked item clears it, so the group can also hold no selection.
+    /// The caller keeps at most one item `checked`; the group does not
+    /// reconcile a state in which several are.
+    pub fn single(mut self) -> Self {
+        self.single = true;
         self
     }
 }
@@ -307,6 +336,7 @@ impl Styled for ToggleGroup {
 impl RenderOnce for ToggleGroup {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let disabled = self.disabled;
+        let single = self.single;
         let items_len = self.items.len();
         let checks = self
             .items
@@ -389,8 +419,14 @@ impl RenderOnce for ToggleGroup {
                         let Some(ix) = clicked_index.take() else {
                             return;
                         };
-                        let mut next = checks.clone();
-                        next[ix] = !next[ix];
+                        // A single group clears every other item; clicking its
+                        // checked item still flips that one off.
+                        let mut next = if single {
+                            vec![false; checks.len()]
+                        } else {
+                            checks.clone()
+                        };
+                        next[ix] = !checks[ix];
                         on_click(&next, window, cx);
                     })
                 },
@@ -401,10 +437,10 @@ impl RenderOnce for ToggleGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{IconName, h_flex};
+    use crate::{IconName, Theme, h_flex};
     use gpui::{
-        Context, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Render,
-        StatefulInteractiveElement, TestAppContext, VisualTestContext, point, px,
+        Context, Hsla, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Render,
+        StatefulInteractiveElement, TestAppContext, VisualTestContext, div, point, px,
     };
     use std::cell::{Cell, RefCell};
 
@@ -458,7 +494,8 @@ mod tests {
     }
 
     fn activate_key(cx: &mut VisualTestContext, key: &str) {
-        let keystroke = Keystroke::parse(key).unwrap();
+        let keystroke =
+            cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
         cx.simulate_event(KeyDownEvent {
             keystroke: keystroke.clone(),
             is_held: false,
@@ -572,6 +609,142 @@ mod tests {
         assert!(changes.borrow().is_empty());
     }
 
+    /// Three 60 px items with no gap, so the pointer reaches each of them at
+    /// a known x: the first is checked.
+    struct SelectionHarness {
+        single: bool,
+        changes: Rc<RefCell<Vec<Vec<bool>>>>,
+    }
+
+    impl Render for SelectionHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let changes = self.changes.clone();
+            ToggleGroup::new("selection")
+                .segmented()
+                .when(self.single, ToggleGroup::single)
+                .child(Toggle::new("one").label("One").w(px(60.)).checked(true))
+                .child(Toggle::new("two").label("Two").w(px(60.)))
+                .child(Toggle::new("three").label("Three").w(px(60.)))
+                .on_click(move |next, _, _| changes.borrow_mut().push(next.clone()))
+        }
+    }
+
+    fn selection_harness(
+        cx: &mut TestAppContext,
+        single: bool,
+    ) -> (&mut VisualTestContext, Rc<RefCell<Vec<Vec<bool>>>>) {
+        cx.update(crate::init);
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let changes = changes.clone();
+            move |_, _| SelectionHarness { single, changes }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (cx, changes)
+    }
+
+    #[gpui::test]
+    fn single_toggle_group_moves_the_check_to_the_clicked_item(cx: &mut TestAppContext) {
+        let (cx, changes) = selection_harness(cx, true);
+        cx.simulate_click(point(px(90.), px(16.)), Modifiers::default());
+        assert_eq!(changes.borrow().as_slice(), &[vec![false, true, false]]);
+    }
+
+    #[gpui::test]
+    fn single_toggle_group_clears_the_checked_item_when_it_is_clicked(cx: &mut TestAppContext) {
+        let (cx, changes) = selection_harness(cx, true);
+        cx.simulate_click(point(px(30.), px(16.)), Modifiers::default());
+        assert_eq!(changes.borrow().as_slice(), &[vec![false, false, false]]);
+    }
+
+    #[gpui::test]
+    fn multi_toggle_group_keeps_the_other_checked_items(cx: &mut TestAppContext) {
+        let (cx, changes) = selection_harness(cx, false);
+        cx.simulate_click(point(px(90.), px(16.)), Modifiers::default());
+        assert_eq!(changes.borrow().as_slice(), &[vec![true, true, false]]);
+    }
+
+    /// Records the text color the toggle hands down to its content.
+    #[derive(IntoElement)]
+    struct ContentColor(Rc<Cell<Option<Hsla>>>);
+
+    impl RenderOnce for ContentColor {
+        fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+            self.0.set(Some(window.text_style().color));
+            div().w(px(40.)).h(px(16.))
+        }
+    }
+
+    /// A single group of two 60 px items that owns its selection; the first
+    /// item reports the text color it passes to its content.
+    struct ContentColorHarness {
+        checked: Option<usize>,
+        color: Rc<Cell<Option<Hsla>>>,
+    }
+
+    impl Render for ContentColorHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            ToggleGroup::new("selection")
+                .segmented()
+                .single()
+                .child(
+                    Toggle::new("one")
+                        .w(px(60.))
+                        .checked(self.checked == Some(0))
+                        .child(ContentColor(self.color.clone())),
+                )
+                .child(
+                    Toggle::new("two")
+                        .label("Two")
+                        .w(px(60.))
+                        .checked(self.checked == Some(1)),
+                )
+                .on_click(cx.listener(|this, next: &Vec<bool>, _, cx| {
+                    this.checked = next.iter().position(|checked| *checked);
+                    cx.notify();
+                }))
+        }
+    }
+
+    #[gpui::test]
+    fn an_item_unchecked_from_elsewhere_drops_its_hover_color(cx: &mut TestAppContext) {
+        let (foreground, accent_foreground) = cx.update(|cx| {
+            crate::init(cx);
+            let theme = Theme::global_mut(cx);
+            theme.foreground = gpui::black();
+            theme.accent_foreground = gpui::white();
+            (theme.foreground, theme.accent_foreground)
+        });
+        let color = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let color = color.clone();
+            move |_, _| ContentColorHarness {
+                checked: None,
+                color,
+            }
+        });
+        let draw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+        draw(cx);
+        assert_eq!(color.get(), Some(foreground));
+
+        // Hover the first item and check it, then rest the pointer on the second.
+        cx.simulate_mouse_move(point(px(30.), px(16.)), None, Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(accent_foreground));
+        cx.simulate_click(point(px(30.), px(16.)), Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(accent_foreground));
+        cx.simulate_mouse_move(point(px(90.), px(16.)), None, Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(accent_foreground));
+
+        // Checking the second item unchecks the first while the pointer is
+        // elsewhere, so its content goes back to the plain foreground.
+        cx.simulate_click(point(px(90.), px(16.)), Modifiers::default());
+        draw(cx);
+        assert_eq!(color.get(), Some(foreground));
+    }
+
     #[test]
     fn instance_style_remains_the_final_visual_override() {
         let toggle = Toggle::new("styled").checked(true).opacity(0.37);
@@ -606,6 +779,7 @@ mod tests {
             .outline()
             .large()
             .segmented()
+            .single()
             .disabled(false)
             .on_click(|_, _, _| {});
 
@@ -613,6 +787,7 @@ mod tests {
         assert_eq!(group.variant, ToggleVariant::Outline);
         assert_eq!(group.size, Size::Large);
         assert!(group.segmented);
+        assert!(group.single);
         assert!(!group.disabled);
         assert!(group.on_click.is_some());
     }

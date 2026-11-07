@@ -5,12 +5,13 @@
 //! tooltips, and menus.
 
 use gpui::{
-    Anchor, AnyElement, App, Bounds, Display, Element, GlobalElementId, Half as _, HitboxBehavior,
-    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, Style,
-    Window, point, px,
+    Anchor, AnyElement, App, Bounds, Decorations, Display, Edges, Element, GlobalElementId,
+    Half as _, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels,
+    Point, Position, Size, Style, Window, point, px,
 };
 
 use crate::Placement;
+use std::{cell::Cell, rc::Rc};
 
 /// Alignment of a popup along the side it is placed on.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -61,6 +62,8 @@ pub struct ResolvedPosition {
 /// children.
 pub struct Positioner {
     strategy: Strategy,
+    corner_position: Option<Rc<Cell<Point<Pixels>>>>,
+    on_position: Option<Box<dyn Fn(ResolvedPosition)>>,
     margin: Pixels,
     occlude: bool,
     children: Vec<AnyElement>,
@@ -81,6 +84,8 @@ impl Positioner {
                 align: Align::Center,
                 offset: px(0.),
             },
+            corner_position: None,
+            on_position: None,
             margin: px(4.),
             occlude: false,
             children: Vec::new(),
@@ -95,10 +100,26 @@ impl Positioner {
     pub fn corner(anchor: Anchor, position: Point<Pixels>) -> Self {
         Self {
             strategy: Strategy::Corner { anchor, position },
+            corner_position: None,
+            on_position: None,
             margin: px(4.),
             occlude: false,
             children: Vec::new(),
         }
+    }
+
+    /// Updates the requested corner position.
+    ///
+    /// This is useful when an animation moves an already-composed popup. It
+    /// has no effect on a side-positioned popup.
+    pub fn position(mut self, position: Point<Pixels>) -> Self {
+        if let Strategy::Corner {
+            position: current, ..
+        } = &mut self.strategy
+        {
+            *current = position;
+        }
+        self
     }
 
     /// Sets the preferred side. Only meaningful for [`Positioner::side`].
@@ -130,6 +151,18 @@ impl Positioner {
         self
     }
 
+    // Read after trigger prepaint so an open popup follows a moving trigger.
+    pub(crate) fn tracked_corner_position(mut self, position: Rc<Cell<Point<Pixels>>>) -> Self {
+        self.corner_position = Some(position);
+        self
+    }
+
+    /// Observe resolved geometry before children prepaint.
+    pub fn on_position(mut self, callback: impl Fn(ResolvedPosition) + 'static) -> Self {
+        self.on_position = Some(Box::new(callback));
+        self
+    }
+
     /// Blocks the mouse over the positioned popup.
     ///
     /// Off by default, because a tooltip that swallowed the pointer would
@@ -148,16 +181,38 @@ impl Positioner {
     }
 }
 
+/// The part of the window's viewport that is frame rather than content, per
+/// side.
+///
+/// A window drawn with client-side decorations pads its content by the client
+/// inset to make room for a shadow, except along an edge that is tiled against
+/// the screen, where the frame draws no shadow and the content runs to the
+/// viewport edge. `Window::client_inset` is the one value on every side (the
+/// platform needs it stable across tiling changes to size the window), so the
+/// tiling is what says where it actually applies. A server-decorated window
+/// has no frame of its own.
+fn frame_insets(decorations: Decorations, client_inset: Pixels) -> Edges<Pixels> {
+    match decorations {
+        Decorations::Server => Edges::default(),
+        Decorations::Client { tiling } => Edges {
+            top: if tiling.top { px(0.) } else { client_inset },
+            right: if tiling.right { px(0.) } else { client_inset },
+            bottom: if tiling.bottom { px(0.) } else { client_inset },
+            left: if tiling.left { px(0.) } else { client_inset },
+        },
+    }
+}
+
 /// Resolves the bounds of a popup of `popup_size`.
 ///
 /// Side placement picks the preferred side when the popup fits, otherwise the
 /// opposite side, otherwise whichever side has more room. The result is always
-/// clamped into the viewport with `margin`.
+/// clamped into the viewport, keeping `margin` from each edge.
 fn resolve(
     strategy: Strategy,
     popup_size: Size<Pixels>,
     viewport_size: Size<Pixels>,
-    margin: Pixels,
+    margin: Edges<Pixels>,
 ) -> ResolvedPosition {
     match strategy {
         Strategy::Corner { anchor, position } => ResolvedPosition {
@@ -189,14 +244,14 @@ fn resolve_placement(
     trigger_bounds: Bounds<Pixels>,
     popup_size: Size<Pixels>,
     viewport_size: Size<Pixels>,
-    margin: Pixels,
+    margin: Edges<Pixels>,
     preferred: Option<Placement>,
 ) -> Placement {
-    let right_limit = (viewport_size.width - margin).max(margin);
-    let bottom_limit = (viewport_size.height - margin).max(margin);
-    let available_left = (trigger_bounds.left() - margin).max(px(0.));
+    let right_limit = (viewport_size.width - margin.right).max(margin.left);
+    let bottom_limit = (viewport_size.height - margin.bottom).max(margin.top);
+    let available_left = (trigger_bounds.left() - margin.left).max(px(0.));
     let available_right = (right_limit - trigger_bounds.right()).max(px(0.));
-    let available_above = (trigger_bounds.top() - margin).max(px(0.));
+    let available_above = (trigger_bounds.top() - margin.top).max(px(0.));
     let available_below = (bottom_limit - trigger_bounds.bottom()).max(px(0.));
 
     match preferred {
@@ -248,22 +303,22 @@ fn side_origin(
 fn clamp(
     mut bounds: Bounds<Pixels>,
     viewport_size: Size<Pixels>,
-    margin: Pixels,
+    margin: Edges<Pixels>,
 ) -> Bounds<Pixels> {
-    let right_limit = (viewport_size.width - margin).max(margin);
-    let bottom_limit = (viewport_size.height - margin).max(margin);
+    let right_limit = (viewport_size.width - margin.right).max(margin.left);
+    let bottom_limit = (viewport_size.height - margin.bottom).max(margin.top);
 
     if bounds.right() > right_limit {
         bounds.origin.x -= bounds.right() - right_limit;
     }
-    if bounds.left() < margin {
-        bounds.origin.x = margin;
+    if bounds.left() < margin.left {
+        bounds.origin.x = margin.left;
     }
     if bounds.bottom() > bottom_limit {
         bounds.origin.y -= bounds.bottom() - bottom_limit;
     }
-    if bounds.top() < margin {
-        bounds.origin.y = margin;
+    if bounds.top() < margin.top {
+        bounds.origin.y = margin.top;
     }
 
     bounds
@@ -334,13 +389,25 @@ impl Element for Positioner {
         }
 
         let popup_size = (child_max - child_min).into();
-        let client_inset = window.client_inset().unwrap_or(px(0.));
+        let frame = frame_insets(
+            window.window_decorations(),
+            window.client_inset().unwrap_or(px(0.)),
+        );
+        let mut strategy = self.strategy;
+        if let (Strategy::Corner { position, .. }, Some(tracked)) =
+            (&mut strategy, &self.corner_position)
+        {
+            *position = tracked.get();
+        }
         let position = resolve(
-            self.strategy,
+            strategy,
             popup_size,
             window.viewport_size(),
-            self.margin + client_inset,
+            frame.map(|inset| *inset + self.margin),
         );
+        if let Some(callback) = &self.on_position {
+            callback(position);
+        }
         // Ahead of the children so it blocks what is behind the popup without
         // blocking the popup's own content.
         if self.occlude {
@@ -384,6 +451,7 @@ impl IntoElement for Positioner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::Tiling;
 
     const MARGIN: Pixels = px(4.);
 
@@ -410,7 +478,7 @@ mod tests {
             },
             popup,
             viewport(),
-            MARGIN,
+            Edges::all(MARGIN),
         )
     }
 
@@ -483,7 +551,7 @@ mod tests {
             },
             Size::new(px(40.), px(30.)),
             viewport(),
-            MARGIN,
+            Edges::all(MARGIN),
         );
 
         assert_eq!(position.bounds.top(), px(228.));
@@ -498,7 +566,7 @@ mod tests {
             },
             Size::new(px(40.), px(30.)),
             viewport(),
-            MARGIN,
+            Edges::all(MARGIN),
         );
 
         assert_eq!(position.placement, None);
@@ -514,12 +582,94 @@ mod tests {
             },
             Size::new(px(40.), px(30.)),
             viewport(),
-            MARGIN,
+            Edges::all(MARGIN),
         );
 
         assert_eq!(position.placement, None);
         assert_eq!(position.bounds.right(), viewport().width - MARGIN);
         assert_eq!(position.bounds.bottom(), viewport().height - MARGIN);
+    }
+
+    #[test]
+    fn corner_position_can_be_updated_without_rebuilding_the_positioner() {
+        let positioner = Positioner::corner(Anchor::TopLeft, point(px(10.), px(20.)))
+            .position(point(px(30.), px(40.)));
+
+        assert!(matches!(
+            positioner.strategy,
+            Strategy::Corner {
+                position,
+                ..
+            } if position == point(px(30.), px(40.))
+        ));
+    }
+
+    /// A tiled edge draws no shadow, so a popup may run right up to the
+    /// margin there; an untiled edge keeps the whole client inset as well.
+    #[test]
+    fn frame_insets_apply_the_client_inset_only_on_untiled_edges() {
+        let inset = px(20.);
+
+        assert_eq!(
+            frame_insets(Decorations::Server, inset),
+            Edges::default(),
+            "a server-decorated window has no frame to keep clear of"
+        );
+        assert_eq!(
+            frame_insets(
+                Decorations::Client {
+                    tiling: Tiling::tiled()
+                },
+                inset
+            ),
+            Edges::default(),
+            "a window tiled on every side draws no shadow padding"
+        );
+        assert_eq!(
+            frame_insets(
+                Decorations::Client {
+                    tiling: Tiling {
+                        top: false,
+                        left: true,
+                        right: false,
+                        bottom: true,
+                    }
+                },
+                inset
+            ),
+            Edges {
+                top: inset,
+                right: inset,
+                bottom: px(0.),
+                left: px(0.),
+            }
+        );
+    }
+
+    /// The bug this guards: a menu opened from a trigger near the right edge
+    /// of a tiled window was pushed inward by the client inset although no
+    /// shadow was drawn there, so it no longer lined up with its trigger.
+    #[test]
+    fn clamping_keeps_only_the_margin_on_a_tiled_edge() {
+        let popup = Size::new(px(120.), px(30.));
+        // A menu aligned to a trigger that ends 10px short of the right edge.
+        let corner = Strategy::Corner {
+            anchor: Anchor::TopRight,
+            position: point(viewport().width - px(10.), px(100.)),
+        };
+        let margin = Edges::all(MARGIN);
+        let inset = px(20.);
+
+        let tiled = resolve(corner, popup, viewport(), margin);
+        assert_eq!(tiled.bounds.right(), viewport().width - px(10.));
+
+        let untiled = resolve(
+            corner,
+            popup,
+            viewport(),
+            margin.map(|margin| *margin + inset),
+        );
+        assert_eq!(untiled.bounds.right(), viewport().width - MARGIN - inset);
     }
 
     // Migrated from the tooltip module when its private positioning logic was
@@ -543,7 +693,7 @@ mod tests {
             },
             popup,
             viewport,
-            margin,
+            Edges::all(margin),
         );
         (resolved.bounds, resolved.placement.unwrap())
     }

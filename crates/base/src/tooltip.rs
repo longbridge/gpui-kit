@@ -1,17 +1,16 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, AnyView, App, Bounds, Context, Div, ElementId, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Render, RenderOnce, Role, Stateful, StatefulInteractiveElement, Styled,
-    Task, Window, deferred, div, prelude::FluentBuilder as _, px,
+    AnyElement, AnyView, App, Bounds, Context, Div, ElementId, Global, InteractiveElement,
+    IntoElement, ParentElement, Pixels, Render, RenderOnce, Role, Stateful,
+    StatefulInteractiveElement, Styled, Task, Window, deferred, div, prelude::FluentBuilder as _,
+    px,
 };
 
 use crate::{Placement, Positioner};
 
 const TOOLTIP_PRIORITY: usize = 200;
 const WINDOW_MARGIN: Pixels = px(4.);
-const GRACE_PERIOD: Duration = Duration::from_millis(300);
-const SHOW_DELAY: Duration = Duration::from_millis(500);
 
 type TooltipBuilder = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
 type TooltipRenderer = Rc<dyn Fn(AnyView, TooltipTransition, &mut Window, &mut App) -> AnyElement>;
@@ -51,12 +50,76 @@ impl RenderOnce for Tooltip {
     }
 }
 
+/// Application-wide timing for tooltips shown through [`TooltipOverlay`].
+///
+/// Read on every show and hide request, so installing new defaults takes
+/// effect in windows that are already open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TooltipDefaults {
+    show_delay: Duration,
+    grace_period: Duration,
+}
+
+impl Global for TooltipDefaults {}
+
+impl TooltipDefaults {
+    /// Creates the Base defaults: a 500 ms show delay and a 300 ms grace period.
+    pub fn new() -> Self {
+        Self {
+            show_delay: Duration::from_millis(500),
+            grace_period: Duration::from_millis(300),
+        }
+    }
+
+    /// Sets how long the pointer must rest on a trigger before its tooltip shows.
+    pub fn with_show_delay(mut self, delay: Duration) -> Self {
+        self.show_delay = delay;
+        self
+    }
+
+    /// Sets how long a tooltip stays after the pointer leaves its trigger.
+    ///
+    /// Entering another trigger within this period switches to its tooltip
+    /// without waiting for the show delay.
+    pub fn with_grace_period(mut self, period: Duration) -> Self {
+        self.grace_period = period;
+        self
+    }
+
+    /// How long the pointer must rest on a trigger before its tooltip shows.
+    pub fn show_delay(&self) -> Duration {
+        self.show_delay
+    }
+
+    /// How long a tooltip stays after the pointer leaves its trigger.
+    pub fn grace_period(&self) -> Duration {
+        self.grace_period
+    }
+
+    /// Installs these defaults for the whole application.
+    pub fn install(self, cx: &mut App) {
+        cx.set_global(self);
+    }
+
+    /// Returns the installed defaults, or the Base ones when none were.
+    pub fn global(cx: &App) -> Self {
+        cx.try_global::<Self>().copied().unwrap_or_default()
+    }
+}
+
+impl Default for TooltipDefaults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Content requested by a tooltip trigger.
 #[derive(Clone)]
 pub struct TooltipRequest {
     build: TooltipBuilder,
     trigger_bounds: Bounds<Pixels>,
     preferred_placement: Option<Placement>,
+    show_delay: Option<Duration>,
 }
 
 impl TooltipRequest {
@@ -68,11 +131,24 @@ impl TooltipRequest {
             build: Rc::new(build),
             trigger_bounds,
             preferred_placement: None,
+            show_delay: None,
         }
     }
 
-    pub fn placement(mut self, placement: Placement) -> Self {
+    /// Prefers a side for the tooltip, falling back when it does not fit.
+    pub fn with_placement(mut self, placement: Placement) -> Self {
         self.preferred_placement = Some(placement);
+        self
+    }
+
+    #[deprecated(note = "use `with_placement`")]
+    pub fn placement(self, placement: Placement) -> Self {
+        self.with_placement(placement)
+    }
+
+    /// Overrides [`TooltipDefaults::show_delay`] for this trigger.
+    pub fn with_show_delay(mut self, delay: Duration) -> Self {
+        self.show_delay = Some(delay);
         self
     }
 }
@@ -91,7 +167,11 @@ pub enum TooltipTransition {
 }
 
 /// Per-window tooltip provider and overlay.
+///
+/// Show requests are ignored on iOS and Android, where touch input must not
+/// open hover tooltips. This does not control GPUI's native `.tooltip()` API.
 pub struct TooltipOverlay {
+    enabled: bool,
     content: Option<TooltipRequest>,
     previous_bounds: Option<Bounds<Pixels>>,
     epoch: usize,
@@ -106,6 +186,7 @@ pub struct TooltipOverlay {
 impl TooltipOverlay {
     pub fn new() -> Self {
         Self {
+            enabled: !crate::is_mobile(),
             content: None,
             previous_bounds: None,
             epoch: 0,
@@ -137,9 +218,17 @@ impl TooltipOverlay {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Gate both delayed display and the immediate grace-period switch.
+        // Keep this in Base so every managed component shares the policy.
+        if !self.enabled {
+            return;
+        }
         self.hide_task = None;
+        let show_delay = content
+            .show_delay
+            .unwrap_or_else(|| TooltipDefaults::global(cx).show_delay);
         let was_visible = self.content.is_some();
-        if was_visible || self.had_recent_tooltip {
+        if was_visible || self.had_recent_tooltip || show_delay.is_zero() {
             self.previous_bounds = self.content.as_ref().map(|content| content.trigger_bounds);
             self.content = Some(content);
             self.show_task = None;
@@ -151,7 +240,7 @@ impl TooltipOverlay {
 
         let epoch = self.next_epoch();
         self.show_task = Some(cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor().timer(SHOW_DELAY).await;
+            cx.background_executor().timer(show_delay).await;
             let _ = this.update_in(cx, |this, _, cx| {
                 if this.epoch == epoch {
                     this.content = Some(content);
@@ -170,9 +259,10 @@ impl TooltipOverlay {
             return;
         }
         let epoch = self.next_epoch();
+        let grace_period = TooltipDefaults::global(cx).grace_period;
         self.had_recent_tooltip = true;
         self.hide_task = Some(cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor().timer(GRACE_PERIOD).await;
+            cx.background_executor().timer(grace_period).await;
             let _ = this.update_in(cx, |this, _, cx| {
                 if this.epoch == epoch {
                     this.content = None;
@@ -301,8 +391,75 @@ mod tests {
         cx.update(|_, cx| assert!(state.read(cx).content.is_none()));
     }
 
+    #[gpui::test]
+    fn show_delay_follows_defaults_and_request_override(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            TooltipDefaults::new()
+                .with_show_delay(Duration::from_millis(100))
+                .install(cx)
+        });
+        // The delayed show updates the overlay in the window it was drawn in.
+        let (state, cx) = cx.add_window_view(|_, _| TooltipOverlay::new());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let request = || {
+            TooltipRequest::new(bounds(0., 0., 20., 20.), |_, cx| {
+                cx.new(|_| gpui::Empty).into()
+            })
+        };
+
+        cx.update(|window, cx| {
+            state.update(cx, |tooltip, cx| {
+                tooltip.request_show(request(), window, cx)
+            });
+        });
+        cx.executor().advance_clock(Duration::from_millis(99));
+        cx.run_until_parked();
+        cx.update(|_, cx| assert!(state.read(cx).content.is_none()));
+        cx.executor().advance_clock(Duration::from_millis(1));
+        cx.run_until_parked();
+        cx.update(|_, cx| assert!(state.read(cx).content.is_some()));
+
+        cx.update(|_, cx| state.update(cx, |tooltip, cx| tooltip.hide(cx)));
+        cx.update(|window, cx| {
+            state.update(cx, |tooltip, cx| {
+                tooltip.request_show(request().with_show_delay(Duration::ZERO), window, cx);
+                assert!(tooltip.content.is_some());
+                assert!(tooltip.show_task.is_none());
+            });
+        });
+    }
+
     #[test]
     fn tooltip_priority_exceeds_popup_layer() {
         assert!(TOOLTIP_PRIORITY > crate::POPUP_PRIORITY);
+    }
+
+    #[gpui::test]
+    fn disabled_provider_ignores_delayed_and_immediate_requests(cx: &mut gpui::TestAppContext) {
+        let state = cx.update(|cx| {
+            cx.new(|_| TooltipOverlay {
+                enabled: false,
+                ..TooltipOverlay::new()
+            })
+        });
+        let cx = cx.add_empty_window();
+        for had_recent_tooltip in [false, true] {
+            cx.update(|window, cx| {
+                state.update(cx, |tooltip, cx| {
+                    tooltip.had_recent_tooltip = had_recent_tooltip;
+                    tooltip.request_show(
+                        TooltipRequest::new(bounds(0., 0., 20., 20.), |_, _| {
+                            panic!("disabled tooltips must not build content")
+                        }),
+                        window,
+                        cx,
+                    );
+                    assert!(tooltip.content.is_none());
+                    assert!(tooltip.show_task.is_none());
+                    assert!(tooltip.hide_task.is_none());
+                    assert_eq!(tooltip.animation_epoch, 0);
+                });
+            });
+        }
     }
 }

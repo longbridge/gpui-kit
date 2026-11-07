@@ -12,7 +12,6 @@
 //! This is useful for more complex layout, for example, a table with different row height.
 use std::{
     cell::RefCell,
-    cmp,
     ops::{Deref, Range},
     rc::Rc,
 };
@@ -265,14 +264,15 @@ impl VirtualList {
     fn scroll_to_deferred_item(
         &self,
         scroll_offset: Point<Pixels>,
-        items_bounds: &[Bounds<Pixels>],
+        size_layout: &ItemSizeLayout,
         content_bounds: &Bounds<Pixels>,
         scroll_to_item: DeferredScrollToItem,
     ) -> Point<Pixels> {
-        let Some(bounds) = items_bounds
-            .get(scroll_to_item.item_index + scroll_to_item.offset)
-            .cloned()
-        else {
+        let Some(bounds) = size_layout.item_bounds(
+            scroll_to_item.item_index + scroll_to_item.offset,
+            self.axis,
+            content_bounds,
+        ) else {
             return scroll_offset;
         };
 
@@ -343,13 +343,73 @@ pub struct VirtualListFrameState {
     size_layout: ItemSizeLayout,
 }
 
+/// Per-item sizes along the list axis, gap included, and their prefix sums.
+///
+/// Shared between the element state and the frame state so that carrying
+/// them across a frame is a reference count, not a copy of every item.
 #[derive(Default, Clone)]
 pub struct ItemSizeLayout {
     items_sizes: Rc<Vec<Size<Pixels>>>,
+    axis_and_gap: Option<(Axis, Pixels)>,
     content_size: Size<Pixels>,
-    sizes: Vec<Pixels>,
-    origins: Vec<Pixels>,
+    sizes: Rc<[Pixels]>,
+    origins: Rc<[Pixels]>,
     last_layout_bounds: Bounds<Pixels>,
+}
+
+impl ItemSizeLayout {
+    /// The bounds of item `ix` in the list's content space: offset from the
+    /// content origin along the list axis, filling it on the other.
+    fn item_bounds(
+        &self,
+        ix: usize,
+        axis: Axis,
+        content_bounds: &Bounds<Pixels>,
+    ) -> Option<Bounds<Pixels>> {
+        let origin = *self.origins.get(ix)?;
+        let item_size = self.sizes[ix];
+        Some(match axis {
+            Axis::Horizontal => Bounds {
+                origin: point(content_bounds.left() + origin, px(0.)),
+                size: size(item_size, content_bounds.size.height),
+            },
+            Axis::Vertical => Bounds {
+                origin: point(px(0.), content_bounds.top() + origin),
+                size: size(content_bounds.size.width, item_size),
+            },
+        })
+    }
+}
+
+/// The items that intersect `viewport` along the list axis, plus one item of
+/// overdraw past its end, given each item's origin and size (gap included).
+///
+/// Both edges are binary searches.
+fn visible_range(origins: &[Pixels], sizes: &[Pixels], viewport: Range<Pixels>) -> Range<usize> {
+    let count = origins.len();
+    // Item ends grow with the index, so the first item ending past `edge` is
+    // a partition point over the indices.
+    let ends_before = |edge: Pixels| {
+        let mut low = 0;
+        let mut high = count;
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if origins[mid] + sizes[mid] <= edge {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        low
+    };
+    let first = ends_before(viewport.start);
+    let past_end = ends_before(viewport.end);
+    let last = if past_end == count {
+        count
+    } else {
+        (past_end + 2).min(count)
+    };
+    first..last.max(first)
 }
 
 impl IntoElement for VirtualList {
@@ -415,8 +475,11 @@ impl Element for VirtualList {
                             .along(self.axis)
                             .to_pixels(font_size.into(), rem_size);
 
-                        if state.items_sizes != self.item_sizes {
+                        if state.items_sizes != self.item_sizes
+                            || state.axis_and_gap != Some((self.axis, gap))
+                        {
                             state.items_sizes = self.item_sizes.clone();
+                            state.axis_and_gap = Some((self.axis, gap));
                             // Prepare each item's size by axis
                             state.sizes = self
                                 .item_sizes
@@ -430,32 +493,24 @@ impl Element for VirtualList {
                                         size + gap
                                     }
                                 })
-                                .collect::<Vec<_>>();
+                                .collect();
 
                             // Prepare each item's origin by axis
+                            let mut cumulative = px(0.);
                             state.origins = state
                                 .sizes
                                 .iter()
-                                .scan(px(0.), |cumulative, size| match self.axis {
-                                    Axis::Horizontal => {
-                                        let x = *cumulative;
-                                        *cumulative += *size;
-                                        Some(x)
-                                    }
-                                    Axis::Vertical => {
-                                        let y = *cumulative;
-                                        *cumulative += *size;
-                                        Some(y)
-                                    }
+                                .map(|size| {
+                                    let origin = cumulative;
+                                    cumulative += *size;
+                                    origin
                                 })
-                                .collect::<Vec<_>>();
+                                .collect();
 
                             if self.axis.is_horizontal() {
-                                state.content_size.width =
-                                    px(state.sizes.iter().map(|size| size.as_f32()).sum::<f32>());
+                                state.content_size.width = cumulative;
                             } else {
-                                state.content_size.height =
-                                    px(state.sizes.iter().map(|size| size.as_f32()).sum::<f32>());
+                                state.content_size.height = cumulative;
                             }
                         }
 
@@ -489,7 +544,7 @@ impl Element for VirtualList {
                                                     }
                                                 },
                                             );
-                                            size.height = known_dimensions.width.unwrap_or(
+                                            size.height = known_dimensions.height.unwrap_or(
                                                 match available_space.height {
                                                     AvailableSpace::Definite(x) => x,
                                                     AvailableSpace::MinContent
@@ -579,26 +634,6 @@ impl Element for VirtualList {
                 ),
         );
 
-        // Update scroll_handle with the item bounds
-        let items_bounds = item_origins
-            .iter()
-            .enumerate()
-            .map(|(i, &origin)| {
-                let item_size = item_sizes[i];
-
-                Bounds {
-                    origin: match self.axis {
-                        Axis::Horizontal => point(content_bounds.left() + origin, px(0.)),
-                        Axis::Vertical => point(px(0.), content_bounds.top() + origin),
-                    },
-                    size: match self.axis {
-                        Axis::Horizontal => size(item_size, content_bounds.size.height),
-                        Axis::Vertical => size(content_bounds.size.width, item_size),
-                    },
-                }
-            })
-            .collect::<Vec<_>>();
-
         let axis = self.axis;
 
         let mut scroll_state = self.scroll_handle.state.borrow_mut();
@@ -610,7 +645,7 @@ impl Element for VirtualList {
         if let Some(scroll_to_item) = scroll_state.deferred_scroll_to_item.take() {
             scroll_offset = self.scroll_to_deferred_item(
                 scroll_offset,
-                &items_bounds,
+                &layout.size_layout,
                 &content_bounds,
                 scroll_to_item,
             );
@@ -653,67 +688,20 @@ impl Element for VirtualList {
                         }
                     }
 
-                    let (first_visible_element_ix, last_visible_element_ix) = match self.axis {
+                    // The viewport in content space: the scroll offset is
+                    // negative, and the leading padding is admitted at the
+                    // start so an item under it is still drawn.
+                    let viewport = match self.axis {
                         Axis::Horizontal => {
-                            let mut cumulative_size = px(0.);
-                            let mut first_visible_element_ix = 0;
-                            for (i, &size) in item_sizes.iter().enumerate() {
-                                cumulative_size += size;
-                                if cumulative_size > -(scroll_offset.x + paddings.left) {
-                                    first_visible_element_ix = i;
-                                    break;
-                                }
-                            }
-
-                            cumulative_size = px(0.);
-                            let mut last_visible_element_ix = 0;
-                            for (i, &size) in item_sizes.iter().enumerate() {
-                                cumulative_size += size;
-                                if cumulative_size > (-scroll_offset.x + content_bounds.size.width)
-                                {
-                                    last_visible_element_ix = i + 1;
-                                    break;
-                                }
-                            }
-                            if last_visible_element_ix == 0 {
-                                last_visible_element_ix = self.items_count;
-                            } else {
-                                last_visible_element_ix += 1;
-                            }
-                            (first_visible_element_ix, last_visible_element_ix)
+                            -(scroll_offset.x + paddings.left)
+                                ..-scroll_offset.x + content_bounds.size.width
                         }
                         Axis::Vertical => {
-                            let mut cumulative_size = px(0.);
-                            let mut first_visible_element_ix = 0;
-                            for (i, &size) in item_sizes.iter().enumerate() {
-                                cumulative_size += size;
-                                if cumulative_size > -(scroll_offset.y + paddings.top) {
-                                    first_visible_element_ix = i;
-                                    break;
-                                }
-                            }
-
-                            cumulative_size = px(0.);
-                            let mut last_visible_element_ix = 0;
-                            for (i, &size) in item_sizes.iter().enumerate() {
-                                cumulative_size += size;
-                                if cumulative_size > (-scroll_offset.y + content_bounds.size.height)
-                                {
-                                    last_visible_element_ix = i + 1;
-                                    break;
-                                }
-                            }
-                            if last_visible_element_ix == 0 {
-                                last_visible_element_ix = self.items_count;
-                            } else {
-                                last_visible_element_ix += 1;
-                            }
-                            (first_visible_element_ix, last_visible_element_ix)
+                            -(scroll_offset.y + paddings.top)
+                                ..-scroll_offset.y + content_bounds.size.height
                         }
                     };
-
-                    let visible_range = first_visible_element_ix
-                        ..cmp::min(last_visible_element_ix, self.items_count);
+                    let visible_range = visible_range(item_origins, item_sizes, viewport);
 
                     let items = (self.render_items)(visible_range.clone(), window, cx);
 
@@ -784,7 +772,7 @@ impl Element for VirtualList {
 mod tests {
     use super::*;
 
-    use gpui::{Context, TestAppContext};
+    use gpui::{Context, ParentElement as _, TestAppContext, VisualTestContext};
 
     struct VirtualListHarness {
         axis: Axis,
@@ -850,6 +838,48 @@ mod tests {
         }
     }
 
+    fn layout(sizes: &[f32]) -> (Vec<Pixels>, Vec<Pixels>) {
+        let sizes: Vec<Pixels> = sizes.iter().map(|size| px(*size)).collect();
+        let origins = sizes
+            .iter()
+            .scan(px(0.), |cumulative, size| {
+                let origin = *cumulative;
+                *cumulative += *size;
+                Some(origin)
+            })
+            .collect();
+        (origins, sizes)
+    }
+
+    #[test]
+    fn visible_range_starts_at_the_first_item_crossing_the_viewport() {
+        let (origins, sizes) = layout(&[20.; 10]);
+        assert_eq!(visible_range(&origins, &sizes, px(0.)..px(60.)), 0..5);
+        assert_eq!(visible_range(&origins, &sizes, px(50.)..px(110.)), 2..7);
+    }
+
+    #[test]
+    fn visible_range_overdraws_one_item_past_the_viewport_but_not_past_the_end() {
+        let (origins, sizes) = layout(&[20.; 10]);
+        assert_eq!(visible_range(&origins, &sizes, px(150.)..px(210.)), 7..10);
+        assert_eq!(visible_range(&origins, &sizes, px(0.)..px(500.)), 0..10);
+    }
+
+    #[test]
+    fn visible_range_handles_uneven_sizes() {
+        let (origins, sizes) = layout(&[10., 30., 5., 50.]);
+        assert_eq!(visible_range(&origins, &sizes, px(12.)..px(44.)), 1..4);
+        assert_eq!(visible_range(&origins, &sizes, px(45.)..px(50.)), 3..4);
+    }
+
+    #[test]
+    fn visible_range_is_empty_without_items_or_past_the_content() {
+        let (origins, sizes) = layout(&[]);
+        assert_eq!(visible_range(&origins, &sizes, px(0.)..px(60.)), 0..0);
+        let (origins, sizes) = layout(&[20.; 10]);
+        assert!(visible_range(&origins, &sizes, px(300.)..px(360.)).is_empty());
+    }
+
     #[gpui::test]
     fn vertical_visible_range_and_deferred_scroll_are_preserved(cx: &mut TestAppContext) {
         exercise_axis(cx, Axis::Vertical);
@@ -858,6 +888,119 @@ mod tests {
     #[gpui::test]
     fn horizontal_visible_range_and_deferred_scroll_are_preserved(cx: &mut TestAppContext) {
         exercise_axis(cx, Axis::Horizontal);
+    }
+
+    /// Three 30 by 10 items, laid out along `axis` with `gap` between them.
+    struct GeometryHarness {
+        axis: Axis,
+        gap: Pixels,
+    }
+
+    impl Render for GeometryHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            virtual_list(
+                cx.entity(),
+                "virtual-list-geometry",
+                self.axis,
+                Rc::new(vec![size(px(30.), px(10.)); 3]),
+                |_, visible_range, _, _| {
+                    visible_range
+                        .map(|ix| {
+                            div()
+                                .w(px(30.))
+                                .h(px(10.))
+                                .debug_selector(move || format!("geometry-item-{ix}"))
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
+            .gap(self.gap)
+            .w(px(120.))
+            .h(px(100.))
+        }
+    }
+
+    /// Where the second item sits relative to the first.
+    fn second_item_offset(cx: &mut VisualTestContext) -> Point<Pixels> {
+        let first = cx.debug_bounds("geometry-item-0").unwrap().origin;
+        let second = cx.debug_bounds("geometry-item-1").unwrap().origin;
+        second - first
+    }
+
+    #[gpui::test]
+    fn changing_the_gap_moves_the_items(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| GeometryHarness {
+            axis: Axis::Vertical,
+            gap: px(0.),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(second_item_offset(cx), point(px(0.), px(10.)));
+
+        cx.update(|window, cx| {
+            view.update(cx, |harness, cx| {
+                harness.gap = px(20.);
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        assert_eq!(second_item_offset(cx), point(px(0.), px(30.)));
+    }
+
+    #[gpui::test]
+    fn changing_the_axis_moves_the_items(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| GeometryHarness {
+            axis: Axis::Vertical,
+            gap: px(0.),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(second_item_offset(cx), point(px(0.), px(10.)));
+
+        cx.update(|window, cx| {
+            view.update(cx, |harness, cx| {
+                harness.axis = Axis::Horizontal;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        assert_eq!(second_item_offset(cx), point(px(30.), px(0.)));
+    }
+
+    #[gpui::test]
+    fn a_horizontal_list_infers_its_height_from_its_items(cx: &mut TestAppContext) {
+        struct InferHarness;
+
+        impl Render for InferHarness {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .w(px(120.))
+                    .child(
+                        virtual_list(
+                            cx.entity(),
+                            "virtual-list-infer",
+                            Axis::Horizontal,
+                            Rc::new(vec![size(px(30.), px(10.)); 3]),
+                            |_, visible_range, _, _| {
+                                visible_range
+                                    .map(|_| div().w(px(30.)).h(px(10.)))
+                                    .collect::<Vec<_>>()
+                            },
+                        )
+                        .with_sizing_behavior(ListSizingBehavior::Infer)
+                        .w(px(120.))
+                        .h_auto()
+                        .flex_none(),
+                    )
+                    .child(div().size(px(1.)).debug_selector(|| "after-list".into()))
+            }
+        }
+
+        let (_, cx) = cx.add_window_view(|_, _| InferHarness);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // The list is as tall as its items, not as wide as itself.
+        assert_eq!(cx.debug_bounds("after-list").unwrap().top(), px(10.));
     }
 
     #[gpui::test]

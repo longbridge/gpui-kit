@@ -4,6 +4,7 @@ import Nav from '../../components/Nav.astro';
 import SiteFooter from '../../components/SiteFooter.astro';
 import HomeApp from '../../components/HomeApp.vue';
 import { fetchStarCount } from '../../lib/github';
+import { docVariable } from '../../lib/doc-variables.js';
 
 let starCount = 0;
 try { starCount = await fetchStarCount(); } catch {}
@@ -14,11 +15,11 @@ const base = import.meta.env.BASE_URL;
 <HomeLayout
   lang="zh-CN"
   title="GPUI Kit"
-  description="为 Rust 桌面应用提供完整 UI 系统、数据表格、Dock 布局、图表与代码编辑器。"
+  description="GPUI Kit 是生产就绪的 Rust UI 框架，提供 75+ 组件与原语、WebAssembly、无障碍、UI 集成测试、数据表格、Dock、图表与代码编辑器。"
 >
   <Nav lang="zh-CN" currentPath={Astro.url.pathname} starCount={starCount} />
 
-  <HomeApp client:load starCount={starCount} base={base} lang="zh-CN" />
+  <HomeApp client:load starCount={starCount} base={base} lang="zh-CN" kitVersion={docVariable('gpui_kit_version')} />
 
   <SiteFooter lang="zh-CN" />
 </HomeLayout>

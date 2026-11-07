@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Check that published recipe fragments match their compiled sources."""
+import argparse
+import json
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+TRUST_LABEL = "Tested consumer recipe"
+
+
+def recipe_inventory(root):
+    inventory = json.loads((root / "examples/ai_recipes/recipes.json").read_text())
+    if not isinstance(inventory, list) or not inventory:
+        raise ValueError("recipe inventory is empty")
+
+    ids = set()
+    for recipe in inventory:
+        if not isinstance(recipe, dict):
+            raise ValueError("recipe inventory entries must be objects")
+        recipe_id = recipe.get("id")
+        if not isinstance(recipe_id, str) or not recipe_id:
+            raise ValueError("recipe inventory entry has an invalid id")
+        if recipe_id in ids:
+            raise ValueError(f"duplicate recipe id: {recipe_id}")
+        ids.add(recipe_id)
+        if not isinstance(recipe.get("source"), str) or not recipe["source"]:
+            raise ValueError(f"{recipe_id}: missing authoritative source")
+        documents = recipe.get("documents")
+        if not isinstance(documents, list) or not documents or not all(
+            isinstance(document, str) and document for document in documents
+        ):
+            raise ValueError(f"{recipe_id}: missing recipe destinations")
+        if recipe.get("trust") != TRUST_LABEL:
+            raise ValueError(f"{recipe_id}: invalid trust label")
+    return inventory
+
+
+def fragments(root, sync=False):
+    checked = 0
+    for recipe in recipe_inventory(root):
+        source_path = root / recipe["source"]
+        if not source_path.is_file():
+            raise ValueError(f"{recipe['id']}: missing authoritative source: {recipe['source']}")
+        source = source_path.read_text().rstrip()
+        for document in recipe["documents"]:
+            path = root / document
+            if not path.is_file():
+                raise ValueError(f"{recipe['id']}: missing recipe destination: {document}")
+            text = path.read_text()
+            start = f'<!-- recipe:{recipe["id"]}:start -->'
+            end = f'<!-- recipe:{recipe["id"]}:end -->'
+            if text.count(start) != 1 or text.count(end) != 1:
+                raise ValueError(f"{document}: missing or duplicate recipe markers for {recipe['id']}")
+            before, tail = text.split(start)
+            current, after = tail.split(end)
+            expected = f"\n```rust\n{source}\n```\n"
+            if current != expected:
+                if not sync:
+                    raise ValueError(f"{document}: stale {recipe['id']} recipe; run script/check-ai-recipes --sync")
+                path.write_text(before + start + expected + end + after)
+            checked += 1
+    return checked
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sync", action="store_true", help="Update published fragments from compiled sources")
+    args = parser.parse_args()
+    try:
+        print(f"Checked {fragments(ROOT, args.sync)} published recipe fragments")
+        print("Coverage: documentation fragments only; `cargo test -p gpui-kit-recipes` compiles and tests the sources")
+        return 0
+    except (ValueError, OSError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

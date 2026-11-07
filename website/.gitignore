@@ -1,4 +1,5 @@
 dist/
+.version-cache/
 .astro/
 bun.lock
 bun.lockb

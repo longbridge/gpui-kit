@@ -1,8 +1,8 @@
 use gpui::{
-    Anchor, App, ElementId, Entity, FocusHandle, Focusable, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, TextAlign, Window, div, hsla, linear_color_stop, linear_gradient,
-    prelude::FluentBuilder as _,
+    Anchor, AnyElement, App, ElementId, Entity, FocusHandle, Focusable, Hsla,
+    InteractiveElement as _, IntoElement, ParentElement, RenderOnce, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, Window, div, hsla,
+    linear_color_stop, linear_gradient, prelude::FluentBuilder as _,
 };
 use rust_i18n::t;
 
@@ -10,9 +10,11 @@ use gpui_base::{ColorPicker as BaseColorPicker, ColorSwatch};
 pub use gpui_base::{ColorPickerEvent, ColorPickerState};
 
 use crate::{
-    ActiveTheme as _, Colorize as _, Icon, Selectable, Sizable, Size, StyleSized, h_flex,
-    input::Input,
+    ActiveTheme as _, Colorize as _, Icon, Selectable, Sizable, Size, StyleSized, StyledExt as _,
+    ThemeStyled as _, h_flex,
+    input::{Input, input_style},
     popover::Popover,
+    select::Caret,
     separator::Separator,
     slider::Slider,
     tab::{Tab, TabBar},
@@ -61,6 +63,9 @@ pub struct ColorPicker {
     icon: Option<Icon>,
     size: Size,
     anchor: Anchor,
+    /// Draws the trigger as a framed field, see [`ColorSelect`].
+    field: bool,
+    placeholder: Option<SharedString>,
 }
 
 impl ColorPicker {
@@ -76,6 +81,8 @@ impl ColorPicker {
             accessibility_label: None,
             icon: None,
             anchor: Anchor::TopLeft,
+            field: false,
+            placeholder: None,
         }
     }
 
@@ -124,31 +131,28 @@ impl ColorPicker {
         self
     }
 
-    fn render_item(&self, color: Hsla, cx: &mut App) -> ColorSwatch {
+    fn render_item(&self, id: impl Into<ElementId>, color: Hsla, cx: &mut App) -> ColorSwatch {
         let selected = self.state.read(cx).value() == Some(color);
         let hover_state = self.state.clone();
         let click_state = self.state.clone();
 
-        ColorSwatch::new(
-            SharedString::from(format!("color-{}", color.to_hex())),
-            color,
-        )
-        .selected(selected)
-        .h_5()
-        .w_5()
-        .bg(color)
-        .border_1()
-        .border_color(color.darken(0.1))
-        .hover(|this| this.border_color(color.darken(0.3)).bg(color.lighten(0.1)))
-        .active(|this| this.border_color(color.darken(0.5)).bg(color.darken(0.2)))
-        .on_hover(move |color, entered, window, cx| {
-            if entered {
-                hover_state.update(cx, |state, cx| state.preview_color(color, window, cx));
-            }
-        })
-        .on_click(move |color, _, window, cx| {
-            click_state.update(cx, |state, cx| state.select_color(color, window, cx));
-        })
+        ColorSwatch::new(id, color)
+            .selected(selected)
+            .h_5()
+            .w_5()
+            .bg(color)
+            .border_1()
+            .border_color(color.darken(0.1))
+            .hover(|this| this.border_color(color.darken(0.3)).bg(color.lighten(0.1)))
+            .active(|this| this.border_color(color.darken(0.5)).bg(color.darken(0.2)))
+            .on_hover(move |color, entered, window, cx| {
+                if entered {
+                    hover_state.update(cx, |state, cx| state.preview_color(color, window, cx));
+                }
+            })
+            .on_click(move |color, _, window, cx| {
+                click_state.update(cx, |state, cx| state.select_color(color, window, cx));
+            })
     }
 
     fn render_colors(&self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -225,19 +229,24 @@ impl ColorPicker {
                 h_flex().gap_1().children(
                     featured_colors
                         .iter()
-                        .map(|color| self.render_item(*color, cx)),
+                        // Featured slots may contain the same color more than once.
+                        .enumerate()
+                        .map(|(ix, color)| self.render_item(("featured-color", ix), *color, cx)),
                 ),
             )
             .child(Separator::horizontal())
             .child(
                 v_flex()
                     .gap_1()
-                    .children(color_palettes().iter().map(|sub_colors| {
-                        h_flex().gap_1().children(
-                            sub_colors
-                                .iter()
-                                .rev()
-                                .map(|color| self.render_item(*color, cx)),
+                    .children(color_palettes().iter().enumerate().map(|(ix, sub_colors)| {
+                        h_flex().id(("palette-row", ix)).gap_1().children(
+                            sub_colors.iter().rev().map(|color| {
+                                self.render_item(
+                                    SharedString::from(format!("color-{}", color.to_hex())),
+                                    *color,
+                                    cx,
+                                )
+                            }),
                         )
                     })),
             )
@@ -470,10 +479,13 @@ impl RenderOnce for ColorPicker {
         let open = state.is_open();
         let value = state.value();
         let focus_handle = self.state.focus_handle(cx);
+        let focused = focus_handle.is_focused(window);
         let open_state = self.state.clone();
         let popover_state = self.state.clone();
 
         BaseColorPicker::new(self.id.clone())
+            .when(self.field, |this| this.w_full())
+            .refine_style(&self.style)
             .open(open)
             .track_focus(&focus_handle)
             .when_some(
@@ -492,29 +504,141 @@ impl RenderOnce for ColorPicker {
                     .on_open_change(move |open: &bool, _, cx| {
                         popover_state.update(cx, |state, cx| state.set_open(*open, cx));
                     })
+                    .when(self.field, |this| {
+                        this.trigger_style(StyleRefinement::default().w_full())
+                    })
                     .trigger(ColorPickerButton {
                         id: "trigger".into(),
                         size: self.size,
                         label: self.label.clone(),
                         value,
-                        tooltip: if display_title.is_empty() {
+                        tooltip: if display_title.is_empty() || self.field {
                             None
                         } else {
                             Some(display_title.clone())
                         },
                         icon: self.icon.clone(),
                         selected: false,
+                        field: self.field,
+                        focused,
+                        placeholder: self.placeholder.clone(),
                     })
-                    .child(self.render_colors(window, cx)),
+                    // The popover drops its content while closed, so building the
+                    // palette swatches or slider tracks then is wasted work.
+                    .when(open, |this| this.child(self.render_colors(window, cx))),
             )
+    }
+}
+
+/// A color picker drawn as a framed field, like a [`Select`](crate::select::Select).
+///
+/// The field shows a swatch of the current color and its hex value; clicking
+/// anywhere on it opens the same popover as [`ColorPicker`]. Use it in forms,
+/// where a control is expected to share the height and frame of the inputs
+/// around it; use [`ColorPicker`] for a compact swatch in a toolbar.
+#[derive(IntoElement)]
+pub struct ColorSelect {
+    picker: ColorPicker,
+}
+
+impl ColorSelect {
+    /// Create a new color select with the given [`ColorPickerState`].
+    pub fn new(state: &Entity<ColorPickerState>) -> Self {
+        let mut picker = ColorPicker::new(state);
+        picker.id = ("color-select", state.entity_id()).into();
+        picker.field = true;
+        Self { picker }
+    }
+
+    /// Set the featured colors shown at the top of the palette.
+    pub fn featured_colors(mut self, colors: Vec<Hsla>) -> Self {
+        self.picker = self.picker.featured_colors(colors);
+        self
+    }
+
+    /// Set the text shown while no color is selected.
+    ///
+    /// Default is the same placeholder as [`Select`](crate::select::Select).
+    pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
+        self.picker.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Set the name a screen reader announces.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.picker = self.picker.accessibility_label(label);
+        self
+    }
+}
+
+impl Sizable for ColorSelect {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.picker = self.picker.with_size(size);
+        self
+    }
+}
+
+impl Focusable for ColorSelect {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.picker.focus_handle(cx)
+    }
+}
+
+impl Styled for ColorSelect {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.picker.style()
+    }
+}
+
+impl RenderOnce for ColorSelect {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        self.picker.render(window, cx)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use gpui::{AppContext as _, Context, Render, TestAppContext};
 
     use super::*;
+
+    struct PaletteHarness {
+        state: Entity<ColorPickerState>,
+    }
+
+    impl Render for PaletteHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let color = color_palettes()[0][0];
+            ColorPicker::new(&self.state)
+                .featured_colors(vec![color, color])
+                .render_palette_panel(cx)
+                .into_any_element()
+        }
+    }
+
+    #[gpui::test]
+    fn repeated_palette_colors_have_independent_focus_stops(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|window, cx| PaletteHarness {
+            state: cx.new(|cx| ColorPickerState::new(window, cx)),
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let swatch_count = 2 + color_palettes().iter().map(Vec::len).sum::<usize>();
+            let mut focused = Vec::new();
+            for _ in 0..swatch_count {
+                window.focus_next(cx);
+                let handle = window.focused(cx).expect("each swatch is focusable");
+                assert!(
+                    !focused.contains(&handle),
+                    "equal colors must not share element identity or a focus stop"
+                );
+                focused.push(handle);
+            }
+            window.focus_next(cx);
+            assert_eq!(window.focused(cx), focused.first().cloned());
+        });
+    }
 
     #[gpui::test]
     fn an_explicit_accessibility_label_replaces_the_visible_one(cx: &mut TestAppContext) {
@@ -542,6 +666,62 @@ mod tests {
             );
         });
     }
+
+    #[gpui::test]
+    fn test_color_select_builder(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| ColorPickerState::new(window, cx));
+            let select = ColorSelect::new(&state)
+                .large()
+                .placeholder("Pick a color")
+                .accessibility_label("Theme color")
+                .featured_colors(vec![hsla(0., 1., 0.5, 1.)]);
+
+            assert!(select.picker.field);
+            assert_eq!(select.picker.size, Size::Large);
+            assert_eq!(select.picker.placeholder.as_deref(), Some("Pick a color"));
+            assert_eq!(
+                select.picker.accessibility_label.as_deref(),
+                Some("Theme color")
+            );
+            assert_eq!(
+                select.picker.featured_colors.as_ref().map(Vec::len),
+                Some(1)
+            );
+        });
+    }
+
+    struct SelectHarness {
+        state: Entity<ColorPickerState>,
+    }
+
+    impl Render for SelectHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(gpui::px(400.)).child(ColorSelect::new(&self.state))
+        }
+    }
+
+    #[gpui::test]
+    fn a_click_anywhere_on_the_color_select_opens_the_picker(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| SelectHarness {
+            state: cx.new(|cx| ColorPickerState::new(window, cx)),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let open = cx.update(|_, cx| view.read(cx).state.read(cx).is_open());
+        assert!(!open, "the picker starts closed");
+
+        // Far from the swatch, where only the field frame can take the click.
+        cx.simulate_click(
+            gpui::point(gpui::px(300.), gpui::px(16.)),
+            Default::default(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let open = cx.update(|_, cx| view.read(cx).state.read(cx).is_open());
+        assert!(open, "the whole field is the trigger, like a Select");
+    }
 }
 
 #[derive(IntoElement)]
@@ -553,6 +733,9 @@ struct ColorPickerButton {
     size: Size,
     label: Option<SharedString>,
     tooltip: Option<SharedString>,
+    field: bool,
+    focused: bool,
+    placeholder: Option<SharedString>,
 }
 
 impl Selectable for ColorPickerButton {
@@ -573,8 +756,70 @@ impl Sizable for ColorPickerButton {
     }
 }
 
+impl ColorPickerButton {
+    /// The framed trigger of a [`ColorSelect`]: the swatch, the hex value and
+    /// a caret, laid out like a [`Select`](crate::select::Select) trigger.
+    fn render_field(self, window: &mut Window, cx: &mut App) -> AnyElement {
+        let (bg, fg) = input_style(false, cx);
+        let outline_visible = self.selected || self.focused;
+
+        h_flex()
+            .id(self.id)
+            .w_full()
+            .gap_2()
+            .bg(bg)
+            .text_color(fg)
+            .border_1()
+            .border_color(cx.theme().input)
+            .rounded(cx.theme().radius)
+            .input_size(self.size)
+            .input_text_size(self.size)
+            .when(outline_visible, |this| {
+                this.border_color(cx.theme().ring)
+                    .focus_ring_style(window, cx)
+            })
+            .child(
+                div()
+                    .id("swatch")
+                    .flex_shrink_0()
+                    .border_1()
+                    .border_color(cx.theme().input)
+                    .rounded(cx.theme().radius / 2.)
+                    .map(|this| match self.size {
+                        Size::XSmall => this.size_3(),
+                        Size::Small => this.size_3p5(),
+                        Size::Large => this.size_5(),
+                        _ => this.size_4(),
+                    })
+                    .when_some(self.value, |this, value| {
+                        this.bg(value).border_color(value.darken(0.3))
+                    }),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .map(|this| match self.value {
+                        Some(value) => this.child(value.to_hex()),
+                        None => this.text_color(cx.theme().muted_foreground).child(
+                            self.placeholder
+                                .unwrap_or_else(|| t!("Select.placeholder").into()),
+                        ),
+                    }),
+            )
+            .child(Caret::new(self.size).text_color(cx.theme().muted_foreground))
+            .into_any_element()
+    }
+}
+
 impl RenderOnce for ColorPickerButton {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if self.field {
+            return self.render_field(window, cx);
+        }
+
         let has_icon = self.icon.is_some();
         h_flex()
             .id(self.id)
@@ -603,5 +848,6 @@ impl RenderOnce for ColorPickerButton {
                 )
             })
             .when_some(self.label, |this, label| this.child(label))
+            .into_any_element()
     }
 }

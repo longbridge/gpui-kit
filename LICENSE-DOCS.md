@@ -1,0 +1,7 @@
+# Documentation license
+
+From the revision that adds this notice, documentation prose and original illustrations for which GPUI Kit holds the rights needed to grant this license in `website/docs/`, `website/base/`, `website/component/`, `website/shell/`, and the corresponding `website/zh-CN/` directories are also offered under the [Creative Commons Attribution 4.0 International license (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+
+When copying or adapting that material, credit **GPUI Kit**, link to the source page and the CC BY 4.0 license, and indicate if you made changes. For example: “Adapted from GPUI Kit, [page title] ([source page URL]), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).” The license applies to copyrightable material; it does not require attribution for learning an idea or using a fact without copying protected expression.
+
+This documentation license does **not** apply to software source, website implementation, or code examples and snippets within documentation. Those remain under the repository's [Apache-2.0 license](LICENSE-APACHE). Third-party contributions and material, including images, fonts, icons, and quotations, are not relicensed here without the relevant rights holder's permission; their existing licenses and notices continue to apply. Existing Apache-2.0 permissions are not withdrawn. This additional CC BY 4.0 offer does not retroactively change the terms of earlier repository revisions or previously published snapshots.

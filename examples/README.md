@@ -2,7 +2,32 @@
 
 This folder contains basic examples of how to use the GPUI Component library. Each example demonstrates a specific feature or functionality of the library.
 
-Unlike the examples in the `story` folder, these examples focus on 1 example for 1 feature, making it easier to understand and implement specific functionalities in your own projects.
+Each Rust package runs with `cargo run -p <package-name>`. The larger examples
+reuse the `story` gallery components as a normal dependency, so running them does
+not enable the gallery's test-support development dependency.
+
+| Example | Command |
+| --- | --- |
+| Editor | `cargo run -p example-editor` |
+| Editor and Markdown highlighted by syntect | `cargo run -p example-syntect` |
+| Brush | `cargo run -p example-brush` |
+| Dock | `cargo run -p example-dock` |
+| HTML | `cargo run -p example-html` |
+| Large text | `cargo run -p example-large-text` |
+| Markdown | `cargo run -p example-markdown` |
+| Streaming Markdown | `cargo run -p example-stream-markdown` |
+| Text selection | `cargo run -p text_selection` |
+| Touch selection | `cargo run -p touch_selection` |
+
+Shared sample documents live in `fixtures/`.
+
+## Opening windows
+
+Examples use `gpui_kit::open_window(options, cx, build)` after
+`gpui_kit::init(cx)`. The helper mounts the Base Root and returns the window
+handle and content entity. The native and web story galleries share this path.
+
+Headless test fixtures may construct Root directly through GPUI's test harness.
 
 ## Contributing
 

@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::Arc};
+use std::{ops::Range, rc::Rc, sync::Arc};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -12,7 +12,9 @@ use crate::StyledExt;
 use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
+use crate::text::range_highlight::{PendingReveal, RevealProgress};
 use crate::text::state::{LineSpan, SelectionFormat, TextViewState};
+use crate::text::stream_fade::TextViewMotion;
 use crate::{GlobalState, TextSelection, text::TextViewStyle};
 
 /// Type for code block actions generator function.
@@ -28,6 +30,7 @@ pub(crate) type CodeBlockHighlighterFn =
 pub struct TextViewDefaults {
     style: Option<TextViewStyle>,
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
+    inherit_text_color: bool,
 }
 
 impl Global for TextViewDefaults {}
@@ -44,12 +47,35 @@ impl TextViewDefaults {
         self
     }
 
+    /// The style every text view starts from, when set.
+    pub(crate) fn style(&self) -> Option<&TextViewStyle> {
+        self.style.as_ref()
+    }
+
+    /// The syntax highlighter for fenced code blocks, when set.
+    pub(crate) fn code_block_highlighter(&self) -> Option<Arc<CodeBlockHighlighterFn>> {
+        self.code_block_highlighter.clone()
+    }
+
     /// Sets the syntax highlighter used for fenced code blocks.
     pub fn with_code_block_highlighter<F>(mut self, highlighter: F) -> Self
     where
         F: Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync + 'static,
     {
         self.code_block_highlighter = Some(Arc::new(highlighter));
+        self
+    }
+
+    /// Sets whether text views without an explicit [`TextView::style`] follow
+    /// the text color their container sets, default false.
+    ///
+    /// The body text takes that color. On a surface inverted from the page,
+    /// such as a `primary` fill, links, muted text, code, borders and
+    /// selection are derived from it too, and the installed syntax highlighter
+    /// is left out because its colors are made for the page. Enable this only
+    /// when every window sets a text color at its root, as Component's does.
+    pub fn with_inherit_text_color(mut self, inherit: bool) -> Self {
+        self.inherit_text_color = inherit;
         self
     }
 
@@ -67,14 +93,65 @@ impl TextViewDefaults {
     pub fn has_code_block_highlighter(&self) -> bool {
         self.code_block_highlighter.is_some()
     }
+
+    /// Whether text views follow the text color their container sets.
+    pub fn inherit_text_color(&self) -> bool {
+        self.inherit_text_color
+    }
 }
 
 /// Type for the table actions generator function.
 pub(crate) type TableActionsFn =
     dyn Fn(&TableData, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
+pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync;
+
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
+
+pub(crate) type TaskToggleHandlerFn = dyn Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync;
+
+/// A click on the checkbox of a Markdown task list item, passed to the
+/// [`TextView::on_task_toggle`] handler.
+///
+/// The ranges are byte ranges in the view's source text.
+#[derive(Debug, Clone)]
+pub struct TaskToggleEvent {
+    checked: bool,
+    item_range: Range<usize>,
+    marker_range: Range<usize>,
+}
+
+impl TaskToggleEvent {
+    pub(crate) fn new(checked: bool, item_range: Range<usize>, marker_range: Range<usize>) -> Self {
+        Self {
+            checked,
+            item_range,
+            marker_range,
+        }
+    }
+
+    /// The checked state the item should now have: the opposite of the
+    /// state its checkbox shows.
+    pub fn checked(&self) -> bool {
+        self.checked
+    }
+
+    /// The list item's source span, starting at its list marker (`-`, `*`,
+    /// `1.`) and covering its content, nested lists included.
+    pub fn item_range(&self) -> Range<usize> {
+        self.item_range.clone()
+    }
+
+    /// The item's task marker: the `[ ]` or `[x]` itself, brackets included.
+    pub fn marker_range(&self) -> Range<usize> {
+        self.marker_range.clone()
+    }
+}
+
+/// Kept by the element only, so unlike the handlers the state carries, it
+/// may hold a `ScrollHandle`.
+pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
 
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
@@ -119,6 +196,9 @@ pub struct TextView {
     text: Option<SharedString>,
     pub(crate) state: Option<Entity<TextViewState>>,
     text_view_style: Option<TextViewStyle>,
+    inline_code_style: Option<StyleRefinement>,
+    list_style: Option<StyleRefinement>,
+    blockquote_style: Option<StyleRefinement>,
     style: StyleRefinement,
     selectable: bool,
     selection_format: SelectionFormat,
@@ -128,7 +208,11 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
+    image_source: Option<Arc<ImageSourceFn>>,
+    reveal_handler: Option<Rc<RevealHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
+    motion: Option<TextViewMotion>,
 }
 
 /// A plugin that can configure a [`TextView`].
@@ -163,6 +247,9 @@ impl TextView {
             format: None,
             text: None,
             text_view_style: None,
+            inline_code_style: None,
+            list_style: None,
+            blockquote_style: None,
             style: StyleRefinement::default(),
             selectable: true,
             selection_format: SelectionFormat::default(),
@@ -172,7 +259,11 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
+            image_source: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
+            motion: None,
         }
     }
 
@@ -183,6 +274,9 @@ impl TextView {
             format: Some(TextViewFormat::Markdown),
             text: Some(markdown.into()),
             text_view_style: None,
+            inline_code_style: None,
+            list_style: None,
+            blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
             selectable: true,
@@ -193,7 +287,11 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
+            image_source: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
+            motion: None,
         }
     }
 
@@ -204,6 +302,9 @@ impl TextView {
             format: Some(TextViewFormat::Html),
             text: Some(html.into()),
             text_view_style: None,
+            inline_code_style: None,
+            list_style: None,
+            blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
             selectable: true,
@@ -214,8 +315,49 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
+            image_source: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
+            motion: None,
         }
+    }
+
+    /// Overrides the source of every document image, including embedded data URLs.
+    ///
+    /// Used for both rendering and intrinsic-size measurement. The returned source
+    /// is authoritative: pending or failed loads never fall back to the document URL.
+    /// Without this override, images use Base's default URI and data URL handling.
+    pub fn image_source<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync + 'static,
+    {
+        self.image_source = Some(Arc::new(resolver));
+        self
+    }
+
+    /// Refines inline code typography, background, border, radius, and padding
+    /// over the resolved style. See [`TextViewStyle::with_inline_code_style`]
+    /// for the supported properties. Unspecified properties are inherited.
+    pub fn inline_code_style(mut self, style: StyleRefinement) -> Self {
+        self.inline_code_style = Some(super::style::normalize_inline_code_style(style));
+        self
+    }
+
+    /// Refines list markers over the resolved style. See
+    /// [`TextViewStyle::with_list_style`] for where it applies.
+    /// Unspecified properties are inherited.
+    pub fn list_style(mut self, style: StyleRefinement) -> Self {
+        self.list_style = Some(style);
+        self
+    }
+
+    /// Refines blockquotes over the resolved style. See
+    /// [`TextViewStyle::with_blockquote_style`] for where it applies.
+    /// Unspecified properties are inherited.
+    pub fn blockquote_style(mut self, style: StyleRefinement) -> Self {
+        self.blockquote_style = Some(style);
+        self
     }
 
     /// Set [`TextViewStyle`].
@@ -306,6 +448,23 @@ impl TextView {
         self
     }
 
+    /// Like [`Self::code_block_highlighter`], with a highlighter that can be
+    /// handed to every frame.
+    ///
+    /// A code block reuses its highlights only while the highlighter is the
+    /// same `Arc`, so a view built every frame with a fresh closure
+    /// re-highlights every code block on every frame.
+    #[doc(hidden)]
+    pub fn shared_code_block_highlighter(
+        mut self,
+        highlighter: Arc<
+            dyn Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync,
+        >,
+    ) -> Self {
+        self.code_block_highlighter = Some(highlighter);
+        self
+    }
+
     /// Set custom actions to be rendered below each Markdown table.
     ///
     /// The closure receives the [`TableData`],
@@ -333,9 +492,48 @@ impl TextView {
         self
     }
 
+    /// Make the checkboxes of Markdown task list items (`- [ ]`, `- [x]`)
+    /// clickable.
+    ///
+    /// The handler receives a [`TaskToggleEvent`] with the checked state the
+    /// item should now have and where the item and its `[ ]` / `[x]` marker
+    /// are in the source text. The view does not change its text: the caller
+    /// owns the source, replaces the marker and sets the new text. Without a
+    /// handler, the checkboxes are not interactive.
+    pub fn on_task_toggle<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.task_toggle_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Scroll a container that does not follow scroll requests to the line
+    /// of [`TextViewState::reveal_range`].
+    ///
+    /// A `gpui::list` scrolls to that line by itself; a `div` with
+    /// `overflow_y_scroll`, for one, does not. After a frame in which the
+    /// line was laid out but not visible, the handler receives its bounds in
+    /// window coordinates, to scroll the container, e.g. through its
+    /// `ScrollHandle`, until the line is visible.
+    pub fn on_reveal<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    {
+        self.reveal_handler = Some(Rc::new(handler));
+        self
+    }
+
     /// Replace the Markdown extension registry.
     pub fn markdown_extensions(mut self, extensions: MarkdownExtensions) -> Self {
         self.markdown_extensions = Arc::new(extensions);
+        self
+    }
+
+    /// Set the motion policy; see [`TextViewMotion`]. Without one, the
+    /// state's own policy applies, which plays no motion by default.
+    pub fn motion(mut self, motion: TextViewMotion) -> Self {
+        self.motion = Some(motion);
         self
     }
 
@@ -410,6 +608,8 @@ pub struct TextViewPrepaintState {
     /// straddles the bottom of the box. `None` leaves the clip at the box edge,
     /// where the container's hidden overflow already applies it.
     clip_bottom: Option<Pixels>,
+    /// The touch handles this view owns, with their hitboxes.
+    touch_handles: crate::TouchHandleLayout,
 }
 
 /// Absorbs sub-pixel layout jitter: a line ending within a pixel of the box
@@ -538,34 +738,98 @@ impl Element for TextView {
         // whole line, so it only applies to the fit-content mode.
         let max_lines = self.max_lines.filter(|_| !self.scrollable);
 
-        let defaults = TextViewDefaults::global(cx);
-        let text_view_style = self
-            .text_view_style
-            .clone()
-            .or(defaults.style)
-            .unwrap_or_else(|| TextViewStyle::from_theme(&crate::Theme::global(cx)));
-        let code_block_highlighter = self
-            .code_block_highlighter
-            .clone()
-            .or(defaults.code_block_highlighter);
+        // Resolve the style by reference: this runs every frame, and the
+        // style only reaches the state when it changed.
+        let defaults = cx.try_global::<TextViewDefaults>();
+        let theme_style;
+        let mut text_view_style = match (
+            &self.text_view_style,
+            defaults.and_then(|d| d.style.as_ref()),
+        ) {
+            (Some(style), _) | (None, Some(style)) => style,
+            (None, None) => {
+                theme_style = TextViewStyle::from_theme(&crate::Theme::global(cx));
+                &theme_style
+            }
+        };
+        // Follow the text color the container sets for its surface, so rich
+        // text stays readable in a filled bubble or a selected row.
+        let surface_style;
+        let mut on_inverted_surface = false;
+        if self.text_view_style.is_none() && defaults.is_some_and(|d| d.inherit_text_color) {
+            let color = self
+                .style
+                .text
+                .color
+                .unwrap_or_else(|| window.text_style().color);
+            if color != text_view_style.foreground() {
+                on_inverted_surface = text_view_style.is_inverted_by(color);
+                surface_style = text_view_style.on_text_color(color);
+                text_view_style = &surface_style;
+            }
+        }
+        let inline_style;
+        if let Some(refinement) = &self.inline_code_style {
+            let mut style = text_view_style.inline_code_style().clone();
+            style.refine(refinement);
+            inline_style = text_view_style.clone().with_inline_code_style(style);
+            text_view_style = &inline_style;
+        }
+        let block_style;
+        if self.list_style.is_some() || self.blockquote_style.is_some() {
+            let mut style = text_view_style.clone();
+            if let Some(refinement) = &self.list_style {
+                let mut marker = style.list_style().clone();
+                marker.refine(refinement);
+                style = style.with_list_style(marker);
+            }
+            if let Some(refinement) = &self.blockquote_style {
+                let mut quote = style.blockquote_style().clone();
+                quote.refine(refinement);
+                style = style.with_blockquote_style(quote);
+            }
+            block_style = style;
+            text_view_style = &block_style;
+        }
+        let foreground = text_view_style.foreground();
+        let text_view_style = (*state.read(cx).text_view_style != *text_view_style)
+            .then(|| Arc::new(text_view_style.clone()));
+        let code_block_highlighter = self.code_block_highlighter.clone().or_else(|| {
+            defaults
+                .filter(|_| !on_inverted_surface)
+                .and_then(|d| d.code_block_highlighter.clone())
+        });
 
         state.update(cx, |state, cx| {
+            if text_view_style.is_some()
+                || match (&state.code_block_highlighter, &code_block_highlighter) {
+                    (Some(previous), Some(next)) => !Arc::ptr_eq(previous, next),
+                    (None, None) => false,
+                    _ => true,
+                }
+            {
+                state.preserve_selection_for_reflow();
+            }
             state.code_block_actions = self.code_block_actions.clone();
-            state.code_block_highlighter = code_block_highlighter.clone();
+            state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.task_toggle_handler = self.task_toggle_handler.clone();
+            state.image_source = self.image_source.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
+            if let Some(motion) = &self.motion {
+                state.set_motion(motion.clone());
+            }
             state.selectable = self.selectable;
             state.selection_format = self.selection_format;
             state.scrollable = self.scrollable;
             state.max_lines = max_lines;
-            if state.text_view_style != text_view_style {
-                state.selection_revision = state.selection_revision.wrapping_add(1);
+            if let Some(text_view_style) = text_view_style {
+                state.text_view_style = text_view_style;
             }
-            state.text_view_style = text_view_style.clone();
 
-            if let Some(text) = self.text.clone() {
-                state.set_text(text.as_str(), cx);
+            if let Some(text) = &self.text {
+                state.set_element_text(text, cx);
             }
         });
 
@@ -587,7 +851,7 @@ impl Element for TextView {
             .when(self.scrollable, |this| this.size_full())
             .when_some(max_lines_cap, |this, cap| this.max_h(cap).overflow_hidden())
             .relative()
-            .text_color(text_view_style.foreground())
+            .text_color(foreground)
             .on_action(move |_: &crate::input::Copy, window, cx| {
                 let text = TextSelection::selected_text(window, cx).trim().to_string();
                 if text.is_empty() {
@@ -597,7 +861,17 @@ impl Element for TextView {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
             })
             .on_action(window.listener_for(&state, TextViewState::on_action_select_all))
-            .child(state.clone())
+            .map(|this| {
+                if self.scrollable {
+                    this.child(crate::ScrollBounce::new(
+                        ("text-view-bounce", state.entity_id()),
+                        &list_state,
+                        state.clone(),
+                    ))
+                } else {
+                    this.child(state.clone())
+                }
+            })
             // Overlay controls must paint after the document, otherwise rich
             // content and selection backgrounds cover the thumb and hitbox.
             .when(self.scrollable, |this| {
@@ -630,16 +904,14 @@ impl Element for TextView {
             if let Ok(mut line_spans) = state.read(cx).line_spans.lock() {
                 line_spans.clear();
             }
-            // Descendant `Inline`s report their line spans through the state
-            // stack during prepaint (in addition to the paint-time push below).
-            GlobalState::global_mut(cx)
-                .text_view_state_stack
-                .push(state.clone());
         }
+        // Descendants read the view through the state stack during prepaint
+        // (in addition to the paint-time push below): `Inline`s report their
+        // line spans when `max_lines` is set, and table cells look for the
+        // selection anchor.
+        GlobalState::global(cx).push_text_view_state(state.clone());
         request_layout.element.prepaint(window, cx);
-        if max_lines_active {
-            GlobalState::global_mut(cx).text_view_state_stack.pop();
-        }
+        GlobalState::global(cx).pop_text_view_state();
 
         let mut clip_bottom = None;
         if max_lines_active {
@@ -671,9 +943,20 @@ impl Element for TextView {
             }
         }
 
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        // Over the text, so after its hitbox.
+        let touch_handles = if self.selectable {
+            state
+                .read(cx)
+                .selection_adapter
+                .prepaint_touch_handles(window, cx)
+        } else {
+            crate::TouchHandleLayout::default()
+        };
         TextViewPrepaintState {
-            hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            hitbox,
             clip_bottom,
+            touch_handles,
         }
     }
 
@@ -689,12 +972,10 @@ impl Element for TextView {
     ) {
         let state = &request_layout.state;
         if self.selectable {
-            state.update(cx, |state, _| state.selection_adapter.begin_frame());
+            state.read(cx).selection_adapter.begin_frame();
         }
 
-        GlobalState::global_mut(cx)
-            .text_view_state_stack
-            .push(state.clone());
+        GlobalState::global(cx).push_text_view_state(state.clone());
         if let Some(clip_bottom) = prepaint.clip_bottom {
             // Snap the `max_lines` clip to the last whole line that fits, so a
             // line of glyphs is never cut in half.
@@ -707,26 +988,49 @@ impl Element for TextView {
         } else {
             request_layout.element.paint(window, cx);
         }
-        GlobalState::global_mut(cx).text_view_state_stack.pop();
+        GlobalState::global(cx).pop_text_view_state();
+
+        // Every list has scrolled by now, so the line of a reveal is where
+        // it ends up this frame.
+        if state.read(cx).pending_reveal.is_some() {
+            let progress = state.update(cx, |state, _| {
+                state.pending_reveal.as_mut().map(PendingReveal::progress)
+            });
+            match progress {
+                Some(RevealProgress::Shown) => {
+                    state.update(cx, |state, _| state.pending_reveal = None);
+                }
+                Some(RevealProgress::Hidden(line)) => {
+                    if let Some(handler) = &self.reveal_handler {
+                        handler(line, window, cx);
+                    }
+                }
+                Some(RevealProgress::NotLaidOut) | None => {}
+            }
+        }
 
         if self.selectable {
-            let (adapter, scroll_offset, content_bounds) = {
+            let (adapter, scroll_offset, content_bounds, self_scroll, handle_color) = {
                 let state = state.read(cx);
                 (
                     state.selection_adapter.clone(),
                     state.scroll_offset(),
                     state.bounds(),
+                    state.scrollable,
+                    state.text_view_style.selection().alpha(1.),
                 )
             };
-            let document_order = GlobalState::global_mut(cx).next_selection_document_order();
             adapter.register(
                 prepaint.hitbox.clone(),
                 content_bounds,
                 scroll_offset,
-                document_order,
+                self_scroll,
                 window,
                 cx,
             );
+            // The handles of a touch selection go over the text, and under
+            // whatever is painted over the text after it.
+            adapter.paint_touch_handles(&prepaint.touch_handles, handle_color, window, cx);
         }
     }
 }
@@ -738,17 +1042,486 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use super::{TextView, TextViewPlugin};
-    use crate::text::{TableData, TextViewState, TextViewStyle};
+    use super::{TaskToggleEvent, TextView, TextViewPlugin};
+    use crate::text::{SelectionFormat, TableData, TextViewState, TextViewStyle};
     use gpui::{
         AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
         Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Overflow, ParentElement as _, Pixels,
         Render, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _,
-        TestAppContext, VisualTestContext, Window, div, point, px,
+        TestAppContext, VisualTestContext, Window, div, point, prelude::FluentBuilder as _, px,
+        rems,
     };
 
     struct TextViewTestRoot {
         text_view: Entity<TextViewState>,
+    }
+
+    struct InlineHoverTestRoot {
+        view: Entity<TextViewState>,
+        builds: Arc<AtomicUsize>,
+        format: crate::text::SelectionFormat,
+    }
+
+    struct InlineHoverCard;
+    impl Render for InlineHoverCard {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .debug_selector(|| "inline-test-card".into())
+                .w(px(120.))
+                .h(px(40.))
+                .child("Member profile")
+        }
+    }
+
+    impl Render for InlineHoverTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let builds = self.builds.clone();
+            div()
+                .pl(px(150.))
+                .w(px(300.))
+                .text_size(px(16.))
+                .child(crate::TextSelectionLayer)
+                .child(
+                    TextView::new(&self.view)
+                        .selection_format(self.format)
+                        .plugin(
+                            crate::text::markdown_ext::TestInlinePlugin::new("mention")
+                                .parse_with(|node, _| {
+                                    let markdown::mdast::Node::Link(link) = node else {
+                                        return None;
+                                    };
+                                    let handle = link.url.strip_prefix("mention:")?;
+                                    Some(
+                                        crate::text::MarkdownNode::new("mention", ())
+                                            .text(format!("@{handle}")),
+                                    )
+                                })
+                                .render_with(move |_, _, _, _| {
+                                    let builds = builds.clone();
+                                    Some(crate::text::InlineElement::new(
+                                        crate::HoverCard::new("mention-hover")
+                                            .anchor(gpui::Anchor::TopCenter)
+                                            .trigger(div().child("@member"))
+                                            .content(move |_, _, cx| {
+                                                builds.fetch_add(1, Ordering::Relaxed);
+                                                div()
+                                                    .id("hover-content")
+                                                    .child(cx.new(|_| InlineHoverCard))
+                                            }),
+                                    ))
+                                }),
+                        ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn text_view_follows_the_text_color_of_its_container(cx: &mut TestAppContext) {
+        struct Root {
+            inherited: Entity<TextViewState>,
+            explicit: Entity<TextViewState>,
+            surface_text: gpui::Hsla,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .text_color(crate::ColorTokens::light().foreground)
+                    .child(
+                        div()
+                            .text_color(self.surface_text)
+                            .child(TextView::new(&self.inherited))
+                            .child(TextView::new(&self.explicit).style(TextViewStyle::default())),
+                    )
+            }
+        }
+
+        let colors = crate::ColorTokens::light();
+        cx.update(|cx| {
+            crate::init(cx);
+            super::TextViewDefaults::new()
+                .with_style(TextViewStyle::default())
+                .with_inherit_text_color(true)
+                .install(cx);
+        });
+        let (root, cx) = cx.add_window_view(|_, cx| Root {
+            inherited: cx.new(|cx| TextViewState::markdown("[link](https://a.b) `code`", cx)),
+            explicit: cx.new(|cx| TextViewState::markdown("text", cx)),
+            surface_text: colors.primary_foreground,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        root.read_with(cx, |root, cx| {
+            let inherited = &root.inherited.read(cx).text_view_style;
+            assert_eq!(inherited.foreground(), colors.primary_foreground);
+            assert_eq!(inherited.link(), colors.primary_foreground);
+            assert!(inherited.is_dark());
+
+            let explicit = &root.explicit.read(cx).text_view_style;
+            assert_eq!(explicit.foreground(), colors.foreground);
+            assert_eq!(explicit.link(), TextViewStyle::default().link());
+        });
+    }
+
+    #[gpui::test]
+    fn inline_plugin_reuses_render_and_preserves_native_child_events(cx: &mut TestAppContext) {
+        use std::sync::Mutex;
+        struct ControlPlugin(Arc<Mutex<Vec<String>>>);
+        impl crate::text::MarkdownPlugin for ControlPlugin {
+            fn name(&self) -> &str {
+                "control"
+            }
+            fn parse(
+                &self,
+                node: &markdown::mdast::Node,
+                _: &crate::text::MarkdownParseContext<'_>,
+            ) -> Option<crate::text::MarkdownNode> {
+                let markdown::mdast::Node::Link(link) = node else {
+                    return None;
+                };
+                let label = link.url.strip_prefix("control:")?;
+                Some(crate::text::MarkdownNode::new("control", ()).text(label.to_string()))
+            }
+            fn render(
+                &self,
+                node: &crate::text::MarkdownNode,
+                _: &mut Window,
+                _: &mut gpui::App,
+            ) -> impl IntoElement {
+                let clicks = self.0.clone();
+                let label = node.as_text().to_string();
+                div()
+                    .id("same-control-id")
+                    .w(px(60.))
+                    .h(px(24.))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, _| clicks.lock().unwrap().push(label.clone()))
+                    .child(node.as_text().to_string())
+            }
+        }
+        struct Root {
+            view: Entity<TextViewState>,
+            clicks: Arc<Mutex<Vec<String>>>,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.view).plugin(ControlPlugin(self.clicks.clone())))
+            }
+        }
+        cx.update(crate::init);
+        let clicks = Arc::new(Mutex::new(Vec::new()));
+        let captured = clicks.clone();
+        let (root, cx) = cx.add_window_view(move |_, cx| Root {
+            view: cx.new(|cx| TextViewState::markdown("[one](control:one)[two](control:two)", cx)),
+            clicks,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        let bounds = root.read_with(cx, |root, cx| {
+            root.view.read(cx).selection_adapter.text_bounds()
+        });
+        assert_eq!(bounds.len(), 2);
+        for bounds in bounds {
+            cx.simulate_click(bounds.center(), Modifiers::default());
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+        }
+        assert_eq!(*captured.lock().unwrap(), vec!["one", "two"]);
+    }
+
+    #[gpui::test]
+    fn inline_hover_card_is_lazy_and_retains_atomic_copy(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let builds = Arc::new(AtomicUsize::new(0));
+        let source = "[@member](mention:member)";
+        let (root, cx) = cx.add_window_view(|_, cx| InlineHoverTestRoot {
+            view: cx.new(|cx| TextViewState::markdown(source, cx)),
+            builds: builds.clone(),
+            format: crate::text::SelectionFormat::Plain,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(builds.load(Ordering::Relaxed), 0);
+        let view = root.read_with(cx, |root, _| root.view.clone());
+        let bounds = view.read_with(cx, |view, _| view.selection_adapter.text_bounds()[0]);
+        cx.update(|window, cx| {
+            window.simulate_mouse_move(point(bounds.right() - px(1.), bounds.center().y), cx)
+        });
+        cx.run_until_parked();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            builds.load(Ordering::Relaxed) > 0,
+            "hover did not build the card"
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let card = cx
+            .debug_bounds("inline-test-card")
+            .expect("hover card should be painted");
+        assert!(
+            (card.center().x - bounds.center().x).abs() < px(1.),
+            "card {card:?} must be centered on mention {bounds:?}"
+        );
+        assert!(
+            card.top() >= bounds.bottom(),
+            "card should be below the mention"
+        );
+        for (format, expected) in [
+            (crate::text::SelectionFormat::Plain, "@member"),
+            (crate::text::SelectionFormat::Source, source),
+        ] {
+            root.update(cx, |root, cx| {
+                root.format = format;
+                cx.notify();
+            });
+            view.update(cx, |view, cx| {
+                view.set_selection_format(format, cx);
+                view.select_all(cx);
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                view.read_with(cx, |view, _| view.selected_text()).trim(),
+                expected
+            );
+        }
+    }
+
+    struct InlinePluginTestRoot {
+        text_view: Entity<TextViewState>,
+        width: Pixels,
+        font_size: Pixels,
+        source_format: bool,
+        prepared_size: Option<Arc<AtomicUsize>>,
+    }
+
+    impl Render for InlinePluginTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let prepared_size = self.prepared_size.clone();
+            div().w(self.width).text_size(self.font_size).child(crate::TextSelectionLayer).child(
+                TextView::new(&self.text_view)
+                    .selection_format(if self.source_format { crate::text::SelectionFormat::Source }
+                        else { crate::text::SelectionFormat::Plain })
+
+                    .plugin(crate::text::markdown_ext::TestInlinePlugin::new("math").parse_with(|node, _| {
+                        let markdown::mdast::Node::InlineMath(math) = node else { return None };
+                        Some(crate::text::MarkdownNode::new("math", ()).text(format!("{}²", math.value)))
+                    }).render_with(move |_, context, _, _| {
+                        let value = prepared_size.as_ref()?.load(Ordering::Relaxed) as f32;
+                        let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg,
+                            b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><path d=\"M0 0L40 40\" stroke=\"black\"/></svg>".to_vec()));
+                        let unit = context.font_size() / 16.;
+                        Some(crate::text::InlineElement::new(gpui::img(image).w(unit * value).h(unit * value)).with_baseline(unit * value * 0.75))
+                    })))
+        }
+    }
+
+    #[gpui::test]
+    fn inline_plugins_drag_and_copy_across_formulas_in_both_directions(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| InlinePluginTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("中文 $x$ $y$ English", cx)),
+            width: px(420.),
+            font_size: px(16.),
+            source_format: false,
+            prepared_size: None,
+        });
+        let cx: &mut VisualTestContext = cx;
+        for font_size in [16., 24., 32.] {
+            for width in [60., 160., 420.] {
+                for prepared in [None, Some(32)] {
+                    for source_format in [false, true] {
+                        root.update(cx, |root, cx| {
+                            root.source_format = source_format;
+                            root.width = px(width);
+                            root.font_size = px(font_size);
+                            root.prepared_size =
+                                prepared.map(|value| Arc::new(AtomicUsize::new(value)));
+                            cx.notify();
+                        });
+                        cx.run_until_parked();
+                        cx.update(|window, cx| window.draw(cx).clear(cx));
+                        let bounds =
+                            root.read_with(cx, |root, cx| root.text_view.read(cx).bounds());
+                        let text_bounds = root.read_with(cx, |root, cx| {
+                            root.text_view.read(cx).selection_adapter.text_bounds()
+                        });
+                        let first = text_bounds.first().unwrap();
+                        let last = text_bounds.last().unwrap();
+                        let left =
+                            point(first.left() + px(0.1), first.top() + first.size.height / 2.);
+                        let right =
+                            point(last.right() - px(0.1), last.top() + last.size.height / 2.);
+                        for (start, end) in [(left, right), (right, left)] {
+                            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+                            cx.update(|window, cx| window.draw(cx).clear(cx));
+                            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+                            cx.update(|window, cx| window.draw(cx).clear(cx));
+                            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+                            cx.update(|window, cx| window.draw(cx).clear(cx));
+                            let selected = root
+                                .read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+                            assert_eq!(
+                                selected.trim(),
+                                if source_format {
+                                    "中文 $x$ $y$ English"
+                                } else {
+                                    "中文 x² y² English"
+                                },
+                                "start={start:?} end={end:?} bounds={bounds:?} width={width} font_size={font_size} prepared={prepared:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn inline_resource_size_update_reflows_without_changing_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let prepared_size = Arc::new(AtomicUsize::new(16));
+        let (root, cx) = cx.add_window_view(|_, cx| InlinePluginTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("中文 $x$ $y$ English", cx)),
+            width: px(160.),
+            font_size: px(16.),
+            source_format: false,
+            prepared_size: Some(prepared_size.clone()),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let before = root.read_with(cx, |root, cx| root.text_view.read(cx).bounds());
+        let regions = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        let first = regions.first().unwrap();
+        let last = regions.last().unwrap();
+        let start = point(first.left() + px(0.1), first.top() + px(10.));
+        let end = point(last.right() - px(0.1), last.top() + px(10.));
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "中文 x² y² English"
+        );
+        prepared_size.store(100, Ordering::Relaxed);
+        root.update(cx, |root, cx| {
+            root.text_view
+                .update(cx, |state, cx| state.invalidate_inline_layout(cx))
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let after = root.read_with(cx, |root, cx| root.text_view.read(cx).bounds());
+        assert!(after.size.height > before.size.height * 2.);
+        assert_eq!(
+            root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "中文 x² y² English"
+        );
+    }
+
+    #[gpui::test]
+    fn triple_click_on_formula_selects_its_entire_mixed_line(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| InlinePluginTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("before $x$ after", cx)),
+            width: px(420.),
+            font_size: px(16.),
+            source_format: false,
+            prepared_size: None,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let regions = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        let formula = regions[1];
+        let position = formula.center();
+        cx.simulate_event(MouseDownEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 3,
+            first_mouse: false,
+        });
+        cx.simulate_event(MouseUpEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 3,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "before x² after"
+        );
+        root.update(cx, |root, cx| {
+            root.source_format = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "before $x$ after"
+        );
+    }
+
+    #[gpui::test]
+    fn double_click_on_formula_selects_only_that_object(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| InlinePluginTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("before $x$ after", cx)),
+            width: px(420.),
+            font_size: px(16.),
+            source_format: false,
+            prepared_size: None,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let regions = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        let position = regions[1].center();
+        cx.simulate_event(MouseDownEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        cx.simulate_event(MouseUpEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 2,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // Two clicks stop at the object; only three take the whole line.
+        assert_eq!(
+            root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "x²"
+        );
     }
 
     /// A scrollable viewport, so the list has a bounded height to measure
@@ -881,10 +1654,44 @@ mod tests {
         let cx: &mut VisualTestContext = cx;
 
         cx.run_until_parked();
-        assert!(
-            renders.load(Ordering::Relaxed) <= 2,
-            "an unchanged TextView must settle after its parse, but rendered {} times",
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let renders_after_redraw = renders.load(Ordering::Relaxed);
+        cx.run_until_parked();
+        assert_eq!(
             renders.load(Ordering::Relaxed),
+            renders_after_redraw,
+            "an unchanged TextView must not schedule another render after its parser is rebuilt",
+        );
+    }
+
+    #[gpui::test]
+    fn markdown_data_url_image_is_decoded_inline(cx: &mut TestAppContext) {
+        use gpui::{Image, ImageFormat, ImageSource};
+
+        // A 1x1 red PNG.
+        const PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+
+        cx.update(crate::init);
+        let markdown = format!("Inline ![dot](data:image/png;base64,{PNG_BASE64}) image");
+        let (_, cx) = cx.add_window_view(|_, cx| TextViewTestRoot::new(&markdown, cx));
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        // `Image` keys the asset system by a hash of its bytes, so rebuilding it
+        // from the same body finds the entry the text view's `img` registered
+        // when it rendered — proof the body was decoded in place instead of
+        // being fetched over HTTP.
+        let bytes = data_url::DataUrl::process(&format!("data:image/png;base64,{PNG_BASE64}"))
+            .unwrap()
+            .decode_to_vec()
+            .unwrap()
+            .0;
+        let image = Arc::new(Image::from_bytes(ImageFormat::Png, bytes));
+        assert!(
+            cx.update(|_, cx| ImageSource::Image(image).is_asset_cached(cx)),
+            "the data URL image must be handed to GPUI as decoded bytes",
         );
     }
 
@@ -904,6 +1711,90 @@ mod tests {
             let style = &root.text_view.read(cx).text_view_style;
             assert_eq!(style.link(), gpui::rgb(0x55aaff).into());
             assert_eq!(style.selection(), gpui::rgb(0x335577).into());
+        });
+    }
+
+    #[gpui::test]
+    fn inline_code_view_refinement_keeps_unspecified_style_properties(cx: &mut TestAppContext) {
+        use super::{TextViewDefaults, TextViewStyle};
+        struct StyledCode(Entity<TextViewState>);
+        impl Render for StyledCode {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                TextView::new(&self.0)
+                    .inline_code_style(
+                        StyleRefinement::default()
+                            .border_1()
+                            .border_color(gpui::blue()),
+                    )
+                    .into_any_element()
+            }
+        }
+        cx.update(crate::init);
+        cx.update(|cx| {
+            cx.set_global(
+                TextViewDefaults::default().with_style(
+                    TextViewStyle::default().with_inline_code_style(
+                        StyleRefinement::default()
+                            .text_size(rems(1.))
+                            .bg(gpui::red()),
+                    ),
+                ),
+            )
+        });
+        let (root, cx) = cx.add_window_view(|_, cx| {
+            StyledCode(cx.new(|cx| TextViewState::markdown("before `code` after", cx)))
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        root.read_with(cx, |root, cx| {
+            let state = root.0.read(cx);
+            let style = state.text_view_style.inline_code_style();
+            assert_eq!(style.text.font_size, Some(rems(1.).into()));
+            assert_eq!(style.background, Some(gpui::red().into()));
+            assert_eq!(style.border_color, Some(gpui::blue()));
+            assert_eq!(style.border_widths.left, Some(px(1.).into()));
+        });
+    }
+
+    #[gpui::test]
+    fn list_and_blockquote_view_refinements_keep_unspecified_style_properties(
+        cx: &mut TestAppContext,
+    ) {
+        use super::{TextViewDefaults, TextViewStyle};
+        struct StyledBlocks(Entity<TextViewState>);
+        impl Render for StyledBlocks {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                TextView::new(&self.0)
+                    .list_style(StyleRefinement::default().text_color(gpui::blue()))
+                    .blockquote_style(StyleRefinement::default().border_color(gpui::blue()))
+                    .into_any_element()
+            }
+        }
+        cx.update(crate::init);
+        cx.update(|cx| {
+            cx.set_global(
+                TextViewDefaults::default().with_style(
+                    TextViewStyle::default()
+                        .with_list_style(
+                            StyleRefinement::default().font_weight(gpui::FontWeight::BOLD),
+                        )
+                        .with_blockquote_style(StyleRefinement::default().border_l_4()),
+                ),
+            )
+        });
+        let (root, cx) = cx.add_window_view(|_, cx| {
+            StyledBlocks(cx.new(|cx| TextViewState::markdown("- item\n\n> quote", cx)))
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        root.read_with(cx, |root, cx| {
+            let style = &root.0.read(cx).text_view_style;
+            let marker = style.list_style();
+            assert_eq!(marker.text.color, Some(gpui::blue()));
+            assert_eq!(marker.text.font_weight, Some(gpui::FontWeight::BOLD));
+            let quote = style.blockquote_style();
+            assert_eq!(quote.border_color, Some(gpui::blue()));
+            assert_eq!(quote.border_widths.left, Some(px(4.).into()));
         });
     }
 
@@ -972,6 +1863,320 @@ mod tests {
             0,
             "finished table selection must not continuously request frames"
         );
+    }
+
+    /// A drag that starts in a table cell selects only in that cell, also when
+    /// the pointer leaves the cell. A drag that starts outside the table still
+    /// selects through it.
+    #[gpui::test]
+    fn table_drag_from_a_cell_stays_in_that_cell(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| TableSelectionTestRoot {
+            text_view: cx.new(|cx| {
+                TextViewState::markdown(
+                    "Intro\n\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell A | Cell B |\n| Cell C | Cell D |",
+                    cx,
+                )
+            }),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let text_bounds = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert_eq!(text_bounds.len(), 7, "{text_bounds:?}");
+        let [intro, _, _, cell_a, cell_b, _, cell_d] = text_bounds[..] else {
+            unreachable!()
+        };
+        let table = cx
+            .debug_bounds("table-selection-root")
+            .expect("table bounds");
+        let start_of = |bounds: Bounds<Pixels>| point(bounds.left() + px(0.1), bounds.center().y);
+        let end_of = |bounds: Bounds<Pixels>| point(bounds.right() - px(0.1), bounds.center().y);
+
+        let mut drag = |start, end| {
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+            let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+            (selected.trim().to_string(), copied.trim().to_string())
+        };
+
+        // Down and right, out of the table: the rest of the cell, nothing else.
+        let below = point(table.right() - px(2.), table.bottom() - px(1.));
+        let expected = ("Cell A".to_string(), "Cell A".to_string());
+        assert_eq!(drag(start_of(cell_a), below), expected);
+
+        // Back along its line into the cell before it, and up and out of the
+        // table: the start of the cell, nothing else.
+        let expected = ("Cell B".to_string(), "Cell B".to_string());
+        let left = point(cell_a.center().x, cell_b.center().y);
+        assert_eq!(drag(end_of(cell_b), left), expected);
+        let above = point(table.left() + px(2.), intro.top());
+        assert_eq!(drag(end_of(cell_b), above), expected);
+
+        // From the paragraph before the table, the selection goes through it.
+        let (selected, copied) = drag(start_of(intro), end_of(cell_d));
+        for text in ["Intro", "Header 1", "Cell A", "Cell B", "Cell C", "Cell D"] {
+            assert!(selected.contains(text), "{text} not in {selected:?}");
+            assert!(copied.contains(text), "{text} not in {copied:?}");
+        }
+
+        // Copy before the frame that paints the last move: Copy projects the
+        // selection itself and keeps it in the cell too.
+        cx.simulate_mouse_down(start_of(cell_a), MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(end_of(cell_a), MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(below, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(below, MouseButton::Left, Modifiers::default());
+        let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+        assert_eq!(copied.trim(), "Cell A");
+    }
+
+    /// Text in a right-aligned or centered column is selected where it is
+    /// painted: a drag over it selects it, and the highlight covers it.
+    #[gpui::test]
+    fn table_drag_selects_aligned_cell_text_where_it_is_painted(cx: &mut TestAppContext) {
+        const SELECTION: u32 = 0xf020b0;
+
+        struct AlignedTableRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for AlignedTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                // The underline is painted under the glyphs, so it shows
+                // where the text is drawn.
+                div()
+                    .w(px(520.))
+                    .underline()
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).style(
+                        TextViewStyle::default().with_selection(gpui::rgb(SELECTION).into()),
+                    ))
+            }
+        }
+
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| AlignedTableRoot {
+            text_view: cx.new(|cx| {
+                TextViewState::markdown(
+                    "| Quarterly revenue | Review status |\n| ---: | :---: |\n| 42 | ok |",
+                    cx,
+                )
+            }),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let mut underlines = cx.update(|window, _| {
+            let scale_factor = window.scale_factor();
+            window
+                .painted_underlines()
+                .into_iter()
+                .map(|underline| underline.bounds.map(|value| px(value.0 / scale_factor)))
+                .collect::<Vec<_>>()
+        });
+        underlines.sort_by(|a, b| {
+            (a.top(), a.left())
+                .partial_cmp(&(b.top(), b.left()))
+                .expect("finite bounds")
+        });
+        let [right_head, center_head, right, center] = underlines[..] else {
+            panic!("expected one underline per cell, got {underlines:?}");
+        };
+        // The body text is narrower than its header, so it is drawn at the
+        // end or in the middle of its column.
+        assert!((right.right() - right_head.right()).abs() < px(1.));
+        assert!(right.left() > right_head.left() + px(1.));
+        assert!((center.center().x - center_head.center().x).abs() < px(1.));
+        assert!(center.left() > center_head.left() + px(1.));
+
+        for (underline, expected) in [(right, "42"), (center, "ok")] {
+            // A few pixels above the underline is inside the text's line.
+            let y = underline.top() - px(4.);
+            let start = point(underline.left() + px(0.1), y);
+            let end = point(underline.right() - px(0.1), y);
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+            let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+            assert_eq!(selected.trim(), expected);
+            assert_eq!(copied.trim(), expected);
+            let highlights = cx.update(|window, _| {
+                let selection: gpui::Background = gpui::rgb(SELECTION).into();
+                let scale_factor = window.scale_factor();
+                window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == selection)
+                    .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
+                    .collect::<Vec<_>>()
+            });
+            assert!(
+                highlights.iter().any(|highlight| {
+                    highlight.left() <= underline.left() + px(1.)
+                        && highlight.right() >= underline.right() - px(1.)
+                        && highlight.top() <= y
+                        && highlight.bottom() >= underline.bottom()
+                }),
+                "the highlight {highlights:?} must cover the text above {underline:?}"
+            );
+        }
+    }
+
+    struct CellSelectionTestRoot {
+        text_view: Entity<TextViewState>,
+        scrollable: bool,
+    }
+
+    impl Render for CellSelectionTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(520.))
+                .h(px(400.))
+                .child(crate::TextSelectionLayer)
+                .child(TextView::new(&self.text_view).scrollable(self.scrollable))
+        }
+    }
+
+    #[gpui::test]
+    fn table_cell_copy_excludes_following_blocks_in_a_scrollable_view(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| CellSelectionTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(
+                "| Header | Other |\n| --- | --- |\n| Cell A | Cell B |\n\nMiddle paragraph\n\nLast paragraph", cx)),
+            scrollable: true,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let rows = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert_eq!(rows.len(), 6, "{rows:?}");
+        let start = point(rows[2].left() + px(0.1), rows[2].center().y);
+        let inside = point(rows[2].right() - px(0.1), rows[2].center().y);
+        let end = point(rows[5].right() - px(0.1), rows[5].center().y);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(inside, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // The copy callback must constrain the logical block range even before paint.
+        cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        for format in [SelectionFormat::Plain, SelectionFormat::Source] {
+            root.update(cx, |root, cx| {
+                root.text_view
+                    .update(cx, |state, cx| state.set_selection_format(format, cx))
+            });
+            let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+            assert_eq!(copied.trim(), "Cell A", "{format:?}");
+        }
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "Cell A");
+    }
+
+    #[gpui::test]
+    fn table_cell_touch_select_all_includes_every_cell(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| CellSelectionTestRoot {
+            text_view: cx.new(|cx| {
+                TextViewState::markdown(
+                    "| Header | Other |\n| --- | --- |\n| Cell A | Cell B |",
+                    cx,
+                )
+            }),
+            scrollable: false,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let rows = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        let position = rows[2].center();
+        for phase in [gpui::TouchPhase::Started, gpui::TouchPhase::Ended] {
+            cx.simulate_event(gpui::LongPressEvent {
+                phase,
+                start_position: position,
+                position,
+            });
+        }
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            crate::TextSelection::select_all(window, cx);
+            window.draw(cx).clear(cx);
+        });
+        let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+        let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+        for text in ["Header", "Other", "Cell A", "Cell B"] {
+            assert!(selected.contains(text), "{selected:?}");
+            assert!(copied.contains(text), "{copied:?}");
+        }
+    }
+
+    #[gpui::test]
+    fn table_cell_selection_does_not_leak_into_another_window(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let start = {
+            let (root, cx) = cx.add_window_view(|_, cx| CellSelectionTestRoot {
+                text_view: cx.new(|cx| {
+                    TextViewState::markdown(
+                        "| Header | Other |\n| --- | --- |\n| Cell A | Cell B |",
+                        cx,
+                    )
+                }),
+                scrollable: false,
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let rows = root.read_with(cx, |root, cx| {
+                root.text_view.read(cx).selection_adapter.text_bounds()
+            });
+            let start = point(rows[0].left() + px(0.1), rows[0].center().y);
+            let end = point(rows[0].right() - px(0.1), rows[0].center().y);
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.update(|window, cx| crate::TextSelection::selected_text(window, cx))
+                    .trim(),
+                "Header"
+            );
+            start
+        };
+        let (root, cx) = cx.add_window_view(|_, cx| CellSelectionTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("ordinary text in another window", cx)),
+            scrollable: false,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let rows = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert!(rows[0].contains(&start), "{start:?}, {rows:?}");
+        let end = point(rows[0].right() - px(0.1), rows[0].center().y);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+        let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+        assert!(!selected.trim().is_empty());
+        assert_eq!(copied, selected);
     }
 
     struct InlineImageTextViewTestRoot {
@@ -1046,6 +2251,91 @@ mod tests {
         });
     }
 
+    struct FittedListTestRoot {
+        text_view: Entity<TextViewState>,
+        width: Pixels,
+    }
+
+    impl Render for FittedListTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(self.width)
+                .flex()
+                .flex_col()
+                .items_end()
+                .text_size(px(16.))
+                .child(crate::TextSelectionLayer)
+                .child(
+                    div()
+                        .debug_selector(|| "fitted-list".into())
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .max_w_full()
+                        .p_4()
+                        .child(TextView::new(&self.text_view).selectable(true)),
+                )
+        }
+    }
+
+    fn fitted_list_bounds(
+        source: &str,
+        width: f32,
+        cx: &mut TestAppContext,
+    ) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>) {
+        let (root, cx) = cx.add_window_view(|_, cx| FittedListTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(source, cx)),
+            width: px(width),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let bubble = cx.debug_bounds("fitted-list").unwrap();
+        let rows = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert!(!rows.is_empty(), "list text must be painted: {source:?}");
+        for row in &rows {
+            assert!(
+                row.left() >= bubble.left() && row.right() <= bubble.right(),
+                "text must remain visible inside the fitted container: {source:?}, {bubble:?}, {row:?}"
+            );
+        }
+        (bubble, rows)
+    }
+
+    #[gpui::test]
+    fn fitted_lists_include_their_body_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (plain, _) = fitted_list_bounds("Hello world", 600., cx);
+        for source in [
+            "3. Hello world",
+            "- Hello world",
+            "- [ ] Hello world",
+            "- [x] Hello world",
+            "Intro\n\n- Hello world",
+            "- Outer\n  - Hello world",
+        ] {
+            let (bubble, _) = fitted_list_bounds(source, 600., cx);
+            assert!(
+                bubble.size.width > plain.size.width,
+                "the marker must leave room for the full body: {source:?}, {bubble:?}, {plain:?}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn fitted_lists_wrap_their_body_within_the_available_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let body = "Visible text that wraps without being clipped. ".repeat(12);
+        for width in [600., 180.] {
+            for prefix in ["3. ", "- ", "- [ ] ", "- [x] ", "- Outer\n  - "] {
+                let (bubble, rows) = fitted_list_bounds(&format!("{prefix}{body}"), width, cx);
+                assert!(bubble.size.width <= px(width));
+                assert!(rows.len() > 1, "the body must wrap: {prefix:?}, {width}");
+            }
+        }
+    }
+
     #[gpui::test]
     fn list_item_renders_fenced_code_block_at_document_width(cx: &mut TestAppContext) {
         struct ListItemBlockRoot;
@@ -1097,6 +2387,93 @@ mod tests {
             top_level_action.right() - nested_action.right() < px(32.),
             "nested code block should fill the list item's available width"
         );
+    }
+
+    /// Height cap of the scrolling code block in [`ScrollingCodeRoot`].
+    const CODE_HEIGHT: Pixels = px(60.);
+
+    struct ScrollingCodeRoot {
+        text_view: Entity<TextViewState>,
+        actions: bool,
+    }
+
+    impl Render for ScrollingCodeRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let mut code_block = StyleRefinement::default().max_h(CODE_HEIGHT);
+            code_block.overflow.y = Some(Overflow::Scroll);
+
+            div().w(px(320.)).h(px(200.)).child(
+                TextView::new(&self.text_view)
+                    .style(TextViewStyle::default().with_code_block(code_block))
+                    .when(self.actions, |this| {
+                        this.code_block_actions(|_, _, _| {
+                            div().debug_selector(|| "code-action".into()).child("Copy")
+                        })
+                    })
+                    .scrollable(true),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn scrolling_code_block_keeps_wheel_from_the_list(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let code = (0..50).map(|i| format!("line {i}\n")).collect::<String>();
+        let tail = "Paragraph after the code.\n\n".repeat(20);
+        let markdown = format!("```\n{code}```\n\n{tail}");
+
+        // Scrolling must not depend on `code_block_actions`, which is what
+        // gives a non-scrolling block its id.
+        for actions in [false, true] {
+            let (root, cx) = cx.add_window_view(|_, cx| ScrollingCodeRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&markdown, cx)),
+                actions,
+            });
+            let cx: &mut VisualTestContext = cx;
+            let draw = |cx: &mut VisualTestContext| {
+                cx.run_until_parked();
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            };
+            let step = px(20.);
+            let wheel_at = |cx: &mut VisualTestContext, y: Pixels| {
+                cx.simulate_event(gpui::ScrollEvent {
+                    position: point(px(20.), y),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), -step)),
+                    ..Default::default()
+                });
+            };
+            // The code block is first in the view, and painted lines are
+            // clipped to its viewport: the first code line's bottom moves with
+            // the code, the first line below the viewport moves with the list.
+            let edges = |cx: &mut VisualTestContext| {
+                let lines = root.read_with(cx, |root, cx| {
+                    root.text_view.read(cx).selection_adapter.text_bounds()
+                });
+                let paragraph = lines.iter().find(|line| line.top() >= CODE_HEIGHT).unwrap();
+                (lines[0].bottom(), paragraph.top())
+            };
+            draw(cx);
+            let (code_bottom, paragraph_top) = edges(cx);
+            let action = cx.debug_bounds("code-action");
+
+            // Over the code block: the code scrolls, the list and the pinned
+            // actions stay put.
+            wheel_at(cx, CODE_HEIGHT / 2.);
+            draw(cx);
+            assert_eq!(
+                edges(cx),
+                (code_bottom - step, paragraph_top),
+                "actions: {actions}"
+            );
+            assert_eq!(cx.debug_bounds("code-action"), action);
+
+            // Below the code block the list still scrolls. Only inequality
+            // holds: once the paragraph moves into the code's band, `edges`
+            // picks the next one down.
+            wheel_at(cx, CODE_HEIGHT * 2.5);
+            draw(cx);
+            assert_ne!(edges(cx).1, paragraph_top, "actions: {actions}");
+        }
     }
 
     /// Draw a Markdown table with a `table_actions` hook installed, and return
@@ -1186,6 +2563,126 @@ mod tests {
             );
             assert_eq!(data.span, Some(0..52));
         }
+    }
+
+    /// A task under each list marker, one of them nested.
+    const TASK_LIST: &str =
+        "- [ ] Open\n  - [x] Nested\n* [X] Star\n+ [ ] Plus\n1. [x] One\n2) [ ] Two\n";
+    const TASK_LABELS: [&str; 6] = ["Open", "Nested", "Star", "Plus", "One", "Two"];
+
+    type TaskToggles = Arc<std::sync::Mutex<Vec<TaskToggleEvent>>>;
+
+    struct TaskListTestRoot {
+        text_view: Entity<TextViewState>,
+        toggles: Option<TaskToggles>,
+        container_clicks: Arc<AtomicUsize>,
+    }
+
+    impl Render for TaskListTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let container_clicks = self.container_clicks.clone();
+            div()
+                .id("task-list-container")
+                .w(px(300.))
+                .text_size(px(16.))
+                .on_click(move |_, _, _| {
+                    container_clicks.fetch_add(1, Ordering::Relaxed);
+                })
+                .child(crate::TextSelectionLayer)
+                .child(TextView::new(&self.text_view).when_some(
+                    self.toggles.clone(),
+                    |this, toggles| {
+                        this.on_task_toggle(move |event, _, _| {
+                            toggles.lock().unwrap().push(event.clone());
+                        })
+                    },
+                ))
+        }
+    }
+
+    /// Clicks the checkbox of each item of [`TASK_LIST`], then the text of
+    /// its first item, and returns how many clicks reached the container.
+    fn click_task_list(toggles: Option<TaskToggles>, cx: &mut TestAppContext) -> usize {
+        cx.update(crate::init);
+        let container_clicks = Arc::new(AtomicUsize::new(0));
+        let (root, cx) = cx.add_window_view({
+            let container_clicks = container_clicks.clone();
+            move |_, cx| TaskListTestRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(TASK_LIST, cx)),
+                toggles,
+                container_clicks,
+            }
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let text = |label: &str, cx: &mut VisualTestContext| {
+            root.read_with(cx, |root, cx| {
+                root.text_view
+                    .read(cx)
+                    .selection_adapter
+                    .text_position(label, 0)
+            })
+        };
+        for label in TASK_LABELS {
+            // The checkbox sits just before the item's text.
+            let checkbox = text(label, cx) - point(px(16.), px(0.));
+            cx.simulate_click(checkbox, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        let open = text("Open", cx);
+        cx.simulate_click(open, Modifiers::default());
+        container_clicks.load(Ordering::Relaxed)
+    }
+
+    #[gpui::test]
+    fn task_checkbox_click_reports_its_new_state_item_and_marker(cx: &mut TestAppContext) {
+        let toggles = TaskToggles::default();
+        let container_clicks = click_task_list(Some(toggles.clone()), cx);
+
+        let reported: Vec<_> = toggles
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| (event.checked(), event.item_range(), event.marker_range()))
+            .collect();
+        let task = |checked, item: &str, marker: &str| {
+            let item_start = TASK_LIST.find(item).unwrap();
+            let marker_start = item_start + item.find(marker).unwrap();
+            (
+                checked,
+                item_start..item_start + item.len(),
+                marker_start..marker_start + marker.len(),
+            )
+        };
+        assert_eq!(
+            reported,
+            vec![
+                task(true, "- [ ] Open\n  - [x] Nested", "[ ]"),
+                task(false, "- [x] Nested", "[x]"),
+                task(false, "* [X] Star", "[X]"),
+                task(true, "+ [ ] Plus", "[ ]"),
+                task(false, "1. [x] One", "[x]"),
+                task(true, "2) [ ] Two", "[ ]"),
+            ],
+            "each checkbox reports the flipped state, its item with any nested \
+             list and exactly its `[ ]` / `[x]`, and a click on the item text \
+             toggles nothing",
+        );
+        assert_eq!(
+            container_clicks, 1,
+            "only the click on the text reaches the container"
+        );
+    }
+
+    #[gpui::test]
+    fn task_checkboxes_without_a_handler_are_not_interactive(cx: &mut TestAppContext) {
+        let container_clicks = click_task_list(None, cx);
+
+        assert_eq!(
+            container_clicks,
+            TASK_LABELS.len() + 1,
+            "every click, including those on a checkbox, reaches the container"
+        );
     }
 
     #[test]
@@ -1423,6 +2920,62 @@ mod tests {
     }
 
     #[gpui::test]
+    fn heading_refinement_changes_rendered_heading_geometry(cx: &mut TestAppContext) {
+        struct HeadingStyleRoot;
+
+        impl Render for HeadingStyleRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .items_start()
+                    .child(
+                        div()
+                            .debug_selector(|| "default-h1".into())
+                            .child(TextView::markdown("default-h1-view", "# Heading")),
+                    )
+                    .child(div().debug_selector(|| "custom-h1".into()).child(
+                        TextView::markdown("custom-heading-view", "# Heading").style(
+                            TextViewStyle::default().with_heading(|level| {
+                                if level == 1 {
+                                    StyleRefinement::default().pb(rems(2.))
+                                } else {
+                                    StyleRefinement::default()
+                                }
+                            }),
+                        ),
+                    ))
+                    .child(
+                        div()
+                            .debug_selector(|| "default-h2".into())
+                            .child(TextView::markdown("default-h2-view", "## Heading")),
+                    )
+                    .child(div().debug_selector(|| "custom-h2".into()).child(
+                        TextView::markdown("custom-h2-view", "## Heading").style(
+                            TextViewStyle::default().with_heading(|level| {
+                                if level == 1 {
+                                    StyleRefinement::default().pb(rems(2.))
+                                } else {
+                                    StyleRefinement::default()
+                                }
+                            }),
+                        ),
+                    ))
+            }
+        }
+
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| HeadingStyleRoot);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let default_h1 = cx.debug_bounds("default-h1").unwrap();
+        let custom_h1 = cx.debug_bounds("custom-h1").unwrap();
+        let default_h2 = cx.debug_bounds("default-h2").unwrap();
+        let custom_h2 = cx.debug_bounds("custom-h2").unwrap();
+        assert!(custom_h1.size.height > default_h1.size.height);
+        assert_eq!(custom_h2.size.height, default_h2.size.height);
+    }
+
+    #[gpui::test]
     fn max_lines_disables_links_hidden_by_the_clamp(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, cx| {
@@ -1438,6 +2991,719 @@ mod tests {
         cx.simulate_click(point(px(10.), px(150.)), Modifiers::default());
 
         assert_eq!(cx.opened_url(), None);
+    }
+
+    #[gpui::test]
+    fn scaled_inline_code_keeps_links_and_drag_selection(cx: &mut TestAppContext) {
+        struct SelectionRoot {
+            text_view: Entity<TextViewState>,
+            format: crate::text::SelectionFormat,
+        }
+        impl Render for SelectionRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(160.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selection_format(self.format))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| SelectionRoot {
+            format: crate::text::SelectionFormat::Plain,
+            text_view: cx
+                .new(|cx| TextViewState::markdown("[`code`](https://example.com) after", cx)),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.simulate_click(point(px(10.), px(10.)), Modifiers::default());
+        assert_eq!(cx.opened_url(), Some("https://example.com".to_string()));
+        // Just past the code span's leading padding, on its first glyph.
+        cx.simulate_mouse_down(
+            point(px(5.), px(8.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(
+            point(px(155.), px(20.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_up(
+            point(px(155.), px(20.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = view.read_with(cx, |view, cx| view.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "code after");
+        view.update(cx, |view, cx| {
+            view.format = crate::text::SelectionFormat::Source;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = view.read_with(cx, |view, cx| view.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "[`code`](https://example.com) after");
+    }
+
+    /// Inline-code Markdown takes the deferred `InlineFlow` path. Its layout
+    /// must use the heading's resolved typography rather than the ambient body
+    /// style that remains after the heading's style stack has been popped.
+    ///
+    /// This is a real request-layout → measured-layout → prepaint → paint test:
+    /// the deterministic text system makes bold glyphs wider than body glyphs.
+    /// Before the fix, the code heading was allocated using normal body metrics
+    /// but its fragments painted bold, so the wrapped heading text crossed into
+    /// the following paragraph.
+    #[test]
+    fn inline_code_heading_reserves_painted_wrapped_lines_and_list_baseline() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        const MARKDOWN: &str = "The same words with inline code.\n\nThe same words with `inline code`.\n\n- The same words with inline code.\n- The same words with `inline code`.\n\n# Heading with inline code\n# Heading with `inline code`\n\nthis is a test";
+
+        struct MarkdownRoot {
+            text_view: Entity<TextViewState>,
+            width: Pixels,
+            preview_zoom: f32,
+        }
+
+        impl Render for MarkdownRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(self.width)
+                    // Match example-markdown: preview zoom changes TextView's
+                    // inherited text size, not the window rem size.
+                    .text_size(rems(self.preview_zoom))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+
+        fn draw(
+            app: &mut TestApp,
+            width: Pixels,
+            preview_zoom: f32,
+        ) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>, String) {
+            let mut window = app.open_window(|_, cx| MarkdownRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(MARKDOWN, cx)),
+                width,
+                preview_zoom,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.update(|root, _, cx| {
+                root.text_view.update(cx, |state, cx| state.select_all(cx));
+            });
+            window.draw();
+            window.read(|root, cx| {
+                let state = root.text_view.read(cx);
+                (
+                    state.bounds(),
+                    state.selection_adapter.text_bounds(),
+                    state.selected_text(),
+                )
+            })
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+
+        for (case, width, preview_zoom) in [
+            // At the root 16px size the plain heading fits, while bold inline
+            // fragments need their own measured widths.
+            ("default-16px", px(600.), 1.),
+            // A narrow view exercises intentional heading wrapping.
+            ("narrow-16px", px(320.), 1.),
+            // Preview zoom applies through `.text_size(rems(zoom))`.
+            ("zoom-1.25", px(600.), 1.25),
+        ] {
+            let (view_bounds, text_bounds, selected_text) = draw(&mut app, width, preview_zoom);
+            assert!(
+                text_bounds.len() > 8,
+                "{case}: expected all markdown fragments"
+            );
+            assert_eq!(
+                selected_text.trim(),
+                "The same words with inline code.\nThe same words with inline code.\nThe same words with inline code.\nThe same words with inline code.\nHeading with inline code\nHeading with inline code\nthis is a test",
+                "{case}: wrapped inline-code text was lost or duplicated"
+            );
+            let following = text_bounds.last().expect("following paragraph must paint");
+            let painted_bottom = text_bounds
+                .iter()
+                .map(|bounds| bounds.bottom())
+                .max()
+                .expect("markdown must paint text");
+            // This is intentionally not a fragment-count or selection-only
+            // assertion: `text_bounds` are the shaped Inline layouts produced
+            // during paint. No painted wrapped line may reach the following
+            // paragraph's origin, and the TextView allocation must contain the
+            // complete painted document.
+            assert!(
+                text_bounds[..text_bounds.len() - 1]
+                    .iter()
+                    .all(|bounds| bounds.bottom() <= following.top()),
+                "{case}: heading/list text painted through the following paragraph;                  following={following:?}, text_bounds={text_bounds:?}, view={view_bounds:?}"
+            );
+            assert!(
+                painted_bottom <= view_bounds.bottom(),
+                "{case}: TextView height did not reserve its painted text;                  painted_bottom={painted_bottom:?}, view={view_bounds:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ordered_markdown_list_start_reaches_layout_marker() {
+        use crate::text::inline::test_fonts::{WideMonoTextSystem, record_shaped_lines};
+        use gpui::TestApp;
+
+        struct MarkdownRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for MarkdownRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(400.)).child(TextView::new(&self.text_view))
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum Format {
+            Markdown,
+            Html,
+        }
+
+        fn shaped_markers(format: Format, source: &str) -> Vec<String> {
+            let (_, shaped_lines) = record_shaped_lines(|| {
+                let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+                app.update(crate::init);
+                let mut window = app.open_window(|_, cx| MarkdownRoot {
+                    text_view: cx.new(|cx| match format {
+                        Format::Markdown => TextViewState::markdown(source, cx),
+                        Format::Html => TextViewState::html(source, cx),
+                    }),
+                });
+                window.draw();
+                app.run_until_parked();
+                window.draw();
+            });
+
+            let mut markers = shaped_lines
+                .into_iter()
+                .filter(|line| line.len() <= 3 && line.ends_with('.'))
+                .collect::<Vec<_>>();
+            markers.dedup();
+            markers
+        }
+
+        let starts_at_one = "1. one\n2. two";
+        assert_eq!(
+            shaped_markers(Format::Markdown, starts_at_one),
+            ["1.", "2."]
+        );
+        assert_eq!(
+            shaped_markers(Format::Html, "<ol><li>one</li><li>two</li></ol>"),
+            ["1.", "2."]
+        );
+
+        assert_eq!(
+            shaped_markers(Format::Markdown, "3. hello\n4. world"),
+            ["3.", "4."]
+        );
+
+        let nested_starts_at_four = "1. outer\n\n   4. nested\n   5. again";
+        assert_eq!(
+            shaped_markers(Format::Markdown, nested_starts_at_four),
+            ["1.", "D.", "E."]
+        );
+
+        let nested_starts_at_zero = "1. outer\n\n   0. zero";
+        assert_eq!(
+            shaped_markers(Format::Markdown, nested_starts_at_zero),
+            ["1.", "0."]
+        );
+    }
+
+    /// A line with inline code takes `InlineFlow` and a plain line takes the
+    /// ordinary text path; both must be the same height, or a list with one
+    /// code item is unevenly spaced (#3162). The fractional scale factor and
+    /// zooms give line heights that are not whole logical pixels.
+    #[test]
+    fn inline_code_line_is_as_tall_as_a_plain_line() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        struct LineRoot {
+            plain: Entity<TextViewState>,
+            code: Entity<TextViewState>,
+            preview_zoom: f32,
+        }
+
+        impl Render for LineRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(600.))
+                    .text_size(rems(self.preview_zoom))
+                    .child(TextView::new(&self.plain))
+                    .child(TextView::new(&self.code))
+            }
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        for scale_factor in [1.6, 2.] {
+            for preview_zoom in [1., 1.25] {
+                let mut window = app.open_window(|_, cx| LineRoot {
+                    plain: cx.new(|cx| TextViewState::markdown("plain body words", cx)),
+                    code: cx.new(|cx| TextViewState::markdown("plain `code` words", cx)),
+                    preview_zoom,
+                });
+                window.simulate_scale_factor_change(scale_factor);
+                window.draw();
+                app.run_until_parked();
+                window.draw();
+                let (plain, code) = window.read(|root, cx| {
+                    (
+                        root.plain.read(cx).bounds().size.height,
+                        root.code.read(cx).bounds().size.height,
+                    )
+                });
+                assert_eq!(code, plain, "scale {scale_factor}, zoom {preview_zoom}");
+            }
+        }
+    }
+
+    /// The code-bearing list item takes `InlineFlow`; the plain item takes the
+    /// ordinary text path. Their first body glyphs must begin at the same row
+    /// position relative to their own TextView origins.
+    #[test]
+    fn inline_code_list_body_paint_origin_matches_plain_list_item() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        struct ListRoot {
+            plain: Entity<TextViewState>,
+            code: Entity<TextViewState>,
+            preview_zoom: f32,
+        }
+
+        impl Render for ListRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(600.))
+                    .text_size(rems(self.preview_zoom))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.plain).selectable(true))
+                    .child(TextView::new(&self.code).selectable(true))
+            }
+        }
+
+        fn draw(app: &mut TestApp, preview_zoom: f32) -> (Pixels, Pixels) {
+            let mut window = app.open_window(|_, cx| ListRoot {
+                plain: cx.new(|cx| TextViewState::markdown("- plain body words", cx)),
+                code: cx.new(|cx| TextViewState::markdown("- plain `code` words", cx)),
+                preview_zoom,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.read(|root, cx| {
+                let first_body_line_top = |view: &Entity<TextViewState>| {
+                    let view = view.read(cx);
+                    let painted_line = view
+                        .selection_adapter
+                        .text_bounds()
+                        .into_iter()
+                        .next()
+                        .expect("list item should paint its first body line");
+                    painted_line.top() - view.bounds().top()
+                };
+                (
+                    first_body_line_top(&root.plain),
+                    first_body_line_top(&root.code),
+                )
+            })
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        for (case, preview_zoom) in [("16px", 1.), ("zoom-1.25", 1.25), ("zoom-1.5", 1.5)] {
+            let (plain_origin, code_origin) = draw(&mut app, preview_zoom);
+            assert_eq!(
+                code_origin, plain_origin,
+                "{case}: code list body paint origin {code_origin:?} must match plain {plain_origin:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_code_fragment_does_not_paint_past_its_reserved_row() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::TestApp;
+
+        const TEXT_BACKGROUND: u32 = 0x20f0b0;
+
+        struct MarkdownRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for MarkdownRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(640.))
+                    .text_size(px(17.9))
+                    .text_bg(gpui::rgb(TEXT_BACKGROUND))
+                    .child(TextView::new(&self.text_view))
+            }
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        let mut window = app.open_window(|_, cx| MarkdownRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("`main` starts the paragraph", cx)),
+        });
+        window.draw();
+        app.run_until_parked();
+        window.draw();
+
+        let (view_bounds, painted) = window.update(|root, window, cx| {
+            let view_bounds = root
+                .text_view
+                .read(cx)
+                .bounds()
+                .scale(window.scale_factor());
+            let text_background: gpui::Background = gpui::rgb(TEXT_BACKGROUND).into();
+            let painted = window
+                .painted_quads()
+                .into_iter()
+                .filter(|quad| quad.background == text_background)
+                .map(|quad| quad.bounds)
+                .collect::<Vec<_>>();
+            (view_bounds, painted)
+        });
+
+        assert!(
+            !painted.is_empty(),
+            "the inherited text background must make actual text paint observable"
+        );
+        assert!(
+            painted
+                .iter()
+                .all(|bounds| bounds.bottom() <= view_bounds.bottom()),
+            "an inline-code fragment wrapped a second time after InlineFlow reserved one row; \
+             text background quads={painted:?}, reserved TextView bounds={view_bounds:?}"
+        );
+    }
+
+    #[test]
+    fn table_row_backgrounds_follow_the_frame_corner_radius() {
+        use gpui::TestApp;
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const RADIUS: f32 = 8.;
+
+        struct RoundedTableRoot {
+            text_view: Entity<TextViewState>,
+            scroll: bool,
+        }
+
+        impl Render for RoundedTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                table.corner_radii.top_left = Some(px(RADIUS).into());
+                table.corner_radii.top_right = Some(px(RADIUS).into());
+                table.corner_radii.bottom_left = Some(px(RADIUS).into());
+                table.corner_radii.bottom_right = Some(px(RADIUS).into());
+                if self.scroll {
+                    table.overflow.x = Some(gpui::Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table);
+                div()
+                    .w(px(400.))
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        for scroll in [false, true] {
+            let mode = if scroll { "scroll" } else { "wrap" };
+            let mut app = TestApp::new();
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| RoundedTableRoot {
+                text_view: cx
+                    .new(|cx| TextViewState::markdown("| a | b |\n| --- | --- |\n| 1 | 2 |", cx)),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+
+            let (quad, scale) = window.update(|_, window, _| {
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                let quad = window
+                    .painted_quads()
+                    .into_iter()
+                    .find(|quad| quad.background == head)
+                    .unwrap_or_else(|| panic!("{mode}: the header background quad is painted"));
+                (quad, window.scale_factor())
+            });
+
+            // GPUI clips children with a rectangular mask, so the header fill
+            // must carry the frame radius itself, inset by the 1px border.
+            let expected = px(RADIUS - 1.).scale(scale);
+            assert_eq!(quad.corner_radii.top_left, expected, "{mode}: top left");
+            assert_eq!(quad.corner_radii.top_right, expected, "{mode}: top right");
+            let square = px(0.).scale(scale);
+            assert_eq!(quad.corner_radii.bottom_left, square, "{mode}: bottom left");
+            assert_eq!(
+                quad.corner_radii.bottom_right, square,
+                "{mode}: bottom right"
+            );
+        }
+    }
+
+    /// A table body row under the pointer takes the hover background and the
+    /// header does not. Every row of every table keeps its own hover state, so
+    /// each move onto or off a row notifies the view, even a move between the
+    /// same row of two tables.
+    #[test]
+    fn table_body_row_under_the_pointer_takes_the_hover_background() {
+        use gpui::TestApp;
+        use std::{cell::Cell, rc::Rc};
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const ROW_HOVER: u32 = 0x7711aa;
+
+        struct HoverTableRoot {
+            text_view: Entity<TextViewState>,
+            scroll: bool,
+        }
+
+        impl Render for HoverTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                if self.scroll {
+                    table.overflow.x = Some(Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table)
+                    .with_table_row_hover(gpui::rgb(ROW_HOVER).into());
+                div()
+                    .w(px(400.))
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        let table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |";
+        let source = format!("{table}\n\nBetween\n\n{table}");
+        for scroll in [false, true] {
+            let mode = if scroll { "scroll" } else { "wrap" };
+            let mut app = TestApp::new();
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| HoverTableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+
+            // The text view's own view paints the rows, so it is the one
+            // their hover notifies.
+            let notifications = Rc::new(Cell::new(0));
+            let text_view = window.update(|root, _, _| root.text_view.clone());
+            app.update(|cx| {
+                let notifications = notifications.clone();
+                cx.observe(&text_view, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+                .detach();
+            });
+
+            // The header rows, top to bottom, in logical pixels.
+            let (heads, scale) = window.update(|_, window, _| {
+                let scale = window.scale_factor();
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                let mut heads = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == head)
+                    .map(|quad| quad.bounds.map(|value| px(value.as_f32() / scale)))
+                    .collect::<Vec<_>>();
+                heads.sort_by_key(|bounds| bounds.origin.y);
+                (heads, scale)
+            });
+            assert_eq!(heads.len(), 2, "{mode}: two header rows");
+            let first_body_row =
+                |head: Bounds<Pixels>| point(head.center().x, head.bottom() + px(4.));
+            let first_head = heads[0].center();
+            let first_row = first_body_row(heads[0]);
+            let second_row = first_body_row(heads[1]);
+            let outside = point(px(600.), first_row.y);
+
+            for (step, position, highlighted) in [
+                ("first table's body row", first_row, true),
+                ("first table's header", first_head, false),
+                ("second table's body row", second_row, true),
+                ("same row of the first table", first_row, true),
+                ("outside the tables", outside, false),
+            ] {
+                let before = notifications.get();
+                window.simulate_mouse_move(position);
+                assert!(
+                    notifications.get() > before,
+                    "{mode}: moving onto the {step} notifies the view"
+                );
+                window.draw();
+
+                let hovered = window.update(|_, window, _| {
+                    let hover: gpui::Background = gpui::rgb(ROW_HOVER).into();
+                    window
+                        .painted_quads()
+                        .into_iter()
+                        .filter(|quad| quad.background == hover)
+                        .map(|quad| quad.bounds)
+                        .collect::<Vec<_>>()
+                });
+                if highlighted {
+                    assert_eq!(
+                        hovered.len(),
+                        1,
+                        "{mode}: one row is highlighted on the {step}"
+                    );
+                    assert!(
+                        hovered[0].contains(&position.scale(scale)),
+                        "{mode}: the {step} is highlighted, not {:?}",
+                        hovered[0]
+                    );
+                } else {
+                    assert!(
+                        hovered.is_empty(),
+                        "{mode}: nothing is highlighted on the {step}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A table wider than its frame shrinks its widest column. A narrower
+    /// column keeps its content width rather than shrinking by the same
+    /// ratio and wrapping the end of its text onto a line of its own, in the
+    /// header and the body alike, and with the cell and frame refinements
+    /// the text renders with.
+    #[test]
+    fn table_keeps_narrow_columns_on_one_line_while_wide_ones_wrap() {
+        use crate::text::inline::test_fonts::WideMonoTextSystem;
+        use gpui::TestApp;
+        use std::sync::Arc;
+
+        const CELL_BACKGROUND: u32 = 0x11aa77;
+
+        struct TableRoot {
+            text_view: Entity<TextViewState>,
+            width: Pixels,
+            style: TextViewStyle,
+        }
+
+        impl Render for TableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(self.width)
+                    .child(TextView::new(&self.text_view).style(self.style.clone()))
+            }
+        }
+
+        let short = "Operating revenue (USD)";
+        let source = format!(
+            "| {short} | Note |\n| --- | --- |\n| {short} | x |\n| 1 | {} |",
+            "word ".repeat(30)
+        );
+        // Heights of the first column's cells, top to bottom.
+        let first_column = |width: f32, style: TextViewStyle| {
+            let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+            app.update(crate::init);
+            let cell = style.table_cell().clone().bg(gpui::rgb(CELL_BACKGROUND));
+            let style = style.with_table_cell(cell);
+            let mut window = app.open_window(|_, cx| TableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                width: px(width),
+                style,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.update(|_, window, _| {
+                let background: gpui::Background = gpui::rgb(CELL_BACKGROUND).into();
+                let cells: Vec<_> = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == background)
+                    .map(|quad| quad.bounds)
+                    .collect();
+                let left = cells.iter().map(|bounds| bounds.origin.x).min().unwrap();
+                let mut column: Vec<_> = cells
+                    .into_iter()
+                    .filter(|bounds| bounds.origin.x == left)
+                    .collect();
+                column.sort_by_key(|bounds| bounds.origin.y);
+                column
+                    .iter()
+                    .map(|bounds| bounds.size.height)
+                    .collect::<Vec<_>>()
+            })
+        };
+        let scroll = || {
+            let mut table = StyleRefinement::default();
+            table.overflow.x = Some(gpui::Overflow::Scroll);
+            TextViewStyle::default().with_table(table)
+        };
+
+        for (layout, style) in [("wrap", TextViewStyle::default()), ("scroll", scroll())] {
+            let fits = first_column(4000., style.clone());
+            let narrow = first_column(700., style);
+            assert_eq!(fits.len(), 3, "{layout}: three rows");
+            assert_eq!(fits[0], fits[2], "{layout}: the header fits on one line");
+            assert_eq!(narrow[..2], fits[..2], "{layout}: the short column wraps");
+        }
+
+        let single_line = first_column(4000., TextViewStyle::default())[0];
+        let padded = TextViewStyle::default().with_table_cell(StyleRefinement::default().px_4());
+        assert_eq!(
+            first_column(4000., padded)[0],
+            single_line,
+            "the cell padding refinement leaves the text its measured width"
+        );
+        let bold = TextViewStyle::default()
+            .with_table(StyleRefinement::default().font_weight(gpui::FontWeight::BOLD));
+        assert_eq!(
+            first_column(4000., bold)[0],
+            single_line,
+            "the table text refinement is measured"
+        );
     }
 
     #[gpui::test]
@@ -1540,6 +3806,73 @@ mod tests {
         assert!(clicks[1].1.is_middle_click());
         assert!(clicks[2].1.is_right_click());
         assert_eq!(cx.opened_url(), None);
+    }
+
+    #[gpui::test]
+    fn inline_object_inherits_bold_and_link_clicks_without_opening_on_drag(
+        cx: &mut TestAppContext,
+    ) {
+        use std::sync::{Arc, Mutex};
+        struct Root {
+            state: Entity<TextViewState>,
+            clicks: Arc<Mutex<Vec<SharedString>>>,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let clicks = self.clicks.clone();
+                let extensions = crate::text::MarkdownExtensions::default().plugin(
+                    crate::text::markdown_ext::TestInlinePlugin::new("math")
+                        .parse_with(|node, _| {
+                            matches!(node, markdown::mdast::Node::InlineMath(_)).then(|| {
+                                super::super::MarkdownNode::new("math", ()).text("formula")
+                            })
+                        })
+                        .render_with(|_, context, _, _| {
+                            assert_eq!(context.text_style().font_weight, gpui::FontWeight::BOLD);
+                            Some(super::super::InlineElement::new(div().child("formula")))
+                        }),
+                );
+                div().w(px(300.)).child(crate::TextSelectionLayer).child(
+                    TextView::new(&self.state)
+                        .markdown_extensions(extensions)
+                        .on_link_click(move |url, _, _, _| {
+                            clicks.lock().unwrap().push(url.clone())
+                        }),
+                )
+            }
+        }
+        cx.update(crate::init);
+        let clicks = Arc::new(Mutex::new(Vec::new()));
+        let captured = clicks.clone();
+        let (root, cx) = cx.add_window_view(move |_, cx| Root {
+            state: cx.new(|cx| TextViewState::markdown("**[$x$](https://example.com)**", cx)),
+            clicks,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let bounds = root.read_with(cx, |root, cx| {
+            root.state.read(cx).selection_adapter.text_bounds()[0]
+        });
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            cx.simulate_mouse_down(bounds.center(), button, Modifiers::default());
+            cx.simulate_mouse_up(bounds.center(), button, Modifiers::default());
+        }
+        assert_eq!(captured.lock().unwrap().len(), 3);
+        let start = point(bounds.left() + px(1.), bounds.center().y);
+        let end = point(bounds.right() - px(1.), bounds.center().y);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        assert_eq!(captured.lock().unwrap().len(), 3);
     }
 
     #[gpui::test]
@@ -1778,6 +4111,187 @@ mod tests {
     }
 
     #[gpui::test]
+    fn long_press_selects_word_then_drag_extends_selection(cx: &mut TestAppContext) {
+        struct TouchRoot {
+            text_view: Entity<TextViewState>,
+        }
+        impl Render for TouchRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| TouchRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let start_position = point(px(10.), px(16.));
+        cx.simulate_event(gpui::LongPressEvent {
+            phase: gpui::TouchPhase::Started,
+            start_position,
+            position: start_position,
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "quick"
+        );
+        for phase in [gpui::TouchPhase::Moved, gpui::TouchPhase::Ended] {
+            cx.simulate_event(gpui::LongPressEvent {
+                phase,
+                start_position,
+                position: point(px(220.), px(16.)),
+            });
+        }
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "quick select value"
+        );
+    }
+
+    #[gpui::test]
+    fn long_press_release_keeps_handles_which_drag_the_selection(cx: &mut TestAppContext) {
+        use crate::{SelectionEdge, TextSelection};
+
+        struct TouchRoot {
+            text_view: Entity<TextViewState>,
+        }
+        impl Render for TouchRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| TouchRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+        });
+        let draw = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        let selected = |cx: &mut VisualTestContext| {
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim()
+                .to_string()
+        };
+        cx.run_until_parked();
+        draw(cx);
+
+        let start_position = point(px(70.), px(16.));
+        for phase in [gpui::TouchPhase::Started, gpui::TouchPhase::Ended] {
+            cx.simulate_event(gpui::LongPressEvent {
+                phase,
+                start_position,
+                position: start_position,
+            });
+            draw(cx);
+        }
+        assert_eq!(selected(cx), "select");
+        let snapshot = cx
+            .update(|window, cx| TextSelection::touch_selection(window, cx))
+            .expect("a released long press keeps its handles");
+        assert!(snapshot.is_menu_open());
+        assert!(!snapshot.is_empty());
+        assert!(snapshot.start().left() < snapshot.end().left());
+
+        // Drag the end handle to the end of the line. The finger holds the
+        // knob below the line, the selection follows along the line.
+        let end = snapshot.end();
+        let finger = point(end.left(), end.bottom() + px(20.));
+        cx.update(|window, cx| {
+            TextSelection::begin_edge_drag(SelectionEdge::End, finger, window, cx);
+        });
+        draw(cx);
+        let snapshot = cx
+            .update(|window, cx| TextSelection::touch_selection(window, cx))
+            .unwrap();
+        assert_eq!(snapshot.dragging(), Some(SelectionEdge::End));
+        assert!(!snapshot.is_menu_open());
+        cx.update(|window, cx| {
+            TextSelection::update_edge_drag(point(px(290.), finger.y), window, cx);
+        });
+        draw(cx);
+        assert_eq!(selected(cx), "select value");
+        cx.update(|window, cx| TextSelection::end_edge_drag(window, cx));
+        draw(cx);
+        let snapshot = cx
+            .update(|window, cx| TextSelection::touch_selection(window, cx))
+            .unwrap();
+        assert!(snapshot.is_menu_open());
+        assert_eq!(snapshot.dragging(), None);
+        let select_start = snapshot.start().left();
+
+        // Select All from the menu is a view-local selection; its handles
+        // still drag, turning it back into a point selection.
+        cx.update(|_, cx| {
+            view.update(cx, |root, cx| {
+                root.text_view.update(cx, |state, cx| state.select_all(cx));
+            });
+        });
+        draw(cx);
+        assert_eq!(selected(cx), "quick select value");
+        let snapshot = cx
+            .update(|window, cx| TextSelection::touch_selection(window, cx))
+            .expect("select all keeps the touch selection");
+        let start = snapshot.start();
+        cx.update(|window, cx| {
+            TextSelection::begin_edge_drag(SelectionEdge::Start, start.origin, window, cx);
+            TextSelection::update_edge_drag(point(select_start, start.origin.y), window, cx);
+            TextSelection::end_edge_drag(window, cx);
+        });
+        draw(cx);
+        assert_eq!(selected(cx), "select value");
+
+        // A press on the menu leaves the selection alone; one on the text
+        // clears it.
+        let menu = gpui::Bounds::new(point(px(0.), px(200.)), gpui::size(px(120.), px(32.)));
+        cx.update(|window, cx| TextSelection::register_touch_ui(menu, window, cx));
+        cx.simulate_event(MouseDownEvent {
+            position: point(px(10.), px(210.)),
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 1,
+            first_mouse: false,
+        });
+        assert_eq!(selected(cx), "select value");
+        cx.simulate_event(MouseDownEvent {
+            position: point(px(10.), px(16.)),
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 1,
+            first_mouse: false,
+        });
+        cx.simulate_event(MouseUpEvent {
+            position: point(px(10.), px(16.)),
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 1,
+        });
+        draw(cx);
+        assert!(
+            cx.update(|window, cx| TextSelection::touch_selection(window, cx))
+                .is_none()
+        );
+    }
+
+    #[gpui::test]
     fn triple_click_selects_paragraph(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) =
@@ -1809,6 +4323,638 @@ mod tests {
 
         let selected_text = view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
         assert_eq!(selected_text.trim(), "quick select value");
+    }
+
+    mod multi_click_drag {
+        use super::*;
+
+        struct Root {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(400.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+
+        fn setup<'a>(
+            markdown: &str,
+            cx: &'a mut TestAppContext,
+        ) -> (Entity<TextViewState>, &'a mut VisualTestContext) {
+            cx.update(crate::init);
+            let (root, cx) = cx.add_window_view(|_, cx| Root {
+                text_view: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            (root.read_with(cx, |root, _| root.text_view.clone()), cx)
+        }
+
+        /// Just inside the character at `index` of the painted `text`.
+        fn position(
+            state: &Entity<TextViewState>,
+            text: &str,
+            index: usize,
+            cx: &mut VisualTestContext,
+        ) -> gpui::Point<Pixels> {
+            state.read_with(cx, |state, _| {
+                state.selection_adapter.text_position(text, index)
+            })
+        }
+
+        fn press(
+            position: gpui::Point<Pixels>,
+            click_count: usize,
+            shift: bool,
+            cx: &mut VisualTestContext,
+        ) {
+            cx.simulate_event(MouseDownEvent {
+                position,
+                modifiers: Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+                button: MouseButton::Left,
+                click_count,
+                first_mouse: false,
+            });
+        }
+
+        fn drag(position: gpui::Point<Pixels>, cx: &mut VisualTestContext) {
+            cx.simulate_event(gpui::MouseMoveEvent {
+                position,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            });
+        }
+
+        fn release(position: gpui::Point<Pixels>, click_count: usize, cx: &mut VisualTestContext) {
+            cx.simulate_event(MouseUpEvent {
+                position,
+                modifiers: Modifiers::default(),
+                button: MouseButton::Left,
+                click_count,
+            });
+        }
+
+        fn selected(state: &Entity<TextViewState>, cx: &mut VisualTestContext) -> String {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            state.read_with(cx, |state, _| state.selected_text().trim().to_string())
+        }
+
+        #[gpui::test]
+        fn double_click_drag_extends_the_selection_by_words(cx: &mut TestAppContext) {
+            let (first, second) = ("alpha beta gamma", "delta epsilon zeta");
+            let (state, cx) = setup(&format!("{first}\n\n{second}"), cx);
+
+            press(position(&state, first, 7, cx), 2, false, cx);
+            assert_eq!(selected(&state, cx), "beta");
+            drag(position(&state, first, 8, cx), cx);
+            assert_eq!(selected(&state, cx), "beta");
+            drag(position(&state, first, 13, cx), cx);
+            assert_eq!(selected(&state, cx), "beta gamma");
+            // Backward, the whole of the word the drag started from stays.
+            drag(position(&state, first, 1, cx), cx);
+            assert_eq!(selected(&state, cx), "alpha beta");
+            let end = position(&state, second, 8, cx);
+            drag(end, cx);
+            assert_eq!(selected(&state, cx), "beta gamma\ndelta epsilon");
+            release(end, 2, cx);
+            assert_eq!(selected(&state, cx), "beta gamma\ndelta epsilon");
+        }
+
+        #[gpui::test]
+        fn triple_click_drag_extends_the_selection_by_paragraphs(cx: &mut TestAppContext) {
+            let (state, cx) = setup("first one\n\nsecond one\n\nthird one", cx);
+
+            press(position(&state, "second one", 2, cx), 3, false, cx);
+            assert_eq!(selected(&state, cx), "second one");
+            drag(position(&state, "third one", 2, cx), cx);
+            assert_eq!(selected(&state, cx), "second one\nthird one");
+            let end = position(&state, "first one", 2, cx);
+            drag(end, cx);
+            assert_eq!(selected(&state, cx), "first one\nsecond one");
+            release(end, 3, cx);
+            assert_eq!(selected(&state, cx), "first one\nsecond one");
+        }
+
+        /// A hard break adds a line to a paragraph without ending that paragraph.
+        #[gpui::test]
+        fn triple_click_drag_and_shift_click_keep_hard_break_paragraphs_whole(
+            cx: &mut TestAppContext,
+        ) {
+            let first = "first top\nfirst bottom";
+            let last = "last top\nlast bottom";
+            let (state, cx) = setup(
+                "first top  \nfirst bottom\n\nmiddle\n\nlast top  \nlast bottom",
+                cx,
+            );
+
+            press(position(&state, "middle", 2, cx), 3, false, cx);
+            assert_eq!(selected(&state, cx), "middle");
+            let after = position(&state, last, 2, cx);
+            drag(after, cx);
+            assert_eq!(selected(&state, cx), format!("middle\n{last}"));
+            let before = position(&state, first, "first top\n".len() + 2, cx);
+            drag(before, cx);
+            assert_eq!(selected(&state, cx), format!("{first}\nmiddle"));
+            release(before, 3, cx);
+
+            press(after, 1, true, cx);
+            release(after, 1, cx);
+            assert_eq!(selected(&state, cx), format!("middle\n{last}"));
+            press(before, 1, true, cx);
+            release(before, 1, cx);
+            assert_eq!(selected(&state, cx), format!("{first}\nmiddle"));
+        }
+
+        /// Inline code lays a paragraph out in pieces; the drag snaps the same.
+        #[gpui::test]
+        fn multi_click_drag_snaps_across_inline_code(cx: &mut TestAppContext) {
+            let (state, cx) = setup("plain words\n\nuse `code` in here", cx);
+
+            press(position(&state, "plain words", 8, cx), 2, false, cx);
+            drag(position(&state, " in here", 6, cx), cx);
+            assert_eq!(selected(&state, cx), "words\nuse code in here");
+            release(position(&state, " in here", 6, cx), 2, cx);
+
+            press(position(&state, "plain words", 2, cx), 3, false, cx);
+            assert_eq!(selected(&state, cx), "plain words");
+            drag(position(&state, "use ", 1, cx), cx);
+            assert_eq!(selected(&state, cx), "plain words\nuse code in here");
+        }
+
+        #[gpui::test]
+        fn shift_click_after_a_double_click_extends_by_words(cx: &mut TestAppContext) {
+            let text = "alpha beta gamma";
+            let (state, cx) = setup(text, cx);
+
+            let word = position(&state, text, 7, cx);
+            press(word, 2, false, cx);
+            release(word, 2, cx);
+            let after = position(&state, text, 13, cx);
+            press(after, 1, true, cx);
+            release(after, 1, cx);
+            assert_eq!(selected(&state, cx), "beta gamma");
+            let before = position(&state, text, 1, cx);
+            press(before, 1, true, cx);
+            release(before, 1, cx);
+            assert_eq!(selected(&state, cx), "alpha beta");
+        }
+    }
+
+    mod copy_before_paint {
+        use super::*;
+        use crate::{TextSelection, text::SelectionFormat};
+
+        const MARKDOWN: &str = "中文 **café**\n\nβeta `\u{2009}code\u{2009}` 👩‍💻\n\n終わり";
+        const PLAIN: &str = "中文 café\nβeta \u{2009}code\u{2009} 👩‍💻\n終わり\n";
+
+        struct Root {
+            state: Entity<TextViewState>,
+            format: SelectionFormat,
+            width: Pixels,
+            scrollable: bool,
+        }
+
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(self.width)
+                    .when(self.scrollable, |el| el.h(px(160.)))
+                    .child(crate::TextSelectionLayer)
+                    .child(
+                        TextView::new(&self.state)
+                            .scrollable(self.scrollable)
+                            .selection_format(self.format),
+                    )
+            }
+        }
+
+        fn setup(
+            format: SelectionFormat,
+            cx: &mut TestAppContext,
+        ) -> (Entity<TextViewState>, &mut VisualTestContext) {
+            cx.update(crate::init);
+            let (root, cx) = cx.add_window_view(|_, cx| Root {
+                state: cx.new(|cx| TextViewState::markdown(MARKDOWN, cx)),
+                format,
+                width: px(520.),
+                scrollable: false,
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            (root.read_with(cx, |root, _| root.state.clone()), cx)
+        }
+
+        fn document<'a>(
+            markdown: &str,
+            format: SelectionFormat,
+            scrollable: bool,
+            cx: &'a mut TestAppContext,
+        ) -> (Entity<Root>, &'a mut VisualTestContext) {
+            cx.update(crate::init);
+            let (root, cx) = cx.add_window_view(|_, cx| Root {
+                state: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+                format,
+                width: px(520.),
+                scrollable,
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            (root, cx)
+        }
+
+        fn scroll_to(state: &Entity<TextViewState>, ix: usize, cx: &mut VisualTestContext) {
+            state.read_with(cx, |state, _| {
+                state.list_state.scroll_to(gpui::ListOffset {
+                    item_ix: ix,
+                    offset_in_item: px(0.),
+                })
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        fn endpoints(
+            state: &Entity<TextViewState>,
+            cx: &mut VisualTestContext,
+        ) -> (
+            gpui::Point<Pixels>,
+            gpui::Point<Pixels>,
+            gpui::Point<Pixels>,
+        ) {
+            let rows = state.read_with(cx, |state, _| state.selection_adapter.text_bounds());
+            let first = rows.first().unwrap();
+            let last = rows.last().unwrap();
+            (
+                point(first.left() + px(0.1), first.center().y),
+                point(first.right() - px(0.1), first.center().y),
+                point(last.right() - px(0.1), last.center().y),
+            )
+        }
+
+        // Raw dispatch is intentional: simulate_event may draw after each
+        // packet, concealing the exact native before-paint race.
+        fn press(position: gpui::Point<Pixels>, window: &mut Window, cx: &mut gpui::App) {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseDown(MouseDownEvent {
+                    position,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }),
+                cx,
+            );
+        }
+
+        fn extend(position: gpui::Point<Pixels>, window: &mut Window, cx: &mut gpui::App) {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position,
+                    pressed_button: Some(MouseButton::Left),
+                    ..Default::default()
+                }),
+                cx,
+            );
+        }
+
+        fn release(position: gpui::Point<Pixels>, window: &mut Window, cx: &mut gpui::App) {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseUp(MouseUpEvent {
+                    position,
+                    button: MouseButton::Left,
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                }),
+                cx,
+            );
+        }
+
+        fn assert_copy(expected: &str, window: &mut Window, cx: &mut gpui::App) {
+            // Dispatch synchronously on the native current focus, without
+            // focusing a different entity or using deferred window dispatch.
+            let focus = window.focused(cx).expect("gesture focuses TextView");
+            focus.dispatch_action(&crate::input::Copy, window, cx);
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|item| item.text()),
+                Some(expected.trim().to_string())
+            );
+            assert!(focus.is_focused(window));
+            assert_eq!(TextSelection::selected_text(window, cx), expected);
+        }
+
+        #[gpui::test]
+        fn custom_inline_and_block_copy_project_with_the_text(cx: &mut TestAppContext) {
+            struct CustomRoot {
+                state: Entity<TextViewState>,
+                format: SelectionFormat,
+                extensions: crate::text::MarkdownExtensions,
+            }
+            impl Render for CustomRoot {
+                fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                    div().w(px(520.)).child(crate::TextSelectionLayer).child(
+                        TextView::new(&self.state)
+                            .selection_format(self.format)
+                            .markdown_extensions(self.extensions.clone()),
+                    )
+                }
+            }
+            for format in [SelectionFormat::Plain, SelectionFormat::Source] {
+                cx.update(crate::init);
+                let extensions = crate::text::MarkdownExtensions::default()
+                    .plugin(
+                        crate::text::markdown_ext::TestInlinePlugin::new("math").parse_with(
+                            |node, _| {
+                                let markdown::mdast::Node::InlineMath(math) = node else {
+                                    return None;
+                                };
+                                Some(
+                                    crate::text::MarkdownNode::new("math", ())
+                                        .text(format!("{}²", math.value)),
+                                )
+                            },
+                        ),
+                    )
+                    .block_parser(|node, _| {
+                        matches!(node, markdown::mdast::Node::ThematicBreak(_)).then(|| {
+                            crate::text::MarkdownNode::new("block", ())
+                                .text("BLOCK")
+                                .markdown("---")
+                        })
+                    })
+                    .block_renderer("block", |_, _, _| {
+                        div()
+                            .debug_selector(|| "copy-custom-block".into())
+                            .w(px(520.))
+                            .h(px(40.))
+                    });
+                let (root, cx) = cx.add_window_view(|_, cx| CustomRoot {
+                    state: cx
+                        .new(|cx| TextViewState::markdown("before $x$ after\n\n---\n\nlast", cx)),
+                    format,
+                    extensions,
+                });
+                cx.run_until_parked();
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                let state = root.read_with(cx, |root, _| root.state.clone());
+                let (start, _, end) = endpoints(&state, cx);
+                let expected = if format == SelectionFormat::Plain {
+                    "before x² after\nBLOCK\nlast\n"
+                } else {
+                    "before $x$ after\n\n---\n\nlast"
+                };
+                cx.update(|window, cx| {
+                    press(start, window, cx);
+                    extend(end, window, cx);
+                    assert_copy(expected, window, cx);
+                    release(end, window, cx);
+                });
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                cx.update(|window, cx| assert_copy(expected, window, cx));
+                let block = cx.debug_bounds("copy-custom-block").unwrap();
+                cx.update(|window, cx| {
+                    press(block.center(), window, cx);
+                    extend(point(block.center().x, block.bottom() + px(1.)), window, cx);
+                    assert_copy(
+                        if format == SelectionFormat::Plain {
+                            "BLOCK\n"
+                        } else {
+                            "---"
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            }
+        }
+
+        #[gpui::test]
+        fn unicode_180_paragraph_copy_extends_and_retracts_before_paint(cx: &mut TestAppContext) {
+            let markdown = (0..180)
+                .map(|ix| format!("p{ix:03} **café** 中文 👩‍💻 `\u{2009}code\u{2009}`"))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            // Expected bytes are constructed independently of rendered_text(),
+            // selected_text(), and the document's selection serializer.
+            let expected = (0..180)
+                .map(|ix| format!("p{ix:03} café 中文 👩‍💻 \u{2009}code\u{2009}\n"))
+                .collect::<String>();
+            let (root, cx) = document(&markdown, SelectionFormat::Plain, false, cx);
+            cx.simulate_resize(gpui::size(px(800.), px(12000.)));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let state = root.read_with(cx, |root, _| root.state.clone());
+            let rows = state.read_with(cx, |state, _| state.selection_adapter.text_bounds());
+            let first = rows.first().unwrap();
+            let first_end = rows
+                .iter()
+                .take_while(|row| row.top() < first.bottom())
+                .last()
+                .unwrap();
+            let last = rows.last().unwrap();
+            assert!(last.top() > first.top() + px(3000.));
+            let start = point(first.left() + px(0.1), first.center().y);
+            let short_end = point(first_end.right() - px(0.1), first_end.center().y);
+            let end = point(last.right() - px(0.1), last.center().y);
+            let short = "p000 café 中文 👩‍💻 \u{2009}code\u{2009}\n";
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(short_end, window, cx);
+                assert_copy(short, window, cx);
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| {
+                extend(end, window, cx);
+                assert_copy(&expected, window, cx);
+                extend(short_end, window, cx);
+                assert_copy(short, window, cx);
+            });
+        }
+
+        #[gpui::test]
+        fn scrolling_before_paint_keeps_the_completed_frame_coordinates(cx: &mut TestAppContext) {
+            let markdown = format!(
+                "{}\n\nlast",
+                "alpha beta gamma delta epsilon zeta ".repeat(30)
+            );
+            let (root, cx) = document(&markdown, SelectionFormat::Plain, true, cx);
+            root.update(cx, |root, cx| {
+                root.width = px(180.);
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let state = root.read_with(cx, |root, _| root.state.clone());
+            let rows = state.read_with(cx, |state, _| state.selection_adapter.text_bounds());
+            let first = rows[0];
+            let (start, end) = state.read_with(cx, |state, _| {
+                (
+                    state.selection_adapter.first_text_position(0),
+                    state.selection_adapter.first_text_position("alpha".len()),
+                )
+            });
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(end, window, cx);
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| {
+                state.read(cx).list_state.scroll_by(first.size.height);
+                // The logical offset changed, registration and native pixels
+                // have not. This must not select the next wrapped row.
+                assert_copy("alpha\n", window, cx);
+            });
+        }
+
+        #[gpui::test]
+        fn offscreen_remeasurement_is_not_a_copy_projection(cx: &mut TestAppContext) {
+            let markdown = (0..180)
+                .map(|ix| format!("row {ix:03} café 中文"))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let (root, cx) = document(&markdown, SelectionFormat::Plain, true, cx);
+            let state = root.read_with(cx, |root, _| root.state.clone());
+            scroll_to(&state, 90, cx);
+            root.update(cx, |root, cx| {
+                root.width = px(260.);
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            scroll_to(&state, 90, cx);
+            // measure_all has remeasured earlier, unpainted paragraphs at the
+            // new width. Only this completed paint supplies Copy geometry.
+            let (start, end, _) = endpoints(&state, cx);
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(end, window, cx);
+                assert_copy("row 090 café 中文\n", window, cx);
+            });
+        }
+
+        #[gpui::test]
+        fn virtualized_flow_retains_its_source_owned_partial_anchor(cx: &mut TestAppContext) {
+            for format in [SelectionFormat::Plain, SelectionFormat::Source] {
+                let tail = (1..180)
+                    .map(|ix| format!("row {ix:03} café 中文"))
+                    .collect::<Vec<_>>();
+                let markdown = format!("PREFIX `code` suffix\n\n{}", tail.join("\n\n"));
+                let expected = if format == SelectionFormat::Plain {
+                    format!("code suffix\n{}\n", tail.join("\n"))
+                } else {
+                    format!("`code` suffix\n\n{}", tail.join("\n\n"))
+                };
+                let (root, cx) = document(&markdown, format, true, cx);
+                let state = root.read_with(cx, |root, _| root.state.clone());
+                let rows = state.read_with(cx, |state, _| state.selection_adapter.text_bounds());
+                let code = rows[1];
+                let suffix = rows[2];
+                assert!(code.left() < suffix.left());
+                cx.update(|window, cx| {
+                    press(point(code.left() + px(0.1), code.center().y), window, cx);
+                    extend(
+                        point(suffix.right() - px(0.1), suffix.center().y),
+                        window,
+                        cx,
+                    );
+                });
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                scroll_to(&state, 179, cx);
+                // Two completed frames let GPUI retire temporary flow fragments.
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                let (_, _, end) = endpoints(&state, cx);
+                cx.update(|window, cx| {
+                    extend(end, window, cx);
+                    assert_copy(&expected, window, cx);
+                });
+            }
+        }
+
+        #[gpui::test]
+        fn a_new_range_copies_before_its_first_selection_paint(cx: &mut TestAppContext) {
+            let (state, cx) = setup(SelectionFormat::Plain, cx);
+            let (start, _, end) = endpoints(&state, cx);
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(end, window, cx);
+                assert_copy(PLAIN, window, cx);
+            });
+        }
+
+        #[gpui::test]
+        fn an_established_range_extends_and_retracts_without_paint(cx: &mut TestAppContext) {
+            let (state, cx) = setup(SelectionFormat::Plain, cx);
+            let (start, first_end, end) = endpoints(&state, cx);
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(first_end, window, cx);
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| {
+                assert_copy("中文 café\n", window, cx);
+                extend(end, window, cx);
+                assert_copy(PLAIN, window, cx);
+                extend(first_end, window, cx);
+                assert_copy("中文 café\n", window, cx);
+            });
+        }
+
+        #[gpui::test]
+        fn source_copy_projects_the_current_range_without_paint(cx: &mut TestAppContext) {
+            let (state, cx) = setup(SelectionFormat::Source, cx);
+            let (start, first_end, end) = endpoints(&state, cx);
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(first_end, window, cx);
+                assert_copy("中文 **café**", window, cx);
+                extend(end, window, cx);
+                assert_copy(MARKDOWN, window, cx);
+                extend(first_end, window, cx);
+                assert_eq!(TextSelection::selected_text(window, cx), "中文 **café**");
+            });
+        }
+
+        #[gpui::test]
+        fn a_blank_gesture_does_not_reuse_the_previous_range(cx: &mut TestAppContext) {
+            let (state, cx) = setup(SelectionFormat::Plain, cx);
+            let (start, first_end, end) = endpoints(&state, cx);
+            cx.update(|window, cx| {
+                press(start, window, cx);
+                extend(end, window, cx);
+                assert_eq!(TextSelection::selected_text(window, cx), PLAIN);
+                release(end, window, cx);
+                press(first_end + point(px(20.), px(0.)), window, cx);
+                extend(first_end + point(px(60.), px(0.)), window, cx);
+                assert_eq!(TextSelection::selected_text(window, cx), "");
+            });
+        }
+
+        #[gpui::test]
+        fn replacing_source_cannot_reproject_old_content(cx: &mut TestAppContext) {
+            for format in [SelectionFormat::Plain, SelectionFormat::Source] {
+                for replacement in ["replacement".to_string(), "replacement ".repeat(500)] {
+                    let (state, cx) = setup(format, cx);
+                    let (start, _, end) = endpoints(&state, cx);
+                    cx.update(|window, cx| {
+                        press(start, window, cx);
+                        extend(end, window, cx);
+                        assert_eq!(
+                            TextSelection::selected_text(window, cx),
+                            if format == SelectionFormat::Plain {
+                                PLAIN
+                            } else {
+                                MARKDOWN
+                            }
+                        );
+                        // Large replacements leave the previous parsed document
+                        // in place while parsing; neither size may reuse it.
+                        state.update(cx, |state, cx| state.set_text(&replacement, cx));
+                        assert_eq!(TextSelection::selected_text(window, cx), "");
+                    });
+                }
+            }
+        }
     }
 
     // Regression: markdown `TextView` items inside an outer `gpui::list` with

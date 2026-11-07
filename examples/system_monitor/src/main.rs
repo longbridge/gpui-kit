@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use gpui_kit::component::ThemeMode;
 use gpui_kit::component::{
-    ActiveTheme, Icon, IconName, Root, Sizable, Theme, TitleBar,
+    ActiveTheme, Icon, IconName, Sizable, Theme, TitleBar,
     chart::AreaChart,
     h_flex,
     progress::Progress,
@@ -621,18 +621,14 @@ fn main() {
             ..TitleBar::window_options()
         };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                window.activate_window();
-                window.set_window_title("System Monitor");
+        gpui_kit::open_window(window_options, cx, |window, cx| {
+            window.activate_window();
+            window.set_window_title("System Monitor");
 
-                Theme::change(ThemeMode::Dark, Some(window), cx);
+            Theme::change(ThemeMode::Dark, Some(window), cx);
 
-                let view = cx.new(|cx| SystemMonitor::new(window, cx));
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+            cx.new(|cx| SystemMonitor::new(window, cx))
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

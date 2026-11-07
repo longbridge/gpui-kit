@@ -1,4 +1,4 @@
-use crate::{StateStyle, StyledExt as _};
+use crate::{StateStyle, StyledExt as _, TestSupportExt as _};
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
     Refineable as _, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
@@ -125,7 +125,7 @@ impl InputContextMenuCapabilities {
 /// normal children. Applications remain responsible for all presentation.
 #[derive(IntoElement)]
 pub struct InputBase {
-    base: gpui::Stateful<Div>,
+    base: crate::ObservedElement<gpui::Stateful<Div>>,
     style: StyleRefinement,
     semantic_styles: InputStyles,
     children: Vec<AnyElement>,
@@ -137,7 +137,7 @@ pub struct InputBase {
 impl InputBase {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             semantic_styles: InputStyles::default(),
             children: Vec::new(),
@@ -159,6 +159,37 @@ impl InputBase {
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
+    }
+
+    /// Exposes an editor's native semantics through this frame's component ID.
+    ///
+    /// `editor` must identify the input, textarea or editor state rendered below
+    /// this frame, without intervening element IDs. Anonymous layout wrappers
+    /// are allowed. ID queries retain the frame's path, bounds and visibility.
+    /// Role, label, value, checked/indeterminate, selected, expanded, disabled
+    /// and focus facts come from the editor's existing native node and observed
+    /// focus scope, not independently focusable addon controls. Native snapshot
+    /// enumeration is unchanged, so role/label queries do not duplicate editors.
+    ///
+    /// This only declares an observation relationship with `test-support`; it
+    /// never adds a native accessibility node or registers a focus handle. The
+    /// relationship follows the frame's GPUI element-state lifetime.
+    pub fn semantic_owner(self, editor: gpui::EntityId) -> Self {
+        #[cfg(feature = "test-support")]
+        {
+            Self {
+                base: self.base.semantic_owner([
+                    ElementId::View(editor),
+                    super::state::EDITOR_ELEMENT_ID.into(),
+                ]),
+                ..self
+            }
+        }
+        #[cfg(not(feature = "test-support"))]
+        {
+            let _ = editor;
+            self
+        }
     }
 
     pub fn styles(mut self, build: impl FnOnce(InputStyles) -> InputStyles) -> Self {
@@ -217,6 +248,11 @@ impl ParentElement for InputBase {
 }
 
 impl InteractiveElement for InputBase {
+    fn track_focus(mut self, focus: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(focus);
+        self
+    }
+
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }

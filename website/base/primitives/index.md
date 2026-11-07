@@ -21,6 +21,7 @@ GPUI Base primitives provide behavior without prescribing presentation. Each pag
 - [Combobox](./combobox.md) — A text input paired with keyboard-navigable suggestions and selection behavior.
 - [Date Picker](./date-picker.md) — A focus-aware date input that composes calendar behavior with a popup.
 - [Dialog](./dialog.md) — A composable modal surface with focus management, backdrop, title, and close parts.
+- [Grid Layout](./grid-layout.md) — A grid whose items the user drags and resizes, with the layout model and its arithmetic.
 - [Hover Card](./hover-card.md) — A delayed floating card associated with a pointer or keyboard trigger.
 - [Input](./input.md) — A single-line text input with selection, masking, validation, and number stepping.
 - [Textarea](./textarea.md) — A multi-line text field with fixed rows, wrapping, and auto-grow behavior.
@@ -43,6 +44,7 @@ GPUI Base primitives provide behavior without prescribing presentation. Each pag
 - [Switch](./switch.md) — A controlled on/off control with separately styleable track and thumb.
 - [Table](./table.md) — Semantic table primitives for composing headers, bodies, rows, and cells.
 - [Tabs](./tabs.md) — A tab list and accessible tab controls with controlled selection.
+- [Time Field](./time-field.md) — A segmented time-of-day editor with a complete keyboard model and 24- or 12-hour clocks.
 - [Toast](./toast.md) — A managed, animated stack of temporary status messages.
 - [Toggle](./toggle.md) — A controlled two-state pressable for persistent choices such as formatting.
 - [Toggle Group](./toggle-group.md) — Coordinates a set of toggle controls as a single- or multiple-selection group.

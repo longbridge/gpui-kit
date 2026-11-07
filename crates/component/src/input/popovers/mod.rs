@@ -1,8 +1,10 @@
+mod caret_anchored;
 mod code_action_menu;
 mod completion_menu;
 mod diagnostic_popover;
 mod hover_popover;
 
+pub(crate) use caret_anchored::*;
 pub(crate) use code_action_menu::*;
 pub(crate) use completion_menu::*;
 pub(crate) use diagnostic_popover::*;

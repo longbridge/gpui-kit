@@ -11,9 +11,12 @@ use crate::highlighter::HighlightTheme;
 /// themed value rather than overriding it with a neutral one.
 #[derive(Clone)]
 pub struct TextViewStyle {
-    /// Gap of each paragraphs, default is 1 rem.
+    /// Gap of each paragraphs, default is 0.75 rem.
     pub paragraph_gap: Rems,
     /// Base font size for headings, default is 14px.
+    ///
+    /// Left at the default together with [`Self::heading_font_size`], headings
+    /// follow the text view's own scale, proportional to the body text.
     pub heading_base_font_size: Pixels,
     /// Function to calculate heading font size based on heading level (1-6).
     ///
@@ -23,6 +26,10 @@ pub struct TextViewStyle {
     /// Highlight theme for code blocks. Default: [`HighlightTheme::default_light()`]
     pub highlight_theme: Arc<HighlightTheme>,
     /// The style refinement for code blocks.
+    ///
+    /// Set `overflow.y` to `Overflow::Scroll` with a max height here to scroll
+    /// long code inside the block, e.g.
+    /// `TextViewStyle::default().code_block({ let mut s = StyleRefinement::default().max_h(px(320.)); s.overflow.y = Some(Overflow::Scroll); s })`.
     pub code_block: StyleRefinement,
     /// Style refinement applied to the table container (the bordered wrapper
     /// in wrap mode, the scroll viewport in horizontal-scroll mode).
@@ -48,14 +55,13 @@ pub struct TextViewStyle {
     /// fallback to `cx.theme().accent`, if it is `None`.
     pub inline_code: HighlightStyle,
     /// Whether content-specific rendering should use dark-mode assets.
-    /// Whether content-specific rendering should use dark-mode assets.
     pub is_dark: bool,
 }
 
 impl Default for TextViewStyle {
     fn default() -> Self {
         Self {
-            paragraph_gap: rems(1.),
+            paragraph_gap: rems(0.75),
             heading_base_font_size: px(14.),
             heading_font_size: None,
             highlight_theme: HighlightTheme::default_light().clone(),
@@ -92,7 +98,7 @@ impl PartialEq for TextViewStyle {
 }
 
 impl TextViewStyle {
-    /// Set paragraph gap, default is 1 rem.
+    /// Set paragraph gap, default is 0.75 rem.
     pub fn paragraph_gap(mut self, gap: Rems) -> Self {
         self.paragraph_gap = gap;
         self
@@ -107,6 +113,9 @@ impl TextViewStyle {
         self
     }
     /// Set style for code blocks.
+    ///
+    /// Set `overflow.y` to `Overflow::Scroll` with a max height on the
+    /// refinement to scroll long code inside the block instead of growing it.
     pub fn code_block(mut self, style: StyleRefinement) -> Self {
         self.code_block = style;
         self

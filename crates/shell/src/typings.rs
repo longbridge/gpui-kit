@@ -183,6 +183,7 @@ fn base_declarations() -> String {
 
 pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRegistry) -> String {
     let (nullary, parametric) = style_methods();
+    let component_module = component_module(components);
 
     let mut out = String::with_capacity(160 * 1024);
     out.push_str(&PREAMBLE.replace("{version}", crate::plugin::SHELL_VERSION));
@@ -200,8 +201,22 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str("   * belongs to the render pass that built it; storing one and using it\n");
     out.push_str("   * again throws, which no type can prevent.\n");
     out.push_str("   */\n");
-    out.push_str("  export interface Element {\n");
+    // Registered builders can override a native signature (for example size).
+    // A renderable union keeps those builders valid children without pretending
+    // that an adapter's semantic size accepts native lengths.
+    out.push_str("  export type Element = NativeElement");
+    for descriptor in components.descriptors() {
+        let _ = write!(
+            out,
+            " | import(\"{component_module}\").{}Element",
+            descriptor.name()
+        );
+    }
+    out.push_str(";\n\n");
+    out.push_str("  /** The fluent builder returned by native and Base element factories. */\n");
+    out.push_str("  export interface NativeElement {\n");
     out.push_str(ELEMENT_METHODS);
+    out.push_str("    token(render: (token: import(\"gpui-base\").InlineTokenContext, cx: Context) => Element | null): this;\n    on_token_click(listener: (event: import(\"gpui-base\").InlineTokenClickEvent, cx: Context) => void): this;\n    on_token_hover(listener: (event: import(\"gpui-base\").InlineTokenHoverEvent, cx: Context) => void): this;\n");
     out.push_str(&parametric_styles(&parametric));
     out.push_str(&nullary_styles(&nullary));
     out.push_str("  }\n");
@@ -215,23 +230,42 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(BASE_IMPORTS);
     out.push_str(&base_color_token_type());
     out.push_str(BASE_SHARED_TYPES);
+    out.push_str(INLINE_TOKEN_TYPES);
     out.push_str(BASE);
     out.push_str("}\n\n");
-    out.push_str("declare module \"gpui-component\" {\n");
-    out.push_str("  import { ClickEvent, Context, Element } from \"gpui-kit\";\n");
+    let _ = writeln!(out, "declare module \"{component_module}\" {{");
+    out.push_str("  import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";\n");
+    if components.states().any(|state| state.has_input_events()) {
+        out.push_str("  import { InputEvent } from \"gpui-base\";\n");
+    }
+    out.push_str(INLINE_TOKEN_TYPES);
     for state in components.states() {
         push_jsdoc(&mut out, state.documentation(), None, "  ");
         out.push_str("  export interface ");
         out.push_str(state.kind());
-        out.push_str(" { readonly __gpuiComponentState: unique symbol }\n");
+        out.push_str(" { readonly __gpuiComponentState: unique symbol");
+        for method in state.methods() {
+            out.push_str(";\n    ");
+            out.push_str(method.name());
+            out.push_str(method.signature());
+        }
+        if state.has_input_events() {
+            out.push_str(";\n    /** `change`, `submit` (Enter), `focus` or `blur`, as on `gpui-base`'s `InputState`. */");
+            out.push_str("\n    on(event: \"change\" | \"submit\" | \"focus\" | \"blur\", handler: (event: InputEvent, cx: Context) => void): boolean");
+        }
+        out.push_str(";\n    /** Releases the state and its subscriptions now rather than with the application. Returns `false` when it was already released; a method called afterwards throws. Not allowed during render. */");
+        out.push_str("\n    release(): boolean");
+        out.push_str(" }\n");
         push_jsdoc(&mut out, state.documentation(), None, "  ");
-        out.push_str("  export function ");
-        out.push_str(state.export());
-        out.push('(');
-        push_arguments(&mut out, state.arguments());
-        out.push_str("): ");
-        out.push_str(state.kind());
-        out.push_str(";\n");
+        // `State.new(...)` is the form `gpui-base` uses; the plain call is kept
+        // for scripts written before it existed.
+        let mut parameters = String::new();
+        push_arguments(&mut parameters, state.arguments());
+        out.push_str(&format!(
+            "  export const {export}: {{ ({parameters}): {kind}; new: ({parameters}) => {kind} }};\n",
+            export = state.export(),
+            kind = state.kind(),
+        ));
     }
     for descriptor in components.descriptors() {
         push_jsdoc(&mut out, descriptor.documentation(), None, "  ");
@@ -252,6 +286,9 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
         let withheld = REGISTERED_COMMON_BEHAVIORS
             .iter()
             .copied()
+            // These native behaviors are not dispatched for registered
+            // components unless supplied by their own descriptor.
+            .chain(["role", "transition"])
             .filter(|behavior| !declared.contains(behavior))
             .collect::<Vec<_>>();
         let removed = declared
@@ -260,9 +297,9 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
             .chain(withheld.iter().copied())
             .collect::<Vec<_>>();
         if removed.is_empty() {
-            out.push_str("Element & {\n");
+            out.push_str("NativeElement & {\n");
         } else {
-            out.push_str("Omit<Element, ");
+            out.push_str("Omit<NativeElement, ");
             for (index, name) in removed.iter().enumerate() {
                 if index != 0 {
                     out.push_str(" | ");
@@ -283,10 +320,8 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
             out.push_str(descriptor.name());
             out.push_str("Element;\n");
         }
-        // Re-declared rather than simply removed. Dropping the member outright
-        // would also drop this type's assignability to `Element`, so a typed
-        // part could no longer be passed to a slot that takes one. A `never`
-        // parameter keeps the shape and still refuses every call.
+        // Keep unavailable behaviors visible with their explanation while a
+        // `never` parameter refuses every call, including after fluent methods.
         for behavior in &withheld {
             out.push_str("    /**\n     * Not available on this component: `");
             out.push_str(descriptor.name());
@@ -307,13 +342,15 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
                     .map(|entry| entry.message()),
                 "  ",
             );
-            out.push_str("  export const ");
-            out.push_str(constructor.export());
-            out.push_str(": { new(");
-            push_arguments(&mut out, &constructor.arguments());
-            out.push_str("): ");
-            out.push_str(descriptor.name());
-            out.push_str("Element };\n");
+            // `Type.new(...)` is the form `gpui-base` uses; `new Type(...)` is
+            // kept for scripts written before it existed.
+            let mut parameters = String::new();
+            push_arguments(&mut parameters, &constructor.arguments());
+            out.push_str(&format!(
+                "  export const {export}: {{ new({parameters}): {name}Element; new: ({parameters}) => {name}Element }};\n",
+                export = constructor.export(),
+                name = descriptor.name(),
+            ));
         }
     }
     out.push_str("}\n\n");
@@ -446,7 +483,7 @@ fn host_modules() -> String {
                 // Rust type of that name carries, so `any` would be wider than
                 // the runtime: a script passing a function or a Symbol would
                 // type-check and then be refused at the call.
-                out.push_str("  import { Element, HostValue } from \"gpui-kit\";\n\n");
+                out.push_str("  import { NativeElement, HostValue } from \"gpui-kit\";\n\n");
                 for function in module.function_names() {
                     // Permissive about shape, but not wrong about the one thing
                     // the caller has to get right: an asynchronous export is
@@ -464,7 +501,7 @@ fn host_modules() -> String {
                 for component in module.component_names() {
                     let _ = writeln!(
                         out,
-                        "  export const {component}: {{ new(id: string, props: HostValue): Element }};"
+                        "  export const {component}: {{ new(id: string, props: HostValue): NativeElement }};"
                     );
                 }
             }
@@ -493,7 +530,7 @@ pub(crate) fn write_application_with_components(
     std::fs::create_dir_all(root)?;
     let mut directories = vec![root.to_path_buf()];
     directories.extend(
-        directories_importing_builtins(root)
+        directories_importing_builtins(root, component_module(components))
             .into_iter()
             .filter(|directory| directory != root),
     );
@@ -531,7 +568,7 @@ pub(crate) fn write_application_with_components(
 /// application directory is whatever someone pointed the runtime at, and a
 /// symlink farm or a vendored tree must not turn a startup step into an
 /// unbounded walk.
-fn directories_importing_builtins(root: &Path) -> Vec<PathBuf> {
+fn directories_importing_builtins(root: &Path, component_module: &str) -> Vec<PathBuf> {
     const MAX_DEPTH: usize = 8;
     const MAX_FILES: usize = 4_096;
     const SKIPPED: [&str; 2] = ["node_modules", "target"];
@@ -580,7 +617,8 @@ fn directories_importing_builtins(root: &Path) -> Vec<PathBuf> {
                     path.extension().and_then(|extension| extension.to_str()),
                     Some("js" | "mjs")
                 )
-                && std::fs::read_to_string(&path).is_ok_and(|source| imports_builtin(&source))
+                && std::fs::read_to_string(&path)
+                    .is_ok_and(|source| imports_builtin(&source, component_module))
             {
                 imports = true;
             }
@@ -594,26 +632,37 @@ fn directories_importing_builtins(root: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// The specifiers one `gpui-kit.d.ts` declares. A script importing any of them
+/// The specifiers one `gpui-kit.d.ts` declares besides the component
+/// catalog's, which [`component_module`] names. A script importing any of them
 /// wants the file beside it.
-const BUILTIN_SPECIFIERS: [&str; 6] = [
-    "gpui-kit",
-    "gpui",
-    "gpui-base",
-    crate::DEFAULT_COMPONENT_MODULE,
-    "gpui-shell",
-    "gpui-fps",
-];
+const BUILTIN_SPECIFIERS: [&str; 5] = ["gpui-kit", "gpui", "gpui-base", "gpui-shell", "gpui-fps"];
 
-/// Whether a script imports one of the built-in modules.
+/// The specifier the declarations give the component catalog.
+///
+/// The registry's own, so a host whose catalog scripts import from another
+/// name gets declarations for that name. The bare runtime's empty registry has
+/// none and keeps `gpui-component`, with an empty block.
+fn component_module(components: &crate::FrozenComponentRegistry) -> &'static str {
+    components
+        .module_specifier()
+        .unwrap_or(crate::DEFAULT_COMPONENT_MODULE)
+}
+
+/// Whether a script imports one of the built-in modules or the component
+/// catalog.
 ///
 /// Matching the quoted specifier rather than the bare word, so a file that only
 /// mentions gpui in a comment or a string does not collect a copy it has no use
 /// for.
-fn imports_builtin(source: &str) -> bool {
-    BUILTIN_SPECIFIERS.iter().any(|specifier| {
-        source.contains(&format!("\"{specifier}\"")) || source.contains(&format!("'{specifier}'"))
-    })
+fn imports_builtin(source: &str, component_module: &str) -> bool {
+    BUILTIN_SPECIFIERS
+        .iter()
+        .copied()
+        .chain([component_module])
+        .any(|specifier| {
+            source.contains(&format!("\"{specifier}\""))
+                || source.contains(&format!("'{specifier}'"))
+        })
 }
 
 /// Rewrites the declarations beside an application when they are not current.
@@ -670,6 +719,10 @@ enum Argument {
     DefiniteLength,
     AbsoluteLength,
     Color,
+    /// A colour or a `Background` value, which only `bg` accepts.
+    Fill,
+    /// A list of `BoxShadowSpec` records, which only `shadow` accepts.
+    Shadows,
     Number,
     /// Nothing the probe recognizes. Emitted as `never` rather than `any` so a
     /// style method added to the runtime without a matching literal here fails
@@ -685,6 +738,8 @@ impl Argument {
             Argument::DefiniteLength => "DefiniteLength",
             Argument::AbsoluteLength => "AbsoluteLength",
             Argument::Color => "Color",
+            Argument::Fill => "Color | Background",
+            Argument::Shadows => "readonly BoxShadowSpec[]",
             Argument::Number => "number",
             Argument::Unrecognized => "never",
         }
@@ -710,8 +765,23 @@ fn argument_of(name: &str) -> Argument {
     }
     let accepts = |value: Bridged| style::apply_param(name, &[value], StyleRefinement::default());
 
+    let background = || {
+        Bridged::Background(Box::new(crate::spec::BackgroundSpec {
+            kind: crate::spec::BackgroundKind::Solid {
+                color: "#ff0000".into(),
+            },
+            opacity: 1.,
+        }))
+    };
+
     if accepts(Bridged::Str("#ff0000".into())).is_ok() {
-        Argument::Color
+        if accepts(background()).is_ok() {
+            Argument::Fill
+        } else {
+            Argument::Color
+        }
+    } else if accepts(Bridged::Shadows(Vec::new())).is_ok() {
+        Argument::Shadows
     } else if accepts(Bridged::Str("auto".into())).is_ok() {
         Argument::Length
     } else if accepts(Bridged::Str("50%".into())).is_ok() {
@@ -801,7 +871,7 @@ fn parametric_styles(names: &[&'static str]) -> String {
         out.push_str(&doc_comment(style::documentation(name), 4));
         let _ = writeln!(
             out,
-            "    {name}(value: {}): Element;",
+            "    {name}<Self extends Element>(this: Self, value: {}): Self;",
             argument_of(name).ts_type()
         );
     }
@@ -820,7 +890,7 @@ fn nullary_styles(names: &[&'static str]) -> String {
     );
     for name in names {
         out.push_str(&doc_comment(style::documentation(name), 4));
-        let _ = writeln!(out, "    {name}(): Element;");
+        let _ = writeln!(out, "    {name}<Self extends Element>(this: Self): Self;");
     }
     out
 }
@@ -995,6 +1065,18 @@ const CONTEXT_AND_VIEW: &str = r#"  /**
      * registered for its scheme.
      */
     open_url(url: string): void;
+    /**
+     * Opens a file or directory with whatever the system opens it with —
+     * the user's default application for its type, or the file manager for
+     * a directory. `App::open_with_system`.
+     *
+     * The path must be inside a directory granted in `capabilities.fs.read`
+     * and must exist; anything else throws. Use this rather than running
+     * `xdg-open` or `open` through `process.run`, which starts commands
+     * without the desktop session's environment, so the opener cannot find
+     * the default application.
+     */
+    open_path(path: string): void;
 
     /** `App::read_from_clipboard`. `undefined` when it holds no text. */
     read_from_clipboard(): string | undefined;
@@ -1179,6 +1261,20 @@ const CONTEXT_AND_VIEW: &str = r#"  /**
     modifiers: Modifiers;
   }
 
+  /** What an `on_pinch` handler receives. */
+  export interface PinchEvent {
+    /**
+     * The zoom change for this step: positive zooms in, negative zooms out,
+     * `0.1` is a 10% increase.
+     */
+    delta: number;
+    phase: "started" | "moved" | "ended" | "cancelled";
+    position: Point;
+    local_position?: Point;
+    bounds?: import("gpui-shell").ElementBounds;
+    modifiers: Modifiers;
+  }
+
   /**
    * The base class of every view: subclass it and default-export the subclass.
    *
@@ -1235,15 +1331,19 @@ const CONTEXT_AND_VIEW: &str = r#"  /**
 /// Hand-written because each has a signature of its own; the names match the
 /// behavior list the engine installs on the prototype, and
 /// [`tests::every_element_method_is_accounted_for`] fails if the two drift.
+/// Explicit receiver generics survive `Omit` in registered builder types;
+/// polymorphic `this` alone would resolve to the original native interface.
 const ELEMENT_METHODS: &str = r#"    /**
      * Passes this element to `transform` and returns exactly what it returns.
      *
      * This mirrors GPUI's `FluentBuilder.map`: it is useful for keeping an
      * imperative or conditional transformation inside a fluent expression.
      */
-    map<T>(transform: (element: Element) => T): T;
+    map<Self extends Element, T>(this: Self, transform: (element: Self) => T): T;
     /**
-     * Adds one child. The child is consumed; using it again throws.
+     * Adds one child. The child is consumed; using it again throws. A
+     * description nests at most 64 levels, counting filled slots; the call
+     * that would go deeper throws.
      *
      * A **string is an element**, exactly as `&str`, `String` and
      * `SharedString` implement `IntoElement` in GPUI: `.child("hello")` is how
@@ -1252,11 +1352,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * An `Entity` from `cx.new(...)` is a child too, the way an `Entity<V>` is
      * renderable in GPUI — that is how a retained nested view is mounted. One
      * entity may appear once per parent snapshot; a second mount in the same
-     * description is refused before any of it is published.
+     * description is refused before any of it is published. Views mounted
+     * inside one another may span 65 levels together, one more for each view;
+     * a mount past that, or inside the view itself, draws nothing.
      */
-    child(child: Element | Entity | string | number | boolean): Element;
+    child<Self extends Element>(this: Self, child: Element | Entity | string | number | boolean): Self;
     /** Adds several children, in order. */
-    children(children: Iterable<Element | Entity | string | number | boolean>): Element;
+    children<Self extends Element>(this: Self, children: Iterable<Element | Entity | string | number | boolean>): Self;
     /**
      * Fills the `content` slot of a `Collapsible`, a `Popover`, a `HoverCard`
      * or a `Popup`.
@@ -1280,7 +1382,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * on the inner element; the region the pointer has to reach is the wrapper
      * around it.
      */
-    content(element: Element): Element;
+    content<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Fills an `Avatar`'s `image` slot, which takes an `AvatarImage`.
      *
@@ -1288,15 +1390,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * child. Base renders this one when it is there and the `fallback` when it
      * is not, so filling both is how a picture gets something to fall back to.
      */
-    image(element: Element): Element;
+    image<Self extends Element>(this: Self, element: Element): Self;
     /** Fills an `Avatar`'s `fallback` slot, which takes an `AvatarFallback`. */
-    fallback(element: Element): Element;
+    fallback<Self extends Element>(this: Self, element: Element): Self;
     /** Fills an `AccordionItem`'s `header` slot, which takes an `AccordionHeader`. */
-    header(element: Element): Element;
+    header<Self extends Element>(this: Self, element: Element): Self;
     /** Fills a component's named `footer` slot. */
-    footer(element: Element): Element;
+    footer<Self extends Element>(this: Self, element: Element): Self;
     /** Fills an `AccordionItem`'s `panel` slot, which takes an `AccordionPanel`. */
-    panel(element: Element): Element;
+    panel<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Fills the `trigger` slot of a `Popover` or a `HoverCard`: the element
      * that is on screen while the surface is closed, and that opens it.
@@ -1306,7 +1408,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * instead, because its trigger's bounds are what the content is anchored
      * to.
      */
-    trigger(element: Element): Element;
+    trigger<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Fills the editor slot of a `NumberInput`.
      *
@@ -1316,7 +1418,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * editor, and a frame inside this frame draws two borders. Adornments
      * beside the editor are ordinary `child(...)` calls on the number input.
      */
-    input(element: Element): Element;
+    input<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Supplies the look of a `NumberInput`'s decrement button.
      *
@@ -1336,30 +1438,30 @@ const ELEMENT_METHODS: &str = r#"    /**
      * `disabled(...)` and `on_click(...)` written here are overwritten: the
      * number input owns whether stepping is allowed and what a press does.
      */
-    decrement_button(element: Element): Element;
+    decrement_button<Self extends Element>(this: Self, element: Element): Self;
     /** The increment button, replayed exactly as `decrement_button` is. */
-    increment_button(element: Element): Element;
+    increment_button<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Stacks both of a `NumberInput`'s step buttons to the right of the text,
      * rather than putting one on each side of it.
      */
-    controls_right(): Element;
+    controls_right<Self extends Element>(this: Self): Self;
     /**
      * Applies `branch` only when `condition` is truthy, keeping the chain in
      * one piece. `branch` must return the element.
      */
-    when(condition: unknown, branch: (el: Element) => Element): Element;
+    when<Self extends Element>(this: Self, condition: unknown, branch: (el: Self) => Self): Self;
 
     /**
      * `handler(event, cx)` on activation. Keyboard activation is available
      * only on components whose Base primitive supports it; `Tab` is currently
      * pointer-only pending the compound keyboard behavior tracked in #2838.
      */
-    on_click(handler: (event: ClickEvent, cx: Context) => void): Element;
+    on_click<Self extends Element>(this: Self, handler: (event: ClickEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_mouse_move`, delivered while this element is hovered. */
-    on_mouse_move(handler: (event: MouseMoveEvent, cx: Context) => void): Element;
+    on_mouse_move<Self extends Element>(this: Self, handler: (event: MouseMoveEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_hover`; reports both pointer entry and exit. */
-    on_hover(handler: (hovered: boolean, cx: Context) => void): Element;
+    on_hover<Self extends Element>(this: Self, handler: (hovered: boolean, cx: Context) => void): Self;
     /**
      * GPUI `InteractiveElement::on_key_down`, delivered while this element or
      * something inside it holds the keyboard.
@@ -1380,13 +1482,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * component that accepts no focus handle — `Tab` — hears presses and never
      * hears keys, however well both are wired.
      */
-    on_key_down(handler: (event: KeyEvent, cx: Context) => void): Element;
+    on_key_down<Self extends Element>(this: Self, handler: (event: KeyEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_key_up`, on the same focus path as `on_key_down`. */
-    on_key_up(handler: (event: KeyEvent, cx: Context) => void): Element;
+    on_key_up<Self extends Element>(this: Self, handler: (event: KeyEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_modifiers_changed`, on the keyboard focus path. */
-    on_modifiers_changed(
+    on_modifiers_changed<Self extends Element>(this: Self,
       handler: (event: ModifiersChangedEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /**
      * GPUI `InteractiveElement::on_mouse_down`, for one button.
      *
@@ -1396,15 +1498,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * for two buttons on one element is fine — the two handlers are
      * independent.
      */
-    on_mouse_down(
+    on_mouse_down<Self extends Element>(this: Self,
       button: MouseButton,
       handler: (event: MouseButtonEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /** GPUI `InteractiveElement::on_mouse_up`, for one button. */
-    on_mouse_up(
+    on_mouse_up<Self extends Element>(this: Self,
       button: MouseButton,
       handler: (event: MouseButtonEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /**
      * GPUI `InteractiveElement::on_mouse_down_out`: a press anywhere *outside*
      * this element, delivered during the capture phase.
@@ -1413,7 +1515,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * elsewhere — the same listener base's own components close on. It fires
      * for any button.
      */
-    on_mouse_down_out(handler: (event: MouseButtonEvent, cx: Context) => void): Element;
+    on_mouse_down_out<Self extends Element>(this: Self, handler: (event: MouseButtonEvent, cx: Context) => void): Self;
     /**
      * GPUI `InteractiveElement::on_scroll_wheel`: wheel and trackpad scrolling
      * over this element.
@@ -1422,7 +1524,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * not: it hands GPUI's own retained scroll container the job. Use this when
      * the gesture drives something else — a zoom, a value, a custom viewport.
      */
-    on_scroll_wheel(handler: (event: ScrollWheelEvent, cx: Context) => void): Element;
+    on_scroll_wheel<Self extends Element>(this: Self, handler: (event: ScrollWheelEvent, cx: Context) => void): Self;
+    /**
+     * GPUI `InteractiveElement::on_pinch`: a trackpad or touch pinch over this
+     * element, delivered once per step of the gesture. Multiply a zoom level
+     * by `1 + event.delta` to follow it.
+     */
+    on_pinch<Self extends Element>(this: Self, handler: (event: PinchEvent, cx: Context) => void): Self;
     /**
      * `handler(event, cx)` when the named action is dispatched to this element
      * or to something inside it.
@@ -1436,7 +1544,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * Registering several on one element is fine and they are independent. An
      * action none of them names carries on to an element further out.
      */
-    on_action(action: string, handler: (event: ActionEvent, cx: Context) => void): Element;
+    on_action<Self extends Element>(this: Self, action: string, handler: (event: ActionEvent, cx: Context) => void): Self;
     /**
      * `InteractiveElement::key_context`: the key-binding context this element
      * and its subtree sit in.
@@ -1446,18 +1554,18 @@ const ELEMENT_METHODS: &str = r#"    /**
      * a predicate expression, not free text; an unparsable one is reported and
      * the context is left unset.
      */
-    key_context(context: string): Element;
+    key_context<Self extends Element>(this: Self, context: string): Self;
     /**
      * An `AccordionHeader`'s announced heading level — "heading level 3" — as
      * `aria-level` means it. Defaults to 3. It announces; it sizes nothing.
      */
-    aria_level(level: number): Element;
+    aria_level<Self extends Element>(this: Self, level: number): Self;
     /**
      * Whether an `AccordionPanel` stays in the tree while shut. Off by default;
      * on, its content keeps a scroll position or a half-typed field across a
      * close and reopen.
      */
-    keep_mounted(value?: boolean): Element;
+    keep_mounted<Self extends Element>(this: Self, value?: boolean): Self;
     /**
      * `handler(key, cx)` when a row of a virtual list is clicked, where `key`
      * is what the list's `get_key(index)` returned for that row.
@@ -1468,22 +1576,14 @@ const ELEMENT_METHODS: &str = r#"    /**
      * key names the item that was pressed; the index would name whatever slid
      * into its place.
      *
-     * One handler for the list rather than one per row, and that is a limit
-     * rather than a shorthand: a handler registered inside the item renderer
-     * throws. Handlers belong to the render pass that registered them and are
-     * released with it; a row is rebuilt on every frame the list is scrolled,
-     * so a per-row handler would accumulate for as long as the view stood —
-     * twenty visible rows over a thousand frames is twenty thousand functions
-     * nothing can reach and nothing releases.
-     *
-     * The key is normally enough: the script already holds the data the row was
-     * built from. A row with several independently clickable parts needs a
-     * handler lifetime scoped to one batch of items, which this runtime does
-     * not have yet; when it does, this restriction lifts and `on_click` inside
-     * an item renderer starts working, with no change to anything written
-     * against `on_item_click`.
+     * A row may also register handlers of its own — `row.on_click(...)` inside
+     * the item renderer works, and a row with several clickable parts needs it.
+     * Those handlers belong to the batch of rows that registered them and are
+     * released when the next frame replaces it. `on_item_click` remains the
+     * cheaper choice for a whole-row click: one handler for the list, and the
+     * key it reports names the item even after a filter or a sort.
      */
-    on_item_click(handler: (key: string, cx: Context) => void): Element;
+    on_item_click<Self extends Element>(this: Self, handler: (key: string, cx: Context) => void): Self;
     /**
      * `handler(key, event, cx)` on a secondary press — the right button — over
      * a row of a virtual list. `key` is what the list's `get_key(index)`
@@ -1493,8 +1593,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * A press rather than a click, because that is when a context menu opens:
      * the row is still under the pointer, so the menu can name what it is for
-     * before it is drawn over it. And one handler for the list rather than one
-     * per row, for the reason `on_item_click` gives.
+     * before it is drawn over it.
      *
      * It is delivered on the row, so a handler for the same button on an
      * element around the list still fires after it, in the ordinary bubble
@@ -1502,9 +1601,29 @@ const ELEMENT_METHODS: &str = r#"    /**
      * pane learns which row was pressed from this handler and where in the
      * pane to open from the pane's.
      */
-    on_item_secondary_click(
+    on_item_secondary_click<Self extends Element>(this: Self,
       handler: (key: string, event: MouseButtonEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
+    /**
+     * `handler(range, count, cx)` after a frame in which the items a `list`
+     * shows, or how many it has, changed. `range` is the visible items as a
+     * half-open `[start, end)`, and `count` is the list's `item_count`.
+     *
+     * It is called once the frame is done, as an event handler is, so it may
+     * change state and call `cx.notify()`: load the page above when
+     * `range.start` reaches 0, or the next one when `range.end` reaches
+     * `count`. The item renderer cannot do this, because it runs inside
+     * layout.
+     *
+     * What calls it is the range itself, not what moved it: the first frame,
+     * a wheel or trackpad scroll, a `Scrollbar` drag, a change of
+     * `item_count`, a change of the list's height. A frame that leaves both
+     * the same calls nothing. Only `list` reports it; on `uniform_list` and
+     * the virtual lists it is ignored.
+     */
+    on_visible_range_change<Self extends Element>(this: Self,
+      handler: (range: ItemRange, count: number, cx: Context) => void,
+    ): Self;
     /**
      * `handler(value, cx)`, on a toggle. The script owns the new value.
      *
@@ -1512,7 +1631,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * already checked — or disabled — radio reports nothing at all, and
      * clearing a group is the script's own business.
      */
-    on_change(handler: (checked: boolean, cx: Context) => void): Element;
+    on_change<Self extends Element>(this: Self, handler: (checked: boolean, cx: Context) => void): Self;
 
     /**
      * `handler(action, cx)` on a `NumberInput`, where `action` is
@@ -1527,7 +1646,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * Both the step buttons and the Up and Down keys report through it.
      */
-    on_step(handler: (action: "increment" | "decrement", cx: Context) => void): Element;
+    on_step<Self extends Element>(this: Self, handler: (action: "increment" | "decrement", cx: Context) => void): Self;
     /**
      * `handler(open, cx)`, when something other than the script changed a
      * `Popover`'s open state: a press on the trigger, a press outside it, or
@@ -1539,7 +1658,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * its open state cannot produce. A hover card's open state is its own, so
      * nothing is lost except the notification.
      */
-    on_open_change(handler: (open: boolean, cx: Context) => void): Element;
+    on_open_change<Self extends Element>(this: Self, handler: (open: boolean, cx: Context) => void): Self;
     /**
      * `handler(_, cx)` on Enter in an open `Select` or `Combobox`.
      *
@@ -1548,13 +1667,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * the script is the only side that knows. Confirming a *closed* root opens
      * it instead, so this never runs for that case.
      */
-    on_confirm(handler: (event: {}, cx: Context) => void): Element;
+    on_confirm<Self extends Element>(this: Self, handler: (event: {}, cx: Context) => void): Self;
     /**
      * `handler(_, cx)` on Escape in an open `Select` or `Combobox`, before
      * `on_open_change(false)` — which is what lets a script commit a pending
      * value on the way out.
      */
-    on_dismiss(handler: (event: {}, cx: Context) => void): Element;
+    on_dismiss<Self extends Element>(this: Self, handler: (event: {}, cx: Context) => void): Self;
     /**
      * The label a hover shows over this element, once the pointer has rested
      * on it for half a second.
@@ -1577,41 +1696,41 @@ const ELEMENT_METHODS: &str = r#"    /**
      * A tooltip is not a substitute for `accessibility_label`. A screen reader
      * announces the label; the tooltip is for the pointer.
      */
-    tooltip(text: string): Element;
+    tooltip<Self extends Element>(this: Self, text: string): Self;
     /** Blocks activation and reports the disabled state. Draw it yourself. */
-    disabled(value: boolean): Element;
+    disabled<Self extends Element>(this: Self, value: boolean): Self;
     /** Reports the selected state of a `Button`. */
-    selected(value: boolean): Element;
+    selected<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * This item's one-based position and its collection's total size, so a
      * screen reader can announce "tab 2 of 5" or "option 2 of 5". Announced,
      * never drawn: a tab list or radio group that omits it looks identical and
      * says nothing about where the reader is in the set.
      */
-    set_position(position: number, size: number): Element;
+    set_position<Self extends Element>(this: Self, position: number, size: number): Self;
     /** The controlled value of a `Checkbox`, `Switch` or `Radio`. */
-    checked(value: boolean): Element;
+    checked<Self extends Element>(this: Self, value: boolean): Self;
     /** The controlled state of a `Toggle`: a button that stays down. */
-    pressed(value: boolean): Element;
+    pressed<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * The announced progress percentage of a `Progress`, clamped to `0..=100`.
      *
      * It moves nothing on screen: size the `ProgressIndicator` from the same
      * number to draw the bar.
      */
-    value(percent: number): Element;
+    value<Self extends Element>(this: Self, percent: number): Self;
     /**
      * Withdraws a `Progress` value from the accessibility tree — "still
      * working, no idea how far". It does not animate anything; a barber-pole
      * or a sliding indicator is yours to draw, and `transition` on the
      * indicator is how it moves.
      */
-    indeterminate(value: boolean): Element;
+    indeterminate<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * What a screen reader announces. An icon-only control has no text of its
      * own and announces nothing without it.
      */
-    accessibility_label(description: string): Element;
+    accessibility_label<Self extends Element>(this: Self, description: string): Self;
     /**
      * What this element announces itself as.
      *
@@ -1622,14 +1741,14 @@ const ELEMENT_METHODS: &str = r#"    /**
      * menu item). Every other component announces a role of its own, and a
      * `role` there is reported and dropped rather than silently overwritten.
      */
-    role(name: Role): Element;
+    role<Self extends Element>(this: Self, name: Role): Self;
     /**
      * The selected state of an option in a list the script built itself.
      *
      * Plain elements only. `Tab` and `Radio` announce their own selection from
      * `selected(...)` and `checked(...)`.
      */
-    aria_selected(value: boolean): Element;
+    aria_selected<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Announces this element as the focused one while an ancestor actually
      * holds the keyboard — the highlighted option of a combobox whose input
@@ -1639,7 +1758,20 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * Plain elements only.
      */
-    aria_active_descendant(): Element;
+    aria_active_descendant<Self extends Element>(this: Self): Self;
+    /**
+     * GPUI `InteractiveElement::window_control_area`: this element is the
+     * window's drag area, or its close, maximize or minimize button.
+     *
+     * The host draws no title bar of its own, so a script's title bar is the
+     * window's. `"drag"` makes it behave like one on every platform, as
+     * gpui-component's `TitleBar` does: pressing and dragging across it moves
+     * the window, and a double-click zooms it (or does what the user set
+     * double-clicking a title bar to do, on macOS).
+     *
+     * Plain elements only.
+     */
+    window_control_area<Self extends Element>(this: Self, area: "drag" | "close" | "max" | "min"): Self;
     /**
      * Tracks a `FocusHandle` the script owns, so `handle.is_focused()` answers
      * for this element and `handle.focus()` moves the keyboard onto it.
@@ -1655,7 +1787,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * you drew as the trigger, or nothing focusable is on screen and Escape and
      * Enter reach nothing.
      */
-    track_focus(handle: FocusHandle): Element;
+    track_focus<Self extends Element>(this: Self, handle: FocusHandle): Self;
     /**
      * Gives a virtual list the scroll position held by a
      * `VirtualListScrollHandle`, so the script can drive it with
@@ -1665,7 +1797,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * the id it was built with — which is the same place a `Scrollbar` named
      * after that id looks, so the bar works either way.
      */
-    track_scroll(handle: import("gpui-base").VirtualListScrollHandle): Element;
+    track_scroll<Self extends Element>(this: Self, handle: import("gpui-base").VirtualListScrollHandle): Self;
     /**
      * Which item a virtual list measures to infer its size across the axis it
      * scrolls: a vertical list takes its width from this item, a horizontal
@@ -1673,7 +1805,20 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * The name is base's own builder, kept verbatim.
      */
-    with_item_to_measure_index(index: number): Element;
+    with_item_to_measure_index<Self extends Element>(this: Self, index: number): Self;
+    /**
+     * Whether a `list` follows its tail — GPUI's `FollowMode`. With `"tail"`
+     * the list opens at its end and stays there as items are added and as the
+     * last one grows, the way a transcript being written is read. Scrolling
+     * up stops it; scrolling back to the end, with the wheel or a
+     * `Scrollbar`, starts it again. `"normal"`, the default, never scrolls on
+     * its own.
+     *
+     * Switching to `"tail"` scrolls to the end once, on the frame it is
+     * switched on; keeping it on does not pull a reader who scrolled up back
+     * down. Only `list` has a follow mode; on other elements it is ignored.
+     */
+    with_follow_mode<Self extends Element>(this: Self, mode: "normal" | "tail"): Self;
     /**
      * The handle a `Select` or `Combobox` moves the keyboard to when it opens,
      * and away from when Escape closes it.
@@ -1682,7 +1827,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * then style itself from `handle.is_focused()`. It does **not** give you
      * arrow-key navigation — see `Select` for what is and is not there.
      */
-    content_focus_handle(handle: FocusHandle): Element;
+    content_focus_handle<Self extends Element>(this: Self, handle: FocusHandle): Self;
     /**
      * Where this element sits in the window's Tab order. A whole number;
      * setting it also makes the element a tab stop.
@@ -1691,15 +1836,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * `Tabs` and the table, group and progress parts, which base leaves out of
      * keyboard focus entirely.
      */
-    tab_index(index: number): Element;
+    tab_index<Self extends Element>(this: Self, index: number): Self;
     /**
      * Whether Tab can land on this element. `false` keeps its place in the
      * order without making it reachable, which is what a container that
      * forwards focus to its first child wants.
      */
-    tab_stop(value: boolean): Element;
+    tab_stop<Self extends Element>(this: Self, value: boolean): Self;
     /** Sets the absolute HTTP(S) target opened by a `Link`. */
-    href(url: string): Element;
+    href<Self extends Element>(this: Self, url: string): Self;
     /**
      * A stable name for this element, used as its identity.
      *
@@ -1711,36 +1856,45 @@ const ELEMENT_METHODS: &str = r#"    /**
      * Any component whose factory takes an id is already identified by that id
      * and ignores this.
      */
-    id(name: string): Element;
+    id<Self extends Element>(this: Self, name: string): Self;
+    /**
+     * Names this element as a group, so that `group_hover(name, declare)` on
+     * an element inside it styles that element while the pointer is over this
+     * one. GPUI `InteractiveElement::group`.
+     *
+     * The name need not be unique: a group hover follows the nearest ancestor
+     * with its name, so every row of a list can be `group("row")`.
+     */
+    group<Self extends Element>(this: Self, name: string): Self;
     /** Owns wheel and touch scrolling on both axes for overflowing children. */
-    overflow_scroll(): Element;
+    overflow_scroll<Self extends Element>(this: Self): Self;
     /** Owns horizontal wheel and touch scrolling for overflowing children. */
-    overflow_x_scroll(): Element;
+    overflow_x_scroll<Self extends Element>(this: Self): Self;
     /** Owns vertical wheel and touch scrolling for overflowing children. */
-    overflow_y_scroll(): Element;
+    overflow_y_scroll<Self extends Element>(this: Self): Self;
     /** Scrolls both axes and paints base-layer scrollbars. */
-    overflow_scrollbar(): Element;
+    overflow_scrollbar<Self extends Element>(this: Self): Self;
     /** Scrolls horizontally and paints a base-layer scrollbar. */
-    overflow_x_scrollbar(): Element;
+    overflow_x_scrollbar<Self extends Element>(this: Self): Self;
     /** Scrolls vertically and paints a base-layer scrollbar. */
-    overflow_y_scrollbar(): Element;
+    overflow_y_scrollbar<Self extends Element>(this: Self): Self;
     /**
      * A `Scrollbar`'s visibility policy. Omitted, it follows the theme, which
      * is what every bar painted by `overflow_*_scrollbar` does.
      */
-    mode(value: import("gpui-base").ScrollbarMode): Element;
+    mode<Self extends Element>(this: Self, value: import("gpui-base").ScrollbarMode): Self;
     /**
      * The content size a `Scrollbar` measures its thumb against, in pixels,
      * for when the script knows it and the scroll area does not — a list that
      * paints a window of rows rather than all of them.
      */
-    scroll_size(width: number, height: number): Element;
+    scroll_size<Self extends Element>(this: Self, width: number, height: number): Self;
     /**
      * Makes a `Scrollbar` take its viewport from its own box rather than from
      * the scroll area it drives. The way to run a bar down the rows of a table
      * without it reaching up over the fixed header.
      */
-    viewport_from_layout(): Element;
+    viewport_from_layout<Self extends Element>(this: Self): Self;
     /**
      * How far a `resizable_panel()` may be dragged, in pixels.
      *
@@ -1749,7 +1903,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * while the maximum is optional and defaults to unbounded. Omit the call
      * entirely to keep both of base's defaults.
      */
-    size_range(min: number, max?: number): Element;
+    size_range<Self extends Element>(this: Self, min: number, max?: number): Self;
     /**
      * `handler(sizes, cx)` on an `h_resizable()` or `v_resizable()`, once a drag
      * of one of its handles has ended. `sizes` is the pixel size of every panel,
@@ -1760,7 +1914,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * wired: it is for persisting a layout or showing a width, not for making
      * the group resize.
      */
-    on_resize(handler: (sizes: number[], cx: Context) => void): Element;
+    on_resize<Self extends Element>(this: Self, handler: (sizes: number[], cx: Context) => void): Self;
     /**
      * The orientation a `RadioGroup` or `ToggleGroup` announces.
      *
@@ -1770,15 +1924,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * drawn. Omitted, each container keeps its own default: `RadioGroup` is
      * vertical, `ToggleGroup` horizontal.
      */
-    axis(value: Axis): Element;
+    axis<Self extends Element>(this: Self, value: Axis): Self;
     /**
      * A `Table`'s total number of rows, including rows outside the range the
      * script rendered, so a screen reader can announce "row 5 of 200". A table
      * that draws every row it has does not need it.
      */
-    row_count(count: number): Element;
+    row_count<Self extends Element>(this: Self, count: number): Self;
     /** A `Table`'s total number of columns, including unrendered ones. */
-    column_count(count: number): Element;
+    column_count<Self extends Element>(this: Self, count: number): Self;
     /**
      * Whether a `Collapsible` renders the element in its `content` slot — its
      * ordinary children are rendered either way — or whether a `Popover`,
@@ -1794,16 +1948,16 @@ const ELEMENT_METHODS: &str = r#"    /**
      * A `Popup` has no open state to set. It shows whatever is in its `content`
      * slot, so `.when(open, el => el.content(...))` is how one is opened.
      */
-    open(value: boolean): Element;
+    open<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Whether a `Popover` starts open. Read once, when the surface is first
      * described; a controlled popover ignores it from then on.
      */
-    default_open(value: boolean): Element;
+    default_open<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Whether pressing outside an open `Popover` closes it. Default `true`.
      */
-    overlay_closable(value: boolean): Element;
+    overlay_closable<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Which corner of a `Popover` or `HoverCard` is pinned to its trigger, or
      * where an `fps_monitor()` is pinned inside its relative parent. Omitted,
@@ -1813,33 +1967,33 @@ const ELEMENT_METHODS: &str = r#"    /**
      * The surface is clamped into the window either way, so an anchor near an
      * edge is a preference rather than a promise.
      */
-    anchor(value: Anchor): Element;
+    anchor<Self extends Element>(this: Self, value: Anchor): Self;
     /** Frame budget, in milliseconds, used by an fps_monitor's FRAME grading. */
-    frame_budget(milliseconds: number): Element;
+    frame_budget<Self extends Element>(this: Self, milliseconds: number): Self;
     /** Which pointer button opens a `Popover`. Default `left`. */
-    mouse_button(value: MouseButton): Element;
+    mouse_button<Self extends Element>(this: Self, value: MouseButton): Self;
     /**
      * How long, in milliseconds, the pointer must rest on a `HoverCard`'s
      * trigger before the card appears. Default 600.
      */
-    open_delay(ms: number): Element;
+    open_delay<Self extends Element>(this: Self, ms: number): Self;
     /**
      * How long, in milliseconds, a `HoverCard` waits after the pointer leaves
      * both the trigger and the card before closing. Default 300; it is what
      * lets the pointer cross the gap between the two.
      */
-    close_delay(ms: number): Element;
+    close_delay<Self extends Element>(this: Self, ms: number): Self;
     /** Animates later target changes entirely in native GPUI code. */
-    transition(property: import("gpui-shell").MotionProperty, policy: number | import("gpui-shell").TransitionPolicy): Element;
+    transition<Self extends Element>(this: Self, property: import("gpui-shell").MotionProperty, policy: number | import("gpui-shell").TransitionPolicy): Self;
     /** Springs later target changes entirely in native GPUI code. */
-    spring(property: import("gpui-shell").MotionProperty, policy?: import("gpui-shell").SpringPolicy): Element;
+    spring<Self extends Element>(this: Self, property: import("gpui-shell").MotionProperty, policy?: import("gpui-shell").SpringPolicy): Self;
 
     /**
      * Which thumb of a range slider a `SliderThumb` is: the one at the start
      * of the range, or the one at its end. Default `false`, the end — which
      * is the only thumb a single-value slider has.
      */
-    start(value: boolean): Element;
+    start<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * How the filled part of a `SliderIndicator` looks. `declare` receives a
      * detached element that collects the styles, exactly as `hover` does; its
@@ -1852,7 +2006,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * with no `range_style` has no fill at all, which is a slider drawn as a
      * groove and a knob.
      */
-    range_style(declare: (el: Element) => Element | void): Element;
+    range_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * How every cell of an `OtpInput` looks. `declare` receives a detached
      * element that collects the styles, exactly as `hover` does; its return
@@ -1862,13 +2016,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * by the script, so an `OtpInput` without this one is a row of boxes with
      * no size, no border and no background — nothing on screen at all.
      */
-    cell_style(declare: (el: Element) => Element | void): Element;
+    cell_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Layered on top of `cell_style` for the one cell the next digit lands in,
      * while the code holds the keyboard and is not disabled. A refinement
      * rather than a replacement, the way `hover` is: declare only what differs.
      */
-    cell_active_style(declare: (el: Element) => Element | void): Element;
+    cell_active_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * The blinking mark drawn in that cell while it is still empty. Give it a
      * width, a height and a background; with no `caret_style` there is no
@@ -1876,17 +2030,32 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * Not `cursor_style`: everywhere else in this API `cursor` is the pointer.
      */
-    caret_style(declare: (el: Element) => Element | void): Element;
+    caret_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Styles applied while the pointer is over the element. `declare` receives
      * a detached element that collects the styles; its return value is
      * ignored, so a chain and a block body both work.
      */
-    hover(declare: (el: Element) => Element | void): Element;
+    hover<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element is pressed. */
-    active(declare: (el: Element) => Element | void): Element;
+    active<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element has focus. */
-    focus(declare: (el: Element) => Element | void): Element;
+    focus<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
+    /**
+     * Styles applied while the pointer is over the nearest ancestor named
+     * `name` with `group(name)`, rather than over this element: an action
+     * that appears when its row is hovered. `declare` receives a detached
+     * element that collects the styles, exactly as `hover` does; its return
+     * value is ignored. GPUI `InteractiveElement::group_hover`.
+     *
+     * It is a style, not a handler, so a virtual list's item renderer may use
+     * it. With no ancestor of that name the styles never apply. A second call
+     * replaces the first. A group hover that changes the element's size or
+     * position needs a stable identity, `.id(...)`, because GPUI lays the
+     * element out from its own state; one that only paints, such as an
+     * opacity or a color, does not.
+     */
+    group_hover<Self extends Element>(this: Self, name: string, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Displays the tab at `index` in `group` when this element is clicked.
      *
@@ -1897,47 +2066,34 @@ const ELEMENT_METHODS: &str = r#"    /**
      * stood. A command carries no script value: it names a container in the
      * area and what to ask it, and base does the work.
      *
-     * Every command takes the object its handler was given — the group, the
-     * dock, the tile — as its first argument. They belong on a `div`, an
+     * Every command takes the object its handler was given — the group or the
+     * dock — as its first argument. They belong on a `div`, an
      * `h_flex` or a `v_flex`; a `Button` builds its own interior and has
      * nowhere to put one.
      */
-    select_tab(group: import("gpui-base").DockGroup, index: number): Element;
+    select_tab<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, index: number): Self;
     /** Closes `panel` when this element is clicked, if its group allows it. */
-    close_panel(group: import("gpui-base").DockGroup, panel: number): Element;
+    close_panel<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, panel: number): Self;
     /** Zooms the group in, or back out. */
-    toggle_zoom(group: import("gpui-base").DockGroup): Element;
+    toggle_zoom<Self extends Element>(this: Self, group: import("gpui-base").DockGroup): Self;
     /**
      * Makes this element the drag source for the tab at `index`, carrying
      * base's own panel payload — so dropping it on another group, or on the
      * area itself, moves the panel there.
      */
-    drag_tab(group: import("gpui-base").DockGroup, index: number): Element;
+    drag_tab<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, index: number): Self;
     /**
      * Accepts a dragged panel here. `index` is the slot it lands in; leave it
      * out to append, which is what a drop past the last tab means.
      */
-    drop_tab(group: import("gpui-base").DockGroup, index?: number): Element;
+    drop_tab<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, index?: number): Self;
     /** Opens or closes the dock when this element is clicked. */
-    toggle_dock(dock: import("gpui-base").DockRegion): Element;
+    toggle_dock<Self extends Element>(this: Self, dock: import("gpui-base").DockRegion): Self;
     /**
      * Drags the dock's edge. Base clamps every size it is given against the
      * area and the opposite dock, so nothing here has to.
      */
-    resize_dock(dock: import("gpui-base").DockRegion): Element;
-    /** Drags the tile around its canvas, raising it first. */
-    move_tile(tile: import("gpui-base").DockTile): Element;
-    /** Drags one edge or corner of the tile. */
-    resize_tile(
-      tile: import("gpui-base").DockTile,
-      side: import("gpui-base").TileResizeSide,
-    ): Element;
-    /** Brings the tile above the others when this element is pressed. */
-    raise_tile(tile: import("gpui-base").DockTile): Element;
-    /** Zooms the tile to fill its dock, or back out. */
-    toggle_tile_zoom(tile: import("gpui-base").DockTile): Element;
-    /** Closes the tile. */
-    close_tile(tile: import("gpui-base").DockTile): Element;
+    resize_dock<Self extends Element>(this: Self, dock: import("gpui-base").DockRegion): Self;
 "#;
 
 fn shell_types() -> String {
@@ -2013,7 +2169,7 @@ const SHELL_TYPES: &str = r#"  /** A path coordinate in pixels or as a percentag
 /// them. `gpui-base`'s components are declared separately, in [`BASE`].
 const ELEMENTS: &str = r#"
   /** An element with no layout of its own. */
-  export function div(): Element;
+  export function div(): NativeElement;
 
   /**
    * A vector image from the application's own directory.
@@ -2023,7 +2179,7 @@ const ELEMENTS: &str = r#"
    * application's public directory works. It inherits the surrounding text
    * color unless it sets its own.
    */
-  export function svg(path: string): Element;
+  export function svg(path: string): NativeElement;
 
   /**
    * A full-color image from the application's own directory.
@@ -2032,7 +2188,7 @@ const ELEMENTS: &str = r#"
    * as a theme-tinted icon mask. SVG, PNG, JPEG and other GPUI image formats
    * are supported by the host image loader.
    */
-  export function image(path: string): Element;
+  export function image(path: string): NativeElement;
 
   /** The visible items, as a half-open `[start, end)` interval. */
   export interface ItemRange {
@@ -2075,6 +2231,22 @@ const ELEMENTS: &str = r#"
    * the other two throw. A duplicate key there quietly gives both items one
    * identity, and `on_item_click` reports it for either.
    *
+   * When `item_count` changes, the reader stays on the item they were
+   * reading: the list remembers the key of the item at the top of the
+   * viewport and, after the change, finds that key again and scrolls back to
+   * it, the same distance into it. So a page of older items put above, or a
+   * new one added below, leaves the view where it was — also at the very top,
+   * where the new items stay above the fold. If that item is gone, the view
+   * stays at the same index. A list scrolled past its last item, or following
+   * its tail (`with_follow_mode("tail")`), stays at the end. To find the key,
+   * `get_key` is called near the item's old index from inside layout, so it
+   * must stay a plain lookup.
+   *
+   * To load more items as the reader nears either end, use
+   * `on_visible_range_change`: it reports which items are shown once the
+   * frame is done, where state may change. The item renderer cannot be used
+   * for that, because it runs inside layout.
+   *
    * @param id      Identity, and the name a `Scrollbar` pairs with.
    * @param item_count How many items the collection has, visible or not.
    * @param get_key An item's stable domain key, from its current index; the
@@ -2086,7 +2258,7 @@ const ELEMENTS: &str = r#"
     item_count: number,
     get_key: (index: number) => string,
     render: (index: number, cx: Context) => Element,
-  ): Element;
+  ): NativeElement;
 
   /**
    * GPUI's own uniform list: one row is measured and every row takes its
@@ -2106,7 +2278,7 @@ const ELEMENTS: &str = r#"
     item_count: number,
     get_key: (index: number) => string,
     render: (range: ItemRange, cx: Context) => Element[],
-  ): Element;
+  ): NativeElement;
 
   /** Immutable native GPUI geometry produced by `PathBuilder.build()`. */
   export interface Path {}
@@ -2125,13 +2297,48 @@ const ELEMENTS: &str = r#"
     fill(): PathBuilder;
     stroke(width: number): PathBuilder;
   };
+  /**
+   * One box shadow for `.shadow([...])`, written like a CSS `box-shadow`
+   * layer. Every length is in pixels and defaults to 0. As in CSS, the first
+   * shadow in the list paints on top of the ones after it.
+   *
+   * `blur` has CSS semantics — the blur radius, twice the gaussian's standard
+   * deviation — and is halved for GPUI, so a value copied from a stylesheet
+   * looks the same here. `spread` may be negative.
+   *
+   * An `inset` shadow is painted inside the element: above its fill, but
+   * beneath its children and its border. Outer shadows paint beneath the fill.
+   */
+  export interface BoxShadowSpec {
+    /** Horizontal offset in pixels. */
+    x?: number;
+    /** Vertical offset in pixels. */
+    y?: number;
+    /** CSS blur radius in pixels; non-negative. */
+    blur?: number;
+    /** Spread in pixels; negative shrinks the shadow. */
+    spread?: number;
+    /** The shadow colour, usually with alpha (`#00000066`). */
+    color: Color;
+    /** Paint inside the element instead of around it. */
+    inset?: boolean;
+  }
   export interface BackgroundStop {}
+  /**
+   * A native GPUI background: what `window.paint_path` fills with, and what
+   * `.bg(...)` accepts besides a colour. A gradient set with `.bg` is drawn
+   * inside the element's rounded corners.
+   */
   export interface Background {
     opacity(factor: number): Background;
     color_space(space: "srgb" | "oklab"): Background;
   }
   export const Background: {
     solid(color: Color): Background;
+    /**
+     * A gradient stop. `percentage` is a fraction of the gradient line, from
+     * 0 (start) to 1 (end) — not 0 to 100.
+     */
     stop(color: Color, percentage: number): BackgroundStop;
     linear_gradient(angle: number, from: Color | BackgroundStop, to: Color | BackgroundStop): Background;
     pattern_slash(color: Color, width: number, interval: number): Background;
@@ -2164,12 +2371,12 @@ const BASE_SHARED_TYPES: &str = r#"
 
   /** A component identified across renders by `new(id)`. */
   export interface ComponentType {
-    new: (id: string | number) => Element;
+    new: (id: string | number) => NativeElement;
   }
 
   /** A sub-part with no identity of its own, constructed with `new()`. */
   export interface PartType {
-    new: () => Element;
+    new: () => NativeElement;
   }
 
 "#;
@@ -2235,7 +2442,7 @@ const WINDOW: &str = r#"
      * the window rather than on the app. Legal from `render`, unlike the
      * overlays above — it builds a description like any other element.
      */
-    paint_path(path: Path, background: Background | Color): Element;
+    paint_path(path: Path, background: Background | Color): NativeElement;
 
     /**
      * `Window::dispatch_action`. Dispatches an action down this window's focus
@@ -2316,6 +2523,15 @@ const WINDOW: &str = r#"
     minimize_window(): void;
     /** `Window::zoom_window`: the platform's zoom, not a scale factor. */
     zoom_window(): void;
+    /**
+     * `Window::start_window_move`: hand the pointer to the platform, which
+     * moves the window until the button is released.
+     *
+     * The host opens its window with a title bar the application draws, so
+     * dragging that bar is the application's to do. Call it from the bar's
+     * `on_mouse_down`; anywhere but inside a press it does nothing.
+     */
+    start_window_move(): void;
     /** `Window::toggle_fullscreen`. */
     toggle_fullscreen(): void;
   }
@@ -2325,10 +2541,30 @@ const WINDOW: &str = r#"
 /// Everything `gpui-base` provides: its layout helpers, its components and its
 /// theme. Emitted into `declare module "gpui-base"`, so an import says which
 /// layer a script is reaching for.
+const INLINE_TOKEN_TYPES: &str = r#"
+  /** Half-open JavaScript UTF-16 string offsets, as used by slice(). */
+  export interface InputRange { start: number; end: number }
+  export interface InlineToken { id: string; text: string; label?: string }
+  export interface InlineTokenSpan { range: InputRange; token: InlineToken }
+  export interface InputContent { text: string; tokens: InlineTokenSpan[] }
+  export interface InlineTokenContext extends InlineTokenSpan {
+    selected: boolean; disabled: boolean; readonly: boolean;
+    line_height: number; available_width: number;
+  }
+  export interface InlineTokenClickEvent extends InlineTokenSpan {
+    bounds: { x: number; y: number; width: number; height: number };
+    modifiers: { shift: boolean; alt: boolean; control: boolean; platform: boolean };
+  }
+  export interface InlineTokenHoverEvent extends InlineTokenSpan {
+    hovered: boolean;
+    bounds: { x: number; y: number; width: number; height: number };
+  }
+"#;
+
 const BASE: &str = r#"  /** A row. */
-  export function h_flex(): Element;
+  export function h_flex(): NativeElement;
   /** A column. */
-  export function v_flex(): Element;
+  export function v_flex(): NativeElement;
 
   /** Activation, focus, disabled and selected state. No styling. */
   export const Button: ComponentType;
@@ -2339,11 +2575,11 @@ const BASE: &str = r#"  /** A row. */
   /** A controlled switch. No styling. */
   export const Switch: ComponentType;
   /** Rich HTML or Markdown text. CSS in HTML is not supported. */
-  export interface TextViewElement extends Element {
+  export interface TextViewElement extends NativeElement {
     /** Overrides TextView's default URL opening and reports the resolved URL. */
-    on_link_click(handler: (url: string, cx: Context) => void): TextViewElement;
-    selectable(value?: boolean): TextViewElement;
-    scrollable(value?: boolean): TextViewElement;
+    on_link_click(handler: (url: string, cx: Context) => void): this;
+    selectable(value?: boolean): this;
+    scrollable(value?: boolean): this;
   }
   export const TextView: {
     html(id: string, html: string): TextViewElement;
@@ -2560,6 +2796,8 @@ const BASE: &str = r#"  /** A row. */
    * collapsing each broken run into an ellipsis. `visible_pages` defaults to
    * seven and is clamped to a minimum of five; a total of one page or fewer
    * answers an empty list, because a control for a single page is not one.
+   * Throws for a page number above 4294967295 or `visible_pages` above
+   * 1000000.
    *
    * An ellipsis names the pages it stands for, inclusive on both ends, so it
    * can be a "jump to" control rather than inert text.
@@ -2624,11 +2862,11 @@ const BASE: &str = r#"  /** A row. */
   /** The body row group of a `Table`. */
   export const TableBody: ComponentType;
   /** One row. `TableRow.new(id, row_index)`, one-based. */
-  export const TableRow: { new: (id: string | number, row_index: number) => Element };
+  export const TableRow: { new: (id: string | number, row_index: number) => NativeElement };
   /** One column header. `TableHead.new(id, column_index)`, one-based. */
-  export const TableHead: { new: (id: string | number, column_index: number) => Element };
+  export const TableHead: { new: (id: string | number, column_index: number) => NativeElement };
   /** One data cell. `TableCell.new(id, column_index)`, one-based. */
-  export const TableCell: { new: (id: string | number, column_index: number) => Element };
+  export const TableCell: { new: (id: string | number, column_index: number) => NativeElement };
   /**
    * The visual slot a caption belongs in. It is an identified container and
    * nothing more: it carries no caption role, so assistive technology does not
@@ -2661,9 +2899,9 @@ const BASE: &str = r#"  /** A row. */
    *   .child(resizable_panel().child(editor));
    * ```
    */
-  export function h_resizable(id: string): Element;
+  export function h_resizable(id: string): NativeElement;
   /** A column of panes with draggable dividers. See `h_resizable`. */
-  export function v_resizable(id: string): Element;
+  export function v_resizable(id: string): NativeElement;
   /**
    * One pane of an `h_resizable()` or `v_resizable()`, and only there: a panel
    * anywhere else throws when it is added, because its size and its drag handle
@@ -2680,7 +2918,7 @@ const BASE: &str = r#"  /** A row. */
    *   `visibility` style. A hidden panel keeps its place in the group, so its
    *   siblings' sizes are undisturbed while it is away. Default `true`.
    */
-  export function resizable_panel(): Element;
+  export function resizable_panel(): NativeElement;
 
   /**
    * A region whose `content` is materialized and rendered only while `open` is
@@ -2745,7 +2983,7 @@ const BASE: &str = r#"  /** A row. */
    * and `track_focus` all land on it.
    */
   export const Popup: {
-    new: (id: string | number, trigger: Element) => Element;
+    new: (id: string | number, trigger: Element) => NativeElement;
   };
 
   /**
@@ -2816,7 +3054,7 @@ const BASE: &str = r#"  /** A row. */
    * trigger and calendar inside one.
    */
   export const DatePicker: {
-    new: (id: string | number, focus_handle: FocusHandle) => Element;
+    new: (id: string | number, focus_handle: FocusHandle) => NativeElement;
   };
 
   /** When a `Scrollbar` shows itself. */
@@ -2850,11 +3088,11 @@ const BASE: &str = r#"  /** A row. */
    */
   export const Scrollbar: {
     /** Both axes. */
-    new: (id: string | number) => Element;
+    new: (id: string | number) => NativeElement;
     /** The horizontal bar alone. */
-    horizontal: (id: string | number) => Element;
+    horizontal: (id: string | number) => NativeElement;
     /** The vertical bar alone. */
-    vertical: (id: string | number) => Element;
+    vertical: (id: string | number) => NativeElement;
   };
 
   /** The visible items, as a half-open `[start, end)` interval. */
@@ -2874,8 +3112,9 @@ const BASE: &str = r#"  /** A row. */
    * Two consequences follow from that, and both are enforced rather than
    * documented away:
    *
-   * * **No handlers inside the renderer.** `on_click` and the rest throw if
-   *   called there. Use `on_item_click` on the list — see its note for why.
+   * * **Handlers inside the renderer last one frame.** `on_click` and the rest
+   *   work on a row, and are released when the next frame redraws it. For a
+   *   whole-row click, `on_item_click` on the list is cheaper — see its note.
    * * **No state inside the renderer.** `InputState.new()`, `cx.focus_handle()`
    *   and the rest throw there as they do in `render()`, and `cx.notify()` is
    *   refused: asking for a re-render from inside layout is a loop.
@@ -2920,7 +3159,7 @@ const BASE: &str = r#"  /** A row. */
     item_sizes: number | number[],
     get_key: (index: number) => string,
     render: (range: ItemRange, cx: Context) => Element[],
-  ): Element;
+  ): NativeElement;
 
   /** `v_virtual_list` along the other axis; `item_sizes` are widths. */
   export function h_virtual_list(
@@ -2929,7 +3168,7 @@ const BASE: &str = r#"  /** A row. */
     item_sizes: number | number[],
     get_key: (index: number) => string,
     render: (range: ItemRange, cx: Context) => Element[],
-  ): Element;
+  ): NativeElement;
 
   /**
    * A virtual list's scroll position, kept across frames so the script can move
@@ -2969,8 +3208,15 @@ const BASE: &str = r#"  /** A row. */
    * an event handler — never in `render`.
    */
   export interface InputState {
+    content(): InputContent;
+    tokens(): InlineTokenSpan[];
+    replace_with_token(token: InlineToken): void;
+    replace_range_with_token(range: InputRange, token: InlineToken): void;
+    set_selected_range(range: InputRange): void;
+    replace(text: string): void;
     value(): string;
-    set_value(next: string): void;
+    /** Plain text, or a content snapshot to restore its tokens as well. */
+    set_value(next: string | InputContent): void;
     /** `change`, `submit`, `focus` or `blur`. */
     on(event: "change" | "submit" | "focus" | "blur", handler: (event: InputEvent, cx: Context) => void): boolean;
     /**
@@ -2998,7 +3244,7 @@ const BASE: &str = r#"  /** A row. */
   };
 
   /** The frame around retained text state. */
-  export const Input: { new: (state: InputState) => Element };
+  export const Input: { new: (state: InputState) => NativeElement };
 
   /**
    * A spinbutton over the same `InputState` an `Input` holds.
@@ -3015,7 +3261,7 @@ const BASE: &str = r#"  /** A row. */
    * declares its own key context, which the two bindings are registered
    * against.
    */
-  export const NumberInput: { new: (state: InputState) => Element };
+  export const NumberInput: { new: (state: InputState) => NativeElement };
 
   /**
    * Retained multi-line text state, created once and kept on the view.
@@ -3029,8 +3275,15 @@ const BASE: &str = r#"  /** A row. */
    * call `set_auto_grow(...)`, or size the element with `.h(...)`.
    */
   export interface TextareaState {
+    content(): InputContent;
+    tokens(): InlineTokenSpan[];
+    replace_with_token(token: InlineToken): void;
+    replace_range_with_token(range: InputRange, token: InlineToken): void;
+    set_selected_range(range: InputRange): void;
+    replace(text: string): void;
     value(): string;
-    set_value(next: string): void;
+    /** Plain text, or a content snapshot to restore its tokens as well. */
+    set_value(next: string | InputContent): void;
     /** `change`, `submit`, `focus` or `blur`. */
     on(event: "change" | "submit" | "focus" | "blur", handler: (event: InputEvent, cx: Context) => void): boolean;
     /** Shows this many rows. */
@@ -3039,6 +3292,16 @@ const BASE: &str = r#"  /** A row. */
     set_auto_grow(min_rows: number, max_rows: number): void;
     /** Wraps long lines instead of scrolling sideways. Default is on. */
     set_soft_wrap(wrap: boolean): void;
+    /**
+     * Makes Enter submit instead of starting a new line. Default is off.
+     *
+     * Off, Enter inserts a line break and then reports `submit`, so a handler
+     * that sends the text finds the break at its end. On, Enter leaves the text
+     * as it is and reports `submit` with `shift: false`. Shift+Enter inserts a
+     * line break either way, and also reports `submit`, with `shift: true` —
+     * a handler that sends should return when `event.shift` is set.
+     */
+    set_submit_on_enter(submit: boolean): void;
     release(): boolean;
   }
 
@@ -3047,7 +3310,7 @@ const BASE: &str = r#"  /** A row. */
   };
 
   /** The frame around retained multi-line text state. */
-  export const Textarea: { new: (state: TextareaState) => Element };
+  export const Textarea: { new: (state: TextareaState) => NativeElement };
 
   /** One thumb, or the two ends of a range. */
   export type SliderValue = number | [number, number];
@@ -3126,16 +3389,16 @@ const BASE: &str = r#"  /** A row. */
    * `axis("vertical")` is announced *and* used to place both, and each part is
    * told separately, as in Rust. A vertical slider grows from the bottom.
    */
-  export const Slider: { new: (state: SliderState) => Element };
+  export const Slider: { new: (state: SliderState) => NativeElement };
   /** The press and drag surface. Give it the height a pointer can hit. */
-  export const SliderTrack: { new: (state: SliderState) => Element };
+  export const SliderTrack: { new: (state: SliderState) => NativeElement };
   /**
    * The groove, and the part that records the geometry. It must span the whole
    * travel of the slider: the box it records is what every pointer position is
    * divided by, so an indicator sized to the value would make the value its own
    * scale.
    */
-  export const SliderIndicator: { new: (state: SliderState) => Element };
+  export const SliderIndicator: { new: (state: SliderState) => NativeElement };
   /**
    * The knob. `start(true)` is the lower thumb of a range slider; the default
    * is the upper one, which is the only thumb a single-value slider has.
@@ -3144,7 +3407,7 @@ const BASE: &str = r#"  /** A row. */
    * state and a `transition("left", ...)` needs to know which of them it is
    * following.
    */
-  export const SliderThumb: { new: (state: SliderState) => Element };
+  export const SliderThumb: { new: (state: SliderState) => NativeElement };
 
   /**
    * Retained one-time-code state, created once and kept on the view.
@@ -3214,7 +3477,7 @@ const BASE: &str = r#"  /** A row. */
    * Grouping ("123 456") is not offered: the groups would be boxes the shell
    * invents, with no template to say what they look like.
    */
-  export const OtpInput: { new: (state: OtpState) => Element };
+  export const OtpInput: { new: (state: OtpState) => NativeElement };
 
   /** Where a region sits relative to the center of a dock area. */
   export type DockPlacement = "center" | "left" | "right" | "bottom";
@@ -3275,23 +3538,6 @@ const BASE: &str = r#"  /** A row. */
     readonly collapsible: boolean;
   }
 
-  /** One tile of a tiles canvas, as the two tile handlers are given it. */
-  export interface DockTile {
-    readonly node: number;
-    readonly panel: { readonly name: string; readonly id: number; readonly visible: boolean };
-    /**
-     * Already resolved — base snaps, clamps and rounds before a skin sees
-     * them, so nothing here has to be positioned by hand.
-     */
-    readonly bounds: import("gpui-shell").ElementBounds;
-    readonly z_index: number;
-    readonly moving: boolean;
-    readonly resizing: boolean;
-    readonly closable: boolean;
-    readonly zoomed: boolean;
-    readonly zoomable: boolean;
-  }
-
   /** Where a dragged panel would land, as the `drop_indicator` handler is given it. */
   export interface DockDrop {
     /** `null` means the drop merges into the group's tabs rather than splitting beside it. */
@@ -3315,11 +3561,6 @@ const BASE: &str = r#"  /** A row. */
     placement?: DockPlacement;
     /** Seeds the dock's extent when the panel is the first thing in it. */
     size?: number;
-    /**
-     * Places the panel on the region's tiles canvas instead of in a tab group.
-     * A region with no canvas has nowhere to put a tile, so nothing happens.
-     */
-    bounds?: { x: number; y: number; width: number; height: number };
     /** Default `true`. */
     closable?: boolean;
     /** Default `true`. */
@@ -3329,7 +3570,7 @@ const BASE: &str = r#"  /** A row. */
   }
 
   /**
-   * A dockable layout: splits, tab groups, docks and tiles that the user can
+   * A dockable layout: splits, tab groups and docks that the user can
    * rearrange, and that survives a restart.
    *
    * Retained for a reason none of the other handles share. **The layout is what
@@ -3387,15 +3628,14 @@ const BASE: &str = r#"  /** A row. */
     dock_size(placement: DockPlacement): number | null;
     set_dock_size(placement: DockPlacement, size: number): void;
     set_dock_collapsible(placement: DockPlacement, collapsible: boolean): void;
-    /** A locked area cannot be rearranged or dropped into; dock and tile resizing stays available. */
+    /** A locked area cannot be rearranged or dropped into; dock resizing stays available. */
     is_locked(): boolean;
     set_locked(locked: boolean): void;
     is_zoomed(): boolean;
     /** Clears the zoom, whichever container holds it. */
     zoom_out(): void;
     /**
-     * Fires on every edit — including each step of a tile drag — so save on a
-     * timer rather than on every one.
+     * Fires on every edit, so save on a timer rather than on every one.
      */
     on(event: "layout_changed", handler: (cx: Context) => void): boolean;
     release(): boolean;
@@ -3436,13 +3676,12 @@ const BASE: &str = r#"  /** A row. */
    * so unchanged frames do not enter JavaScript. It may not register event
    * handlers — cached chrome has no script callback lifecycle of its own — so
    * the elements it returns say what they do with a **command** instead:
-   * `select_tab(group, i)`, `close_panel(group, id)`, `toggle_dock(dock)`,
-   * `move_tile(tile)` and the rest. A command carries no script value, and base
-   * does the work.
+   * `select_tab(group, i)`, `close_panel(group, id)`, `toggle_dock(dock)` and
+   * the rest. A command carries no script value, and base does the work.
    */
   export function dock_area(area: DockArea): DockAreaElement;
 
-  export interface DockAreaElement extends Element {
+  export interface DockAreaElement extends NativeElement {
     /** The tab bar above a group's displayed panel. */
     tab_bar(handler: (group: DockGroup, cx: Context) => Element): DockAreaElement;
     /** What a group with no displayed panel shows. */
@@ -3455,23 +3694,13 @@ const BASE: &str = r#"  /** A row. */
      * `dock_content()` where the panels belong.
      */
     dock(handler: (dock: DockRegion, cx: Context) => Element | null): DockAreaElement;
-    /**
-     * The strip a tile is dragged by. Its height is fixed at base's drag-bar
-     * height, which the snapping arithmetic assumes.
-     */
-    tile_drag_bar(handler: (tile: DockTile, cx: Context) => Element): DockAreaElement;
-    /** A tile's resize affordances. */
-    tile_resize_handles(handler: (tile: DockTile, cx: Context) => Element | null): DockAreaElement;
   }
 
   /**
    * Where a dock's own panels go inside the chrome the `dock` handler drew
    * around them. Legal only inside that handler, and only once.
    */
-  export function dock_content(): Element;
-
-  /** Which edge or corner of a tile a resize handle pulls. */
-  export type TileResizeSide = "left" | "right" | "top" | "bottom" | "bottom_right";
+  export function dock_content(): NativeElement;
 
   /** Semantic color roles, aligned with `gpui_base::ColorTokens`. */
   export type ColorTokens = { readonly [Role in ColorToken]: Color };
@@ -3558,6 +3787,7 @@ const BASE_IMPORTS: &str = r#"  import {
     Color,
     Context,
     Element,
+    NativeElement,
     FocusHandle,
   } from "gpui-kit";
 
@@ -3572,13 +3802,16 @@ const FPS: &str = r#"  /**
    * Prefer `show_fps_monitor()`: a HUD placed inside the script's own tree is
    * rebuilt with it, and what the tree does then counts against the reading.
    */
-  export function fps_monitor(): Element;
+  export function fps_monitor(): NativeElement;
 
   /** Where the root-owned HUD sits and how it behaves. Every key is optional. */
   export interface FpsMonitorOptions {
     /** Corner or edge of the window. Default `top_right`. */
     anchor?: Anchor;
-    /** Frame budget in milliseconds, for the FRAME grading and the chart's scale. */
+    /**
+     * Frame budget in milliseconds, for the FRAME grading and the chart's
+     * scale. Positive, and no longer than a `Duration` holds.
+     */
     frame_budget?: number;
   }
 
@@ -3588,7 +3821,8 @@ const FPS: &str = r#"  /**
    * whether and where, and nothing the script renders can move it, rebuild
    * it, or count against it. Calling it again moves or reconfigures the HUD
    * that is already up; the monitor behind it keeps its history across a hide
-   * and a show. Needs a live host call: `init()`, an event handler or a task.
+   * and a show. Call it from an event handler or a task: `init()` runs before
+   * the window has its root, so it throws there.
    */
   export function show_fps_monitor(options?: FpsMonitorOptions): void;
   /** Takes the HUD down. `true` if one was up. */
@@ -3598,7 +3832,7 @@ const FPS: &str = r#"  /**
 "#;
 
 /// What `gpui-fps`'s declarations borrow from `"gpui-kit"`.
-const FPS_IMPORTS: &str = r#"  import { Anchor, Element } from "gpui-kit";
+const FPS_IMPORTS: &str = r#"  import { Anchor, Element, NativeElement } from "gpui-kit";
 
 "#;
 
@@ -3703,24 +3937,121 @@ declare module "console" {
 }
 declare module "process" {
   export interface CommandOutput { code: number; stdout: string; stderr: string; }
-  export function run(command: string, args?: string[]): Promise<CommandOutput>;
+  export interface RunOptions {
+    /** Must be inside a directory granted in `capabilities.fs.read`. */
+    cwd?: string;
+    /** Defaults to 30 seconds. */
+    timeoutMs?: number;
+  }
+  /**
+   * Runs a command to completion and resolves with what it did. Bounded: 30
+   * seconds unless `timeoutMs` says otherwise, 8 MiB of each stream. For a
+   * command that runs longer, talks over stdin, or should be read as it
+   * works, use `spawn`.
+   */
+  export function run(command: string, args?: string[], options?: RunOptions): Promise<CommandOutput>;
+  export interface SpawnOptions {
+    /** Must be inside a directory granted in `capabilities.fs.read`, or this throws. */
+    cwd?: string;
+    /** `"pipe"` to `write()` to the child; defaults to `"null"`. */
+    stdin?: "pipe" | "null";
+    /** No limit by default. When given, the whole process group is killed at the deadline. */
+    timeoutMs?: number;
+    /**
+     * Deliver stdout and stderr a line at a time, without the line ending —
+     * joined across reads, with a last unterminated line delivered at the end.
+     * A single line over 8 MiB kills the process and is reported on `exit`.
+     */
+    lines?: boolean;
+  }
+  export interface ExitResult {
+    code: number | null;
+    signal: string | null;
+    /** Set when the runtime stopped the process: a timeout, or a line too long. */
+    error?: string;
+  }
+  /**
+   * A running child. Handlers run on the UI thread with an async `cx`, like a
+   * `cx.spawn` task's. `exit` fires once, after the last `stdout`/`stderr`.
+   * Releasing the view that spawned it, reloading the application or closing
+   * the window kills it and everything it started.
+   */
+  export interface ChildProcess {
+    readonly pid: number;
+    on(event: "stdout" | "stderr", handler: (text: string, cx: import("gpui-kit").AsyncContext) => void): ChildProcess;
+    on(event: "exit", handler: (result: ExitResult, cx: import("gpui-kit").AsyncContext) => void): ChildProcess;
+    /** Needs `stdin: "pipe"`; throws otherwise, or after `end()`. */
+    write(text: string): void;
+    /** Closes stdin. */
+    end(): void;
+    /** Kills the whole process group (a Job Object on Windows). `exit` still fires once. */
+    kill(): void;
+  }
+  /**
+   * Starts a command and streams what it does: output as it arrives, no
+   * deadline unless asked for, stdin on request. The same grant as `run`
+   * (`capabilities.fs.execute`), the same host-PATH resolution and the same
+   * empty environment. UTF-8 output is decoded whole even when a character
+   * spans two reads; there is no limit on total output.
+   */
+  export function spawn(command: string, args?: string[], options?: SpawnOptions): ChildProcess;
   export function exit(code?: number): void;
   export function nextTick(callback: (...args: unknown[]) => void, ...args: unknown[]): void;
   export const platform: string;
   export const arch: string;
-  const process: { run: typeof run; exit: typeof exit; nextTick: typeof nextTick; platform: string; arch: string };
+  const process: {
+    run: typeof run;
+    spawn: typeof spawn;
+    exit: typeof exit;
+    nextTick: typeof nextTick;
+    platform: string;
+    arch: string;
+    /**
+     * Common variables (`HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`,
+     * `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories…), plus those
+     * `capabilities.process.env` names, when set; names match regardless of
+     * case. Every other variable is absent. A fresh copy on each read; assigning to
+     * it changes nothing.
+     */
+    readonly env: Record<string, string | undefined>;
+    /**
+     * This application's data directory, the one `${dataDir}` names in the
+     * manifest and `localStorage` lives in. `undefined` when the host placed
+     * none. A path, not a grant: reading it still needs `capabilities.fs`.
+     */
+    readonly dataDir: string | undefined;
+  };
   export default process;
 }
 declare module "os" {
   export function platform(): string;
   export function arch(): string;
   export const EOL: string;
-  const os: { platform: typeof platform; arch: typeof arch; EOL: string };
+  /**
+   * The user's home directory. Needs no capability; reading files there needs
+   * a `${homeDir}` root in `capabilities.fs`.
+   */
+  export function homedir(): string;
+  const os: { platform: typeof platform; arch: typeof arch; EOL: string; homedir: typeof homedir };
   export default os;
 }
 declare module "fs/promises" {
   export interface Dirent { name: string; isDirectory(): boolean; }
   export interface MakeDirectoryOptions { recursive?: boolean; }
+  /** Node's `Stats`, cut to what every platform can fill. An unrecorded time reads as the epoch. */
+  export interface Stats {
+    isFile(): boolean;
+    isDirectory(): boolean;
+    isSymbolicLink(): boolean;
+    size: number;
+    mode: number;
+    mtimeMs: number;
+    atimeMs: number;
+    birthtimeMs: number;
+    mtime: Date;
+    atime: Date;
+    birthtime: Date;
+  }
   export function readFile(path: string): Promise<Uint8Array>;
   export function readFile(path: string, encoding: "utf8" | { encoding: "utf8" }): Promise<string>;
   export function writeFile(path: string, contents: string | Uint8Array): Promise<void>;
@@ -3730,6 +4061,14 @@ declare module "fs/promises" {
   export function unlink(path: string): Promise<void>;
   export function rmdir(path: string): Promise<void>;
   export function mkdir(path: string, options?: MakeDirectoryOptions): Promise<void>;
+  /** Follows a symlink; needs read access. */
+  export function stat(path: string): Promise<Stats>;
+  /** Describes a symlink itself; needs read access. */
+  export function lstat(path: string): Promise<Stats>;
+  /** Moves a file or directory, replacing a file at `to`; needs write access to both paths. */
+  export function rename(from: string, to: string): Promise<void>;
+  /** The target a symlink stores, as written; needs read access. */
+  export function readlink(path: string): Promise<string>;
 }
 declare module "net" {
   export interface Socket {
@@ -3767,6 +4106,8 @@ interface ShellFetchResponse {
   readonly url: string;
   text(): Promise<string>;
   json(): Promise<unknown>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  bytes(): Promise<Uint8Array>;
 }
 interface ShellFetchOptions {
   /**
@@ -3775,12 +4116,36 @@ interface ShellFetchOptions {
    * this field.
    */
   method?: string;
-  /** Client-managed framing headers such as Host and Content-Length are refused. */
+  /**
+   * Client-managed framing headers such as Host and Content-Length are refused.
+   * `User-Agent` defaults to `gpui-shell/<version>`; a value set here replaces it.
+   */
   headers?: Record<string, string>;
   body?: string | Uint8Array;
 }
 declare function fetch(url: string, options?: ShellFetchOptions): Promise<ShellFetchResponse>;
+/** UTF-8 encoding, as in the WHATWG Encoding standard. */
+declare class TextEncoder {
+  constructor();
+  readonly encoding: "utf-8";
+  encode(input?: string): Uint8Array;
+  encodeInto(source: string, destination: Uint8Array): { read: number; written: number };
+}
+interface TextDecoderOptions { fatal?: boolean; ignoreBOM?: boolean; }
+interface TextDecodeOptions { stream?: boolean; }
+/** UTF-8 decoding, as in the WHATWG Encoding standard. Any other label throws a RangeError. */
+declare class TextDecoder {
+  constructor(label?: "utf-8" | "utf8" | "unicode-1-1-utf-8", options?: TextDecoderOptions);
+  readonly encoding: "utf-8";
+  readonly fatal: boolean;
+  readonly ignoreBOM: boolean;
+  decode(input?: ArrayBuffer | ArrayBufferView, options?: TextDecodeOptions): string;
+}
 declare const process: typeof import("process").default;
+interface ImportMeta {
+  /** The `file:` URL of this module. */
+  readonly url: string;
+}
 "#;
 
 /// `window` is a real global — see the runtime's `overlay` module.
@@ -3863,8 +4228,87 @@ mod tests {
         let declarations = declarations_with_components(&registry.freeze().unwrap());
 
         assert!(declarations.contains("export interface InputState"));
-        assert!(declarations.contains("export function InputState(text: string): InputState;"));
+        assert!(declarations.contains(
+            "export const InputState: { (text: string): InputState; new: (text: string) => InputState };"
+        ));
         assert!(declarations.contains("Retained input state."));
+        assert!(declarations.contains("\n    release(): boolean }"));
+    }
+
+    /// A catalog that scripts import from `"host-native"`, with one component
+    /// and one state.
+    fn host_native_catalog() -> crate::FrozenComponentRegistry {
+        use crate::{
+            ComponentDescriptor, ComponentMaterializer, ComponentPayload, ConstructorDescriptor,
+            MaterializeRequest,
+        };
+        use std::sync::Arc;
+
+        struct Empty;
+        impl ComponentMaterializer for Empty {
+            fn materialize(
+                &self,
+                request: MaterializeRequest<'_>,
+            ) -> anyhow::Result<gpui::AnyElement> {
+                request.finish(gpui::div())
+            }
+        }
+
+        let mut registry =
+            crate::ComponentRegistry::new(crate::COMPONENT_REGISTRY_API_VERSION, "host-native")
+                .unwrap();
+        registry
+            .register(
+                ComponentDescriptor::new("Terminal", Arc::new(Empty)).with_constructors(vec![
+                    ConstructorDescriptor::new("Terminal", Vec::new(), |_| {
+                        Ok(ComponentPayload::new(()))
+                    }),
+                ]),
+            )
+            .unwrap();
+        registry
+            .register_state(crate::StateDescriptor::new(
+                "TerminalState",
+                "TerminalState",
+                Vec::new(),
+                |_, _, _| Ok(Box::new(())),
+            ))
+            .unwrap();
+        registry.freeze().unwrap()
+    }
+
+    /// A host's catalog may answer to a specifier other than
+    /// `gpui-component`; its declarations have to use the same one, or every
+    /// import from it is an unknown module to the editor.
+    #[test]
+    fn a_catalog_is_declared_under_its_own_module_specifier() {
+        let declarations = declarations_with_components(&host_native_catalog());
+
+        assert!(declarations.contains("declare module \"host-native\" {\n"));
+        assert!(declarations.contains(" | import(\"host-native\").TerminalElement"));
+        assert!(declarations.contains("export const TerminalState: "));
+        assert!(!declarations.contains("\"gpui-component\""));
+    }
+
+    /// A directory whose scripts import only that catalog still gets the file.
+    #[test]
+    fn a_directory_importing_only_the_catalog_gets_the_declarations() {
+        let root =
+            std::env::temp_dir().join(format!("gpui-shell-typings-catalog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let panels = root.join("panels");
+        std::fs::create_dir_all(&panels).expect("nested directory");
+        std::fs::write(
+            panels.join("terminal.js"),
+            "import { Terminal } from \"host-native\";\n",
+        )
+        .expect("nested script");
+
+        let written = write_application_with_components(&root, &host_native_catalog())
+            .expect("declarations are writable");
+
+        assert!(written.contains(&panels.join(FILE_NAME)), "{written:?}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The element methods that are not style methods, so a test can subtract
@@ -3882,6 +4326,9 @@ mod tests {
         "controls_right",
         "when",
         "on_click",
+        "token",
+        "on_token_click",
+        "on_token_hover",
         "on_mouse_move",
         "on_hover",
         "on_key_down",
@@ -3891,6 +4338,7 @@ mod tests {
         "on_mouse_up",
         "on_mouse_down_out",
         "on_scroll_wheel",
+        "on_pinch",
         "on_action",
         "key_context",
         "image",
@@ -3902,6 +4350,7 @@ mod tests {
         "keep_mounted",
         "on_item_click",
         "on_item_secondary_click",
+        "on_visible_range_change",
         "on_change",
         "on_step",
         "on_open_change",
@@ -3915,14 +4364,17 @@ mod tests {
         "role",
         "aria_selected",
         "aria_active_descendant",
+        "window_control_area",
         "track_focus",
         "track_scroll",
         "with_item_to_measure_index",
+        "with_follow_mode",
         "content_focus_handle",
         "tab_index",
         "tab_stop",
         "href",
         "id",
+        "group",
         "overflow_scroll",
         "overflow_x_scroll",
         "overflow_y_scroll",
@@ -3951,11 +4403,6 @@ mod tests {
         "drop_tab",
         "toggle_dock",
         "resize_dock",
-        "move_tile",
-        "resize_tile",
-        "raise_tile",
-        "toggle_tile_zoom",
-        "close_tile",
         "value",
         "indeterminate",
         "axis",
@@ -3974,6 +4421,7 @@ mod tests {
         "hover",
         "active",
         "focus",
+        "group_hover",
     ];
 
     /// Every method name declared in the `Element` interface, in order.
@@ -4018,18 +4466,20 @@ mod tests {
         let _ = &registry as &ComponentRegistry;
         let declarations = super::declarations_with_components(&registry.freeze().unwrap());
 
-        for behavior in super::REGISTERED_COMMON_BEHAVIORS {
+        for behavior in super::REGISTERED_COMMON_BEHAVIORS
+            .into_iter()
+            .chain(["role", "transition"])
+        {
             assert!(
                 declarations.contains(&format!("{behavior}(unavailable: never): never;")),
                 "`{behavior}` must be declared uncallable on a component that does not declare it"
             );
         }
-        // Re-declared, not dropped: removing the member would cost the type its
-        // assignability to `Element`, so a typed part could no longer be passed
-        // to a slot that takes one.
+        // The common native surface is retained, with unsupported behaviors
+        // explicitly redeclared as uncallable.
         assert!(
             declarations.contains(
-                "export type PlainElement = Omit<Element, \"disabled\" | \"selected\" | \"on_click\">"
+                "export type PlainElement = Omit<NativeElement, \"disabled\" | \"selected\" | \"on_click\" | \"role\" | \"transition\">"
             ),
             "{declarations}"
         );
@@ -4038,7 +4488,7 @@ mod tests {
     fn element_methods(declarations: &str) -> Vec<String> {
         declarations
             .lines()
-            .skip_while(|line| !line.starts_with("  export interface Element {"))
+            .skip_while(|line| !line.starts_with("  export interface NativeElement {"))
             .skip(1)
             .take_while(|line| !line.starts_with("  }"))
             .filter_map(|line| {
@@ -4055,27 +4505,32 @@ mod tests {
     #[test]
     fn a_reflected_style_is_declared_with_no_arguments() {
         let declarations = base_declarations();
-        assert!(declarations.contains("\n    items_center(): Element;\n"));
-        assert!(declarations.contains("\n    flex_col(): Element;\n"));
+        assert!(
+            declarations.contains("\n    items_center<Self extends Element>(this: Self): Self;\n")
+        );
+        assert!(declarations.contains("\n    flex_col<Self extends Element>(this: Self): Self;\n"));
         // Reflection misses the macro-generated font weights; the runtime adds
         // them back, and so must the declarations.
-        assert!(declarations.contains("\n    font_semibold(): Element;\n"));
+        assert!(
+            declarations.contains("\n    font_semibold<Self extends Element>(this: Self): Self;\n")
+        );
     }
 
     #[test]
     fn a_parametric_style_is_declared_with_the_type_the_runtime_enforces() {
         let declarations = base_declarations();
         for expected in [
-            "    bg(value: Color): Element;",
-            "    border_color(value: Color): Element;",
-            "    w(value: Length): Element;",
-            "    p(value: DefiniteLength): Element;",
-            "    gap(value: DefiniteLength): Element;",
-            "    rounded(value: AbsoluteLength): Element;",
-            "    text_size(value: AbsoluteLength): Element;",
-            "    font_weight(value: number): Element;",
-            "    opacity(value: number): Element;",
-            "    flex_grow(value: number): Element;",
+            "    bg<Self extends Element>(this: Self, value: Color | Background): Self;",
+            "    shadow<Self extends Element>(this: Self, value: readonly BoxShadowSpec[]): Self;",
+            "    border_color<Self extends Element>(this: Self, value: Color): Self;",
+            "    w<Self extends Element>(this: Self, value: Length): Self;",
+            "    p<Self extends Element>(this: Self, value: DefiniteLength): Self;",
+            "    gap<Self extends Element>(this: Self, value: DefiniteLength): Self;",
+            "    rounded<Self extends Element>(this: Self, value: AbsoluteLength): Self;",
+            "    text_size<Self extends Element>(this: Self, value: AbsoluteLength): Self;",
+            "    font_weight<Self extends Element>(this: Self, value: number): Self;",
+            "    opacity<Self extends Element>(this: Self, value: number): Self;",
+            "    flex_grow<Self extends Element>(this: Self, value: number): Self;",
         ] {
             assert!(declarations.contains(expected), "missing: {expected}");
         }
@@ -4093,6 +4548,15 @@ mod tests {
                  literal in `argument_of` before the declarations claim it accepts nothing"
             );
         }
+    }
+
+    #[test]
+    fn surface_paint_styles_take_their_structured_values() {
+        assert_eq!(argument_of("bg"), Argument::Fill);
+        assert_eq!(argument_of("border_color"), Argument::Color);
+        assert_eq!(argument_of("shadow"), Argument::Shadows);
+
+        assert!(base_declarations().contains("  export interface BoxShadowSpec {"));
     }
 
     #[test]
@@ -4266,7 +4730,7 @@ mod tests {
         // `HostValue` rather than `any`: the boundary is not wider than the
         // Rust type of that name, and the declarations should not claim it is.
         assert!(
-            declarations.contains("  import { Element, HostValue } from \"gpui-kit\";"),
+            declarations.contains("  import { NativeElement, HostValue } from \"gpui-kit\";"),
             "the permissive signatures below need this import to resolve"
         );
         assert!(
@@ -4277,7 +4741,7 @@ mod tests {
                 .contains("  export function drain(...args: HostValue[]): Promise<HostValue>;")
         );
         assert!(declarations.contains(
-            "  export const AuditPanel: { new(id: string, props: HostValue): Element };"
+            "  export const AuditPanel: { new(id: string, props: HostValue): NativeElement };"
         ));
 
         crate::clear_exported_modules();
@@ -4322,7 +4786,7 @@ mod tests {
                 "`{name}` is also declared in gpui-base"
             );
         }
-        assert!(module("gpui-fps").contains("export function fps_monitor(): Element;"));
+        assert!(module("gpui-fps").contains("export function fps_monitor(): NativeElement;"));
 
         // The dependency runs upward only: a layer names what it borrows from
         // `"gpui-kit"`, and `"gpui-kit"` imports nothing back.
@@ -4429,6 +4893,11 @@ mod tests {
         assert!(!declarations.contains("export const fs: FileSystem"));
         assert!(!declarations.contains("export const process: Process"));
         assert!(declarations.contains("declare function fetch"));
+        assert!(declarations.contains("declare class TextEncoder"));
+        assert!(declarations.contains("declare class TextDecoder"));
+        assert!(declarations.contains("arrayBuffer(): Promise<ArrayBuffer>;"));
+        assert!(declarations.contains("export function stat(path: string): Promise<Stats>;"));
+        assert!(declarations.contains("export function rename(from: string, to: string)"));
     }
 
     #[test]
@@ -4458,10 +4927,13 @@ mod tests {
         assert!(declarations.contains("text(): Promise<string>;"));
         assert!(declarations.contains("json(): Promise<unknown>;"));
 
+        // `homedir` is real; `process.env` is a granted view on the default
+        // object only, never a named export.
+        assert!(declarations.contains("export function homedir(): string;"));
+        assert!(declarations.contains("readonly env: Record<string, string | undefined>;"));
         for fake_system_member in [
             "export const env:",
             "export function cwd()",
-            "export function homedir()",
             "export function tmpdir()",
         ] {
             assert!(
@@ -4533,12 +5005,13 @@ mod tests {
     fn focus_and_accessibility_are_declared_from_the_runtime_tables() {
         let declarations = base_declarations();
         for expected in [
-            "    role(name: Role): Element;",
-            "    aria_selected(value: boolean): Element;",
-            "    aria_active_descendant(): Element;",
-            "    track_focus(handle: FocusHandle): Element;",
-            "    tab_index(index: number): Element;",
-            "    tab_stop(value: boolean): Element;",
+            "    role<Self extends Element>(this: Self, name: Role): Self;",
+            "    aria_selected<Self extends Element>(this: Self, value: boolean): Self;",
+            "    aria_active_descendant<Self extends Element>(this: Self): Self;",
+            "    window_control_area<Self extends Element>(this: Self, area: \"drag\" | \"close\" | \"max\" | \"min\"): Self;",
+            "    track_focus<Self extends Element>(this: Self, handle: FocusHandle): Self;",
+            "    tab_index<Self extends Element>(this: Self, index: number): Self;",
+            "    tab_stop<Self extends Element>(this: Self, value: boolean): Self;",
             // `App::focus_handle` in GPUI, so `cx` here — there is no
             // `FocusHandle::new` to mirror.
             "    focus_handle(): FocusHandle;",
@@ -4571,7 +5044,7 @@ mod tests {
     fn text_view_behaviors_are_not_declared_on_every_element() {
         let declarations = declarations();
         let element = declarations
-            .split_once("export interface Element")
+            .split_once("export interface NativeElement")
             .expect("Element declaration")
             .1
             .split_once("\n  }")
@@ -4580,7 +5053,7 @@ mod tests {
         assert!(!element.contains("on_link_click("));
         assert!(!element.contains("selectable("));
         assert!(!element.contains("scrollable("));
-        assert!(declarations.contains("export interface TextViewElement extends Element"));
+        assert!(declarations.contains("export interface TextViewElement extends NativeElement"));
         assert!(declarations.contains("html(id: string, html: string): TextViewElement;"));
     }
 
@@ -4634,10 +5107,10 @@ mod tests {
         assert!(base.contains("export interface PartType"));
         assert!(!declarations.contains("IndexedComponentType"));
         assert!(declarations.contains(
-            "export const TableRow: { new: (id: string | number, row_index: number) => Element };"
+            "export const TableRow: { new: (id: string | number, row_index: number) => NativeElement };"
         ));
         assert!(declarations.contains(
-            "export const TableCell: { new: (id: string | number, column_index: number) => Element };"
+            "export const TableCell: { new: (id: string | number, column_index: number) => NativeElement };"
         ));
     }
 
@@ -4741,11 +5214,11 @@ mod tests {
             );
         }
         for expected in [
-            "    anchor(value: Anchor): Element;",
-            "    mouse_button(value: MouseButton): Element;",
-            "    trigger(element: Element): Element;",
-            "    open_delay(ms: number): Element;",
-            "    close_delay(ms: number): Element;",
+            "    anchor<Self extends Element>(this: Self, value: Anchor): Self;",
+            "    mouse_button<Self extends Element>(this: Self, value: MouseButton): Self;",
+            "    trigger<Self extends Element>(this: Self, element: Element): Self;",
+            "    open_delay<Self extends Element>(this: Self, ms: number): Self;",
+            "    close_delay<Self extends Element>(this: Self, ms: number): Self;",
             "  export const Popover: ComponentType;",
             "  export const HoverCard: ComponentType;",
         ] {
@@ -4757,11 +5230,11 @@ mod tests {
     fn motion_policies_are_declared_without_per_frame_callbacks() {
         let declarations = base_declarations();
         assert!(declarations.contains(
-            "transition(property: import(\"gpui-shell\").MotionProperty, policy: number | import(\"gpui-shell\").TransitionPolicy): Element;"
+            "transition<Self extends Element>(this: Self, property: import(\"gpui-shell\").MotionProperty, policy: number | import(\"gpui-shell\").TransitionPolicy): Self;"
         ));
         assert!(
             declarations.contains(
-                "spring(property: import(\"gpui-shell\").MotionProperty, policy?: import(\"gpui-shell\").SpringPolicy): Element;"
+                "spring<Self extends Element>(this: Self, property: import(\"gpui-shell\").MotionProperty, policy?: import(\"gpui-shell\").SpringPolicy): Self;"
             )
         );
         assert!(declarations.contains(

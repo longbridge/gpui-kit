@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="250" viewBox="0 0 1120 250" role="img" aria-labelledby="title desc">
+  <title id="title">GPUI shortcut dispatch in three steps</title>
+  <desc id="desc">GPUI builds the Dispatch Path from Focus, matches a KeyBinding with Key Contexts on that path, then dispatches the Action from the most specific handler upward.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#52606d"/></marker>
+    <style>.step{font:700 14px ui-sans-serif,system-ui;fill:#3578c8}.title{font:700 18px ui-sans-serif,system-ui;fill:#17212b}.body{font:400 14px ui-sans-serif,system-ui;fill:#52606d}.code{font:600 14px ui-monospace,SFMono-Regular,monospace;fill:#17212b}.box{fill:#fff;stroke:#a7b2bc;stroke-width:1.5}.active{fill:#edf5ff;stroke:#3578c8;stroke-width:1.5}.action{fill:#edf8f0;stroke:#3b8d57;stroke-width:1.5}.arrow{stroke:#52606d;stroke-width:1.8;fill:none;marker-end:url(#arrow)}</style>
+  </defs>
+  <rect x="24" y="24" width="310" height="202" rx="14" class="box"/>
+  <text x="50" y="58" class="step">1 · FOCUS</text><text x="50" y="88" class="title">Build the Dispatch Path</text>
+  <rect x="50" y="111" width="258" height="58" rx="9" class="active"/><text x="70" y="136" class="code">Chat → Workspace</text><text x="70" y="157" class="body">focused Element → ancestors</text>
+  <text x="50" y="201" class="body">Start at the Element with Focus.</text>
+  <path d="M348 125H393" class="arrow"/>
+  <rect x="407" y="24" width="310" height="202" rx="14" class="box"/>
+  <text x="433" y="58" class="step">2 · KEY CONTEXT</text><text x="433" y="88" class="title">Match a KeyBinding</text>
+  <rect x="433" y="111" width="258" height="58" rx="9" class="active"/><text x="453" y="136" class="code">⌘ Enter + "Chat"</text><text x="453" y="157" class="code">→ SendMessage</text>
+  <text x="433" y="201" class="body">Use key_context values on the path.</text>
+  <path d="M731 125H776" class="arrow"/>
+  <rect x="790" y="24" width="306" height="202" rx="14" class="box"/>
+  <text x="816" y="58" class="step">3 · ACTION</text><text x="816" y="88" class="title">Dispatch along the path</text>
+  <rect x="816" y="111" width="254" height="58" rx="9" class="action"/><text x="836" y="136" class="code">Chat handler</text><text x="836" y="157" class="body">then parents if propagated</text>
+  <text x="816" y="201" class="body">The most specific handler runs first.</text>
+</svg>

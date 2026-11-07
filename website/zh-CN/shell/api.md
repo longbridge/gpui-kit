@@ -1,7 +1,8 @@
 ---
-title: API 参考
+title: API Reference
 description: 脚本能 import 或触及的每个名字——四个内置模块、cx 与 window 全局对象，以及那些不是样式的元素方法。
 order: 10
+maturity: [preview]
 ---
 
 # API Reference
@@ -48,7 +49,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 
 `PathBuilder.fill()` 与 `.stroke(width)` 返回一个句柄，可链式调用 `move_to`、`line_to`、`curve_to`、`cubic_bezier_to`、`arc_to`、`add_polygon`、`close` 与 `dash_array`，最后以 `build()` 收尾。用 `window.paint_path(path, background)` 把结果画出来——它是唯一一个通过对象取到的元素构造器，因为它镜像的东西在 Rust 侧就是窗口上的一个方法。
 
-`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。
+`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。`list` 的 `item_count` 变化时，读者停留在视口顶部的那一项上：列表按 `get_key` 给出的键重新找到这一项并滚回去，所以在上方插入一页更早的条目、或在下方追加一条，都不会挪动正在读的内容。加上 `with_follow_mode("tail")` 后，`list` 改为停在末尾，追加条目或最后一项变高时都跟到底，直到读者向上滚动。`on_visible_range_change` 在一帧结束后报告 `list` 显示了哪些条目，脚本可以据此在读者接近任一端时加载更多。
 
 字符串本身也是元素，和 GPUI 里 `&str` 实现 `IntoElement` 完全一样：`.child("hello")` 就是写文本的方式，样式来自持有它的那个元素。
 
@@ -145,6 +146,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 | `phase()`                  | 这次调用处于哪个 `ScopePhase`                                        |
 | `theme()`                  | 当前 `gpui_kit::base::Theme` 的语义 token 投影                       |
 | `open_url(url)`            | 把一个绝对的 `http`/`https` URL 交给系统处理器                       |
+| `open_path(path)`          | 用默认程序打开 `capabilities.fs.read` 授权范围内的文件或目录              |
 | `read_from_clipboard()`    | 剪贴板里的文本，没有文本时是 `undefined`                             |
 | `write_to_clipboard(text)` | 替换剪贴板里的文本                                                   |
 | `focus_handle()`           | 一个新的 `FocusHandle`；属于 `init` 或事件处理器，绝不属于 `render`  |
@@ -153,7 +155,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 | `sleep(ms?)`               | 在 GPUI 的 foreground executor 上，`ms` 之后 resolve                 |
 | `timer`                    | `Timer`：`after` 与 `every`                                          |
 
-其中好几个都指名了它所镜像的 GPUI 方法：`open_url` 是 `App::open_url`，`read_from_clipboard` 与 `write_to_clipboard` 是 `App::read_from_clipboard` 与 `App::write_to_clipboard`，`focus_handle` 是 `App::focus_handle`（GPUI 没有 `FocusHandle::new`，这里同样没有），`new` 是 `AppContext::new`，`spawn` 是 `App::spawn`。
+其中好几个都指名了它所镜像的 GPUI 方法：`open_url` 是 `App::open_url`，`open_path` 是 `App::open_with_system`，`read_from_clipboard` 与 `write_to_clipboard` 是 `App::read_from_clipboard` 与 `App::write_to_clipboard`，`focus_handle` 是 `App::focus_handle`（GPUI 没有 `FocusHandle::new`，这里同样没有），`new` 是 `AppContext::new`，`spawn` 是 `App::spawn`。
 
 ### `AsyncContext`
 
@@ -214,7 +216,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 
 ## `gpui-base` 模块
 
-这里的组件拥有行为、焦点，以及屏幕阅读器听到的内容，而自身几乎什么都不画。画面归脚本所有，用[样式接口](./styling.md)写出来。每个名字都链接到它在 [gpui-base 文档](../../base/index.md)里的页面，那里描述了它完整的 Rust 接口与行为。
+这里的组件拥有行为、焦点，以及屏幕阅读器听到的内容，而自身几乎什么都不画。画面归脚本所有，用[样式接口](./styling.md)写出来。每个名字都链接到它在 [gpui-base 文档](../base/index.md)里的页面，那里描述了它完整的 Rust 接口与行为。
 
 ### 布局
 
@@ -222,43 +224,43 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 | --------------------------------------------------------- | -------------------------------------------------- |
 | `h_flex()`                                                | 一行                                               |
 | `v_flex()`                                                | 一列                                               |
-| [`h_resizable(id)`](../../base/primitives/resizable.md)   | 一行带可拖拽分隔条的窗格；尺寸按这个 id 存在窗口里 |
-| [`v_resizable(id)`](../../base/primitives/resizable.md)   | 同上，纵向堆叠                                     |
-| [`resizable_panel()`](../../base/primitives/resizable.md) | 可调整组里的一个窗格，用在别处都不合法             |
+| [`h_resizable(id)`](../base/primitives/resizable.md)   | 一行带可拖拽分隔条的窗格；尺寸按这个 id 存在窗口里 |
+| [`v_resizable(id)`](../base/primitives/resizable.md)   | 同上，纵向堆叠                                     |
+| [`resizable_panel()`](../base/primitives/resizable.md) | 可调整组里的一个窗格，用在别处都不合法             |
 
 ### 控件
 
 | 名称                                                     | 说明                                                                                     |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| [`Button`](../../base/primitives/button.md)              | 激活、焦点、disabled 与 selected 状态                                                    |
-| [`Link`](../../base/primitives/link.md)                  | 通过系统浏览器打开的外部 HTTP(S) 资源                                                    |
-| [`Checkbox`](../../base/primitives/checkbox.md)          | 受控的勾选；勾选标记自己画                                                               |
-| [`Switch`](../../base/primitives/switch.md)              | 受控的 switch                                                                            |
-| [`Radio`](../../base/primitives/radio.md)                | 一组中的一个选项；只报告 `true`，从不报告取消选中                                        |
-| [`Toggle`](../../base/primitives/toggle.md)              | 一个会保持按下的按钮                                                                     |
-| [`RadioGroup`](../../base/primitives/radio-group.md)     | 被报读为一组的一批 radio；自身不持有选中项                                               |
-| [`ToggleGroup`](../../base/primitives/toggle-group.md)   | 被报读为 toolbar 的一批 toggle                                                           |
-| [`Tabs`](../../base/primitives/tabs.md)                  | 自身不持有选中项的 tab 列表                                                              |
-| [`Tab`](../../base/primitives/tabs.md)                   | 一个 tab：`selected(...)` 进，`on_click(...)` 出                                         |
-| [`Progress`](../../base/primitives/progress.md)          | 只有报读，没有进度条；单独的 `Progress.new(...)` 什么都不画                              |
-| [`ProgressTrack`](../../base/primitives/progress.md)     | 凹槽：一个由你设定尺寸与颜色的普通元素                                                   |
-| [`ProgressIndicator`](../../base/primitives/progress.md) | 已填充的部分；按你报读的百分比设置它的宽度                                               |
-| [`Avatar`](../../base/primitives/avatar.md)              | 渲染它的 `image` 槽；没有图片时渲染 `fallback`。它自己不画圆形、尺寸或背景               |
-| [`AvatarImage`](../../base/primitives/avatar.md)         | 图片槽：`AvatarImage.new(path)`，用在别处无效                                            |
-| [`AvatarFallback`](../../base/primitives/avatar.md)      | 兜底槽：一个普通盒子，放首字母、图形或 `svg`                                             |
-| [`Pagination`](../../base/primitives/pagination.md)      | 一个 navigation landmark，带报读的标签；页码按钮由脚本自己画                             |
+| [`Button`](../base/primitives/button.md)              | 激活、焦点、disabled 与 selected 状态                                                    |
+| [`Link`](../base/primitives/link.md)                  | 通过系统浏览器打开的外部 HTTP(S) 资源                                                    |
+| [`Checkbox`](../base/primitives/checkbox.md)          | 受控的勾选；勾选标记自己画                                                               |
+| [`Switch`](../base/primitives/switch.md)              | 受控的 switch                                                                            |
+| [`Radio`](../base/primitives/radio.md)                | 一组中的一个选项；只报告 `true`，从不报告取消选中                                        |
+| [`Toggle`](../base/primitives/toggle.md)              | 一个会保持按下的按钮                                                                     |
+| [`RadioGroup`](../base/primitives/radio-group.md)     | 被报读为一组的一批 radio；自身不持有选中项                                               |
+| [`ToggleGroup`](../base/primitives/toggle-group.md)   | 被报读为 toolbar 的一批 toggle                                                           |
+| [`Tabs`](../base/primitives/tabs.md)                  | 自身不持有选中项的 tab 列表                                                              |
+| [`Tab`](../base/primitives/tabs.md)                   | 一个 tab：`selected(...)` 进，`on_click(...)` 出                                         |
+| [`Progress`](../base/primitives/progress.md)          | 只有报读，没有进度条；单独的 `Progress.new(...)` 什么都不画                              |
+| [`ProgressTrack`](../base/primitives/progress.md)     | 凹槽：一个由你设定尺寸与颜色的普通元素                                                   |
+| [`ProgressIndicator`](../base/primitives/progress.md) | 已填充的部分；按你报读的百分比设置它的宽度                                               |
+| [`Avatar`](../base/primitives/avatar.md)              | 渲染它的 `image` 槽；没有图片时渲染 `fallback`。它自己不画圆形、尺寸或背景               |
+| [`AvatarImage`](../base/primitives/avatar.md)         | 图片槽：`AvatarImage.new(path)`，用在别处无效                                            |
+| [`AvatarFallback`](../base/primitives/avatar.md)      | 兜底槽：一个普通盒子，放首字母、图形或 `svg`                                             |
+| [`Pagination`](../base/primitives/pagination.md)      | 一个 navigation landmark，带报读的标签；页码按钮由脚本自己画                             |
 | `pagination_items(current, total, visible?)`             | 该画哪些页码、省略号落在哪。`visible` 默认 7，最小 5；总页数 ≤ 1 时返回空                |
-| [`Accordion`](../../base/primitives/accordion.md)        | 一个 group，装 item                                                                      |
-| [`AccordionItem`](../../base/primitives/accordion.md)    | 一个条目：`open(...)` 进，trigger 的 `on_change(...)` 出；它把自己的 `open` 传给下面两半 |
-| [`AccordionHeader`](../../base/primitives/accordion.md)  | 标题：`AccordionHeader.new(trigger)`，`aria_level(n)` 报读层级（默认 3）                 |
-| [`AccordionPanel`](../../base/primitives/accordion.md)   | 展开的区域。关闭时不在树里，除非 `keep_mounted(true)`                                    |
-| [`AccordionTrigger`](../../base/primitives/accordion.md) | 按钮：报读展开状态，`on_change` 请求相反的那个                                           |
-| [`CalendarState`](../../base/primitives/calendar.md)     | 留存的日历状态：月网格、当前月份、选中的日期                                             |
-| [`SliderState`](../../base/primitives/slider.md)         | 留存的 slider 状态，也是一次拖拽写入的地方                                               |
-| [`Slider`](../../base/primitives/slider.md)              | 根：报读数值，并拥有 release                                                             |
-| [`SliderTrack`](../../base/primitives/slider.md)         | 按下与拖拽的表面                                                                         |
-| [`SliderIndicator`](../../base/primitives/slider.md)     | 凹槽，也是每个指针位置据以测量的那个盒子                                                 |
-| [`SliderThumb`](../../base/primitives/slider.md)         | 滑块；shell 给它位置，你给它外观                                                         |
+| [`Accordion`](../base/primitives/accordion.md)        | 一个 group，装 item                                                                      |
+| [`AccordionItem`](../base/primitives/accordion.md)    | 一个条目：`open(...)` 进，trigger 的 `on_change(...)` 出；它把自己的 `open` 传给下面两半 |
+| [`AccordionHeader`](../base/primitives/accordion.md)  | 标题：`AccordionHeader.new(trigger)`，`aria_level(n)` 报读层级（默认 3）                 |
+| [`AccordionPanel`](../base/primitives/accordion.md)   | 展开的区域。关闭时不在树里，除非 `keep_mounted(true)`                                    |
+| [`AccordionTrigger`](../base/primitives/accordion.md) | 按钮：报读展开状态，`on_change` 请求相反的那个                                           |
+| [`CalendarState`](../base/primitives/calendar.md)     | 留存的日历状态：月网格、当前月份、选中的日期                                             |
+| [`SliderState`](../base/primitives/slider.md)         | 留存的 slider 状态，也是一次拖拽写入的地方                                               |
+| [`Slider`](../base/primitives/slider.md)              | 根：报读数值，并拥有 release                                                             |
+| [`SliderTrack`](../base/primitives/slider.md)         | 按下与拖拽的表面                                                                         |
+| [`SliderIndicator`](../base/primitives/slider.md)     | 凹槽，也是每个指针位置据以测量的那个盒子                                                 |
+| [`SliderThumb`](../base/primitives/slider.md)         | 滑块；shell 给它位置，你给它外观                                                         |
 
 slider 的四个部件接受同一个 `SliderState`，而且四个都不能少——没有 `SliderIndicator` 的 slider 根本拖不动。
 
@@ -266,13 +268,13 @@ slider 的四个部件接受同一个 `SliderState`，而且四个都不能少�
 
 | 名称                                                   | 说明                                                        |
 | ------------------------------------------------------ | ----------------------------------------------------------- |
-| [`InputState`](../../base/primitives/input.md)         | 留存的文本状态：`InputState.new({ placeholder, value })`    |
-| [`Input`](../../base/primitives/input.md)              | 包住留存文本状态的框                                        |
-| [`NumberInput`](../../base/primitives/number-input.md) | 建立在同一个 `InputState` 上的 spinbutton，三个插槽都有分量 |
-| [`TextareaState`](../../base/primitives/textarea.md)   | 留存的多行文本状态；`rows` 是一个选项                       |
-| [`Textarea`](../../base/primitives/textarea.md)        | 包住留存多行状态的框                                        |
-| [`OtpState`](../../base/primitives/otp-input.md)       | 留存的一次性验证码状态；长度在创建时固定                    |
-| [`OtpInput`](../../base/primitives/otp-input.md)       | 定长验证码，格子由 shell 画、由脚本设定样式                 |
+| [`InputState`](../base/primitives/input.md)         | 留存的文本状态：`InputState.new({ placeholder, value })`    |
+| [`Input`](../base/primitives/input.md)              | 包住留存文本状态的框                                        |
+| [`NumberInput`](../base/primitives/number-input.md) | 建立在同一个 `InputState` 上的 spinbutton，三个插槽都有分量 |
+| [`TextareaState`](../base/primitives/textarea.md)   | 留存的多行文本状态；`rows` 是一个选项                       |
+| [`Textarea`](../base/primitives/textarea.md)        | 包住留存多行状态的框                                        |
+| [`OtpState`](../base/primitives/otp-input.md)       | 留存的一次性验证码状态；长度在创建时固定                    |
+| [`OtpInput`](../base/primitives/otp-input.md)       | 定长验证码，格子由 shell 画、由脚本设定样式                 |
 
 没有专门的数字状态类型：给 `InputState` 设上 `set_step`、`set_min` 与 `set_max`，它就成了数字状态。
 
@@ -280,13 +282,13 @@ slider 的四个部件接受同一个 `SliderState`，而且四个都不能少�
 
 | 名称                                                  | 说明                                                              |
 | ----------------------------------------------------- | ----------------------------------------------------------------- |
-| [`Collapsible`](../../base/primitives/collapsible.md) | 仅在 `open` 时渲染它的 `content` 插槽；不带 role、箭头或触发器    |
-| [`Popover`](../../base/primitives/popover.md)         | 锚定在触发元素上、由按下打开的浮层                                |
-| [`HoverCard`](../../base/primitives/hover-card.md)    | 同上，但由指针停留打开，并有自己的打开状态                        |
-| [`Popup`](../../base/primitives/popup.md)             | 光秃秃的锚定浮层：`Popup.new(id, trigger)`，填入 `content` 即打开 |
-| [`Select`](../../base/primitives/select.md)           | combobox 的根：role、报读的打开状态、键盘——但不含任何画面         |
-| [`Combobox`](../../base/primitives/combobox.md)       | 同一个根，被报读为一个触发器是可编辑输入框的 combobox             |
-| [`DatePicker`](../../base/primitives/date-picker.md)  | 日期选择器的根：`DatePicker.new(id, focus_handle)`；它不持有日期  |
+| [`Collapsible`](../base/primitives/collapsible.md) | 仅在 `open` 时渲染它的 `content` 插槽；不带 role、箭头或触发器    |
+| [`Popover`](../base/primitives/popover.md)         | 锚定在触发元素上、由按下打开的浮层                                |
+| [`HoverCard`](../base/primitives/hover-card.md)    | 同上，但由指针停留打开，并有自己的打开状态                        |
+| [`Popup`](../base/primitives/popup.md)             | 光秃秃的锚定浮层：`Popup.new(id, trigger)`，填入 `content` 即打开 |
+| [`Select`](../base/primitives/select.md)           | combobox 的根：role、报读的打开状态、键盘——但不含任何画面         |
+| [`Combobox`](../base/primitives/combobox.md)       | 同一个根，被报读为一个触发器是可编辑输入框的 combobox             |
+| [`DatePicker`](../base/primitives/date-picker.md)  | 日期选择器的根：`DatePicker.new(id, focus_handle)`；它不持有日期  |
 
 在这些之上动手之前，有两处缺口值得先知道：打开的 `Select` 或 `Combobox` 列表的方向键导航要你自己接（零件都在，见下），而 Enter 与 Escape 到不了 `DatePicker`。两者都写在各自类型的声明里，也就是它们真正咬人的地方。
 
@@ -294,17 +296,17 @@ slider 的四个部件接受同一个 `SliderState`，而且四个都不能少�
 
 | 名称                                                    | 说明                                                                  |
 | ------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`Table`](../../base/primitives/table.md)               | 语义表格的根，组合方式与 HTML 组合表格一致                            |
-| [`TableHeader`](../../base/primitives/table.md)         | 表头行组                                                              |
-| [`TableBody`](../../base/primitives/table.md)           | 表体行组                                                              |
-| [`TableRow`](../../base/primitives/table.md)            | 一行：`.new(id, row_index)`，从 1 开始                                |
-| [`TableHead`](../../base/primitives/table.md)           | 一个列头：`.new(id, column_index)`，从 1 开始                         |
-| [`TableCell`](../../base/primitives/table.md)           | 一个数据单元格：`.new(id, column_index)`，从 1 开始                   |
-| [`TableCaption`](../../base/primitives/table.md)        | caption 该在的视觉位置；它不带 caption role                           |
-| [`v_virtual_list(…)`](../../base/virtual-list.md)       | 只描述屏幕内内容的纵向列表                                            |
-| [`h_virtual_list(…)`](../../base/virtual-list.md)       | 另一个轴上的同一件事；`item_sizes` 是宽度                             |
-| [`VirtualListScrollHandle`](../../base/virtual-list.md) | 虚拟列表的滚动位置，跨帧保留                                          |
-| [`Scrollbar`](../../base/primitives/scrollbar.md)       | `new(id)`、`horizontal(id)`、`vertical(id)`——一条由你自己摆放的滚动条 |
+| [`Table`](../base/primitives/table.md)               | 语义表格的根，组合方式与 HTML 组合表格一致                            |
+| [`TableHeader`](../base/primitives/table.md)         | 表头行组                                                              |
+| [`TableBody`](../base/primitives/table.md)           | 表体行组                                                              |
+| [`TableRow`](../base/primitives/table.md)            | 一行：`.new(id, row_index)`，从 1 开始                                |
+| [`TableHead`](../base/primitives/table.md)           | 一个列头：`.new(id, column_index)`，从 1 开始                         |
+| [`TableCell`](../base/primitives/table.md)           | 一个数据单元格：`.new(id, column_index)`，从 1 开始                   |
+| [`TableCaption`](../base/primitives/table.md)        | caption 该在的视觉位置；它不带 caption role                           |
+| [`v_virtual_list(…)`](../base/virtual-list.md)       | 只描述屏幕内内容的纵向列表                                            |
+| [`h_virtual_list(…)`](../base/virtual-list.md)       | 另一个轴上的同一件事；`item_sizes` 是宽度                             |
+| [`VirtualListScrollHandle`](../base/virtual-list.md) | 虚拟列表的滚动位置，跨帧保留                                          |
+| [`Scrollbar`](../base/primitives/scrollbar.md)       | `new(id)`、`horizontal(id)`、`vertical(id)`——一条由你自己摆放的滚动条 |
 
 两种虚拟列表都接受 `(id, item_count, item_sizes, get_key, render)`。`render(range, cx)` 是这套接口里唯一由 Host 在一帧*进行中*调用的回调，所以在它内部注册处理器、创建留存状态与调用 `cx.notify()` 都会被拒绝。
 
@@ -354,6 +356,7 @@ area 上的方法是 `add_panel(view, options)`、`remove_panel(id)`、`panels()
 | `set_rows(rows: number): void`                            | 可见行数                                                                |
 | `set_auto_grow(min_rows: number, max_rows: number): void` | 在这两者之间随内容增高                                                  |
 | `set_soft_wrap(wrap: boolean): void`                      | 长行是否折行                                                            |
+| `set_submit_on_enter(submit: boolean): void`              | 回车是否提交而不是换行                                                  |
 
 #### `SliderState`
 
@@ -457,9 +460,7 @@ base 的 `Calendar` 元素**没有**绑定，这是个决定而不是遗漏：�
 | `DockPanel`             | `panels()` 报告的一块面板：`id`、`name`、`placement`、`node`、`index`、`active` 与三个标志位 |
 | `DockGroup` / `DockTab` | 一个标签组与它的一个标签页，也就是 `tab_bar` 与 `empty_group` 拿到的东西                     |
 | `DockRegion`            | 一侧 dock，也就是 `dock` handler 拿到的东西                                                  |
-| `DockTile`              | 一个 tile，bounds 已经解析好                                                                 |
 | `DockDrop`              | 被拖动的面板会落在哪里                                                                       |
-| `TileResizeSide`        | `"left"`、`"right"`、`"top"`、`"bottom"` 或 `"bottom_right"`                                 |
 
 ### 组合模式
 
@@ -579,6 +580,7 @@ render() {
 | `children(iterable)`      | 按顺序添加多个                                                               |
 | `when(condition, branch)` | `condition` 为真时应用 `branch`，让链保持完整                                |
 | `id(name)`                | 给这个元素一个稳定的名字，作为它的身份                                       |
+| `group(name)`             | 把这个元素命名为一个 group，里面元素的 `group_hover` 跟随它                  |
 
 ### 插槽
 
@@ -599,25 +601,27 @@ render() {
 
 ### 事件
 
-| 方法                             | 交付什么                                                                    |
-| -------------------------------- | --------------------------------------------------------------------------- |
-| `on_click(handler)`              | 激活时的 `(ClickEvent, cx)`                                                 |
-| `on_mouse_move(handler)`         | 指针悬停在元素上时的 `(MouseMoveEvent, cx)`                                 |
-| `on_hover(handler)`              | 指针进入与离开时的 `(hovered, cx)`                                          |
-| `on_key_down(handler)`           | 该元素持有键盘时按下按键的 `(KeyEvent, cx)`                                 |
-| `on_key_up(handler)`             | 同一条焦点路径上松开按键的 `(KeyEvent, cx)`                                 |
-| `on_mouse_down(button, handler)` | 按下该按钮时的 `(MouseButtonEvent, cx)`                                     |
-| `on_mouse_up(button, handler)`   | 松开时的 `(MouseButtonEvent, cx)`                                           |
-| `on_mouse_down_out(handler)`     | 在该元素之外任意位置按下时的 `(MouseButtonEvent, cx)`                       |
-| `on_scroll_wheel(handler)`       | 滚轮或触控板滚动时的 `(ScrollWheelEvent, cx)`                               |
-| `on_action(action, handler)`     | 该命名 action 被派发到此元素或其内部时的 `(ActionEvent, cx)`                |
-| `on_change(handler)`             | 开关变化时的 `(checked, cx)`；新值由脚本保存                                |
-| `on_step(handler)`               | `("increment" \| "decrement", cx)`，并且它会**取代**内置的步进              |
-| `on_item_click(handler)`         | 虚拟列表某一行被点击时的 `(key, cx)`，按 key 而不是按下标                   |
-| `on_open_change(handler)`        | 脚本之外的东西改变了 `Popover` 的打开状态时的 `(open, cx)`                  |
-| `on_confirm(handler)`            | 在打开的 `Select` 或 `Combobox` 中按下回车；无参数                          |
-| `on_dismiss(handler)`            | 在打开的 `Select` 或 `Combobox` 中按下 Escape，早于 `on_open_change(false)` |
-| `on_resize(handler)`             | 可调整组的拖拽结束后的 `(sizes, cx)`                                        |
+| 方法                               | 交付什么                                                                    |
+| ---------------------------------- | --------------------------------------------------------------------------- |
+| `on_click(handler)`                | 激活时的 `(ClickEvent, cx)`                                                 |
+| `on_mouse_move(handler)`           | 指针悬停在元素上时的 `(MouseMoveEvent, cx)`                                 |
+| `on_hover(handler)`                | 指针进入与离开时的 `(hovered, cx)`                                          |
+| `on_key_down(handler)`             | 该元素持有键盘时按下按键的 `(KeyEvent, cx)`                                 |
+| `on_key_up(handler)`               | 同一条焦点路径上松开按键的 `(KeyEvent, cx)`                                 |
+| `on_mouse_down(button, handler)`   | 按下该按钮时的 `(MouseButtonEvent, cx)`                                     |
+| `on_mouse_up(button, handler)`     | 松开时的 `(MouseButtonEvent, cx)`                                           |
+| `on_mouse_down_out(handler)`       | 在该元素之外任意位置按下时的 `(MouseButtonEvent, cx)`                       |
+| `on_scroll_wheel(handler)`         | 滚轮或触控板滚动时的 `(ScrollWheelEvent, cx)`                               |
+| `on_pinch(handler)`                | 触控板或触摸屏双指缩放每一步的 `(PinchEvent, cx)`                           |
+| `on_action(action, handler)`       | 该命名 action 被派发到此元素或其内部时的 `(ActionEvent, cx)`                |
+| `on_change(handler)`               | 开关变化时的 `(checked, cx)`；新值由脚本保存                                |
+| `on_step(handler)`                 | `("increment" \| "decrement", cx)`，并且它会**取代**内置的步进              |
+| `on_item_click(handler)`           | 虚拟列表某一行被点击时的 `(key, cx)`，按 key 而不是按下标                   |
+| `on_visible_range_change(handler)` | `list` 显示的条目或条目总数在一帧后变化时的 `(range, count, cx)`            |
+| `on_open_change(handler)`          | 脚本之外的东西改变了 `Popover` 的打开状态时的 `(open, cx)`                  |
+| `on_confirm(handler)`              | 在打开的 `Select` 或 `Combobox` 中按下回车；无参数                          |
+| `on_dismiss(handler)`              | 在打开的 `Select` 或 `Combobox` 中按下 Escape，早于 `on_open_change(false)` |
+| `on_resize(handler)`               | 可调整组的拖拽结束后的 `(sizes, cx)`                                        |
 
 ### Actions 与键绑定
 
@@ -695,6 +699,7 @@ render(_cx) {
 | `viewport_from_layout()`                            | 让 `Scrollbar` 从自身的盒子取 viewport         |
 | `track_scroll(handle)`                              | 给虚拟列表一个脚本可以驱动的滚动位置           |
 | `with_item_to_measure_index(index)`                 | 虚拟列表在它滚动的那个轴上测量哪一项           |
+| `with_follow_mode(mode)`                            | `"tail"` 让 `list` 在追加条目时停在末尾        |
 | `size_range(min, max?)`                             | `resizable_panel()` 可被拖拽的范围，单位为像素 |
 
 ### 锚定浮层
@@ -720,15 +725,10 @@ dock 的 chrome 画出来的元素*做什么*。缓存的 chrome 描述没有脚
 | `drop_tab(group, index?)`      | 放下 | 在此接收被拖来的面板；不给 index 就追加到末尾 |
 | `toggle_dock(dock)`            | 点击 | 展开或收起这侧 dock                           |
 | `resize_dock(dock)`            | 拖动 | 拖动 dock 的边；每个位置都由 base 钳制        |
-| `move_tile(tile)`              | 拖动 | 在画布上移动这个 tile                         |
-| `resize_tile(tile, side)`      | 拖动 | 拖动某条边或某个角                            |
-| `raise_tile(tile)`             | 按下 | 把这个 tile 提到最上层                        |
-| `toggle_tile_zoom(tile)`       | 点击 | 让 tile 放大占满所在 dock                     |
-| `close_tile(tile)`             | 点击 | 关闭这个 tile                                 |
 
 ### Dock chrome
 
-六个 handler，全都可选，且只能挂在 `dock_area(...)` 上。每一个都会先在 GPUI 的 layout pass 内部被调用，拿到的是 base 已经解析好的状态；描述会缓存到该状态或 handler 改变为止。
+四个 handler，全都可选，且只能挂在 `dock_area(...)` 上。每一个都会先在 GPUI 的 layout pass 内部被调用，拿到的是 base 已经解析好的状态；描述会缓存到该状态或 handler 改变为止。
 
 | 方法                           | 画什么                                               |
 | ------------------------------ | ---------------------------------------------------- |
@@ -736,8 +736,6 @@ dock 的 chrome 画出来的元素*做什么*。缓存的 chrome 描述没有脚
 | `empty_group(handler)`         | 没有可显示面板的 group 显示什么                      |
 | `drop_indicator(handler)`      | 被拖动的面板会落在哪里                               |
 | `dock(handler)`                | 一侧 dock 包住内容的外框；把 `dock_content()` 放进去 |
-| `tile_drag_bar(handler)`       | 拖动 tile 用的那条拖拽条                             |
-| `tile_resize_handles(handler)` | tile 的缩放把手                                      |
 
 ### 动效
 
@@ -757,6 +755,7 @@ property 取 `"opacity"`、`"width"`、`"height"`、`"left"`、`"top"` 之一，
 | `hover(declare)`             | 指针悬停在元素上时                                             |
 | `active(declare)`            | 元素被按下时                                                   |
 | `focus(declare)`             | 元素持有焦点时                                                 |
+| `group_hover(name, declare)` | 指针悬停在以 `group(name)` 命名的最近祖先上时                  |
 | `range_style(declare)`       | `SliderIndicator` 已填充的部分——只管它长什么样，从不管它在哪里 |
 | `cell_style(declare)`        | `OtpInput` 的每个格子；没有它屏幕上什么都没有                  |
 | `cell_active_style(declare)` | 叠在上面一层，用于下一个数字将落入的那个格子                   |

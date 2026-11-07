@@ -2,6 +2,7 @@
 title: State and Views
 description: Views, init and render, cx.notify(), retained input state, and asynchronous work.
 order: 6
+maturity: [preview]
 ---
 
 # State and Views
@@ -56,7 +57,7 @@ Several `notify` calls inside one event handler collapse into a single repaint �
 
 ## When `render` runs
 
-`render` does **not** run once per frame. GPUI repaints for reasons your application never hears about — a pointer moving over a button, a text cursor blinking, a list scrolling, an animation advancing — and none of those are a reason to run JavaScript.
+`render` does **not** run once per frame. GPUI can request a frame for reasons unrelated to a script View's data — a pointer moving over a button, a text cursor blinking, a list scrolling, or an animation advancing. Those events need not rerun that View's script `render`. They also do not imply that an idle window draws at the display's full refresh rate. Frame-path callbacks such as virtual-list item renderers are a separate case; see [Performance](./performance.md#reading-the-counters).
 
 So a `render` call does not describe *this frame*. It describes the interface once, into a Snapshot the runtime keeps:
 
@@ -77,7 +78,7 @@ Everything else replays the description you already produced, in Rust, without r
 
 Three consequences worth holding on to:
 
-**Your `render` cost follows your users, not your frame rate.** A View that changes ten times a second costs ten renders a second, whether the window is repainting at 60 FPS or 120. Describing a large panel is affordable precisely because it is not being redescribed sixty times for no reason.
+**Your script `render` cost follows invalidation, not the display refresh rate alone.** A View notified ten times a second needs at most ten rebuilds in that second, and notifications before the next frame may be coalesced. Repaints that reuse its Snapshot do not redescribe that View in JavaScript; other frame work still has a cost.
 
 **Hover, focus and active styles never call back into script.** `.hover(s => s.opacity(0.8))` is resolved into a native style description while the Snapshot is built, and GPUI applies it from there. A pointer moving across your interface runs no JavaScript at all. The same is true of an [`Input`](#retained-state)'s cursor and selection.
 
@@ -194,7 +195,20 @@ this.draft.on("submit", (event, cx) => this.add(cx));
 | `focus` | The field gained focus |
 | `blur` | It lost focus |
 
+In a `TextareaState`, Enter starts a new line and then reports `submit` as well, so the text a handler reads ends with that line break. A message box that sends on Enter calls `set_submit_on_enter(true)`: Enter then leaves the text alone, and Shift+Enter still starts a new line. Shift+Enter is still reported as `submit`, with `event.shift` set, so the handler returns early on it:
+
+```js
+this.draft = TextareaState.new({ rows: 3 });
+this.draft.set_submit_on_enter(true);
+this.draft.on("submit", (event, cx) => {
+  if (event.shift) return;
+  this.send(this.draft.value(), cx);
+});
+```
+
 Unlike a rendered `on_click`, this subscription **outlives the render that created it**. The subscription is owned by the runtime's handle store rather than by the script, because a script has nowhere to keep it and a handler that stops firing because a value was garbage collected is the kind of bug nobody finds. It is released when the handle is.
+
+`"gpui-component"`'s `InputState` and `TextareaState` answer `on` with the same events and the same payload, so a field moved between the two modules keeps its subscriptions. Each module's `Input` takes only its own module's state; passing a `gpui-base` `InputState` to the `gpui-component` `Input` is refused by name.
 
 A misspelled event name lists the valid ones:
 

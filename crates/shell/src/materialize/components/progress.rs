@@ -80,7 +80,7 @@ fn warn_ignored_ops(behavior: &Behavior, states: &StateStyles, component: &str) 
              state for an identity to keep"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {component} are ignored; put them on the Progress around it"
         );

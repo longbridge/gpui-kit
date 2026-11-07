@@ -6,6 +6,8 @@ order: 2
 
 # Getting Started
 
+Applications use `gpui_kit::open_window(options, cx, build)`, which creates a Base `Root` and returns the window handle and content entity. Base owns window structure and overlay hosting without depending on Component. Initialize Component explicitly before opening windows when styled overlays are needed.
+
 ## Install
 
 Use the repository revision of GPUI that matches `gpui-base`:
@@ -61,7 +63,7 @@ the light palette. Both palettes use `Hsla` values and match the semantic roles
 of the default `gpui-component` themes.
 
 ```rust
-use gpui_kit::base::{ColorTokens, SemanticThemeTokens, Theme};
+use gpui_kit::base::{ColorTokens, Theme};
 
 // Pick the palette that matches the application's current appearance.
 let colors = if is_dark {
@@ -70,10 +72,7 @@ let colors = if is_dark {
     ColorTokens::light()
 };
 
-Theme::global_mut(cx).tokens = SemanticThemeTokens {
-    colors,
-    ..Default::default()
-};
+Theme::global_mut(cx).tokens.colors = colors;
 ```
 
 The palette contains semantic roles rather than component-specific colors:

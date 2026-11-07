@@ -15,18 +15,21 @@ use gpui_base::input::{
     InputHighlighterFactory,
 };
 use ropey::Rope;
-use tree_sitter::{InputEdit, ParseOptions, Parser, Point};
+use tree_sitter::{InputEdit, ParseOptions, Point};
 
-use super::{LanguageRegistry, SyntaxHighlighter};
+use super::{LanguageRegistry, SyntaxHighlighter, highlighter::parse_input_bytes};
 
 pub(crate) fn input_highlighter_factory() -> InputHighlighterFactory {
     Rc::new(|language| {
-        let config = LanguageRegistry::singleton().language(language)?;
-        config.has_grammar().then(|| {
+        LanguageRegistry::singleton().has_parser(language).then(|| {
             Box::new(TreeSitterInputHighlighter::new(language)) as Box<dyn InputHighlighter>
         })
     })
 }
+
+const SYNC_PARSE_TIMEOUT: Duration = Duration::from_millis(2);
+const SYNC_PARSE_MAX_BYTES: usize = 256 * 1024;
+const PARSE_DEBOUNCE: Duration = Duration::from_millis(150);
 
 struct TreeSitterInputHighlighter {
     inner: Rc<RefCell<SyntaxHighlighter>>,
@@ -40,46 +43,17 @@ impl TreeSitterInputHighlighter {
             parse_task: Rc::new(RefCell::new(None)),
         }
     }
-}
 
-impl SyntaxHighlighter {
-    pub(crate) fn update_input(
+    /// Settle after the edits reached the tree: drop a pending background
+    /// parse when the synchronous one `completed`, or schedule one for `text`.
+    fn finish_update(
         &mut self,
-        edit: Option<BaseInputEdit>,
-        text: &Rope,
-        timeout: Option<Duration>,
-    ) -> bool {
-        self.update(edit.map(to_tree_sitter_edit), text, timeout)
-    }
-}
-
-impl InputHighlighter for TreeSitterInputHighlighter {
-    fn language(&self) -> SharedString {
-        self.inner.borrow().language().clone()
-    }
-
-    fn update(
-        &mut self,
-        edit: Option<BaseInputEdit>,
+        completed: bool,
         text: &Rope,
         folding: bool,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<EditorState>,
     ) {
-        const SYNC_PARSE_TIMEOUT: Duration = Duration::from_millis(2);
-        const SYNC_PARSE_MAX_BYTES: usize = 256 * 1024;
-        const PARSE_DEBOUNCE: Duration = Duration::from_millis(150);
-
-        let edit = edit.map(to_tree_sitter_edit);
-        let completed = {
-            let mut highlighter = self.inner.borrow_mut();
-            if text.len() > SYNC_PARSE_MAX_BYTES {
-                highlighter.edit_tree(edit, text);
-                false
-            } else {
-                highlighter.update(edit, text, Some(SYNC_PARSE_TIMEOUT))
-            }
-        };
         if completed {
             self.parse_task.borrow_mut().take();
             return;
@@ -108,10 +82,9 @@ impl InputHighlighter for TreeSitterInputHighlighter {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let config = LanguageRegistry::singleton().language(&language)?;
-                    let grammar = config.language.as_ref()?;
-                    let mut parser = Parser::new();
-                    parser.set_language(grammar).ok()?;
+                    let (mut parser, grammar) =
+                        LanguageRegistry::singleton().parser(&language).ok()?;
+                    parser.set_language(&grammar).ok()?;
                     let mut progress = |_: &tree_sitter::ParseState| {
                         if parse_cancel.load(Ordering::Relaxed) {
                             std::ops::ControlFlow::Break(())
@@ -121,14 +94,7 @@ impl InputHighlighter for TreeSitterInputHighlighter {
                     };
                     let options = ParseOptions::new().progress_callback(&mut progress);
                     let tree = parser.parse_with_options(
-                        &mut |offset, _| {
-                            if offset >= text.len() {
-                                ""
-                            } else {
-                                let (chunk, chunk_byte_ix) = text.chunk(offset);
-                                &chunk[offset - chunk_byte_ix..]
-                            }
-                        },
+                        &mut |offset, _| parse_input_bytes(&text, offset),
                         old_tree.as_ref(),
                         Some(options),
                     )?;
@@ -157,6 +123,72 @@ impl InputHighlighter for TreeSitterInputHighlighter {
             }
         });
         parse_task.borrow_mut().replace(task);
+    }
+}
+
+impl SyntaxHighlighter {
+    pub(crate) fn update_input(
+        &mut self,
+        edit: Option<BaseInputEdit>,
+        text: &Rope,
+        timeout: Option<Duration>,
+    ) -> bool {
+        self.update(edit.map(to_tree_sitter_edit), text, timeout)
+    }
+}
+
+impl InputHighlighter for TreeSitterInputHighlighter {
+    fn language(&self) -> SharedString {
+        self.inner.borrow().language().clone()
+    }
+
+    fn update(
+        &mut self,
+        edit: Option<BaseInputEdit>,
+        text: &Rope,
+        folding: bool,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<EditorState>,
+    ) {
+        let edit = edit.map(to_tree_sitter_edit);
+        let completed = {
+            let mut highlighter = self.inner.borrow_mut();
+            if text.len() > SYNC_PARSE_MAX_BYTES {
+                highlighter.edit_tree(edit, text);
+                false
+            } else {
+                highlighter.update(edit, text, Some(SYNC_PARSE_TIMEOUT))
+            }
+        };
+        self.finish_update(completed, text, folding, window, cx);
+    }
+
+    fn update_batch(
+        &mut self,
+        edits: &[(BaseInputEdit, Rope)],
+        folding: bool,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<EditorState>,
+    ) {
+        let Some((_, text)) = edits.last() else {
+            return;
+        };
+        let edits: Vec<InputEdit> = edits
+            .iter()
+            .map(|(edit, _)| to_tree_sitter_edit(*edit))
+            .collect();
+        let completed = {
+            let mut highlighter = self.inner.borrow_mut();
+            if text.len() > SYNC_PARSE_MAX_BYTES {
+                for edit in edits {
+                    highlighter.edit_tree(Some(edit), text);
+                }
+                false
+            } else {
+                highlighter.update_edits(&edits, text, Some(SYNC_PARSE_TIMEOUT))
+            }
+        };
+        self.finish_update(completed, text, folding, window, cx);
     }
 
     fn styles(

@@ -23,6 +23,8 @@ struct RetainedStateEntry {
     kind: &'static str,
     owner: Option<Rc<crate::runtime::ApplicationGeneration>>,
     value: RetainedState,
+    /// Script subscriptions to the state's events, which end with the slot.
+    subscriptions: Vec<gpui::Subscription>,
 }
 
 impl RetainedStateStore {
@@ -49,9 +51,63 @@ impl RetainedStateStore {
             .next_handle
             .checked_add(1)
             .ok_or_else(|| "retained component state handle space exhausted".to_owned())?;
-        self.values
-            .insert(handle, RetainedStateEntry { kind, owner, value });
+        self.values.insert(
+            handle,
+            RetainedStateEntry {
+                kind,
+                owner,
+                value,
+                subscriptions: Vec::new(),
+            },
+        );
         Ok(handle)
+    }
+
+    /// Keeps `subscription` alive for as long as the state at `handle` is.
+    pub fn attach(&mut self, handle: u64, subscription: gpui::Subscription) -> anyhow::Result<()> {
+        let entry = self
+            .values
+            .get_mut(&handle)
+            .ok_or_else(|| anyhow::anyhow!("retained state handle has been released"))?;
+        entry.subscriptions.push(subscription);
+        Ok(())
+    }
+
+    /// Subscribes to the input events of the state at `handle`, through its
+    /// descriptor's [`StateDescriptor::with_input_events`].
+    pub(crate) fn subscribe(
+        &self,
+        handle: u64,
+        descriptor: &StateDescriptor,
+        event: crate::entities::InputEventName,
+        handler: InputEventHandler,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<gpui::Subscription> {
+        let subscribe = descriptor
+            .events
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("`{}` has no events", descriptor.export))?;
+        let entry = self
+            .values
+            .get(&handle)
+            .ok_or_else(|| anyhow::anyhow!("retained state handle has been released"))?;
+        anyhow::ensure!(
+            entry.owner.as_ref().is_none_or(|owner| owner.is_active()),
+            "retained state owner has been released"
+        );
+        anyhow::ensure!(
+            entry.kind == descriptor.kind,
+            "retained state kind mismatch: expected `{}`, found `{}`",
+            descriptor.kind,
+            entry.kind
+        );
+        subscribe(&entry.value, event, handler, window, cx).ok_or_else(|| {
+            anyhow::anyhow!(
+                "adapter state type does not match registered kind `{}`",
+                descriptor.kind
+            )
+        })
     }
 
     pub fn kind(&self, handle: u64) -> Option<&'static str> {
@@ -112,6 +168,21 @@ impl RetainedStateStore {
             anyhow::anyhow!("adapter state type does not match registered kind `{kind}`")
         })?;
         Ok(body(value))
+    }
+
+    /// Drops one state of `kind` ahead of its application, with its
+    /// subscriptions. Returns whether it was still live.
+    pub fn remove(&mut self, handle: u64, kind: &'static str) -> bool {
+        if self
+            .values
+            .get(&handle)
+            .is_none_or(|entry| entry.kind != kind)
+        {
+            return false;
+        }
+        self.values
+            .remove(&handle)
+            .is_some_and(|entry| entry.owner.as_ref().is_none_or(|owner| owner.is_active()))
     }
 
     pub fn release_application(&mut self, application: &Rc<crate::runtime::ApplicationGeneration>) {
@@ -361,13 +432,99 @@ type StateFactory = dyn Fn(&[ComponentArgument], &mut Window, &mut App) -> Resul
     + Sync
     + 'static;
 
+pub(crate) type InputEventHandler =
+    Box<dyn Fn(&gpui_base::input::InputEvent, &mut Window, &mut App)>;
+
+type SubscribeInputEvents = dyn Fn(
+        &RetainedState,
+        crate::entities::InputEventName,
+        InputEventHandler,
+        &mut Window,
+        &mut App,
+    ) -> Option<gpui::Subscription>
+    + Send
+    + Sync;
+
+type PreparedStateCall =
+    Box<dyn FnOnce(&mut Window, &mut App) -> anyhow::Result<ComponentDataValue>>;
+type PrepareStateCall = dyn Fn(
+        &RetainedStateStore,
+        u64,
+        &'static str,
+        Vec<ComponentDataValue>,
+    ) -> anyhow::Result<PreparedStateCall>
+    + Send
+    + Sync;
+
+/// An opt-in operation on retained state. Clone the handle before entering GPUI,
+/// so callbacks never execute with the registry's state table borrowed.
+#[derive(Clone)]
+pub struct StateMethodDescriptor {
+    name: &'static str,
+    signature: &'static str,
+    readonly: bool,
+    prepare: Arc<PrepareStateCall>,
+}
+impl StateMethodDescriptor {
+    pub fn new<T: Any + Clone>(
+        name: &'static str,
+        signature: &'static str,
+        call: impl Fn(
+            &T,
+            &[ComponentDataValue],
+            &mut Window,
+            &mut App,
+        ) -> anyhow::Result<ComponentDataValue>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        let call = Arc::new(call);
+        Self {
+            name,
+            signature,
+            readonly: false,
+            prepare: Arc::new(move |store, handle, kind, args| {
+                let state = store.with::<T, _>(handle, kind, Clone::clone)?;
+                let call = call.clone();
+                Ok(Box::new(move |window, cx| call(&state, &args, window, cx)))
+            }),
+        }
+    }
+    pub fn with_readonly(mut self, readonly: bool) -> Self {
+        self.readonly = readonly;
+        self
+    }
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+    /// TypeScript parameter list and result, e.g. `(): string`.
+    pub fn signature(&self) -> &'static str {
+        self.signature
+    }
+    pub fn is_readonly(&self) -> bool {
+        self.readonly
+    }
+    pub(crate) fn prepare(
+        &self,
+        store: &RetainedStateStore,
+        handle: u64,
+        kind: &'static str,
+        args: Vec<ComponentDataValue>,
+    ) -> anyhow::Result<PreparedStateCall> {
+        (self.prepare)(store, handle, kind, args)
+    }
+}
+
 #[derive(Clone)]
 pub struct StateDescriptor {
+    methods: Vec<StateMethodDescriptor>,
     export: &'static str,
     kind: &'static str,
     arguments: Vec<ArgumentDescriptor>,
     documentation: Option<&'static str>,
     factory: Arc<StateFactory>,
+    events: Option<Arc<SubscribeInputEvents>>,
 }
 
 impl StateDescriptor {
@@ -388,17 +545,52 @@ impl StateDescriptor {
         + 'static,
     ) -> Self {
         Self {
+            methods: Vec::new(),
             export,
             kind,
             arguments,
             documentation: None,
             factory: Arc::new(factory),
+            events: None,
         }
     }
 
     pub fn with_documentation(mut self, documentation: &'static str) -> Self {
         self.documentation = Some(documentation);
         self
+    }
+
+    /// Gives the state `on(event, handler)`, for a state whose value is an
+    /// `Entity<InputBaseState<M>>` — the text engine `gpui-base`'s
+    /// `InputState` and `TextareaState` script bindings sit on.
+    ///
+    /// The events, their names and their payloads are the ones those bindings
+    /// already answer: `change`, `submit` (Enter, with `secondary` and
+    /// `shift`), `focus` and `blur`. A script moving an input between the two
+    /// modules keeps its subscriptions as they are.
+    pub fn with_input_events<M: gpui_base::input::InputModeKind>(mut self) -> Self {
+        self.events = Some(Arc::new(|value, event, handler, window, cx| {
+            let state =
+                value.downcast_ref::<gpui::Entity<gpui_base::input::InputBaseState<M>>>()?;
+            Some(crate::entities::subscribe_to_events(
+                state, event, window, cx, handler,
+            ))
+        }));
+        self
+    }
+
+    /// Whether the state answers `on(event, handler)`; see
+    /// [`Self::with_input_events`].
+    pub fn has_input_events(&self) -> bool {
+        self.events.is_some()
+    }
+
+    pub fn with_methods(mut self, methods: Vec<StateMethodDescriptor>) -> Self {
+        self.methods = methods;
+        self
+    }
+    pub fn methods(&self) -> &[StateMethodDescriptor] {
+        &self.methods
     }
 
     pub fn export(&self) -> &'static str {
@@ -600,6 +792,7 @@ pub struct MaterializeRequest<'a> {
     issued_children: SmallVec<[(u64, u32); 4]>,
     next_child_token: u64,
     request_id: u64,
+    element_id: gpui::ElementId,
     child_lane: ChildLane,
     slots: Slots,
     /// Deferred slots, still unbuilt. A factory leases the snapshot and
@@ -622,6 +815,7 @@ pub(crate) type SlotSpecs = SmallVec<[(&'static str, u32); 2]>;
 
 pub(crate) struct MaterializeRequestInit<'a> {
     pub component_name: &'static str,
+    pub element_id: gpui::ElementId,
     pub payload: &'a ComponentPayload,
     pub operations: &'a [crate::spec::SpecOp],
     pub runtime: &'a Rc<crate::ShellRuntime>,
@@ -659,6 +853,7 @@ impl<'a> MaterializeRequest<'a> {
             issued_children: SmallVec::new(),
             next_child_token: 0,
             request_id: NEXT_MATERIALIZE_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+            element_id: init.element_id,
             child_lane: ChildLane::Unclaimed,
             slots: init.slots,
             slot_factory_specs: init.slot_factory_specs,
@@ -677,6 +872,17 @@ impl<'a> MaterializeRequest<'a> {
             anyhow::anyhow!("component app effects require a root application snapshot")
         })?;
         Ok(ComponentAppEffects::new(self.runtime, application, view))
+    }
+
+    /// The element id of the spec node being materialized: the script's `key`
+    /// for it, or its address in the description.
+    ///
+    /// A component that keeps per-element state — a hitbox, a hover, a cached
+    /// path — keys it on this, so two of the same component in one description
+    /// stay apart instead of sharing one slot. Plain elements already carry it;
+    /// a registered component reads it from here.
+    pub fn element_id(&self) -> &gpui::ElementId {
+        &self.element_id
     }
 
     pub fn payload(&self) -> &ComponentPayload {
@@ -1204,7 +1410,6 @@ impl ComponentDataCallback {
 }
 
 impl ComponentElementCallback {
-    #[cfg(test)]
     pub(crate) fn from_runtime(runtime: &Rc<crate::ShellRuntime>, id: u64) -> Self {
         Self {
             callback: ComponentCallback::from_runtime(runtime, id),
@@ -1259,6 +1464,31 @@ impl ComponentElementCallback {
             .upgrade()
             .ok_or_else(|| anyhow::anyhow!("component callback runtime has been released"))?;
         runtime.dispatch_component_element_data_callback(self.callback.id, arguments, window, cx)
+    }
+    /// Build a frame-owned inline subtree whose child callbacks retire with that frame.
+    pub fn build_interactive_data_with(
+        &self,
+        arguments: &[ComponentDataValue],
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Option<AnyElement>> {
+        anyhow::ensure!(
+            !self.active.replace(true),
+            "component element callback is already running"
+        );
+        struct Reset<'a>(&'a Cell<bool>);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.0.set(false)
+            }
+        }
+        let _reset = Reset(&self.active);
+        let runtime = self
+            .callback
+            .runtime
+            .upgrade()
+            .ok_or_else(|| anyhow::anyhow!("component callback runtime has been released"))?;
+        runtime.dispatch_inline_element_data(self.callback.id, arguments, true, window, cx)
     }
 }
 
@@ -1440,7 +1670,6 @@ impl ComponentClickCallback {
 }
 
 impl ComponentCallback {
-    #[cfg(test)]
     pub(crate) fn from_runtime(runtime: &Rc<crate::ShellRuntime>, id: u64) -> Self {
         Self {
             runtime: Rc::downgrade(runtime),
@@ -1495,6 +1724,21 @@ impl ComponentCallback {
     ///
     /// GPUI event closures cannot return an error. Adapters should use this
     /// entry point instead of discarding the [`Result`] from [`Self::invoke_with`].
+    pub fn invoke_data_with(
+        &self,
+        arguments: &[ComponentDataValue],
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<()> {
+        let runtime = self
+            .runtime
+            .upgrade()
+            .ok_or_else(|| anyhow::anyhow!("component callback runtime has been released"))?;
+        runtime
+            .dispatch_component_event_data(self.id, arguments, window, cx)
+            .map(|_| ())
+    }
+
     pub fn invoke_and_report_with(
         &self,
         context: &str,
@@ -1990,6 +2234,19 @@ impl ComponentRegistry {
         if self.state_kinds.contains(descriptor.kind) {
             return Err(RegistryError::DuplicateStateKind(descriptor.kind));
         }
+        let mut method_names = HashSet::new();
+        for method in &descriptor.methods {
+            // Every state object already answers `release()`.
+            if !is_javascript_identifier(method.name)
+                || method.name == "release"
+                || !method_names.insert(method.name)
+            {
+                return Err(RegistryError::InvalidMethod {
+                    component: descriptor.kind,
+                    method: method.name,
+                });
+            }
+        }
         validate_arguments(descriptor.kind, descriptor.export, &descriptor.arguments)?;
         self.exports.insert(descriptor.export);
         self.state_kinds.insert(descriptor.kind);
@@ -2238,9 +2495,19 @@ impl FrozenComponentRegistry {
             source.push_str(state.export);
             source.push_str("(...args) { const handle = globalThis.__gpui_components[");
             source.push_str(&format!("{:?}", state.export));
-            source.push_str("](args); const value = Object.freeze({}); __stateHandles.set(value, handle); return value; }\nexport { ");
-            source.push_str(state.export);
-            source.push_str(" };\n");
+            source.push_str("](args); const value = Object.freeze({");
+            for method in state.methods() {
+                source.push_str(&format!("{:?}: (...args) => globalThis.__gpui_components[{:?}](__stateProof, handle, args),", method.name(), format!("{}.{}", state.export(), method.name())));
+            }
+            if state.has_input_events() {
+                source.push_str(&format!("on: (event, handler) => globalThis.__gpui_components[{:?}](__stateProof, handle, event, handler),", format!("{}.on", state.export())));
+            }
+            source.push_str(&format!(
+                "release: () => globalThis.__gpui_components[{:?}](__stateProof, handle),",
+                format!("{}.release", state.export())
+            ));
+            source.push_str("}); __stateHandles.set(value, handle); return value; }\n");
+            push_new_alias(&mut source, state.export);
         }
         for descriptor in self.descriptors() {
             for constructor in &descriptor.constructors {
@@ -2250,13 +2517,21 @@ impl FrozenComponentRegistry {
                     "(...args) { return globalThis.__gpui.__element(globalThis.__gpui_components[",
                 );
                 source.push_str(&format!("{:?}", constructor.export));
-                source.push_str("](args.map(__unwrapState))); }\nexport { ");
-                source.push_str(constructor.export);
-                source.push_str(" };\n");
+                source.push_str("](args.map(__unwrapState))); }\n");
+                push_new_alias(&mut source, constructor.export);
             }
         }
         source
     }
+}
+
+/// Exports `name` callable as `name(...)`, `new name(...)` and `name.new(...)`.
+///
+/// `gpui-base` constructs with `Type.new(...)`, as in Rust, and a script that
+/// imports from both modules should not have to remember which one it is
+/// calling. The plain call and `new` keep working for scripts written before.
+fn push_new_alias(source: &mut String, name: &str) {
+    source.push_str(&format!("{name}.new = {name};\nexport {{ {name} }};\n"));
 }
 
 #[cfg(test)]
@@ -2309,6 +2584,7 @@ mod tests {
             anyhow::bail!("no element argument expected")
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Slotted",
             payload: &payload,
             operations: &operations,
@@ -2348,6 +2624,7 @@ mod tests {
             anyhow::bail!("no element argument expected")
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Slotted",
             payload: &payload,
             operations: &operations,
@@ -2391,6 +2668,7 @@ mod tests {
             Ok(div().into_any_element())
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Parent",
             payload: &payload,
             operations: &operations,
@@ -2428,6 +2706,7 @@ mod tests {
             Ok(div().into_any_element())
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "RepeatedParent",
             payload: &payload,
             operations: &operations,
@@ -2467,6 +2746,7 @@ mod tests {
         let mut ordinary_resolver =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut ordinary = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Ordinary",
             payload: &payload,
             operations: &operations,
@@ -2493,6 +2773,7 @@ mod tests {
         let mut typed_resolver =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut typed = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Typed",
             payload: &payload,
             operations: &operations,
@@ -2535,6 +2816,7 @@ mod tests {
         let mut resolve_element =
             |_, _: Option<&mut Window>, _: Option<&mut App>| anyhow::bail!("child adapter failed");
         let request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Parent",
             payload: &payload,
             operations: &operations,
@@ -2572,6 +2854,7 @@ mod tests {
         let mut resolver_c =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut request_a = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "A",
             payload: &payload,
             operations: &operations,
@@ -2589,6 +2872,7 @@ mod tests {
             application_owner: None,
         });
         let mut request_b = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "B",
             payload: &payload,
             operations: &operations,
@@ -2606,6 +2890,7 @@ mod tests {
             application_owner: None,
         });
         let mut request_c = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "C",
             payload: &payload,
             operations: &operations,

@@ -28,7 +28,10 @@ use ropey::Rope;
 
 use super::decorations::DecorationCollections;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
-use crate::input::{HighlightStyleResolver, InputEdit, InputHighlighter, TextDecoration};
+use crate::input::{
+    GutterDecoration, HighlightStyleResolver, InputEdit, InputHighlighter, OverviewRulerDecoration,
+    RangeDecoration, SyntaxContext, TextDecoration,
+};
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
 
@@ -78,6 +81,34 @@ pub trait InputExtras: Default + 'static {
     /// Decoration ranges to paint, innermost collection first.
     fn decoration_layers(&self) -> Vec<&[TextDecoration]> {
         Vec::new()
+    }
+
+    /// Geometric decorations intersecting visible, non-folded buffer spans.
+    fn range_decorations(&self, _ranges: &[std::ops::Range<usize>]) -> Vec<&RangeDecoration> {
+        Vec::new()
+    }
+
+    /// Return the gutter decoration strip width, or `None` when no gutter
+    /// collection exists.
+    fn gutter_decorations_width(&self) -> Option<gpui::Pixels> {
+        None
+    }
+
+    /// Return the gutter decorations that touch a UTF-8 byte range, in paint
+    /// order. An empty decoration touches the range when it lies inside it.
+    fn gutter_decorations(&self, _range: std::ops::Range<usize>) -> Vec<&GutterDecoration> {
+        Vec::new()
+    }
+
+    /// Return all overview ruler decorations in paint order.
+    fn overview_ruler_decorations(&self) -> Vec<&OverviewRulerDecoration> {
+        Vec::new()
+    }
+
+    /// A number that changes whenever an overview ruler collection is created,
+    /// replaced, extended, cleared or released.
+    fn overview_ruler_revision(&self) -> u64 {
+        0
     }
 
     /// Semantic-token styles for a visible range, when an LSP supplies them.
@@ -162,6 +193,17 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
     ) {
     }
 
+    /// Drives the syntax highlighter once for several edits applied as one
+    /// change, each paired with the text right after it.
+    fn drive_highlighter_batch(
+        _highlighter: &Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
+        _edits: &[(InputEdit, Rope)],
+        _folding: bool,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<InputBaseState<Self>>,
+    ) {
+    }
+
     /// The range highlighted while Cmd-hovering a symbol, with its style.
     fn hover_definition_style(
         _state: &InputBaseState<Self>,
@@ -184,6 +226,14 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
 
     /// Drops decorations and hover state when the text is replaced wholesale.
     fn reset_annotations(_state: &mut InputBaseState<Self>) {}
+
+    /// Syntax context at `offset` for editing decisions.
+    ///
+    /// Only a code editor can have a provider installed; the default answer
+    /// is `Code`, which preserves character-heuristic behavior.
+    fn editing_syntax_context(_state: &InputBaseState<Self>, _offset: usize) -> SyntaxContext {
+        SyntaxContext::Code
+    }
 
     /// Slides decoration ranges along with an edit.
     fn adjust_annotations(
@@ -326,6 +376,10 @@ impl InputModeKind for TextareaMode {
 pub struct EditorExtras {
     pub(crate) lsp: Lsp,
     pub(crate) decorations: DecorationCollections,
+    pub(crate) range_decorations: DecorationCollections<RangeDecoration>,
+    pub(crate) gutter_decorations: DecorationCollections<GutterDecoration>,
+    pub(crate) gutter_decorations_width: gpui::Pixels,
+    pub(crate) overview_ruler_decorations: DecorationCollections<OverviewRulerDecoration>,
     pub(crate) inline_completion: InlineCompletion,
     pub(crate) context_menu_content: ContextMenuContent,
     pub(crate) hover_popover: Option<HoverPopoverState>,
@@ -338,6 +392,10 @@ impl Default for EditorExtras {
         Self {
             lsp: Lsp::default(),
             decorations: DecorationCollections::default(),
+            range_decorations: DecorationCollections::default(),
+            gutter_decorations: DecorationCollections::default(),
+            gutter_decorations_width: gpui::px(3.),
+            overview_ruler_decorations: DecorationCollections::default(),
             inline_completion: InlineCompletion::default(),
             context_menu_content: ContextMenuContent::default(),
             hover_popover: None,

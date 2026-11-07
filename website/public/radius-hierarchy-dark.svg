@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Radius hierarchy in a chat composer</title>
+  <desc id="desc">A chat composer demonstrates three phases: the outer frame expands while the inner surface stays fixed; the inner surface expands while the outer frame stays fixed; then all layers expand together. The placeholder has equal top and left gaps, the buttons share a bottom line, and the corner arcs share their centers. Small reference shapes compare each radius with its element height.</desc>
+  <style>
+    .canvas { fill: #0a0a0a; }
+    .outer { fill: #171717; stroke: #525252; stroke-width: 1.5; }
+    .inner { fill: #262626; stroke: #525252; stroke-width: 1.5; }
+    .button { fill: #171717; stroke: #525252; stroke-width: 1.5; }
+    .send { fill: #419cff; stroke: #419cff; }
+    .icon { fill: none; stroke: #d4d4d4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .send-icon { stroke: #0a0a0a; }
+    .ink { fill: #fafafa; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .muted { fill: #a3a3a3; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { fill: #a3a3a3; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .line { stroke: #525252; stroke-width: 1; }
+    .guide { fill: none; stroke: #f87171; stroke-width: 1; stroke-dasharray: 3 4; opacity: .7; }
+    .guide-outer { opacity: .5; }
+    #still { display: none; }
+    @media (prefers-reduced-motion: reduce) { #moving { display: none; } #still { display: inline; } }
+  </style>
+
+  <rect class="canvas" width="960" height="420" rx="20"/>
+  <text class="ink" x="48" y="46" font-size="22" font-weight="650">One composer, three radius tiers</text>
+  <text class="muted" x="48" y="72" font-size="14">Outer only, inner only, then together; alignment holds in every phase.</text>
+
+  <g id="moving">
+    <rect class="outer" x="48" y="112" width="528" height="232" rx="36">
+    <animate attributeName="x" values="48;48;44;44;44;44;40;40;48;48" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    <animate attributeName="y" values="112;112;108;108;108;108;104;104;112;112" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    <animate attributeName="width" values="528;528;536;536;536;536;544;544;528;528" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    <animate attributeName="height" values="232;232;240;240;240;240;248;248;232;232" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    <animate attributeName="rx" values="36;36;40;40;40;40;44;44;36;36" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    </rect>
+    <rect class="inner" x="60" y="124" width="504" height="208" rx="24">
+      <animate attributeName="x" values="60;60;60;60;56;56;52;52;60;60" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <animate attributeName="y" values="124;124;124;124;120;120;116;116;124;124" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <animate attributeName="width" values="504;504;504;504;512;512;520;520;504;504" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <animate attributeName="height" values="208;208;208;208;216;216;224;224;208;208" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <animate attributeName="rx" values="24;24;24;24;28;28;32;32;24;24" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    </rect>
+    <text class="muted" x="80" y="141" font-size="19" dominant-baseline="hanging">Ask anything…
+      <animate attributeName="x" values="80;80;80;80;80;80;72;72;80;80" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <animate attributeName="y" values="141;141;141;141;141;141;133;133;141;141" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+    </text>
+    <g transform="translate(80 264)">
+      <animateTransform attributeName="transform" type="translate" values="80 264;80 264;80 264;80 264;80 264;80 264;72 272;72 272;80 264;80 264" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <rect class="button" width="48" height="48" rx="4"><animate attributeName="rx" values="4;4;4;4;4;4;12;12;4;4" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/></rect>
+      <path class="icon" d="M24 16v16M16 24h16"/>
+    </g>
+    <g transform="translate(496 264)">
+      <animateTransform attributeName="transform" type="translate" values="496 264;496 264;496 264;496 264;496 264;496 264;504 272;504 272;496 264;496 264" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/>
+      <rect class="button send" width="48" height="48" rx="4"><animate attributeName="rx" values="4;4;4;4;4;4;12;12;4;4" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/></rect>
+      <path class="icon send-icon" d="M24 32V16m-7 7 7-7 7 7"/>
+    </g>
+    <circle class="guide" cx="84" cy="308" r="24"><animate attributeName="r" values="24;24;24;24;28;28;32;32;24;24" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/></circle>
+    <circle class="guide" cx="84" cy="308" r="4"><animate attributeName="r" values="4;4;4;4;4;4;12;12;4;4" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/></circle>
+    <circle class="guide guide-outer" cx="84" cy="308" r="36"><animate attributeName="r" values="36;36;40;40;40;40;44;44;36;36" dur="11s" repeatCount="indefinite" calcMode="spline" keySplines="0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1;0.76 0 0.24 1" keyTimes="0;0.057142857;0.2;0.271428571;0.414285714;0.485714286;0.628571429;0.735714286;0.878571429;1"/></circle>
+    <text class="label" x="653" y="378" font-size="13" font-weight="600" opacity="1">At rest<animate attributeName="opacity" values="1;0;0;0;0;1;1" dur="11s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.057142857;0.271428571;0.485714286;0.735714286;0.878571429;1"/></text>
+    <text class="label" x="653" y="378" font-size="13" font-weight="600" opacity="0">01 · Outer frame<animate attributeName="opacity" values="0;1;0;0;0;0;0" dur="11s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.057142857;0.271428571;0.485714286;0.735714286;0.878571429;1"/></text>
+    <text class="label" x="653" y="378" font-size="13" font-weight="600" opacity="0">02 · Inset surface<animate attributeName="opacity" values="0;0;1;0;0;0;0" dur="11s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.057142857;0.271428571;0.485714286;0.735714286;0.878571429;1"/></text>
+    <text class="label" x="653" y="378" font-size="13" font-weight="600" opacity="0">03 · All layers<animate attributeName="opacity" values="0;0;0;1;0;0;0" dur="11s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.057142857;0.271428571;0.485714286;0.735714286;0.878571429;1"/></text>
+    <text class="label" x="653" y="378" font-size="13" font-weight="600" opacity="0">Return to rest<animate attributeName="opacity" values="0;0;0;0;1;0;0" dur="11s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.057142857;0.271428571;0.485714286;0.735714286;0.878571429;1"/></text>
+  </g>
+  <g id="still">
+    <rect class="outer" x="48" y="112" width="528" height="232" rx="36"/>
+    <rect class="inner" x="60" y="124" width="504" height="208" rx="24"/>
+    <text class="muted" x="80" y="141" font-size="19" dominant-baseline="hanging">Ask anything…</text>
+    <g transform="translate(80 264)"><rect class="button" width="48" height="48" rx="4"/><path class="icon" d="M24 16v16M16 24h16"/></g>
+    <g transform="translate(496 264)"><rect class="button send" width="48" height="48" rx="4"/><path class="icon send-icon" d="M24 32V16m-7 7 7-7 7 7"/></g>
+    <circle class="guide" cx="84" cy="308" r="24"/>
+    <circle class="guide" cx="84" cy="308" r="4"/>
+    <circle class="guide guide-outer" cx="84" cy="308" r="36"/>
+    <text class="label" x="653" y="378" font-size="13" font-weight="600">At rest</text>
+  </g>
+  <circle cx="84" cy="308" r="2.5" fill="#f87171"/>
+  <text class="muted" x="48" y="398" font-size="14">Inner radius r = R − g · button radius b = r − h · top and left text gaps match.</text>
+
+  <line class="line" x1="615" y1="112" x2="615" y2="344"/>
+  <text class="ink" x="653" y="144" font-size="16" font-weight="620">At rest · radius / height</text>
+  <rect class="outer" x="653" y="164" width="72" height="44" rx="6.8"/>
+  <text class="ink" x="745" y="183" font-size="15" font-weight="600">Container</text>
+  <text class="label" x="745" y="204" font-size="13">R / H = 36 / 232</text>
+  <rect class="inner" x="653" y="231" width="72" height="42" rx="4.8"/>
+  <text class="ink" x="745" y="249" font-size="15" font-weight="600">Inset surface</text>
+  <text class="label" x="745" y="270" font-size="13">r / H = 24 / 208</text>
+  <rect class="button" x="653" y="297" width="42" height="42" rx="3.5"/>
+  <text class="ink" x="745" y="315" font-size="15" font-weight="600">Icon button</text>
+  <text class="label" x="745" y="336" font-size="13">b / H = 4 / 48</text>
+</svg>

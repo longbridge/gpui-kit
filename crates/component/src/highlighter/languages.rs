@@ -1,6 +1,6 @@
 use gpui::SharedString;
 
-use crate::highlighter::LanguageConfig;
+use crate::highlighter::GrammarConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, enum_iterator::Sequence)]
 pub enum Language {
@@ -368,9 +368,9 @@ impl Language {
     /// Return the language info for the language.
     ///
     /// (language, query, injection, locals)
-    pub(super) fn config(&self) -> LanguageConfig {
+    pub(super) fn config(&self) -> GrammarConfig {
         let (language, query, injection, locals) = match self {
-            Self::Plain => return LanguageConfig::plain(self.name()),
+            Self::Plain => return GrammarConfig::plain(self.name()),
             Self::Json => (
                 tree_sitter_json::LANGUAGE,
                 include_str!("languages/json/highlights.scm"),
@@ -608,7 +608,7 @@ impl Language {
 
         let language = tree_sitter::Language::new(language);
 
-        LanguageConfig::new(
+        GrammarConfig::new(
             self.name(),
             language,
             self.injection_languages(),
@@ -688,5 +688,22 @@ mod tests {
         assert_eq!(Language::from_name("ts"), None);
 
         assert_eq!(Language::from_str("unknown"), Language::Plain);
+    }
+
+    #[test]
+    fn test_every_language_query_compiles() {
+        let failures: Vec<String> = Language::all()
+            .filter_map(|language| {
+                let config = language.config();
+                let grammar = config.language?;
+                let source = format!(
+                    "{}{}{}",
+                    config.injections, config.locals, config.highlights
+                );
+                let err = tree_sitter::Query::new(&grammar, &source).err()?;
+                Some(format!("{}: {err}", language.name()))
+            })
+            .collect();
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }

@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::{
-    ActiveTheme as _, ElementExt, IconName, button::Button, native_menu::NativeMenu, v_flex,
+    ActiveTheme as _, ElementExt, Icon, IconName, button::Button, native_menu::NativeMenu, v_flex,
 };
 use gpui_kit::*;
 use serde::Deserialize;
@@ -35,6 +35,11 @@ fn demo_menu(word_wrap: bool) -> NativeMenu {
         .separator()
         .menu_with_icon("Github", IconName::Github, Box::new(OpenGitHub))
         .menu_with_icon("Inbox", IconName::Inbox, click("Inbox"))
+        .menu_with_icon(
+            "Search (SVG bytes)",
+            Icon::default().data(include_bytes!("../../../assets/assets/icons/search.svg")),
+            click("Search"),
+        )
         .separator()
         .menu_with_disabled("Disabled item", true, click("Disabled"))
         .menu_with_check("Word Wrap", word_wrap, click("Word Wrap"))

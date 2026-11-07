@@ -2,20 +2,26 @@ use std::rc::Rc;
 
 use gpui_kit::component::{
     ActiveTheme as _,
+    button::Button,
     dock::{
         BasePanel, DockArea, DockLayout, DockPlacement, DockSkin, Panel, PanelEvent, panel_handle,
     },
+    menu::PopupMenuItem,
+    v_flex,
 };
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
     ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
 };
 
+use crate::story_toolbar_group;
+
 struct DemoPanel {
     name: &'static str,
     title: SharedString,
     body: SharedString,
     focus_handle: FocusHandle,
+    closable: bool,
 }
 
 impl DemoPanel {
@@ -30,6 +36,7 @@ impl DemoPanel {
             title: title.into(),
             body: body.into(),
             focus_handle: cx.focus_handle(),
+            closable: true,
         })
     }
 }
@@ -45,6 +52,10 @@ impl Focusable for DemoPanel {
 impl BasePanel for DemoPanel {
     fn panel_name(&self) -> &'static str {
         self.name
+    }
+
+    fn closable(&self, _: &App) -> bool {
+        self.closable
     }
 }
 
@@ -66,7 +77,8 @@ impl Render for DemoPanel {
 
 pub struct DockStory {
     dock_area: Entity<DockArea>,
-    _skin: Rc<DockSkin>,
+    skin: Rc<DockSkin>,
+    close_button_visible: bool,
 }
 
 impl super::Story for DockStory {
@@ -102,6 +114,7 @@ impl super::Story for DockStory {
             "Drop a tab near an edge to split this group.",
             cx,
         );
+        editor.update(cx, |editor, _| editor.closable = false);
         let terminal = DemoPanel::new(
             "DockStoryTerminal",
             "Terminal",
@@ -141,13 +154,40 @@ impl super::Story for DockStory {
 
         cx.new(|_| Self {
             dock_area,
-            _skin: skin,
+            skin,
+            close_button_visible: false,
         })
     }
 }
 
 impl Render for DockStory {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().child(self.dock_area.clone())
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let close_button_visible = self.close_button_visible;
+        let story = cx.entity();
+        v_flex()
+            .size_full()
+            .child(story_toolbar_group().p_2().dropdown_child(
+                Button::new("dock-options").label("Options"),
+                move |menu, window, _| {
+                    menu.item(
+                        PopupMenuItem::new("Tab close buttons")
+                            .checked(close_button_visible)
+                            .on_click(window.listener_for(&story, |this, _, _, cx| {
+                                this.close_button_visible = !this.close_button_visible;
+                                this.skin
+                                    .set_close_button_visible(this.close_button_visible, cx);
+                                cx.notify();
+                            })),
+                    )
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(self.dock_area.clone()),
+            )
     }
 }

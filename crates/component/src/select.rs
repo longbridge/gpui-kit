@@ -4,6 +4,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
     deferred, div, prelude::FluentBuilder, px, rems,
 };
+use gpui_base::TestSupportExt as _;
 use rust_i18n::t;
 
 use crate::ThemeStyled as _;
@@ -17,6 +18,7 @@ use crate::{
     searchable_list::{
         SearchableListChange, SearchableListDelegate, SearchableListItem, SearchableListState,
     },
+    sizing::DROPDOWN_LIST_PADDING,
     v_flex,
 };
 use gpui_base::{GlobalState, Select as BaseSelect};
@@ -86,6 +88,7 @@ struct SelectOptions {
     search_placeholder: Option<SharedString>,
     menu_width: Length,
     menu_max_h: Length,
+    scroll_bounce: Option<bool>,
     disabled: bool,
     appearance: bool,
     focus_ring_enabled: bool,
@@ -103,6 +106,7 @@ impl Default for SelectOptions {
             title_prefix: None,
             menu_width: Length::Auto,
             menu_max_h: rems(20.).into(),
+            scroll_bounce: None,
             disabled: false,
             appearance: true,
             focus_ring_enabled: true,
@@ -114,6 +118,8 @@ impl Default for SelectOptions {
 // MARK: SelectState
 
 /// State of the [`Select`] component.
+///
+/// Emits [`DismissEvent`] when an open menu closes, including after a selection is confirmed.
 pub struct SelectState<D: SearchableListDelegate + 'static>
 where
     <D::Item as SearchableListItem>::Value: PartialEq + Clone,
@@ -191,22 +197,46 @@ where
                             .delegate
                             .on_will_change(&mut selection, &changes);
 
-                        let new_selection = weak_confirm.update(cx, |this, cx| {
+                        let confirmed = weak_confirm.update(cx, |this, cx| {
                             this.state.selection = selection;
 
                             let final_value =
                                 this.state.selection.first().map(|(_, i)| i.value().clone());
 
-                            cx.emit(SelectEvent::Confirm(final_value));
+                            cx.emit(SelectEvent::Confirm(final_value.clone()));
                             cx.notify();
                             this.set_open(false, cx);
                             this.focus(window, cx);
 
-                            this.state.selection.clone()
+                            (this.state.selection.clone(), final_value)
                         });
 
-                        // Sync snapshot and fire on_confirm directly — same re-entrancy guard.
-                        if let Ok(new_selection) = new_selection {
+                        // Clear the query through list_state directly — an entity-handle
+                        // update here would re-enter the ListState lock held above.
+                        // The committed index pointed into the filtered view, so resolve
+                        // the confirmed value in the restored full list; otherwise the
+                        // cursor and the mark would disagree on the next open.
+                        if let Ok((mut new_selection, final_value)) = confirmed {
+                            if !list_state.query_input.read(cx).value().is_empty() {
+                                list_state.set_query("", window, cx);
+                            }
+
+                            if let Some(ix) = final_value
+                                .as_ref()
+                                .and_then(|value| list_state.delegate().delegate.position(value))
+                            {
+                                list_state.set_selected_index(Some(ix), window, cx);
+                                if let Some((slot, _)) = new_selection.first_mut() {
+                                    *slot = ix;
+                                }
+                                _ = weak_confirm.update(cx, |this, cx| {
+                                    if let Some((slot, _)) = this.state.selection.first_mut() {
+                                        *slot = ix;
+                                    }
+                                    cx.notify();
+                                });
+                            }
+
                             list_state
                                 .delegate_mut()
                                 .update_selection_snapshot(new_selection.clone());
@@ -218,7 +248,7 @@ where
                     }
                 });
             },
-            // on_cancel — restore cursor to committed index, close
+            // on_cancel — clear the query, restore cursor to committed index, close
             move |_final_selected_index, window, cx| {
                 cx.defer_in(window, {
                     let weak_cancel = weak_cancel.clone();
@@ -227,6 +257,9 @@ where
                             .upgrade()
                             .and_then(|e| e.read(cx).state.selection.first().map(|(ix, _)| *ix));
 
+                        if !list_state.query_input.read(cx).value().is_empty() {
+                            list_state.set_query("", window, cx);
+                        }
                         list_state.set_selected_index(committed_ix, window, cx);
 
                         _ = weak_cancel.update(cx, |this, cx| {
@@ -323,13 +356,38 @@ where
     }
 
     /// Replace the delegate (item data) for the select state.
-    pub fn set_items(&mut self, items: D, _: &mut Window, cx: &mut Context<Self>)
+    pub fn set_items(&mut self, items: D, window: &mut Window, cx: &mut Context<Self>)
     where
         D: SearchableListDelegate + 'static,
     {
-        self.state.list.update(cx, |list, _| {
+        let mut selection = self.state.selection.clone();
+        self.state.list.update(cx, |list, cx| {
+            let cursor = list
+                .selected_index()
+                .and_then(|ix| list.delegate().delegate.item(ix))
+                .and_then(|item| items.position(item.value()));
+            // A value the new items no longer have is dropped, as
+            // `set_selected_value` does, rather than kept at an index that
+            // now points at another item.
+            selection.retain_mut(|(ix, item)| {
+                let Some(position) = items.position(item.value()) else {
+                    return false;
+                };
+                let Some(replacement) = items.item(position) else {
+                    return false;
+                };
+                *ix = position;
+                *item = replacement.clone();
+                true
+            });
             list.delegate_mut().delegate = items;
+            list.set_selected_index(cursor, window, cx);
+            list.delegate_mut()
+                .update_selection_snapshot(selection.clone());
+            cx.notify();
         });
+        self.state.selection = selection;
+        cx.notify();
     }
 
     /// Get the current selected index.
@@ -354,13 +412,7 @@ where
             return;
         }
 
-        let committed_ix = self.state.selection.first().map(|(ix, _)| *ix);
-        if self.selected_index(cx) != committed_ix {
-            self.state.list.update(cx, |list, cx| {
-                list.set_selected_index(committed_ix, window, cx);
-            });
-        }
-
+        self.clear_query_and_restore_cursor(window, cx);
         self.set_open(false, cx);
         cx.notify();
     }
@@ -372,6 +424,8 @@ where
 
         if self.state.open {
             self.state.list.focus_handle(cx).focus(window, cx);
+        } else {
+            self.clear_query_and_restore_cursor(window, cx);
         }
 
         cx.notify();
@@ -384,15 +438,34 @@ where
         }
 
         cx.stop_propagation();
+        self.clear_query_and_restore_cursor(window, cx);
         self.set_open(false, cx);
         self.focus(window, cx);
         cx.notify();
     }
 
+    /// Drop the search query and move the cursor back to the committed
+    /// selection, so the next open shows every item. Call on every menu
+    /// close that does not go through the confirm/cancel callbacks.
+    fn clear_query_and_restore_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.clear_query(window, cx);
+
+        let committed_ix = self.state.selection.first().map(|(ix, _)| *ix);
+        self.state.list.update(cx, |list, cx| {
+            if list.selected_index() != committed_ix {
+                list.set_selected_index(committed_ix, window, cx);
+            }
+        });
+    }
+
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        let dismissed = self.state.open && !open;
         self.state.open = open;
         self.state.deferred_context = open.then(|| GlobalState::register_deferred_popover(cx));
 
+        if dismissed {
+            cx.emit(DismissEvent);
+        }
         cx.notify();
     }
 
@@ -440,6 +513,22 @@ where
             })
             .child(title)
     }
+
+    fn accessibility_value(&self) -> SharedString {
+        let Some((_, item)) = self.state.selection.first() else {
+            return self
+                .state
+                .placeholder
+                .clone()
+                .unwrap_or_else(|| t!("Select.placeholder").into());
+        };
+
+        if let Some(prefix) = self.title_prefix.as_ref() {
+            format!("{}{}", prefix, item.title()).into()
+        } else {
+            item.title()
+        }
+    }
 }
 
 impl<D> Render for SelectState<D>
@@ -472,6 +561,7 @@ where
                 .child(
                     div()
                         .id("input")
+                        .test_support()
                         .relative()
                         .flex()
                         .items_center()
@@ -550,7 +640,7 @@ where
                             v_flex()
                                 .occlude()
                                 .map(|this| match self.state.menu_width {
-                                    Length::Auto => this.w(bounds.size.width + px(2.)),
+                                    Length::Auto => this.w(bounds.size.width),
                                     Length::Definite(w) => this.w(w),
                                 })
                                 .popover_style(cx)
@@ -564,7 +654,10 @@ where
                                         )
                                         .with_size(self.state.size)
                                         .max_h(self.state.menu_max_h)
-                                        .paddings(Edges::all(px(4.))),
+                                        .when_some(self.state.scroll_bounce, |list, on| {
+                                            list.scroll_bounce(on)
+                                        })
+                                        .paddings(Edges::all(DROPDOWN_LIST_PADDING)),
                                 )
                                 .on_mouse_down_out(cx.listener(|this, _, window, cx| {
                                     this.escape(&Cancel, window, cx);
@@ -590,6 +683,12 @@ where
             options: SelectOptions::default(),
             empty: None,
         }
+    }
+
+    /// Sets an explicit identity for the select root.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
     }
 
     /// Set the width of the dropdown menu, default: `Length::Auto`.
@@ -642,6 +741,13 @@ where
     /// Set the placeholder text for the search input.
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Bounce the dropdown list at its vertical boundaries. On by default on iOS,
+    /// Android and macOS, off elsewhere; reduced motion disables displacement.
+    pub fn scroll_bounce(mut self, enabled: bool) -> Self {
+        self.options.scroll_bounce = Some(enabled);
         self
     }
 
@@ -753,6 +859,7 @@ where
             this.state.search_placeholder = opts.search_placeholder;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
+            this.state.scroll_bounce = opts.scroll_bounce;
             this.state.disabled = opts.disabled;
             this.state.appearance = opts.appearance;
             this.focus_ring_enabled = opts.focus_ring_enabled;
@@ -765,6 +872,7 @@ where
         });
 
         let is_open = self.state.read(cx).state.open;
+        let accessibility_value = self.state.read(cx).accessibility_value();
         let content_focus_handle = self.state.read(cx).state.list.focus_handle(cx);
         let open_state = self.state.clone();
 
@@ -776,8 +884,14 @@ where
             })
             .focus_handle(&focus_handle)
             .content_focus_handle(&content_focus_handle)
-            .on_open_change(move |open, _, cx| {
-                open_state.update(cx, |state, cx| state.set_open(open, cx));
+            .accessibility_value(accessibility_value)
+            .on_open_change(move |open, window, cx| {
+                open_state.update(cx, |state, cx| {
+                    if !open {
+                        state.clear_query_and_restore_cursor(window, cx);
+                    }
+                    state.set_open(open, cx);
+                });
             })
             .size_full()
             .child(self.state)
@@ -788,7 +902,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use gpui::{AppContext as _, RenderOnce as _, TestAppContext};
 
     use crate::{
         IndexPath,
@@ -905,5 +1019,200 @@ mod tests {
                 Some(IndexPath::new(0).section(1)),
             );
         });
+    }
+
+    #[gpui::test]
+    fn test_select_accessibility_value_tracks_placeholder_and_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.update(|window, cx| {
+            let items = SearchableVec::new(vec!["Rust", "Go"]);
+            let state = cx.new(|cx| SelectState::new(items, None, window, cx).searchable(true));
+
+            _ = Select::new(&state)
+                .placeholder("Choose a language")
+                .accessibility_label("Programming language")
+                .render(window, cx);
+            assert_eq!(state.read(cx).accessibility_value(), "Choose a language");
+
+            state.update(cx, |state, cx| {
+                state.set_selected_value(&"Rust", window, cx);
+            });
+            assert_eq!(state.read(cx).accessibility_value(), "Rust");
+
+            let list = state.read(cx).state.list.clone();
+            list.update(cx, |list, cx| list.set_query("Go", window, cx));
+            assert_eq!(list.read(cx).delegate().delegate.items_count(0), 1);
+            // Filtering changes the available rows, not the committed value.
+            assert_eq!(state.read(cx).accessibility_value(), "Rust");
+
+            _ = Select::new(&state)
+                .placeholder("Choose a language")
+                .title_prefix("Language: ")
+                .render(window, cx);
+            assert_eq!(state.read(cx).accessibility_value(), "Language: Rust");
+
+            state.update(cx, |state, cx| state.set_selected_index(None, window, cx));
+            assert_eq!(state.read(cx).accessibility_value(), "Choose a language");
+
+            _ = Select::new(&state).render(window, cx);
+            assert_eq!(
+                state.read(cx).accessibility_value(),
+                rust_i18n::t!("Select.placeholder").to_string(),
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn replacing_items_reconciles_the_cursor_and_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| {
+                SelectState::new(
+                    vec!["main", "topic", "release"],
+                    Some(IndexPath::new(0)),
+                    window,
+                    cx,
+                )
+            });
+            let list = state.read(cx).state.list.clone();
+            list.update(cx, |list, cx| {
+                list.set_selected_index(Some(IndexPath::new(1)), window, cx)
+            });
+            state.update(cx, |state, cx| {
+                state.set_items(vec!["release", "main", "topic"], window, cx)
+            });
+            assert_eq!(state.read(cx).selected_index(cx), Some(IndexPath::new(2)));
+            assert_eq!(state.read(cx).selected_value(), Some(&"main"));
+            assert_eq!(state.read(cx).state.selection[0].0, IndexPath::new(1));
+            assert_eq!(
+                list.read(cx).delegate().selection_snapshot[0].0,
+                IndexPath::new(1)
+            );
+            state.update(cx, |state, cx| {
+                state.set_items(vec!["main", "replacement"], window, cx)
+            });
+            assert_eq!(state.read(cx).selected_index(cx), None);
+            assert_eq!(state.read(cx).selected_value(), Some(&"main"));
+
+            // A selected value the new items no longer have is dropped.
+            state.update(cx, |state, cx| {
+                state.set_items(vec!["replacement", "other"], window, cx)
+            });
+            assert_eq!(state.read(cx).selected_value(), None);
+            assert!(state.read(cx).state.selection.is_empty());
+            assert!(list.read(cx).delegate().selection_snapshot.is_empty());
+        });
+    }
+
+    #[derive(Clone)]
+    struct RemoteChoice {
+        value: &'static str,
+        title: &'static str,
+        unavailable: bool,
+    }
+
+    impl super::SelectItem for RemoteChoice {
+        type Value = &'static str;
+        fn value(&self) -> &&'static str {
+            &self.value
+        }
+        fn title(&self) -> gpui::SharedString {
+            self.title.into()
+        }
+        fn disabled(&self) -> bool {
+            self.unavailable
+        }
+    }
+
+    #[gpui::test]
+    fn disabled_items_cannot_be_confirmed(cx: &mut TestAppContext) {
+        use crate::list::ListDelegate as _;
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        for unavailable in [true, false] {
+            let state = cx.update(|window, cx| {
+                let state = cx.new(|cx| {
+                    SelectState::new(
+                        vec![RemoteChoice {
+                            value: "main",
+                            title: "Main",
+                            unavailable,
+                        }],
+                        Some(IndexPath::new(0)),
+                        window,
+                        cx,
+                    )
+                });
+                state.update(cx, |state, cx| state.set_open(true, cx));
+                let list = state.read(cx).state.list.clone();
+                list.update(cx, |list, cx| {
+                    list.delegate_mut().confirm(false, window, cx)
+                });
+                state
+            });
+            cx.run_until_parked();
+            cx.update(|_, cx| assert_eq!(state.read(cx).state.open, unavailable));
+        }
+    }
+
+    /// A page holding a select under retained views.
+    #[cfg(feature = "gpui-fast")]
+    mod retained {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{
+            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+            TestAppContext, Window, div, px,
+        };
+
+        use crate::{
+            searchable_list::SearchableVec,
+            select::{Select, SelectState},
+        };
+
+        /// A page that shows a select and what it selected, counting its
+        /// renders.
+        struct Page {
+            state: Entity<SelectState<SearchableVec<&'static str>>>,
+            renders: Rc<Cell<usize>>,
+        }
+
+        impl Render for Page {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                let selected = self.state.read(cx).selected_index(cx);
+                div()
+                    .w(px(240.))
+                    .child(Select::new(&self.state))
+                    .child(format!("{selected:?}"))
+            }
+        }
+
+        /// Drawing a select again changes nothing in it: the page around it,
+        /// which reads its selection, is not built again for it.
+        #[gpui::test]
+        fn drawing_a_select_again_leaves_the_page_around_it_retained(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let renders = Rc::new(Cell::new(0));
+            let (_, cx) = cx.add_window_view({
+                let renders = renders.clone();
+                move |window, cx| {
+                    let items = SearchableVec::new(vec!["Rust", "Go", "C++"]);
+                    Page {
+                        state: cx.new(|cx| SelectState::new(items, None, window, cx)),
+                        renders,
+                    }
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let rendered = renders.get();
+            for _ in 0..3 {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert_eq!(renders.get(), rendered, "the page was built again");
+        }
     }
 }

@@ -1,17 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { bodyWithoutFrontmatter, expandSnippets } from './llms';
+import { bodyWithoutFrontmatter, documentationLicenseNotice, expandSnippets } from './llms';
+import { isLatestVersion } from './versions';
+import { expandDocVariables } from './doc-variables.js';
 
 /**
  * Serves a page's markdown at its own `.md` address, the way the published site
- * does — `/docs/components/combobox.md` beside `/docs/components/combobox`.
+ * does — `/component/combobox.md` beside `/component/combobox`.
  * The frontmatter is replaced with the two fields a reader of the raw file
  * needs: where it lives, and what it covers.
  */
 export function markdownResponse(options: {
   /** The entry's own path, relative to the project root. */
   filePath: string;
-  /** Public route of the rendered page, e.g. `/docs/components/combobox`. */
+  /** Public route of the rendered page, e.g. `/component/combobox`. */
   route: string;
   description?: string;
 }): Response {
@@ -21,13 +23,16 @@ export function markdownResponse(options: {
   const front = [`url: ${options.route}.md`];
   if (options.description) front.push(`description: ${options.description}`);
 
-  const body = expandSnippets(bodyWithoutFrontmatter(source), dirname(absolute));
-  const text = `---\n${front.join('\n')}\n---\n\n${body}\n`;
+  const body = expandDocVariables(expandSnippets(bodyWithoutFrontmatter(source), dirname(absolute)));
+  const lang = options.route.startsWith('/zh-CN/') ? 'zh-CN' : 'en';
+  const notice = documentationLicenseNotice(lang, `https://gpui-kit.com${options.route}`);
+  const text = `---\n${front.join('\n')}\n---\n\n${body.trimEnd()}\n\n> ${notice}\n`;
 
   return new Response(text, {
     headers: {
       'Content-Type': 'text/markdown; charset=utf-8',
       'Cache-Control': 'public, max-age=3600',
+      ...(isLatestVersion ? {} : { 'X-Robots-Tag': 'noindex, nofollow' }),
     },
   });
 }

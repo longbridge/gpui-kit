@@ -29,6 +29,7 @@ pub struct TabsStory {
     dynamic_active_tab_ix: usize,
     dynamic_tabs: Vec<usize>,
     dynamic_next_tab_id: usize,
+    dynamic_scroll_handle: ScrollHandle,
     size: Size,
     menu: bool,
     max_width_ix: usize,
@@ -60,6 +61,7 @@ impl TabsStory {
             dynamic_active_tab_ix: 0,
             dynamic_tabs: vec![0, 1, 2],
             dynamic_next_tab_id: 3,
+            dynamic_scroll_handle: ScrollHandle::new(),
             size: Size::default(),
             menu: false,
             max_width_ix: 0,
@@ -81,6 +83,8 @@ impl TabsStory {
         self.dynamic_next_tab_id += 1;
         self.dynamic_tabs.push(id);
         self.dynamic_active_tab_ix = self.dynamic_tabs.len() - 1;
+        self.dynamic_scroll_handle
+            .scroll_to_item(self.dynamic_active_tab_ix);
         cx.notify();
     }
 
@@ -291,6 +295,57 @@ impl Render for TabsStory {
                 ),
             )
             .child(
+                section("Folder Tabs").w_full().child(
+                    v_flex()
+                        .w_full()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .rounded(cx.theme().radius_lg)
+                        .overflow_hidden()
+                        .child(
+                            TabBar::new("folder")
+                                .w_full()
+                                .folder()
+                                .with_size(self.size)
+                                .menu(self.menu)
+                                .when_some(max_width, |this, max_width| this.max_width(max_width))
+                                .selected_index(self.active_tab_ix)
+                                .on_click(cx.listener(|this, ix: &usize, window, cx| {
+                                    this.set_active_tab(*ix, window, cx);
+                                }))
+                                .children(
+                                    [
+                                        "Account",
+                                        "Profile",
+                                        "Documents",
+                                        "Mail",
+                                        "Appearance",
+                                        "Settings",
+                                        "About",
+                                        "License",
+                                    ]
+                                    .into_iter()
+                                    .map(|label| {
+                                        Tab::new().label(label).suffix(
+                                            Button::new(format!("folder-tab-close-{label}"))
+                                                .ghost()
+                                                .xsmall()
+                                                .icon(IconName::Close),
+                                        )
+                                    }),
+                                )
+                                .suffix(
+                                    Button::new("folder-new-tab")
+                                        .ghost()
+                                        .xsmall()
+                                        .mx_1()
+                                        .icon(IconName::Plus),
+                                ),
+                        )
+                        .child(div().h_20().bg(cx.theme().tab_active)),
+                ),
+            )
+            .child(
                 section("Dynamic Tabs")
                     .description(
                         "Tabs can be added, removed, and composed with prefix and suffix content.",
@@ -315,6 +370,7 @@ impl Render for TabsStory {
                     )
                     .child(
                         TabBar::new("segmented-dynamic")
+                            .track_scroll(&self.dynamic_scroll_handle)
                             .w_full()
                             .segmented()
                             .with_size(self.size)

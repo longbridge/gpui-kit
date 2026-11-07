@@ -1,0 +1,25 @@
+---
+export interface Props {
+  lang: 'en' | 'zh-CN';
+  sourceUrl: string;
+}
+
+const { lang, sourceUrl } = Astro.props;
+const isZh = lang === 'zh-CN';
+---
+
+<footer class="docs-license" aria-label={isZh ? '文档许可与署名' : 'Documentation license and attribution'}>
+  <p>
+    <strong>CC BY 4.0</strong>
+    {' · '}
+    {isZh ? 'GPUI Kit 有权授权的原创文档正文与图示可在注明署名后复制或改编。' : 'Documentation prose and original illustrations GPUI Kit has rights to license may be copied or adapted with attribution.'}
+    {' '}
+    <a href="https://creativecommons.org/licenses/by/4.0/" rel="license">{isZh ? '许可条款' : 'License'}</a>{isZh ? '。' : '. '}
+    {isZh ? '请署名 GPUI Kit，链接到' : 'Credit GPUI Kit, link to'}{' '}
+    <a href={sourceUrl}>{isZh ? '本页原文' : 'this source page'}</a>
+    {isZh ? '及 CC BY 4.0 许可，并注明是否修改。' : ' and the CC BY 4.0 license, and indicate any changes.'}
+    {' '}
+    {isZh ? '代码示例与软件源码仍适用' : 'Code examples and software source remain under'}{' '}
+    <a href="https://github.com/longbridge/gpui-kit/blob/main/LICENSE-APACHE">Apache-2.0</a>{isZh ? '。既有 Apache 权利不受影响；第三方材料保留各自许可。' : '. Existing Apache permissions remain; third-party material retains its own terms.'}
+  </p>
+</footer>

@@ -99,17 +99,8 @@ impl ProgressCircle {
                     .outer_radius(prepaint.actual_outer_radius);
 
                 arc.paint(
-                    &ArcData {
-                        data: &(),
-                        index: 0,
-                        value: 100.,
-                        start_angle: 0.,
-                        end_angle: TAU,
-                        pad_angle: 0.,
-                    },
+                    &ArcData::new(&(), 0, 100., 0., TAU),
                     color.opacity(0.2),
-                    None,
-                    None,
                     &prepaint.bounds,
                     window,
                 );
@@ -118,17 +109,8 @@ impl ProgressCircle {
                     let start_angle = (prepaint.start_value / 100.) * TAU;
                     let end_angle = (prepaint.end_value / 100.) * TAU;
                     arc.paint(
-                        &ArcData {
-                            data: &(),
-                            index: 1,
-                            value: prepaint.end_value,
-                            start_angle,
-                            end_angle,
-                            pad_angle: 0.,
-                        },
+                        &ArcData::new(&(), 1, prepaint.end_value, start_angle, end_angle),
                         color,
-                        None,
-                        None,
                         &prepaint.bounds,
                         window,
                     );
@@ -171,7 +153,10 @@ impl RenderOnce for ProgressCircle {
                 .easing(cx.theme().motion_tokens().easing_move.clone()),
             window,
             cx,
-        );
+        )
+        // An overshooting theme curve may carry the value past either end, but
+        // the ring cannot sweep more than once around.
+        .clamp(0., 100.);
 
         let color = self.color.unwrap_or(cx.theme().progress_bar);
 

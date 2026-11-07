@@ -8,6 +8,27 @@ order: 16
 
 `Editor` 是源代码编辑控件。它建立在共享文本引擎之上，增加语言、行号槽、折叠、空白字符显示、文本装饰、高亮、搜索基础、诊断与 LSP 扩展。单行值使用 [Input](./input.md)，普通多行文本使用 [Textarea](./textarea.md)。
 
+## 语言编辑规则
+
+Base 编辑器接受 `LanguageConfig` 及独立的 `auto_close` / `smart_indent` 选项。
+它读取已注册的语言配置，不加载解析器。Component 在初始化时安装 `LanguageProvider`，
+提供内置语言名称、默认规则及语法提供者；Base 使用者也可通过 `set_language_provider`
+安装自己的服务，并用 `set_language_config` 配置语言规则。
+配置字段及语言注册方式参见
+[语言编辑规则](../../component/editor.md#语言编辑规则)。直接使用 Base 时，从
+`gpui_kit::base::input` 导入相同的配置类型。
+
+
+## 快捷键
+
+Base 与样式组件共享键盘和鼠标行为。各平台快捷键、多光标编辑和矩形列选的细节请参阅
+[快捷键与矩形列选](../../component/editor.md#快捷键与矩形列选)。
+
+## 搜索
+
+编辑器内置搜索面板。编辑器聚焦时按 `Ctrl-F`（Windows/Linux）或 `Cmd-F`（macOS）打开。编程式 API（`open_search`、`close_search`、`set_searchable`）与只读行为参见
+[搜索](../../component/editor.md#搜索)。
+
 ## 导入
 
 ```rust
@@ -30,7 +51,18 @@ Editor::new(&editor)
 
 ## 空白字符与装饰
 
-通过 `show_whitespaces(true)` 显示空白字符，通过 `create_decorations_collection` 创建随文本编辑自动跟踪范围的装饰集合。只要装饰仍需生效，就应保留返回的 collection。
+通过 `show_whitespaces(true)` 显示空白字符，通过 `create_decorations_collection` 创建随文本编辑自动跟踪范围的装饰集合。保留句柄用于更新或清空条目；丢弃句柄不会移除装饰。
+
+`create_range_decorations_collection` 创建独立的 `RangeDecoration` 填充或边框集合，只参与绘制。
+文本装饰和几何装饰共享 UTF-8 范围归一化与编辑跟踪。
+所有权、边界亲和性、删除、撤销重做、折叠、绘制顺序及索引语义参见
+[几何范围装饰](../../component/editor.md#几何范围装饰)；直接使用 Base 时，从
+`gpui_kit::base::input` 导入相同的类型。
+
+使用 `create_gutter_decorations_collection` 在行号之前的窄带中标记整行。
+使用 `create_overview_ruler_decorations_collection` 在垂直滚动条轨道上标记整行。
+Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边界的空范围。
+参见[行号槽与概览标尺装饰](../../component/editor.md#行号槽与概览标尺装饰)。
 
 ## 高亮与语言功能
 
@@ -40,7 +72,7 @@ Editor::new(&editor)
 
 ## 字体与表现
 
-Editor 没有独立字体设置，而是使用环境文本样式。可在外层元素设置 `font_family`、`text_size`、字重和行高。应用负责编辑器颜色、行号槽、折叠图标和覆盖层；使用 `InputEditorStyle`、`FoldIconRenderer` 与 provider trait 接入。现成视觉方案参见 [`gpui-component` Editor](../../docs/components/editor.md)。
+Editor 没有独立字体设置，而是使用环境文本样式。可在外层元素设置 `font_family`、`text_size`、字重和行高。应用负责编辑器颜色、行号槽、折叠图标和覆盖层；使用 `InputEditorStyle`、`FoldIconRenderer` 与 provider trait 接入。现成视觉方案参见 [`gpui-component` Editor](../../component/editor.md)。
 
 ## 可运行示例
 

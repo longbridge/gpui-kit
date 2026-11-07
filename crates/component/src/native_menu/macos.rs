@@ -2,7 +2,7 @@
 
 use std::{cell::Cell, sync::Arc};
 
-use gpui::{Action, App, AssetSource, Pixels, Point, SharedString, Window};
+use gpui::{Action, App, AssetSource, Pixels, Point, Window};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send, sel};
@@ -145,7 +145,7 @@ fn build_menu<'a>(
                     ns_item.setTitle(&NSString::from_str(label));
                     ns_item.setEnabled(!*disabled);
                     if let Some(icon) = icon {
-                        if let Some(ns_image) = ns_image_for_icon(icon.path_ref(), asset_source) {
+                        if let Some(ns_image) = ns_image_for_icon(icon, asset_source) {
                             ns_image.setSize(NSSize::new(MENU_IMAGE_SIZE, MENU_IMAGE_SIZE));
                             ns_image.setTemplate(true);
                             ns_item.setImage(Some(&ns_image));
@@ -186,10 +186,10 @@ fn build_menu<'a>(
 }
 
 fn ns_image_for_icon(
-    path: &SharedString,
+    icon: &crate::Icon,
     asset_source: &dyn AssetSource,
 ) -> Option<Retained<NSImage>> {
-    let image = resolve_icon_image(path, asset_source)?;
+    let image = resolve_icon_image(icon, asset_source)?;
     if image.bytes.is_empty() {
         return None;
     }

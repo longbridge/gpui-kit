@@ -66,20 +66,18 @@ impl MyComponent {
 ```rust
 impl MyComponent {
     fn process_file(&mut self, cx: &mut Context<Self>) {
-        let entity = cx.entity().downgrade();
-
-        cx.background_spawn(async move {
+        cx.spawn(async move |this, cx| {
             // Runs on background thread, CPU-intensive
-            let result = heavy_computation().await;
-            result
-        })
-        .then(cx.spawn(move |result, cx| {
-            // Back to foreground to update UI
-            entity.update(cx, |state, cx| {
+            let result = cx
+                .background_spawn(async move { heavy_computation() })
+                .await;
+
+            // Back on the foreground to update UI
+            this.update(cx, |state, cx| {
                 state.result = result;
                 cx.notify();
             }).ok();
-        }))
+        })
         .detach();
     }
 }
@@ -129,15 +127,13 @@ cx.spawn(async move |this, cx: &mut AsyncApp| {
 ### 2. Background Computation + UI Update
 
 ```rust
-cx.background_spawn(async move {
-    heavy_work()
-})
-.then(cx.spawn(move |this, cx: &mut AsyncApp| {
+cx.spawn(async move |this, cx: &mut AsyncApp| {
+    let result = cx.background_spawn(async move { heavy_work() }).await;
     this.update(cx, |state, cx| {
         state.result = result;
         cx.notify();
     }).ok();
-}))
+})
 .detach();
 ```
 
@@ -210,17 +206,20 @@ cx.background_spawn(async move {
 });
 ```
 
-### ✅ Do: Use foreground task or chain
+### ✅ Do: Await the background task inside a foreground task
 
 ```rust
-// ✅ Correct: Chain with foreground task
-cx.background_spawn(async move { data })
-    .then(cx.spawn(move |data, cx| {
-        entity.update(cx, |state, cx| {
-            state.data = data;
-            cx.notify();
-        }).ok();
-    }))
-    .detach();
+// ✅ Correct: the foreground task awaits the background result
+cx.spawn(async move |this, cx| {
+    let data = cx.background_spawn(async move { load_data() }).await;
+    this.update(cx, |state, cx| {
+        state.data = data;
+        cx.notify();
+    }).ok();
+})
+.detach();
 ```
+
+GPUI has no `Task::then`. Await the background task inside `cx.spawn`. The
+closure receives `(WeakEntity<Self>, &mut AsyncApp)`, not the background result.
 

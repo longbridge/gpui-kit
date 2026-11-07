@@ -95,9 +95,9 @@ impl Render for NotificationStory {
                                             .on_click(window.listener_for(
                                                 &view,
                                                 move |_, _, _, cx| {
-                                                    Theme::global_mut(cx).notification.placement =
-                                                        placement;
-                                                    cx.notify();
+                                                    Theme::update(cx, |theme| {
+                                                        theme.notification.placement = placement
+                                                    });
                                                 },
                                             )),
                                     )
@@ -118,9 +118,9 @@ impl Render for NotificationStory {
                                         .on_click(window.listener_for(
                                             &view,
                                             move |_, _, _, cx| {
-                                                Theme::global_mut(cx).notification.max_items =
-                                                    max_items;
-                                                cx.notify();
+                                                Theme::update(cx, |theme| {
+                                                    theme.notification.max_items = max_items
+                                                });
                                             },
                                         )),
                                 )

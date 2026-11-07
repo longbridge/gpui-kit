@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -8,6 +9,7 @@ use gpui::{
 
 use crate::{
     StyledExt as _,
+    a11y_disabled::A11yDisabledExt as _,
     actions::{Cancel, Confirm},
 };
 
@@ -17,7 +19,7 @@ type OpenChange = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 /// positioning, and visual presentation; Base owns focus and open/dismiss keyboard behavior.
 #[derive(IntoElement)]
 pub struct DatePicker {
-    base: gpui::Stateful<Div>,
+    base: crate::ObservedElement<gpui::Stateful<Div>>,
     open: bool,
     disabled: bool,
     focus_handle: FocusHandle,
@@ -29,7 +31,7 @@ pub struct DatePicker {
 impl DatePicker {
     pub fn new(id: impl Into<ElementId>, focus_handle: &FocusHandle) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             open: false,
             disabled: false,
             focus_handle: focus_handle.clone(),
@@ -68,6 +70,11 @@ impl InteractiveElement for DatePicker {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
+    }
 }
 impl StatefulInteractiveElement for DatePicker {}
 impl RenderOnce for DatePicker {
@@ -82,12 +89,12 @@ impl RenderOnce for DatePicker {
             .on_action({
                 let handler = handler.clone();
                 move |_: &Confirm, window, cx| {
+                    // Enter opens the picker, and closes it again once the
+                    // value shown in the popup is the one the user wants.
                     if disabled {
                         cx.propagate();
-                    } else if !open {
-                        if let Some(handler) = &handler {
-                            handler(true, window, cx);
-                        }
+                    } else if let Some(handler) = &handler {
+                        handler(!open, window, cx);
                     }
                 }
             })
@@ -102,5 +109,6 @@ impl RenderOnce for DatePicker {
             })
             .refine_style(&self.style)
             .children(self.children)
+            .a11y_disabled(disabled)
     }
 }

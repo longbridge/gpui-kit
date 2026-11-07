@@ -56,6 +56,10 @@ pub(crate) struct FrameSampler {
     /// for; for one up from the start it is the cold start. Neither is the
     /// steady state the rows below the headline are describing.
     drained_backlog: bool,
+    /// The readout clock's notifies that no draw has answered yet: when the
+    /// first of them fired, and how many there have been. See
+    /// [`Self::expect_own_frame`].
+    own_frame_pending: Option<(Instant, u64)>,
     capacity: usize,
 }
 
@@ -69,8 +73,31 @@ impl FrameSampler {
             present_times: VecDeque::new(),
             warmup: WARMUP_FRAMES,
             drained_backlog: false,
+            own_frame_pending: None,
             capacity,
         }
+    }
+
+    /// Announces that the HUD itself is about to dirty the window, so the frame
+    /// that answers is not counted as the application's.
+    ///
+    /// The readout clock has to `notify` to move the digits, and to GPUI that
+    /// is an invalidation like any other: the window is drawn in full and the
+    /// trace records the draw. Left in, the HUD would be measuring a frame it
+    /// caused — twice a second, cold, on a window that had nothing to redraw —
+    /// and reporting it as the application's `FRAME` and `MAX`. So the clock
+    /// says when it fired, and the first draw after `at` is dropped if the
+    /// clock's notifies were the only invalidations it carried. Coalesced with
+    /// anything else, the application asked for the frame too, and it stays.
+    ///
+    /// The notifies are counted rather than flagged: a window the platform is
+    /// not drawing — occluded, minimized — accumulates one per tick, and the
+    /// draw that finally answers carries all of them.
+    pub(crate) fn expect_own_frame(&mut self, at: Instant) {
+        self.own_frame_pending = Some(match self.own_frame_pending {
+            Some((since, notifies)) => (since, notifies + 1),
+            None => (at, 1),
+        });
     }
 
     /// Drains the frames drawn since the previous call. Call once per rendered
@@ -97,6 +124,15 @@ impl FrameSampler {
         }
         self.ingest_draws(draws);
         self.ingest_presents(presents, Instant::now());
+    }
+
+    /// Starts over, as for a HUD shown again after a spell hidden: a new
+    /// collector, because the frame trace was cleared meanwhile and the counter
+    /// its cursor is measured against with it, and nothing retained — the
+    /// frames drawn in between were not watched, and the first ones back are
+    /// cold.
+    pub(crate) fn reset(&mut self) {
+        *self = Self::new(self.window_id, self.capacity);
     }
 
     pub(crate) fn set_capacity(&mut self, capacity: usize) {
@@ -226,6 +262,18 @@ impl FrameSampler {
         for timing in timings {
             if timing.window_id != self.window_id {
                 continue;
+            }
+
+            if let Some((since, notifies)) = self.own_frame_pending
+                && timing.draw_start >= since
+            {
+                // The first draw after the clock fired is the one that answered
+                // it; carrying nothing but the clock's notifies it is the HUD's
+                // frame, carrying more it is also the application's.
+                self.own_frame_pending = None;
+                if timing.invalidations <= notifies {
+                    continue;
+                }
             }
 
             if self.warmup > 0 {
@@ -478,6 +526,9 @@ mod tests {
             invalidations,
             draw_start: start,
             draw_end: start + draw,
+            refresh_interval: None,
+            signal_at: None,
+            phases: Default::default(),
         }
     }
 
@@ -489,6 +540,160 @@ mod tests {
             sampler.ingest_draws(vec![timing(window_id, Duration::from_millis(*millis))]);
         }
         sampler
+    }
+
+    /// A frame whose draw began at `start`.
+    fn frame_at(
+        window_id: WindowId,
+        start: Instant,
+        draw: Duration,
+        invalidations: u64,
+    ) -> FrameTiming {
+        FrameTiming {
+            window_id,
+            dirty_at: None,
+            invalidations,
+            draw_start: start,
+            draw_end: start + draw,
+            refresh_interval: None,
+            signal_at: None,
+            phases: Default::default(),
+        }
+    }
+
+    #[test]
+    fn the_frame_answering_the_huds_own_clock_is_not_a_sample() {
+        let window_id = WindowId::from(1);
+        let mut sampler = warmed_sampler(window_id, 8);
+        let tick = Instant::now();
+
+        sampler.expect_own_frame(tick);
+        // Only the clock's notify was pending, so this draw is the HUD's.
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(1),
+            Duration::from_millis(12),
+            1,
+        )]);
+        assert_eq!(sampler.samples().len(), 0);
+
+        // The frames after it are the application's again.
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(200),
+            Duration::from_millis(5),
+            1,
+        )]);
+        assert_eq!(sampler.mean_draw(), Duration::from_millis(5));
+    }
+
+    #[test]
+    fn a_frame_the_application_also_asked_for_stays_a_sample() {
+        let window_id = WindowId::from(1);
+        let mut sampler = warmed_sampler(window_id, 8);
+        let tick = Instant::now();
+
+        sampler.expect_own_frame(tick);
+        // The clock's notify landed in the same frame as an invalidation of
+        // the application's own: the work was wanted, so the cost counts.
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(1),
+            Duration::from_millis(12),
+            2,
+        )]);
+        assert_eq!(sampler.mean_draw(), Duration::from_millis(12));
+
+        // And it consumed the announcement: the next lone frame is not the
+        // HUD's.
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(300),
+            Duration::from_millis(6),
+            1,
+        )]);
+        assert_eq!(sampler.samples().len(), 2);
+    }
+
+    #[test]
+    fn several_unanswered_ticks_are_still_one_frame_of_the_huds() {
+        let window_id = WindowId::from(1);
+        let mut sampler = warmed_sampler(window_id, 8);
+        let tick = Instant::now();
+
+        // An occluded window is not drawn, so the clock's notifies pile up in
+        // the frame that is finally drawn when it comes back.
+        sampler.expect_own_frame(tick);
+        sampler.expect_own_frame(tick + Duration::from_millis(500));
+        sampler.expect_own_frame(tick + Duration::from_millis(1000));
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(1100),
+            Duration::from_millis(30),
+            3,
+        )]);
+        assert_eq!(sampler.samples().len(), 0);
+
+        // One more invalidation than the clock accounts for is the
+        // application's, and the frame is sampled.
+        sampler.expect_own_frame(tick + Duration::from_millis(1500));
+        sampler.expect_own_frame(tick + Duration::from_millis(2000));
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(2100),
+            Duration::from_millis(9),
+            3,
+        )]);
+        assert_eq!(sampler.mean_draw(), Duration::from_millis(9));
+    }
+
+    #[test]
+    fn a_frame_drawn_before_the_clock_fired_is_the_applications() {
+        let window_id = WindowId::from(1);
+        let mut sampler = warmed_sampler(window_id, 8);
+        let tick = Instant::now();
+
+        sampler.expect_own_frame(tick);
+        // Drawn before the clock fired, so the clock had nothing to do with it;
+        // the announcement waits for the draw that does answer it.
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick - Duration::from_millis(5),
+            Duration::from_millis(7),
+            1,
+        )]);
+        assert_eq!(sampler.samples().len(), 1);
+
+        sampler.ingest_draws(vec![frame_at(
+            window_id,
+            tick + Duration::from_millis(1),
+            Duration::from_millis(12),
+            1,
+        )]);
+        assert_eq!(
+            sampler.samples().len(),
+            1,
+            "the clock's own frame was sampled"
+        );
+        assert_eq!(sampler.mean_draw(), Duration::from_millis(7));
+    }
+
+    #[test]
+    fn a_reset_sampler_keeps_nothing_and_warms_up_again() {
+        let window_id = WindowId::from(1);
+        let mut sampler = warmed_sampler(window_id, 8);
+        sampler.ingest_draws(vec![timing(window_id, Duration::from_millis(5))]);
+        sampler.ingest_presents([Instant::now()], Instant::now());
+        assert_eq!(sampler.samples().len(), 1);
+
+        sampler.reset();
+        assert_eq!(sampler.samples().len(), 0);
+        assert_eq!(sampler.fps(), 0.);
+        assert_eq!(sampler.capacity(), 8);
+
+        // The first frames after coming back are warm-up again.
+        sampler.ingest_draws(vec![timing(window_id, Duration::from_millis(5))]);
+        assert_eq!(sampler.samples().len(), 0);
     }
 
     #[test]

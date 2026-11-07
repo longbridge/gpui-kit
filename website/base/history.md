@@ -32,9 +32,8 @@ commands that operate on it:
   composition.
 
 Within gpui-component, `NavStack` uses `History<NavEntry>` for page navigation,
-while Dock's tiles canvas uses `UndoHistory<TileChange>` to reverse grouped
-move and resize changes. Input deliberately keeps its specialized private undo
-manager.
+and `UndoHistory` is available to any state that wants grouped undo and redo.
+Input deliberately keeps its specialized private undo manager.
 
 ## `History`: a navigation trail
 

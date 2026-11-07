@@ -11,16 +11,12 @@ use std::time::{Duration, Instant};
 use std::{
     collections::{BTreeSet, HashMap},
     ops::{ControlFlow, Range},
-    usize,
 };
 use sum_tree::Bias;
 use tree_sitter::{
     InputEdit, ParseOptions, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
 
-/// When a node spans more than this many bytes beyond the requested query
-/// range, we recurse into its children instead of querying it directly.
-const LARGE_NODE_THRESHOLD: usize = 8 * 1024;
 const MAX_INJECTION_RANGES: usize = 4096;
 const MAX_INJECTION_BYTES: usize = 512 * 1024;
 const MAX_INJECTION_LANGUAGE_BYTES: usize = 64;
@@ -68,6 +64,8 @@ pub(crate) struct InjectionLayer {
     pub(crate) ranges: Vec<tree_sitter::Range>,
     pub(crate) byte_range: Range<usize>,
     pub(crate) tree: Tree,
+    /// Whether this layer parses the ranges of every match combined.
+    pub(crate) combined: bool,
 }
 
 /// Data needed to compute injection layers on a background thread.
@@ -75,7 +73,8 @@ pub(crate) struct InjectionParseData {
     pub(crate) query: Arc<Query>,
     pub(crate) content_capture_index: Option<u32>,
     pub(crate) language_capture_index: Option<u32>,
-    /// Old injection trees that can be reused when the injected ranges are unchanged.
+    /// Old injection layers, edited to match the text being parsed, whose
+    /// trees are reused as the old trees of the new layers.
     pub(crate) old_layers: Vec<ReusableInjectionLayer>,
 }
 
@@ -84,6 +83,19 @@ pub(crate) struct ReusableInjectionLayer {
     highlight_query: Arc<Query>,
     pub(crate) ranges: Vec<tree_sitter::Range>,
     pub(crate) tree: Tree,
+    pub(crate) combined: bool,
+}
+
+impl From<InjectionLayer> for ReusableInjectionLayer {
+    fn from(layer: InjectionLayer) -> Self {
+        Self {
+            language_name: layer.language_name,
+            highlight_query: layer.highlight_query,
+            ranges: layer.ranges,
+            tree: layer.tree,
+            combined: layer.combined,
+        }
+    }
 }
 
 struct TextProvider<'a>(&'a Rope);
@@ -139,12 +151,33 @@ impl<'a> Iterator for ByteChunks<'a> {
     }
 }
 
+/// Answer a tree-sitter read request at byte `offset`.
+///
+/// Tree-sitter reads bytes, not chars: a stale tree or stale included ranges
+/// can ask for an offset inside a multi-byte character. Slicing `&str` there
+/// panics, and a panic inside tree-sitter's `extern "C"` read callback aborts
+/// the process, so the chunk is sliced as bytes.
+pub(crate) fn parse_input_bytes(text: &Rope, offset: usize) -> &[u8] {
+    if offset >= text.len() {
+        return &[];
+    }
+
+    let (chunk, chunk_byte_ix) = text.chunk(offset);
+    &chunk.as_bytes()[offset - chunk_byte_ix..]
+}
+
 fn injection_range_len(range: &tree_sitter::Range) -> usize {
     range.end_byte.saturating_sub(range.start_byte)
 }
 
 fn injection_ranges_byte_count(ranges: &[tree_sitter::Range]) -> usize {
     ranges.iter().map(injection_range_len).sum()
+}
+
+fn bounding_byte_range(ranges: &[tree_sitter::Range]) -> Option<Range<usize>> {
+    let start = ranges.iter().map(|r| r.start_byte).min()?;
+    let end = ranges.iter().map(|r| r.end_byte).max()?;
+    Some(start..end)
 }
 
 fn injection_ranges_within_limits(ranges: &[tree_sitter::Range]) -> bool {
@@ -155,10 +188,15 @@ fn injection_ranges_within_limits(ranges: &[tree_sitter::Range]) -> bool {
 /// Read a captured injection language without ever allocating an unbounded
 /// amount of source text. Language identifiers in fenced code blocks are tiny;
 /// longer captures cannot name a registered language and are ignored.
+///
+/// The range comes from a tree that can be stale relative to `text`; one that
+/// no longer lands on char boundaries cannot name a language either.
 fn captured_injection_language(text: &Rope, range: Range<usize>) -> Option<SharedString> {
     if range.end > text.len()
         || range.start >= range.end
         || range.end.saturating_sub(range.start) > MAX_INJECTION_LANGUAGE_BYTES
+        || !text.is_char_boundary(range.start)
+        || !text.is_char_boundary(range.end)
     {
         return None;
     }
@@ -243,8 +281,13 @@ fn should_include_injection_range(
 /// spans, links, images, autolinks). If that query gains a construct with a new
 /// trigger character (e.g. GFM bare autolinks), add it here or the construct
 /// will silently lose highlighting.
+///
+/// The range comes from a tree that can be stale relative to `text`, so it is
+/// clipped to the text's char boundaries before slicing.
 fn markdown_inline_range_has_trigger(text: &Rope, range: Range<usize>) -> bool {
-    text.slice(range).bytes().any(|byte| {
+    let start = text.clip_offset(range.start, Bias::Left);
+    let end = text.clip_offset(range.end, Bias::Right).max(start);
+    text.slice(start..end).bytes().any(|byte| {
         matches!(
             byte,
             b'*' | b'_' | b'`' | b'[' | b']' | b'(' | b')' | b'<' | b'>' | b'!' | b'~' | b'$'
@@ -381,14 +424,17 @@ impl SyntaxHighlighter {
             ));
         };
 
-        // Languages without grammar default to a highlighter that never
-        // parses and creates no styles.
-        let Some(grammar) = config.language.as_ref() else {
+        // Languages without a parser (neither a statically linked grammar nor a
+        // registered parser factory) default to a highlighter that never parses
+        // and creates no styles.
+        if !LanguageRegistry::singleton().has_parser(lang) {
             return Ok(Self::build_inert(config.name.clone()));
-        };
+        }
 
-        let mut parser = Parser::new();
-        parser.set_language(grammar).context("parse set_language")?;
+        let (mut parser, grammar) = LanguageRegistry::singleton().parser(lang)?;
+        parser
+            .set_language(&grammar)
+            .context("parse set_language")?;
 
         // Concatenate the query strings, keeping track of the start offset of each section.
         let mut query_source = String::new();
@@ -400,7 +446,7 @@ impl SyntaxHighlighter {
 
         // Construct a single query by concatenating the three query strings, but record the
         // range of pattern indices that belong to each individual string.
-        let mut query = Query::new(grammar, &query_source).context("new query")?;
+        let mut query = Query::new(&grammar, &query_source).context("new query")?;
 
         let mut locals_pattern_index = 0;
         let mut highlights_pattern_index = 0;
@@ -417,7 +463,7 @@ impl SyntaxHighlighter {
         }
 
         let injections_query = if !config.injections.is_empty() {
-            Query::new(grammar, &config.injections).ok().map(Arc::new)
+            Query::new(&grammar, &config.injections).ok().map(Arc::new)
         } else {
             None
         };
@@ -505,7 +551,29 @@ impl SyntaxHighlighter {
         if let (Some(edit), Some(tree)) = (edit, self.tree.as_mut()) {
             tree.edit(&edit);
         }
+        self.edit_injection_layers(edit.as_ref());
         self.text = text.clone();
+    }
+
+    /// Keep the injection layers in step with `edit`, the way `Tree::edit`
+    /// keeps a tree, so the next injection pass reuses their trees instead of
+    /// parsing every layer after the edit from scratch. Without an edit the
+    /// layers no longer describe the text and are dropped.
+    fn edit_injection_layers(&mut self, edit: Option<&InputEdit>) {
+        let Some(edit) = edit else {
+            self.injection_layers.clear();
+            return;
+        };
+
+        for layer in &mut self.injection_layers {
+            layer.tree.edit(edit);
+            for range in &mut layer.ranges {
+                edit.edit_range(range);
+            }
+            if let Some(byte_range) = bounding_byte_range(&layer.ranges) {
+                layer.byte_range = byte_range;
+            }
+        }
     }
 
     /// Returns the language name for this highlighter.
@@ -532,6 +600,18 @@ impl SyntaxHighlighter {
         text: &Rope,
         timeout: Option<Duration>,
     ) -> bool {
+        self.update_edits(edit.as_slice(), text, timeout)
+    }
+
+    /// Like [`Self::update`] for several edits, in the order they were applied
+    /// to reach `text`: the tree takes every edit, then reparses once. No
+    /// edits means the change is unknown, as `None` does for `update`.
+    pub(crate) fn update_edits(
+        &mut self,
+        edits: &[InputEdit],
+        text: &Rope,
+        timeout: Option<Duration>,
+    ) -> bool {
         if self.text.eq(text) {
             return true;
         }
@@ -542,20 +622,32 @@ impl SyntaxHighlighter {
             return true;
         }
 
-        let edit = edit.unwrap_or(InputEdit {
-            start_byte: 0,
-            old_end_byte: 0,
-            new_end_byte: text.len(),
-            start_position: Point::new(0, 0),
-            old_end_position: Point::new(0, 0),
-            new_end_position: Point::new(0, 0),
-        });
+        let full_edit;
+        let edits = if edits.is_empty() {
+            self.edit_injection_layers(None);
+            full_edit = [InputEdit {
+                start_byte: 0,
+                old_end_byte: 0,
+                new_end_byte: text.len(),
+                start_position: Point::new(0, 0),
+                old_end_position: Point::new(0, 0),
+                new_end_position: Point::new(0, 0),
+            }];
+            &full_edit[..]
+        } else {
+            for edit in edits {
+                self.edit_injection_layers(Some(edit));
+            }
+            edits
+        };
 
         let mut old_tree = self
             .tree
             .take()
             .unwrap_or(self.parser.parse("", None).unwrap());
-        old_tree.edit(&edit);
+        for edit in edits {
+            old_tree.edit(edit);
+        }
 
         let mut timed_out = false;
         let start = Instant::now();
@@ -574,14 +666,7 @@ impl SyntaxHighlighter {
 
         let options = ParseOptions::new().progress_callback(&mut progress);
         let new_tree = self.parser.parse_with_options(
-            &mut move |offset, _| {
-                if offset >= text.len() {
-                    ""
-                } else {
-                    let (chunk, chunk_byte_ix) = text.chunk(offset);
-                    &chunk[offset - chunk_byte_ix..]
-                }
-            },
+            &mut move |offset, _| parse_input_bytes(text, offset),
             Some(&old_tree),
             Some(options),
         );
@@ -616,6 +701,7 @@ impl SyntaxHighlighter {
                     highlight_query: layer.highlight_query.clone(),
                     ranges: layer.ranges.clone(),
                     tree: layer.tree.clone(),
+                    combined: layer.combined,
                 })
                 .collect(),
         })
@@ -675,7 +761,8 @@ impl SyntaxHighlighter {
                 return Some((config.name, query.clone()));
             }
 
-            let query = match Query::new(config.language.as_ref()?, &config.highlights) {
+            let grammar = LanguageRegistry::singleton().grammar(language_name).ok()?;
+            let query = match Query::new(&grammar, &config.highlights) {
                 Ok(query) => Arc::new(query),
                 Err(error) => {
                     tracing::error!(
@@ -695,15 +782,27 @@ impl SyntaxHighlighter {
         let mut matches = cursor.matches(&data.query, root_node, TextProvider(text));
 
         let mut combined_ranges: HashMap<SharedString, CombinedRanges> = HashMap::new();
+        // Old layers were edited along with the text, so a non-combined layer
+        // whose content did not change keeps exactly the same ranges.
         let old_layer_trees: HashMap<_, _> = data
             .old_layers
             .iter()
+            .filter(|layer| !layer.combined)
             .map(|layer| {
                 (
                     (layer.language_name.clone(), ranges_cache_key(&layer.ranges)),
                     &layer.tree,
                 )
             })
+            .collect();
+        // A combined layer spans many matches, so an edit anywhere in them
+        // changes its ranges. Tree-sitter accepts an edited old tree whose
+        // included ranges differ and reparses only where they changed.
+        let old_combined_trees: HashMap<SharedString, &Tree> = data
+            .old_layers
+            .iter()
+            .filter(|layer| layer.combined)
+            .map(|layer| (layer.language_name.clone(), &layer.tree))
             .collect();
         // Query objects are relatively expensive. Reuse one Arc per language
         // from the previous parse and compile only languages present in this
@@ -803,6 +902,7 @@ impl SyntaxHighlighter {
                     highlight_query,
                     ranges,
                     old_tree,
+                    false,
                     text,
                 ) {
                     new_layers.push(layer);
@@ -820,15 +920,18 @@ impl SyntaxHighlighter {
             if ranges.is_empty() {
                 continue;
             }
-            let old_tree = old_layer_trees
-                .get(&(language_name.clone(), ranges_cache_key(&ranges)))
-                .copied();
+            let old_tree = old_combined_trees.get(&language_name).copied();
             let Some(highlight_query) = highlight_queries.get(&language_name).cloned() else {
                 continue;
             };
-            if let Some(layer) =
-                Self::parse_injection_layer(&language_name, highlight_query, ranges, old_tree, text)
-            {
+            if let Some(layer) = Self::parse_injection_layer(
+                &language_name,
+                highlight_query,
+                ranges,
+                old_tree,
+                true,
+                text,
+            ) {
                 new_layers.push(layer);
             }
         }
@@ -837,22 +940,17 @@ impl SyntaxHighlighter {
     }
 
     /// Parse one injection layer over the given included ranges.
-    /// Reuses the previous tree only when the language and byte ranges still match.
+    /// `old_tree`, when given, has been edited to match `text`.
     fn parse_injection_layer(
         language_name: &SharedString,
         highlight_query: Arc<Query>,
         ranges: Vec<tree_sitter::Range>,
         old_tree: Option<&Tree>,
+        combined: bool,
         text: &Rope,
     ) -> Option<InjectionLayer> {
-        fn bounding_byte_range(ranges: &[tree_sitter::Range]) -> Option<Range<usize>> {
-            let start = ranges.iter().map(|r| r.start_byte).min()?;
-            let end = ranges.iter().map(|r| r.end_byte).max()?;
-            Some(start..end)
-        }
-        let config = LanguageRegistry::singleton().language(language_name)?;
-        let mut parser = Parser::new();
-        parser.set_language(config.language.as_ref()?).ok()?;
+        let (mut parser, grammar) = LanguageRegistry::singleton().parser(language_name).ok()?;
+        parser.set_language(&grammar).ok()?;
         parser.set_included_ranges(&ranges).ok()?;
         let parse_start = Instant::now();
         let mut timed_out = false;
@@ -867,14 +965,7 @@ impl SyntaxHighlighter {
         let options = ParseOptions::new().progress_callback(&mut progress);
 
         let new_tree = parser.parse_with_options(
-            &mut |offset, _| {
-                if offset >= text.len() {
-                    ""
-                } else {
-                    let (chunk, chunk_byte_ix) = text.chunk(offset);
-                    &chunk[offset - chunk_byte_ix..]
-                }
-            },
+            &mut |offset, _| parse_input_bytes(text, offset),
             old_tree,
             Some(options),
         )?;
@@ -889,6 +980,7 @@ impl SyntaxHighlighter {
             ranges,
             byte_range,
             tree: new_tree,
+            combined,
         })
     }
 
@@ -914,11 +1006,21 @@ impl SyntaxHighlighter {
     /// Parse injection layers after the main tree is updated.
     /// pattern: parse once in update, query many times in render.
     fn parse_injection_layers(&mut self, tree: &Tree) {
-        let Some(data) = self.injection_parse_data() else {
+        let Some(query) = self.injections_query.clone() else {
             self.injection_layers.clear();
             return;
         };
-        self.injection_layers = Self::compute_injection_layers(data, tree, &self.text.clone());
+        // The old layers are replaced below, so move them instead of cloning.
+        let data = InjectionParseData {
+            query,
+            content_capture_index: self.injection_content_capture_index,
+            language_capture_index: self.injection_language_capture_index,
+            old_layers: std::mem::take(&mut self.injection_layers)
+                .into_iter()
+                .map(ReusableInjectionLayer::from)
+                .collect(),
+        };
+        self.injection_layers = Self::compute_injection_layers(data, tree, &self.text);
     }
 
     /// Match the visible ranges of nodes in the Tree for highlighting.
@@ -986,41 +1088,37 @@ impl SyntaxHighlighter {
             }
         }
 
-        let query_nodes = collect_query_nodes(root_node, &range);
+        let mut query_cursor = QueryCursor::new();
+        query_cursor.set_byte_range(range.clone());
 
-        for query_node in &query_nodes {
-            let mut query_cursor = QueryCursor::new();
-            query_cursor.set_byte_range(range.clone());
+        let mut matches = query_cursor.matches(query, root_node, TextProvider(source));
 
-            let mut matches = query_cursor.matches(&query, *query_node, TextProvider(&source));
+        while let Some(query_match) = matches.next() {
+            for cap in query_match.captures {
+                let node = cap.node;
 
-            while let Some(query_match) = matches.next() {
-                for cap in query_match.captures {
-                    let node = cap.node;
+                let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
+                    continue;
+                };
 
-                    let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
-                        continue;
-                    };
+                let node_range: Range<usize> = node.start_byte()..node.end_byte();
+                let highlight_name = SharedString::from(highlight_name.to_string());
 
-                    let node_range: Range<usize> = node.start_byte()..node.end_byte();
-                    let highlight_name = SharedString::from(highlight_name.to_string());
+                // Merge near range and same highlight name
+                let last_item = highlights.last();
+                let last_range = last_item.map(|item| &item.range).unwrap_or(&(0..0));
+                let last_highlight_name = last_item.map(|item| item.name.clone());
 
-                    // Merge near range and same highlight name
-                    let last_item = highlights.last();
-                    let last_range = last_item.map(|item| &item.range).unwrap_or(&(0..0));
-                    let last_highlight_name = last_item.map(|item| item.name.clone());
-
-                    if last_range == &node_range {
-                        // case:
-                        // last_range: 213..220, last_highlight_name: Some("property")
-                        // last_range: 213..220, last_highlight_name: Some("string")
-                        highlights.push(HighlightItem::new(
-                            node_range,
-                            last_highlight_name.unwrap_or(highlight_name),
-                        ));
-                    } else {
-                        highlights.push(HighlightItem::new(node_range, highlight_name.clone()));
-                    }
+                if last_range == &node_range {
+                    // case:
+                    // last_range: 213..220, last_highlight_name: Some("property")
+                    // last_range: 213..220, last_highlight_name: Some("string")
+                    highlights.push(HighlightItem::new(
+                        node_range,
+                        last_highlight_name.unwrap_or(highlight_name),
+                    ));
+                } else {
+                    highlights.push(HighlightItem::new(node_range, highlight_name.clone()));
                 }
             }
         }
@@ -1036,6 +1134,24 @@ impl SyntaxHighlighter {
         // }
 
         highlights
+    }
+
+    /// Parses `text` without reusing a tree from unrelated text and returns
+    /// every capture in precedence order: later captures override earlier ones.
+    ///
+    /// Injected languages are skipped: building their layers compiles a query
+    /// on every parse, which dominates the cost of many short fragments.
+    pub(crate) fn capture_names(&mut self, text: &Rope) -> Vec<(Range<usize>, SharedString)> {
+        self.tree = None;
+        self.text = Rope::new();
+        self.injection_layers.clear();
+        let injections_query = self.injections_query.take();
+        self.update(None, text, None);
+        self.injections_query = injections_query;
+        self.match_styles(0..text.len())
+            .into_iter()
+            .map(|item| (item.range, item.name))
+            .collect()
     }
 
     /// Returns the syntax highlight styles for a range of text.
@@ -1213,57 +1329,6 @@ pub(crate) fn unique_styles(
     merged
 }
 
-/// Walk the tree and collect nodes suitable for querying, skipping subtrees
-/// that fall entirely outside the byte range. Nodes much larger than the
-/// query range are recursed into so that `QueryCursor` only visits the
-/// relevant portion of the tree.
-fn collect_query_nodes<'a>(
-    root: tree_sitter::Node<'a>,
-    range: &Range<usize>,
-) -> Vec<tree_sitter::Node<'a>> {
-    let mut nodes = Vec::new();
-    collect_query_nodes_inner(root, range, &mut nodes);
-    if nodes.is_empty() {
-        nodes.push(root);
-    }
-    nodes
-}
-
-fn collect_query_nodes_inner<'a>(
-    node: tree_sitter::Node<'a>,
-    range: &Range<usize>,
-    out: &mut Vec<tree_sitter::Node<'a>>,
-) {
-    // Skip nodes entirely outside the range.
-    if node.end_byte() <= range.start || node.start_byte() >= range.end {
-        return;
-    }
-
-    let node_span = node.end_byte() - node.start_byte();
-    let range_span = range.end - range.start;
-
-    // Use `goto_first_child_for_byte` to seek directly to the first
-    // overlapping child instead of iterating all children from the start.
-    if node_span > range_span + LARGE_NODE_THRESHOLD && node.child_count() > 0 {
-        let mut cursor = node.walk();
-        if cursor.goto_first_child_for_byte(range.start).is_some() {
-            loop {
-                let child = cursor.node();
-                if child.start_byte() >= range.end {
-                    break;
-                }
-                collect_query_nodes_inner(child, range, out);
-                if !cursor.goto_next_sibling() {
-                    break;
-                }
-            }
-        }
-        return;
-    }
-
-    out.push(node);
-}
-
 /// Merge other style (Other on top)
 fn merge_highlight_style(style: &mut HighlightStyle, other: &HighlightStyle) {
     if let Some(color) = other.color {
@@ -1300,6 +1365,48 @@ mod tests {
         let mut style = HighlightStyle::default();
         style.color = Some(color);
         style
+    }
+
+    #[test]
+    fn test_parse_input_bytes_inside_multibyte_char() {
+        // Stale trees make tree-sitter read from offsets inside a character;
+        // the read callback must return bytes instead of panicking.
+        let rope = Rope::from("let s = \"你好\";");
+        let start = "let s = \"".len();
+        assert_eq!(
+            parse_input_bytes(&rope, start + 1),
+            &"你好\";".as_bytes()[1..]
+        );
+        assert_eq!(parse_input_bytes(&rope, rope.len()), b"");
+        assert_eq!(parse_input_bytes(&rope, rope.len() + 4), b"");
+    }
+
+    #[test]
+    fn test_injection_ranges_inside_multibyte_char() {
+        // Injection ranges come from a tree that can be stale relative to the
+        // text, so they may start or end inside a character (#3315).
+        let rope = Rope::from("# 你\n*a*");
+        let inside = "# ".len() + 1;
+
+        assert!(!markdown_inline_range_has_trigger(
+            &rope,
+            inside..inside + 1
+        ));
+        assert!(markdown_inline_range_has_trigger(&rope, inside..rope.len()));
+        assert!(markdown_inline_range_has_trigger(
+            &rope,
+            inside..rope.len() + 4
+        ));
+        assert!(!markdown_inline_range_has_trigger(
+            &rope,
+            rope.len() + 1..rope.len() + 4
+        ));
+
+        assert_eq!(captured_injection_language(&rope, inside..rope.len()), None);
+        assert_eq!(
+            captured_injection_language(&rope, "# ".len()..inside + 2),
+            Some("你".into())
+        );
     }
 
     #[test]
@@ -1461,6 +1568,31 @@ console.log(answer);
 
     #[test]
     #[cfg(feature = "tree-sitter-languages")]
+    fn test_kotlin_highlights_string_templates() {
+        let kotlin = "fun greet(name: String) = \"hi $name, ${name.length}\"\n";
+
+        let rope = Rope::from_str(kotlin);
+        let mut highlighter = SyntaxHighlighter::new("kotlin");
+        highlighter.update(None, &rope, None);
+
+        let highlights = highlighter.match_styles(0..kotlin.len());
+
+        assert!(
+            has_highlight_covering(&highlights, kotlin, "fun", "keyword"),
+            "Kotlin keywords should be highlighted"
+        );
+        assert!(
+            has_highlight_covering(&highlights, kotlin, "$", "punctuation.special"),
+            "A string template's `$` should be highlighted"
+        );
+        assert!(
+            has_highlight_covering(&highlights, kotlin, "${", "punctuation.special"),
+            "A string template's `${{` should be highlighted"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-languages")]
     fn test_markdown_fenced_code_injects_captured_language() {
         let markdown = "```rs\nfn first() {}\n```\n\n```rust\nfn second() {}\n```\n";
         let rope = Rope::from_str(markdown);
@@ -1499,6 +1631,66 @@ console.log(answer);
                 && range.end >= keyword_start + 2
                 && style.color == keyword_color
         }));
+    }
+
+    /// Injection layers are edited along with the text and reused as old
+    /// trees. Every edit must highlight exactly like a from-scratch parse.
+    #[test]
+    #[cfg(feature = "tree-sitter-languages")]
+    fn test_incremental_injection_layers_match_fresh_parse() {
+        fn point_at(text: &str, offset: usize) -> Point {
+            let before = &text[..offset];
+            let row = before.matches('\n').count();
+            let column = offset - before.rfind('\n').map_or(0, |ix| ix + 1);
+            Point::new(row, column)
+        }
+
+        let mut source = String::from(
+            "# Title\n\nSome *emphasis* and `code`.\n\n```rust\nfn first() {}\n```\n\n\
+             More **bold** text.\n\n```html\n<b>x</b>\n```\n",
+        );
+        let mut highlighter = SyntaxHighlighter::new("markdown");
+        assert!(highlighter.update(None, &Rope::from_str(&source), None));
+
+        let theme = HighlightTheme::default_dark();
+        for (target, replacement) in [
+            // Before every layer, shifting all of them.
+            ("# Title", "# Longer title"),
+            // Inside a fence.
+            ("fn first", "fn renamed_first"),
+            // Inside the combined inline text.
+            ("*emphasis*", "*more emphasis*"),
+            // Adds a new inline range to the combined layer.
+            ("text.", "text with `span`."),
+            // Inside the last fence, adding a line.
+            ("<b>x</b>", "<i>y</i>\n<b>x</b>"),
+            // A deletion before every layer.
+            ("# Longer title\n\n", ""),
+        ] {
+            let start = source.find(target).expect("target should exist in source");
+            let end = start + target.len();
+            let new_source = format!("{}{}{}", &source[..start], replacement, &source[end..]);
+            let new_end = start + replacement.len();
+            let edit = InputEdit {
+                start_byte: start,
+                old_end_byte: end,
+                new_end_byte: new_end,
+                start_position: point_at(&source, start),
+                old_end_position: point_at(&source, end),
+                new_end_position: point_at(&new_source, new_end),
+            };
+            source = new_source;
+
+            let rope = Rope::from_str(&source);
+            assert!(highlighter.update(Some(edit), &rope, None));
+            let mut fresh = SyntaxHighlighter::new("markdown");
+            assert!(fresh.update(None, &rope, None));
+            assert_eq!(
+                highlighter.styles(&(0..rope.len()), theme.as_ref()),
+                fresh.styles(&(0..rope.len()), theme.as_ref()),
+                "styles differ after replacing {target:?} with {replacement:?}"
+            );
+        }
     }
 
     #[test]

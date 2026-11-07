@@ -5,12 +5,12 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::StyledExt as _;
+use crate::{StyledExt as _, TestSupportExt as _};
 
 /// An unstyled linear progress root with controlled value accessibility.
 #[derive(IntoElement)]
 pub struct Progress {
-    base: gpui::Stateful<Div>,
+    base: crate::ObservedElement<gpui::Stateful<Div>>,
     style: StyleRefinement,
     value: f32,
     indeterminate: bool,
@@ -21,7 +21,7 @@ pub struct Progress {
 impl Progress {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             value: 0.,
             indeterminate: false,

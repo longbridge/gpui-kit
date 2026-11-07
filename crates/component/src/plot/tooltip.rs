@@ -1,10 +1,17 @@
 use gpui::{
-    AnyElement, App, Div, Half as _, Hsla, IntoElement, ParentElement, Pixels, Point, RenderOnce,
-    SharedString, Size, StyleRefinement, Styled, Window, deferred, div, prelude::FluentBuilder, px,
+    AnyElement, App, Div, ElementId, Half as _, Hsla, IntoElement, ParentElement, Pixels, Point,
+    RenderOnce, SharedString, Size, StyleRefinement, Styled, Window, deferred, div, point,
+    prelude::FluentBuilder, px,
 };
+use gpui_base::motion::spring;
+pub use gpui_base::plot::{PlotHover, TooltipState};
+use gpui_base::plot::{hover_progress, is_hover_entering, pointer_spring};
 
 use crate::ThemeStyled as _;
 use crate::{ActiveTheme, Colorize, StyledExt, h_flex, v_flex};
+
+/// The spring ids a tooltip glides its crosshair with, within the plot's scope.
+const GLIDE: &str = "__plot-tooltip-glide";
 
 #[derive(Default)]
 pub enum CrossLineAxis {
@@ -186,6 +193,8 @@ pub struct Dot {
     size: Pixels,
     stroke: Hsla,
     fill: Hsla,
+    /// Diameter of the translucent ring behind the dot; `None` draws no ring.
+    halo: Option<Pixels>,
 }
 
 impl Dot {
@@ -195,12 +204,24 @@ impl Dot {
             size: px(6.),
             stroke: gpui::transparent_black(),
             fill: gpui::transparent_black(),
+            halo: None,
         }
     }
 
     /// Set the size of the dot.
     pub fn size(mut self, size: impl Into<Pixels>) -> Self {
         self.size = size.into();
+        self
+    }
+
+    /// Draw a translucent ring of the fill color, `size` across, behind the dot,
+    /// which marks the hovered point the way a chart marks its emphasized
+    /// symbol.
+    ///
+    /// `size` is the ring at full hover progress: in a [`Tooltip`] the ring grows out of
+    /// the dot as the hover fades in.
+    pub fn halo(mut self, size: impl Into<Pixels>) -> Self {
+        self.halo = Some(size.into());
         self
     }
 
@@ -222,7 +243,7 @@ impl RenderOnce for Dot {
         let border_width = px(1.);
         let offset = self.size / 2. - border_width / 2.;
 
-        div()
+        let dot = div()
             .absolute()
             .w(self.size)
             .h(self.size)
@@ -231,32 +252,30 @@ impl RenderOnce for Dot {
             .border_color(self.stroke)
             .bg(self.fill)
             .left(self.point.x - offset)
-            .top(self.point.y - offset)
+            .top(self.point.y - offset);
+
+        // The ring paints first so it sits behind the dot, both centered on the
+        // point.
+        let halo = self.halo.map(|halo| {
+            div()
+                .absolute()
+                .size(halo)
+                .rounded_full()
+                .bg(self.fill.opacity(0.2))
+                .left(self.point.x - halo / 2.)
+                .top(self.point.y - halo / 2.)
+        });
+
+        div().absolute().top_0().left_0().children(halo).child(dot)
     }
 }
 
-#[derive(Clone)]
-pub struct TooltipState {
-    pub index: usize,
-    pub cross_line: Point<Pixels>,
-    pub dots: Vec<Point<Pixels>>,
-}
-
-impl TooltipState {
-    pub fn new(index: usize, cross_line: Point<Pixels>, dots: Vec<Point<Pixels>>) -> Self {
-        Self {
-            index,
-            cross_line,
-            dots,
-        }
-    }
-}
-
-/// A single labelled row in a [`Tooltip`]: a colored swatch, a muted label, and a value.
+/// A single labelled row in a [`Tooltip`]: an optional colored swatch, a muted label, and a value.
 struct TooltipRow {
-    color: Hsla,
+    color: Option<Hsla>,
     label: SharedString,
     value: SharedString,
+    value_color: Option<Hsla>,
 }
 
 #[derive(IntoElement)]
@@ -273,13 +292,20 @@ pub struct Tooltip {
     /// Plot size, used to flip the box toward the center near each edge so it never
     /// overflows the near side.
     within: Size<Pixels>,
+    /// Opacity of the whole overlay when set; see [`Self::progress`].
+    progress: Option<f32>,
+    /// Whether the crosshair and dots glide between data; see [`Self::glide`].
+    glide: bool,
 }
 
 impl Tooltip {
     /// Create a tooltip whose box follows the cursor at `cursor` within a `within`-sized plot.
     pub fn new(cursor: Point<Pixels>, within: Size<Pixels>) -> Self {
         Self {
-            base: v_flex(),
+            // The same row rhythm the structured content lays out with, so a
+            // tooltip built from freeform children does not have to rediscover
+            // it — and does not read as one solid block when it forgets.
+            base: v_flex().gap_y_1(),
             gap: px(0.),
             cross_line: None,
             dots: None,
@@ -288,7 +314,40 @@ impl Tooltip {
             rows: Vec::new(),
             cursor,
             within,
+            progress: None,
+            glide: true,
         }
+    }
+
+    /// Glide the crosshair and dots between data, or snap them to each datum.
+    ///
+    /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) slides
+    /// them to the hovered datum on the pointer spring, adopting it on the
+    /// frame the cursor lands instead of travelling from where the last hover
+    /// ended. A crosshair glides along the axis it marks only, so a line that
+    /// also follows the cursor keeps up with it. Turn this off for positions
+    /// the plot already springs itself ([`PlotHover::glide`]).
+    ///
+    /// Default is true.
+    pub fn glide(mut self, glide: bool) -> Self {
+        self.glide = glide;
+        self
+    }
+
+    /// Fade the whole overlay — crosshair, dots and box — to `progress` (`0..=1`).
+    ///
+    /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) already
+    /// follows the plot's hover, easing in when the cursor lands on a datum and
+    /// out after it leaves ([`PlotHover::progress`]); set this to override that,
+    /// or to fade a tooltip rendered outside a plot.
+    pub fn progress(mut self, progress: f32) -> Self {
+        self.progress = Some(progress.clamp(0., 1.));
+        self
+    }
+
+    #[deprecated(since = "0.7.0", note = "use `progress`")]
+    pub fn focus(self, focus: f32) -> Self {
+        self.progress(focus)
     }
 
     /// Set a bold title row shown at the top of the tooltip (e.g. the hovered x value).
@@ -305,10 +364,42 @@ impl Tooltip {
         value: impl Into<SharedString>,
     ) -> Self {
         self.rows.push(TooltipRow {
-            color: color.into(),
+            color: Some(color.into()),
             label: label.into(),
             value: value.into(),
+            value_color: None,
         });
+        self
+    }
+
+    /// Append a row without a swatch, for a figure no series on the plot draws,
+    /// such as a total or a ratio.
+    ///
+    /// Among series rows its label lines up with theirs; without any, the
+    /// labels sit at the start.
+    pub fn plain_row(
+        mut self,
+        label: impl Into<SharedString>,
+        value: impl Into<SharedString>,
+    ) -> Self {
+        self.rows.push(TooltipRow {
+            color: None,
+            label: label.into(),
+            value: value.into(),
+            value_color: None,
+        });
+        self
+    }
+
+    /// Color the value of the row added last — by [`row`](Self::row) or
+    /// [`plain_row`](Self::plain_row) — such as green or red by its sign. The
+    /// value reads in the tooltip's text color otherwise.
+    ///
+    /// Call it right after the row it colors; before any row it does nothing.
+    pub fn value_color(mut self, color: impl Into<Hsla>) -> Self {
+        if let Some(row) = self.rows.last_mut() {
+            row.value_color = Some(color.into());
+        }
         self
     }
 
@@ -349,24 +440,85 @@ impl ParentElement for Tooltip {
     }
 }
 
+/// Whether the rows keep a swatch slot: when any has a swatch, so a plain row's
+/// label lines up with the series labels, and not when every row is plain.
+fn has_swatches(rows: &[TooltipRow]) -> bool {
+    rows.iter().any(|row| row.color.is_some())
+}
+
+#[cfg(test)]
+impl Tooltip {
+    pub(crate) fn title_for_test(&self) -> Option<&SharedString> {
+        self.title.as_ref()
+    }
+
+    pub(crate) fn rows_for_test(&self) -> Vec<(SharedString, Option<Hsla>)> {
+        self.rows
+            .iter()
+            .map(|row| (row.value.clone(), row.value_color))
+            .collect()
+    }
+}
+
 impl RenderOnce for Tooltip {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Rendered within the plot's element scope, so this is the fade the
+        // plot tracked for it this frame; fully opaque outside a plot.
+        let tracked_progress = hover_progress(window, cx);
+        let entering = is_hover_entering(window, cx);
         let Tooltip {
             base,
             gap,
-            cross_line,
-            dots,
+            mut cross_line,
+            mut dots,
             appearance,
             title,
             rows,
             cursor,
             within,
+            progress,
+            glide,
         } = self;
+        let progress = progress.unwrap_or(tracked_progress);
+
+        if glide {
+            let policy = pointer_spring(cx).with_travel(!entering);
+            if let Some(line) = cross_line.as_mut() {
+                if line.direction.show_vertical() {
+                    line.point.x = spring((GLIDE, "x"), line.point.x, policy, window, cx);
+                }
+                if line.direction.show_horizontal() {
+                    line.point.y = spring((GLIDE, "y"), line.point.y, policy, window, cx);
+                }
+            }
+            for (i, dot) in dots.iter_mut().flatten().enumerate() {
+                dot.point = point(
+                    spring(
+                        ElementId::named_usize("__plot-hover-dot-x", i),
+                        dot.point.x,
+                        policy,
+                        window,
+                        cx,
+                    ),
+                    spring(
+                        ElementId::named_usize("__plot-hover-dot-y", i),
+                        dot.point.y,
+                        policy,
+                        window,
+                        cx,
+                    ),
+                );
+            }
+        }
+        // The ring grows out of the dot as the hover fades in.
+        for dot in dots.iter_mut().flatten() {
+            dot.halo = dot.halo.map(|halo| halo * progress);
+        }
 
         // Structured content (title + rows) takes precedence over freeform `base` children.
         let content = if title.is_some() || !rows.is_empty() {
+            let swatched = has_swatches(&rows);
             v_flex()
-                .text_sm()
                 .gap_1()
                 .when_some(title, |this, title| {
                     this.child(div().font_semibold().child(title))
@@ -380,37 +532,50 @@ impl RenderOnce for Tooltip {
                             h_flex()
                                 .items_center()
                                 .gap_1p5()
-                                .child(
-                                    div()
-                                        .size_2()
-                                        .rounded(cx.theme().radius.half())
-                                        .bg(row.color),
-                                )
+                                .when(swatched, |this| {
+                                    this.child(
+                                        div()
+                                            .size_2()
+                                            .rounded(cx.theme().radius.half())
+                                            .when_some(row.color, |this, color| this.bg(color)),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .text_color(cx.theme().muted_foreground)
                                         .child(row.label),
                                 ),
                         )
-                        .child(div().child(row.value))
+                        .child(
+                            div()
+                                .when_some(row.value_color, |this, color| this.text_color(color))
+                                .child(row.value),
+                        )
                 }))
         } else {
             base
         };
+        // One size for every tooltip, structured or freeform, boxed or bare: a
+        // transient overlay over dense data reads at the compact tier, and a
+        // per-call-site size is how a dozen charts end up at a dozen sizes.
+        // Content that wants a hierarchy sets it on its own children.
+        let content = content.text_xs();
 
         div()
             .size_full()
             .absolute()
             .top_0()
             .left_0()
+            .opacity(progress)
             .when_some(cross_line, |this, cross_line| this.child(cross_line))
             .when_some(dots, |this, dots| this.children(dots))
             // Only the box is deferred: it can overflow the plot bounds and must paint above
             // sibling content, while the crosshair and dots stay in the plot's own layer so
-            // they don't cover elements drawn over the plot.
+            // they don't cover elements drawn over the plot. A deferred draw paints outside
+            // this element's opacity, so the box carries the fade itself.
             .child(deferred(content.map(|mut this| {
                 if !appearance {
-                    return this.size_full().relative();
+                    return this.size_full().relative().opacity(progress);
                 }
 
                 // Default min width only applies when the caller hasn't set one, so a
@@ -420,6 +585,7 @@ impl RenderOnce for Tooltip {
                 // The box hugs the cursor, flipping toward the center near each edge so it
                 // never overflows the near side.
                 this.absolute()
+                    .opacity(progress)
                     .when(min_w_unset, |c| c.min_w(px(150.)))
                     .popover_style(cx)
                     .p_2()
@@ -438,5 +604,51 @@ impl RenderOnce for Tooltip {
                         }
                     })
             })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{point, px};
+
+    use super::*;
+
+    #[test]
+    fn a_value_color_colors_only_the_row_added_last() {
+        let tooltip = Tooltip::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)))
+            .value_color(gpui::red())
+            .row(gpui::blue(), "Open", "1")
+            .row(gpui::blue(), "Close", "2")
+            .value_color(gpui::green());
+        let colors: Vec<_> = tooltip.rows.iter().map(|row| row.value_color).collect();
+        assert_eq!(colors, vec![None, Some(gpui::green())]);
+    }
+
+    #[test]
+    fn a_plain_row_has_no_swatch_and_takes_a_value_color() {
+        let tooltip = Tooltip::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)))
+            .row(gpui::blue(), "Call", "1")
+            .plain_row("Total", "3")
+            .value_color(gpui::red());
+        let rows: Vec<_> = tooltip
+            .rows
+            .iter()
+            .map(|row| (row.color, row.value_color))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![(Some(gpui::blue()), None), (None, Some(gpui::red()))]
+        );
+    }
+
+    #[test]
+    fn plain_rows_keep_a_swatch_slot_only_beside_series_rows() {
+        let tooltip = || Tooltip::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)));
+        let mixed = tooltip()
+            .row(gpui::blue(), "Call", "1")
+            .plain_row("Total", "3");
+        let plain = tooltip().plain_row("Total", "3").plain_row("Ratio", "0.5");
+        assert!(has_swatches(&mixed.rows));
+        assert!(!has_swatches(&plain.rows));
     }
 }

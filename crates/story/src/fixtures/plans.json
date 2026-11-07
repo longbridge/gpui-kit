@@ -1,0 +1,18 @@
+[
+  {
+    "plan": "Free",
+    "accounts": 6420
+  },
+  {
+    "plan": "Starter",
+    "accounts": 1830
+  },
+  {
+    "plan": "Pro",
+    "accounts": 940
+  },
+  {
+    "plan": "Enterprise",
+    "accounts": 120
+  }
+]

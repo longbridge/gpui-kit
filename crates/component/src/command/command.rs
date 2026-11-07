@@ -20,6 +20,7 @@ pub(crate) struct CommandOptions {
     pub(crate) placeholder: Option<SharedString>,
     pub(crate) empty: Option<Rc<CommandSlot>>,
     pub(crate) max_h: DefiniteLength,
+    pub(crate) scroll_bounce: Option<bool>,
     pub(crate) bordered: bool,
     pub(crate) header: Option<Rc<CommandSlot>>,
     pub(crate) footer: Option<Rc<CommandSlot>>,
@@ -32,6 +33,7 @@ impl Default for CommandOptions {
             placeholder: None,
             empty: None,
             max_h: rems(18.75).into(),
+            scroll_bounce: None,
             bordered: true,
             header: None,
             footer: None,
@@ -197,6 +199,13 @@ impl Command {
         self
     }
 
+    /// Bounce the command list at its vertical boundaries. On by default on iOS,
+    /// Android and macOS, off elsewhere; reduced motion disables displacement.
+    pub fn scroll_bounce(mut self, enabled: bool) -> Self {
+        self.options.scroll_bounce = Some(enabled);
+        self
+    }
+
     /// Set whether to draw the surrounding border and rounding, default: `true`.
     ///
     /// Turn it off when the palette already sits inside a frame of its own,
@@ -250,7 +259,7 @@ impl RenderOnce for Command {
             on_cancel: self.on_cancel,
         };
         self.state.update(cx, |state, cx| {
-            state.options = options;
+            state.set_options(options);
             state.install_model(model, cx);
         });
 

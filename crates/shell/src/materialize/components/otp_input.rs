@@ -143,7 +143,7 @@ pub(in crate::materialize) fn otp_input(
     // `InteractiveElement` nor `StatefulInteractiveElement`, so a state style
     // here has nowhere to land. As with `Switch` and `Slider`, saying so beats
     // dropping it without a word.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on an OtpInput are ignored: it is not an interactive element, and \
              its cells are the shell's rather than the script's. Put a hover on the element \
@@ -175,9 +175,9 @@ pub(in crate::materialize) fn otp_input(
     all.extend((0..length).map(|index| {
         let focus_target = state.clone();
         div()
-            .map(|cell| refine(cell, behavior.cell_style.as_ref()))
+            .map(|cell| refine(cell, behavior.cell_style.as_deref()))
             .when(active == Some(index), |cell| {
-                refine(cell, behavior.cell_active_style.as_ref())
+                refine(cell, behavior.cell_active_style.as_deref())
             })
             // Base focuses on Tab, but a code is something a pointer user
             // clicks *at* rather than tabs to, and the root's own box is the
@@ -189,7 +189,7 @@ pub(in crate::materialize) fn otp_input(
                 |cell| match cell_content(&value, index, masked, active, caret_visible) {
                     CellContent::Digit(digit) => cell.child(SharedString::from(digit.to_string())),
                     CellContent::Caret => cell
-                        .when_some(behavior.caret_style.as_ref(), |cell, style| {
+                        .when_some(behavior.caret_style.as_deref(), |cell, style| {
                             cell.child(refine(div(), Some(style)))
                         }),
                     CellContent::Empty => cell,
@@ -200,6 +200,14 @@ pub(in crate::materialize) fn otp_input(
     // After the cells, because the cells are what an `OtpInput` is. A script
     // that adds a child gets it beside them rather than instead of them.
     all.extend(children);
+    // The state, mounted as a view so that its notifications reach the screen.
+    // The cells above read it while they are built, but it is a plain entity:
+    // a keystroke or a caret blink notifies it and dirties no view, and the
+    // frame replays `ShellRoot`'s cached content with the old cells until the
+    // pointer moves. As a view node under the script view, its notification
+    // dirties every view above it. Its render is `Empty`, and the absolute
+    // holder keeps it out of the flow, so a script `gap` adds no space.
+    all.push(div().absolute().child(state.clone()).into_any_element());
 
     let otp = OtpInput::new(&state).disabled(behavior.disabled);
     finish(otp, refinement, all)

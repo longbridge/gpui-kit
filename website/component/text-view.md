@@ -1,0 +1,585 @@
+---
+title: TextView
+description: Renders Markdown and HTML text with optional custom Markdown plugins.
+---
+
+# TextView
+
+`TextView` renders formatted text in GPUI. It supports Markdown and simple HTML, text selection, code block actions, and custom Markdown plugins for project-specific syntax.
+
+The canonical implementation now lives in `gpui-base`; this module remains a compatibility re-export and provides component-theme adaptation. Base-only setup, complete default styling, and opt-in syntax highlighting are documented on [GPUI Base TextView](../base/text-view.md).
+
+TextView is selectable by default and uses the shared window selection engine from `gpui-base`. Use `.selectable(false)` only when selection must be disabled. See [GPUI Base Text Selection](../base/text-selection.md) when integrating plain text or a custom renderer with the same selection.
+
+## Import
+
+```rust
+use gpui_kit::component::text::{markdown, TextView};
+```
+
+## Usage
+
+### Markdown
+
+Use the `markdown` helper when you only need to render Markdown text:
+
+```rust
+use gpui_kit::component::text::markdown;
+
+markdown("# Hello\n\nThis is **Markdown**.")
+    .scrollable(true)
+```
+
+You can also construct a `TextView` directly when you need a stable id:
+
+```rust
+use gpui_kit::component::text::TextView;
+
+TextView::markdown("preview", markdown_source)
+```
+
+### HTML
+
+```rust
+TextView::html("html-preview", "<strong>Hello</strong>")
+```
+
+### Inside a colored surface
+
+A `TextView` without an explicit `.style()` follows the text color of its
+container. On a surface that is inverted from the page, such as a `Filled`
+[Bubble](bubble.md), links, muted text, code and table backgrounds, borders and
+selection are derived from that color as well, and syntax highlighting is left
+out, so the content needs no extra styling:
+
+```rust
+Bubble::new().child(TextView::markdown("reply", text))
+```
+
+### Clamp to a number of lines
+
+Use `max_lines` to render a bounded preview of rich content — for example a
+collapsed "show more" section. The view's height is capped at `n` × the base
+line height, and a line of glyphs is never cut in half: a line that would
+straddle the bottom of the box is left out whole, across paragraphs, lists,
+headings, code blocks and tables:
+
+```rust
+TextView::markdown("preview", markdown_source).max_lines(5)
+```
+
+Nothing is shown with less than a line of itself to show, so the border and
+padding a table row leads with never strands at the bottom. Whatever has more
+than that is cut on the box edge and keeps the part that fits, so an image
+crossing the edge shows instead of disappearing and leaving blank space
+behind.
+
+`TextViewState::is_clamped()` reports whether the previous painted frame
+actually clipped content, so the caller can decide whether to render an
+"expand" affordance. `n` counts lines of body text, so paragraph spacing and
+taller lines mean fewer of them fit inside the capped height, and a line taller
+than the whole budget keeps the part that fits rather than emptying the box.
+`max_lines` only applies to the fit-content mode and is ignored when
+`scrollable` is set.
+
+### Fade in streamed text
+
+A chat reply arrives in chunks. `stream_fade(true)` fades each chunk in where
+it lands instead of popping it onto the screen, the way Claude reveals a
+response:
+
+```rust
+TextView::new(&self.reply).stream_fade(true)
+```
+
+The fade follows the rendered text. Whatever a `push_str`, or a `set_text`
+whose text extends the current one, adds starts transparent and reaches full
+color over 350 ms on an ease-out curve, the timing measured from Claude:
+longer than the 50–300 ms a model's chunks arrive at, so consecutive chunks
+overlap into one gradient tail rather than the newest chunk blinking in. Code
+in fenced blocks and text in table cells fade the same way. Markdown that
+completes as it streams (`**bo` becoming bold `bold`) fades the changed
+glyphs rather than the whole paragraph. Text that replaces the current
+content shows at once, and so does everything when the system asks for
+reduced motion. Nothing animates unless the view opts in.
+
+Pass a `TextViewMotion` through `.motion(...)` to choose the duration or
+easing yourself, or to reveal each chunk word by word; see
+[GPUI Base TextView](../base/text-view.md#retained-state-and-streaming-updates).
+
+### Highlight ranges
+
+An application that searches a document, or points at a citation inside it,
+paints its ranges with `set_range_highlights`. The application owns the
+search: it finds its ranges in `rendered_text()`, the text the view shows, and
+hands them back with the colors to paint them in, a stronger one for the
+current result:
+
+```rust
+use gpui_kit::component::{
+    ActiveTheme as _,
+    text::{RangeHighlight, RangeHighlightError, TextViewState},
+};
+
+fn highlight_matches(
+    state: &mut TextViewState,
+    query: &str,
+    current_match: usize,
+    cx: &mut Context<TextViewState>,
+) -> Result<(), RangeHighlightError> {
+    let (color, current_color) = (cx.theme().warning.opacity(0.3), cx.theme().warning);
+    let text = state.rendered_text();
+    let matches = if query.is_empty() {
+        Vec::new()
+    } else {
+        text.as_str().match_indices(query).collect()
+    };
+    let highlights = matches.into_iter().enumerate().map(|(ix, (start, found))| {
+        RangeHighlight::new(
+            start..start + found.len(),
+            if ix == current_match { current_color } else { color },
+        )
+    });
+    state.set_range_highlights(highlights, cx)
+}
+```
+
+`rendered_text()` is the text plain copy produces: `hello **world**` reads
+`hello world`, escapes are resolved, and heading and list markers are left
+out. Offsets are UTF-8 byte offsets, so the ranges `str` search returns can be
+passed as they are, and a repeated phrase is addressed by where it occurs. The
+text is built the first time it is read.
+
+A highlight is painted behind the text and under the selection, so wrapping,
+alignment, syntax colors, links, selection and copy stay as they were. Where
+highlights overlap, the later one paints over the earlier. A range that
+crosses from one block into the next paints in both. Text that belongs to no
+block is left unpainted: the line breaks between blocks, the spaces between
+table cells, custom blocks, HTML blocks and inline plugin objects. Only a range
+that is reversed, out of bounds or not on a character boundary is rejected,
+and the whole set with it.
+
+When the content changes, a highlight follows its block and stays as far as
+the block's text is unchanged. Text appended while streaming, through
+`push_str` or `set_text`, keeps the highlights before it, and an edit keeps
+those before and after it. After an edit inside a table, the cells in and
+after the edited row lose theirs, since a cell is only known by its place in
+the table. The view notifies when its text changes: observe the state and
+search the new `rendered_text()` again. Compute ranges and call
+`set_range_highlights` in the same state update so the ranges address the
+current text. Backgrounds that are part of the text, such as
+`<mark>` and syntax highlighting, paint over a range highlight (inline code's
+background is painted under it), and highlights do not fade in with streamed
+text. HTML views do not support range highlights.
+
+An application that keeps ranges of the Markdown source instead, such as the
+ranges `selected_source_range()` returns for the passages people comment on,
+converts each with `range_for_source` on the same `rendered_text()`:
+
+```rust
+use std::ops::Range;
+
+use gpui_kit::component::{
+    ActiveTheme as _,
+    text::{RangeHighlight, RangeHighlightError, TextViewState},
+};
+
+fn highlight_comments(
+    state: &mut TextViewState,
+    markdown: &str,
+    comments: &[Range<usize>],
+    cx: &mut Context<TextViewState>,
+) -> Result<(), RangeHighlightError> {
+    let text = state.rendered_text();
+    // The ranges index `markdown`. Until its parse lands, the view renders the
+    // source it had before; convert again when the view notifies.
+    if text.source() != markdown {
+        return Ok(());
+    }
+    let color = cx.theme().info.opacity(0.3);
+    let highlights = comments
+        .iter()
+        .filter_map(|comment| text.range_for_source(comment.clone()))
+        .map(|range| RangeHighlight::new(range, color));
+    state.set_range_highlights(highlights, cx)
+}
+```
+
+`range_for_source` returns the smallest range holding every character
+rendered from the source range. Source that renders nothing, such as emphasis
+delimiters, heading and list markers, code fences, table pipes and link
+destinations, adds nothing, so `**bold**` and `bold` convert to the same range.
+A character is included when any of its source is in the range: `&` for part
+of `&amp;`, or the whole text of an inline plugin object for part of its
+source. Converting the source range a selection reports gives the selected
+range back, except that a line break between blocks at either end of the
+selection is rendered from no source and is left out: Select All gives back
+everything but the line break after the last block.
+
+`rendered_text().source()` is the source of the last parse that landed. While
+text is appended with `push_str`, it is a prefix of the text the view was
+given; after `set_text` replaces the content, it can be the earlier, unrelated
+text until the new parse lands, so compare it with the source your ranges
+index, as the example does, before converting. The result is
+`None` when the range is empty, out of bounds or not on a character boundary,
+when nothing is rendered from it, and always in HTML views.
+
+### Scroll to a range
+
+`reveal_range` scrolls to a range of the same text, such as the current
+result when the user steps to the next one:
+
+```rust
+state.reveal_range(current_range, cx)?;
+```
+
+It scrolls the line the range starts on into view, down to a line in the
+middle of a long paragraph, and leaves the view where it is when that line, or
+a whole block revealed, is already visible. An empty range reveals the line of
+its position. A `scrollable` view scrolls itself. A fit-content view scrolls
+the nearest enclosing `gpui::list`, as a chat transcript is, as long as the
+row that holds the view is laid out: scroll to that row first when it may be
+off screen. Any other scroll container, such as a `div` with
+`overflow_y_scroll`, scrolls through `on_reveal`, which receives the line's
+bounds in window coordinates:
+
+```rust
+let scroll = scroll_handle.clone();
+TextView::new(&state).on_reveal(move |line, _, _| {
+    let viewport = scroll.bounds();
+    let mut offset = scroll.offset();
+    if line.bottom() > viewport.bottom() {
+        offset.y -= line.bottom() - viewport.bottom();
+    } else if line.top() < viewport.top() {
+        offset.y += viewport.top() - line.top();
+    }
+    scroll.set_offset(offset);
+})
+```
+
+A range that covers no block's text, such as a custom block's, scrolls its
+whole block into a scrollable view. Only the latest reveal is carried out. It
+follows the content the way highlights do, and it is dropped when its text
+changes, when the view clamps its lines with `max_lines`, or when it cannot be
+shown within a second, so it never scrolls long after it was asked for. Text
+scrolled sideways inside a table stays where it is, a block revealed whole and
+taller than the view shows its end when it comes from below, a scrollable
+view inside an application list scrolls only itself, and views sharing one
+state share one reveal.
+
+Revealing is best effort. `Ok(())` means the range is valid for the current
+text and the request was taken, not that the view has scrolled, and a dropped
+request is not reported.
+
+## Touch Selection
+
+On a touch screen, a long press selects the word under the finger and keeps
+following the finger while it stays down. Lifting it opens an edit menu with
+`Copy` and `Select All` over the selection and puts a grab handle at each end.
+Dragging a handle moves that end while the other stays put; `Select All`
+selects the view that was pressed, and its handles keep working on the result.
+
+The handles and the menu are drawn by [`Root`](./root.md) for the whole
+window selection, so they cover a selection that spans several views. A tap
+elsewhere clears them, and the menu steps aside while the content scrolls
+under a finger.
+
+## Link Click Handling
+
+Use `on_link_click` when links should be routed by the application instead of
+being opened directly by `App::open_url`. The callback receives the resolved
+URL and the original GPUI `ClickEvent`, so it can distinguish mouse buttons,
+keyboard activation, touch, and modifier keys:
+
+```rust
+use gpui_kit::ClickEvent;
+use gpui_kit::component::text::markdown;
+
+markdown("[Open the project](https://github.com/longbridge/gpui-kit)")
+    .on_link_click(|url, event, _window, cx| {
+        if event.is_right_click() {
+            println!("Show a context menu for {url}");
+            return;
+        }
+
+        match event {
+            ClickEvent::Mouse(click) if click.up.modifiers.control => {
+                println!("Open {url} in an internal view");
+            }
+            _ => cx.open_url(url),
+        }
+    })
+```
+
+Installing a handler consumes the link event and disables the default URL
+opening behavior. If no handler is installed, links continue to use
+`App::open_url` as usual. The callback is used for both text links and linked
+images.
+
+## Task Lists
+
+Markdown task list items (`- [ ]`, `- [x]`) show a checkbox that is not
+interactive by default. Use `on_task_toggle` to let the user check and uncheck
+them. The callback receives a `TaskToggleEvent`:
+
+- `checked()` is the state the item should now have.
+- `item_range()` is the byte range of the clicked list item in the source
+  text, nested lists included.
+- `marker_range()` is the byte range of its `[ ]` or `[x]` marker.
+
+```rust
+use gpui_kit::component::text::markdown;
+
+let view = cx.entity().downgrade();
+markdown(self.source.clone()).on_task_toggle(move |event, _window, cx| {
+    _ = view.update(cx, |this, cx| {
+        let marker = if event.checked() { "[x]" } else { "[ ]" };
+        this.source.replace_range(event.marker_range(), marker);
+        cx.notify();
+    });
+})
+```
+
+`TextView` does not change its own text: the application owns the source,
+replaces the marker and renders the new text.
+
+## Images
+
+A Markdown `![alt](src)` or HTML `<img src>` renders through GPUI's `img`
+element, and `src` decides where the bytes come from:
+
+- `http://` and `https://` URLs are fetched with the application's HTTP client.
+- `data:` URLs are decoded in place, so a document can embed its own images
+  (`data:image/png;base64,…`, or a percent-encoded `data:image/svg+xml,…`).
+  Any image format GPUI can decode is accepted; a `data:` URL with another
+  media type is left to the loader and reports an error like any other
+  unreachable image.
+- Every other value — a relative path, `file://`, a custom scheme — is passed
+  through as a URI. `TextView` never reads the filesystem or the asset bundle
+  on a document's behalf.
+
+To resolve those other sources, or to change how any image is loaded, wrap the
+`TextView` in an element that installs a GPUI `ImageCache`. Every `img` inside
+it, including the ones the document produces, asks that cache for its
+`Resource` before falling back to the default loader:
+
+```rust
+use gpui_kit::{ImageCache, ImageCacheProvider};
+
+div()
+    .image_cache(app_image_cache.clone())
+    .child(markdown("![diagram](app://diagrams/pipeline.svg)"))
+```
+
+`ImageCache::load` receives the `Resource::Uri` and decides how to turn it into
+a `RenderImage`, so the application owns the loading policy while the document
+stays plain Markdown.
+
+## Markdown Plugins
+
+Use `.plugin(...)` to support custom Markdown formats. A plugin owns both parsing and rendering, so callers only need to attach it to the `TextView`:
+
+```rust
+markdown(source)
+    .plugin(TickerPlugin::new())
+```
+
+A Markdown plugin implements `MarkdownPlugin`:
+
+```rust
+use gpui_kit::{App, IntoElement, ParentElement as _, Window};
+use gpui_kit::component::text::{
+    markdown_ast, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
+};
+
+struct TickerNode {
+    symbol: String,
+}
+
+struct TickerPlugin;
+
+impl TickerPlugin {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl MarkdownPlugin for TickerPlugin {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "ticker"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        cx: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::Paragraph(paragraph) = node else {
+            return None;
+        };
+        let [markdown_ast::Node::Text(text)] = paragraph.children.as_slice() else {
+            return None;
+        };
+        let symbol = text.value.strip_prefix('$')?;
+
+        Some(
+            MarkdownNode::new(
+                "ticker",
+                TickerNode {
+                    symbol: symbol.to_string(),
+                },
+            )
+            .text(format!("${symbol}"))
+            .markdown(cx.node_source(node).unwrap_or(text.value.as_str())),
+        )
+    }
+
+    fn render(
+        &self,
+        node: &MarkdownNode,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> impl IntoElement {
+        let ticker = node.data::<TickerNode>().expect("ticker node data");
+
+        gpui_kit::div().child(format!("${}", ticker.symbol))
+    }
+}
+```
+
+Then attach it to a Markdown `TextView`:
+
+```rust
+markdown("$AAPL.US")
+    .plugin(TickerPlugin::new())
+```
+
+## MarkdownNode
+
+`MarkdownNode` is the neutral data passed between `parse` and `render`.
+
+```rust
+MarkdownNode::new("ticker", TickerNode { symbol })
+    .text("$AAPL.US")
+    .markdown("$AAPL.US")
+```
+
+- `name` is the stable node name used to match the renderer.
+- `data` is typed parser output read with `node.data::<T>()`.
+- `text` is the plain text representation used by selection and fallback rendering.
+- `markdown` is the Markdown representation used when the document is serialized back to Markdown.
+
+## Block Plugins
+
+Return `true` from `is_block()` to use the block parser and renderer:
+
+```rust
+fn is_block(&self) -> bool {
+    true
+}
+```
+
+Inline plugins use the default `is_block() == false` and return `Option<InlineElement>` from `render_inline`. Wrap any GPUI element with `InlineElement::new(...)`, use native styles and events, and set an optional baseline. TextView measures and selects the whole element as one atom, with plain/Markdown copying, text fallback, and explicit asynchronous layout invalidation. See [Inline plugin](../base/text-view.md#inline-plugin) for the contract and `.plugin(...)` registration example. The component facade exports the same `InlineElement` and `InlineRenderContext` types.
+
+## YAML Frontmatter
+
+YAML frontmatter is opt-in because it is not part of CommonMark or GFM. Enable
+the parser construct and attach `FrontmatterPlugin` to render top-level mappings
+as a `DescriptionList`:
+
+```rust
+use gpui_component::text::{markdown, FrontmatterPlugin, MarkdownExtensions};
+
+let extensions = MarkdownExtensions::default().frontmatter();
+
+markdown("---\nname: example\ndescription: Example metadata.\n---")
+    .markdown_extensions(extensions)
+    .plugin(FrontmatterPlugin::new())
+```
+
+Values are rendered as plain text. Simple unquoted values and block scalars
+using `|-` or `>-` are supported; literal scalars preserve content indentation.
+Quoted values, inline comments, collections, aliases, other block headers, and
+more-indented folded lines fall back to a YAML code block, preserving the source
+instead of displaying an incorrectly interpreted value.
+
+## Code Block Actions
+
+You can render controls for Markdown code blocks:
+
+```rust
+markdown(source)
+    .code_block_actions(|code_block, _window, _cx| {
+        gpui_kit::div().child(format!("Run {}", code_block.lang().unwrap_or_default()))
+    })
+```
+
+## Inline code style
+
+`TextView::inline_code_style(StyleRefinement)` refines inline code after the
+resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The existing `TextViewStyle::inline_code(HighlightStyle)` continues to work;
+the view-level refinement takes precedence without changing the public
+`TextViewStyle` struct fields.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "Run `cargo build` first.")
+    .inline_code_style(
+        StyleRefinement::default()
+            .text_size(rems(1.))
+            .px(rems(0.25))
+            .border_1()
+            .border_color(cx.theme().border),
+    )
+```
+
+Supported properties are font family, size, features, fallbacks, weight,
+italic, color, underline, strikethrough, background, border widths/color/style,
+corner radii, and padding. Font sizes use pixels or window-relative rems;
+non-finite or non-positive sizes retain the default. Without a font-size override,
+code remains 0.875 times its surrounding text. Without a border override, code
+has no border. Padding and border widths participate in wrapping and table
+measurement. Margin, positioning, flex, explicit box size, overflow, and
+interaction properties are not used; line height remains owned by the paragraph.
+
+## List and blockquote style
+
+`TextView::list_style(StyleRefinement)` and
+`blockquote_style(StyleRefinement)` refine list markers and blockquotes after
+the resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The public `TextViewStyle` struct fields are unchanged.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+use gpui_kit::component::ActiveTheme as _;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(cx.theme().primary))
+    .blockquote_style(StyleRefinement::default().border_color(cx.theme().primary))
+```
+
+The list marker refinement applies to the bullet or number column of each
+item, over its defaults: muted text color, a minimum width of the list indent,
+right-aligned text, and a right padding of 0.3 times that indent. Text
+properties such as color, font family, size, and weight style the marker; box
+properties such as width and padding change the marker column. Its text color
+also outlines an unchecked task-list checkbox; a checked one keeps the link
+color.
+
+The blockquote refinement applies to the quote container, over its defaults:
+muted text color, a 2px left border in the border color, and a left padding of
+0.9 times the body font size. Border widths and color style the quote bar;
+text properties, background, padding, and corner radii style the quote and the
+blocks inside it. Child blocks keep their own explicit styles, including
+heading and table font sizes. Other element properties apply to the container
+as they do to any `div`. Code blocks, tables, rules, and done tasks keep the
+shared muted and border colors.

@@ -226,6 +226,15 @@ impl DisplayMap {
     }
 
     /// Update layout parameters (wrap width or font)
+    pub(crate) fn set_inline_metrics(
+        &mut self,
+        metrics: std::rc::Rc<[(std::ops::Range<usize>, Pixels)]>,
+        cx: &mut App,
+    ) {
+        self.wrap_map.set_inline_metrics(metrics, cx);
+        self.rebuild_fold_projection();
+    }
+
     pub fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrap_map.on_layout_changed(wrap_width, cx);
         self.rebuild_fold_projection();
@@ -235,6 +244,13 @@ impl DisplayMap {
     pub fn set_wrapping_indent(&mut self, wrapping_indent: WrappingIndent, cx: &mut App) {
         self.wrap_map.set_wrapping_indent(wrapping_indent, cx);
         self.rebuild_fold_projection();
+    }
+
+    /// Set the number of spaces per tab stop.
+    pub(crate) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) {
+        if self.wrap_map.set_tab_size(tab_size, cx) {
+            self.rebuild_fold_projection();
+        }
     }
 
     /// Set font parameters
@@ -293,6 +309,13 @@ impl DisplayMap {
             .offset_to_display_point_with_affinity(offset, line_end_affinity)
     }
 
+    /// Resolve the caret's visual row through both wrapping and folded regions.
+    pub(crate) fn offset_to_display_row(&self, offset: usize, line_end_affinity: bool) -> usize {
+        let point = self.offset_to_wrap_display_point_with_affinity(offset, line_end_affinity);
+        self.wrap_row_to_display_row(point.row)
+            .unwrap_or_else(|| self.nearest_visible_display_row(point.row))
+    }
+
     /// Convert wrap display point to byte offset.
     #[inline]
     pub(crate) fn wrap_display_point_to_offset(&self, point: WrapDisplayPoint) -> usize {
@@ -322,6 +345,16 @@ impl DisplayMap {
     #[inline]
     pub fn display_row_to_wrap_row(&self, display_row: usize) -> Option<usize> {
         self.fold_map.display_row_to_wrap_row(display_row)
+    }
+
+    pub(crate) fn display_row_column_to_offset(&self, display_row: usize, column: usize) -> usize {
+        let wrap_row = self
+            .fold_map
+            .display_row_to_wrap_row(display_row)
+            .unwrap_or(0);
+        self.wrap_map
+            .wrapper()
+            .display_point_to_offset(WrapDisplayPoint::new(wrap_row, 0, column))
     }
 
     /// Get the longest row index (by byte length).

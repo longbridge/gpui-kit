@@ -30,6 +30,10 @@ struct ChangeSize(Size);
 
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = data_table_story, no_json)]
+struct ChangeHeaderRowHeight(Option<Pixels>);
+
+#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = data_table_story, no_json)]
 struct ChangeRows(usize);
 
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
@@ -349,7 +353,6 @@ impl StockTableDelegate {
                     .width(100.)
                     .fixed(ColumnFixed::Left)
                     .sortable(),
-                Column::new("price", "Price").sortable().text_right().p_0(),
                 Column::new("change", "Chg").sortable().text_right().p_0(),
                 Column::new("change_percent", "Chg%")
                     .sortable()
@@ -399,6 +402,11 @@ impl StockTableDelegate {
                 Column::new("day_30_ranking", "30d Ranking").text_right(),
                 Column::new("day_120_ranking", "120d Ranking").text_right(),
                 Column::new("day_250_ranking", "250d Ranking").text_right(),
+                Column::new("price", "Price")
+                    .fixed_right()
+                    .sortable()
+                    .text_right()
+                    .p_0(),
             ],
             extra_columns_count: 0,
             loading: false,
@@ -409,6 +417,29 @@ impl StockTableDelegate {
             visible_rows: Range::default(),
             _load_task: Task::ready(()),
         }
+    }
+
+    /// Maps a table column to its index in `columns`, or to the number of the
+    /// extra column it shows.
+    ///
+    /// Extra columns go before the right-fixed columns, which must stay last.
+    fn source_col_ix(&self, col_ix: usize) -> Result<usize, usize> {
+        let right_fixed_start = self
+            .columns
+            .iter()
+            .position(|col| col.fixed == Some(ColumnFixed::Right))
+            .unwrap_or(self.columns.len());
+        if col_ix < right_fixed_start {
+            Ok(col_ix)
+        } else if col_ix < right_fixed_start + self.extra_columns_count {
+            Err(col_ix - right_fixed_start + 1)
+        } else {
+            Ok(col_ix - self.extra_columns_count)
+        }
+    }
+
+    fn source_column(&self, col_ix: usize) -> Option<&Column> {
+        self.columns.get(self.source_col_ix(col_ix).ok()?)
     }
 
     fn set_stocks(&mut self, stocks: Vec<Stock>) {
@@ -434,28 +465,23 @@ impl StockTableDelegate {
             .when(col.align == TextAlign::Right, |this| this.justify_end())
     }
 
-    /// A plain number, already formatted by the caller.
-    fn render_number(&self, col: &Column, text: String) -> AnyElement {
-        self.value_cell(col).child(text).into_any_element()
-    }
-
     /// A percentage, tinted over the whole cell as ticker tables do.
-    fn render_percent(&self, col: &Column, val: f64, cx: &mut App) -> AnyElement {
+    fn render_percent(&self, col: &Column, val: f64, text: String, cx: &mut App) -> AnyElement {
         self.value_cell(col)
             .when_some(change_colors(val, cx), |this, (foreground, background)| {
                 this.text_color(foreground).bg(background.alpha(0.05))
             })
-            .child(format!("{:+.2}%", val * 100.))
+            .child(text)
             .into_any_element()
     }
 
     /// A signed change, colored by its direction.
-    fn render_change(&self, col: &Column, val: f64, cx: &mut App) -> AnyElement {
+    fn render_change(&self, col: &Column, val: f64, text: String, cx: &mut App) -> AnyElement {
         self.value_cell(col)
             .when_some(change_colors(val, cx), |this, (foreground, _)| {
                 this.text_color(foreground)
             })
-            .child(format!("{val:+.2}"))
+            .child(text)
             .into_any_element()
     }
 }
@@ -470,12 +496,81 @@ impl TableDelegate for StockTableDelegate {
     }
 
     fn column(&self, col_ix: usize, _cx: &App) -> Column {
-        if let Some(col) = self.columns.get(col_ix) {
-            col.clone()
-        } else {
-            let n = col_ix - self.columns.len() + 1;
-            Column::new(format!("extra_{n}"), format!("Column {n}"))
+        match self.source_col_ix(col_ix) {
+            Ok(ix) => self.columns[ix].clone(),
+            Err(n) => Column::new(format!("extra_{n}"), format!("Column {n}")),
         }
+    }
+
+    /// Measures the heading and the text every row draws in the column, so a
+    /// double-click on a resize handle fits the column to its widest text.
+    fn fit_column(
+        &mut self,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> Option<Pixels> {
+        // Use the same size refinement as the cells and header. Custom pixel
+        // sizes keep the story's inherited `text_sm`.
+        let font_size = div()
+            .table_cell_size(self.size)
+            .style()
+            .text
+            .font_size
+            .unwrap_or(rems(0.875).into())
+            .to_pixels(window.rem_size());
+        let mut font = window.text_style().font();
+        font.family = cx.theme().font_family.clone();
+
+        let col = self.column(col_ix, cx);
+        let measure = |text: String, weight: FontWeight, window: &Window| {
+            let font = Font {
+                weight,
+                ..font.clone()
+            };
+            let run = TextRun {
+                len: text.len(),
+                font,
+                color: Hsla::default(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            window
+                .text_system()
+                .shape_line(text.into(), font_size, &[run], None)
+                .width()
+        };
+
+        // The table draws the sort icon at 0.75rem with 2 px of padding on each
+        // side. It is counted even while sorting is off, which only leaves room.
+        let sort_icon = if col.sort.is_some() {
+            rems(0.75).to_pixels(window.rem_size()) + px(4.)
+        } else {
+            px(0.)
+        };
+        let header_padding = col.paddings.map_or(px(0.), |padding| {
+            (self.size.table_cell_padding().right - padding.right).max(px(0.))
+        });
+        let heading =
+            measure(col.name.to_string(), FontWeight::NORMAL, window) + sort_icon + header_padding;
+        let widest = self
+            .stocks
+            .iter()
+            .filter_map(|stock| format_cell(stock, &col.key))
+            .map(|(text, weight)| measure(text, weight, window))
+            .fold(heading, Pixels::max);
+
+        // A column that dropped its own padding gets the size's back from its
+        // cells and header (see `value_cell`).
+        let padding = match col.paddings {
+            Some(_) => {
+                let padding = self.size.table_cell_padding();
+                padding.left + padding.right
+            }
+            None => px(0.),
+        };
+        Some(widest + padding)
     }
 
     fn group_headers(&self, cx: &App) -> Option<Vec<Vec<ColumnGroup>>> {
@@ -494,7 +589,7 @@ impl TableDelegate for StockTableDelegate {
                 },
                 ColumnGroup {
                     label: "Market Data".into(),
-                    span: 10,
+                    span: 9,
                 },
                 ColumnGroup {
                     label: "Quotes".into(),
@@ -512,6 +607,10 @@ impl TableDelegate for StockTableDelegate {
                     label: "Shares & Rankings".into(),
                     span: 8 + trailing,
                 },
+                ColumnGroup {
+                    label: "Quote".into(),
+                    span: 1,
+                },
             ],
             vec![
                 ColumnGroup {
@@ -519,8 +618,8 @@ impl TableDelegate for StockTableDelegate {
                     span: 4,
                 },
                 ColumnGroup {
-                    label: "Price & Change".into(),
-                    span: 3,
+                    label: "Change".into(),
+                    span: 2,
                 },
                 ColumnGroup {
                     label: "Turnover".into(),
@@ -561,6 +660,10 @@ impl TableDelegate for StockTableDelegate {
                 ColumnGroup {
                     label: "Rankings".into(),
                     span: 5 + trailing,
+                },
+                ColumnGroup {
+                    label: "Last".into(),
+                    span: 1,
                 },
             ],
         ])
@@ -618,12 +721,19 @@ impl TableDelegate for StockTableDelegate {
             .on_click(cx.listener(move |table, ev: &ClickEvent, _window, cx| {
                 println!(
                     "You have clicked row with secondary: {}",
-                    ev.modifiers().secondary()
+                    ev.modifiers().secondary(cx)
                 );
 
                 table.delegate_mut().clicked_row = Some(row_ix);
                 cx.notify();
             }))
+    }
+
+    fn cell_label(&self, row_ix: usize, col_ix: usize, _: &App) -> Option<SharedString> {
+        let stock = self.stocks.get(row_ix)?;
+        let col = self.source_column(col_ix)?;
+        let text = format_cell(stock, &col.key).map_or("--".to_string(), |(text, _)| text);
+        Some(text.into())
     }
 
     /// NOTE: Performance metrics
@@ -642,19 +752,27 @@ impl TableDelegate for StockTableDelegate {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let stock = self.stocks.get(row_ix).unwrap();
-        let Some(col) = self.columns.get(col_ix) else {
+        let Some(col) = self.source_column(col_ix) else {
             return div().child("--").into_any_element();
+        };
+
+        let Some((text, weight)) = format_cell(stock, &col.key) else {
+            return self
+                .value_cell(col)
+                .text_color(cx.theme().muted_foreground)
+                .child("--")
+                .into_any_element();
         };
 
         match col.key.as_ref() {
             "id" => self
-                .value_cell(&col)
+                .value_cell(col)
                 .text_color(cx.theme().muted_foreground)
                 .when(col.align == TextAlign::Center, |this| this.justify_center())
-                .child(stock.id.to_string())
+                .child(text)
                 .into_any_element(),
             "market" => self
-                .value_cell(&col)
+                .value_cell(col)
                 .map(|this| {
                     if stock.counter.market == "US" {
                         this.text_color(cx.theme().blue)
@@ -662,76 +780,23 @@ impl TableDelegate for StockTableDelegate {
                         this.text_color(cx.theme().magenta)
                     }
                 })
-                .child(stock.counter.market.clone())
-                .into_any_element(),
-            "symbol" => self
-                .value_cell(&col)
-                .font_medium()
-                .child(stock.counter.symbol_code())
+                .child(text)
                 .into_any_element(),
             "name" => self
-                .value_cell(&col)
-                .child(div().truncate().child(stock.counter.name.clone()))
+                .value_cell(col)
+                .child(div().truncate().child(text))
                 .into_any_element(),
-            "price" => self
-                .value_cell(&col)
-                .font_semibold()
-                .child(format!("{:.2}", stock.price))
-                .into_any_element(),
-            "change" => self.render_change(&col, stock.change, cx),
-            "change_percent" => self.render_percent(&col, stock.change_percent, cx),
-            "volume" => self.render_number(&col, compact(stock.volume)),
-            "turnover" => self.render_number(&col, compact(stock.turnover)),
-            "market_cap" => self.render_number(&col, compact(stock.market_cap)),
-            "ttm" => self.render_number(&col, compact(stock.ttm)),
-            "five_mins_ranking" => {
-                self.render_number(&col, format!("{:.0}", stock.five_mins_ranking))
-            }
-            "th60_days_ranking" => {
-                self.render_number(&col, format!("{:.0}", stock.th60_days_ranking))
-            }
-            "year_change_percent" => self.render_percent(&col, stock.year_change_percent, cx),
-            "bid" => self.render_number(&col, format!("{:.2}", stock.bid)),
-            "bid_volume" => self.render_number(&col, compact(stock.bid_volume)),
-            "ask" => self.render_number(&col, format!("{:.2}", stock.ask)),
-            "ask_volume" => self.render_number(&col, compact(stock.ask_volume)),
-            "open" => self.render_number(&col, format!("{:.2}", stock.open)),
-            "prev_close" => self.render_number(&col, format!("{:.2}", stock.prev_close)),
-            "high" => self.render_number(&col, format!("{:.2}", stock.high)),
-            "low" => self.render_number(&col, format!("{:.2}", stock.low)),
-            "turnover_rate" => {
-                self.render_number(&col, format!("{:.2}%", stock.turnover_rate * 100.))
-            }
-            "rise_rate" => self.render_number(&col, format!("{:.2}%", stock.rise_rate * 100.)),
-            "amplitude" => self.render_number(&col, format!("{:.2}%", stock.amplitude * 100.)),
-            "pe_status" => self.render_number(&col, format!("{:.2}", stock.pe_status)),
-            "pb_status" => self.render_number(&col, format!("{:.2}", stock.pb_status)),
-            "volume_ratio" => self.render_number(&col, format!("{:.2}", stock.volume_ratio)),
-            "bid_ask_ratio" => self.render_number(&col, format!("{:.2}", stock.bid_ask_ratio)),
-            "latest_pre_close" => {
-                self.render_number(&col, format!("{:.2}", stock.latest_pre_close))
-            }
-            "latest_post_close" => {
-                self.render_number(&col, format!("{:.2}", stock.latest_post_close))
-            }
-            "pre_market_cap" => self.render_number(&col, compact(stock.pre_market_cap)),
-            "pre_market_percent" => self.render_percent(&col, stock.pre_market_percent, cx),
-            "pre_market_change" => self.render_change(&col, stock.pre_market_change, cx),
-            "post_market_cap" => self.render_number(&col, compact(stock.post_market_cap)),
-            "post_market_percent" => self.render_percent(&col, stock.post_market_percent, cx),
-            "post_market_change" => self.render_change(&col, stock.post_market_change, cx),
-            "float_cap" => self.render_number(&col, compact(stock.float_cap)),
-            "shares" => self.render_number(&col, compact(stock.shares as f64)),
-            "shares_float" => self.render_number(&col, compact(stock.shares_float as f64)),
-            "day_5_ranking" => self.render_number(&col, format!("{:.0}", stock.day_5_ranking)),
-            "day_10_ranking" => self.render_number(&col, format!("{:.0}", stock.day_10_ranking)),
-            "day_30_ranking" => self.render_number(&col, format!("{:.0}", stock.day_30_ranking)),
-            "day_120_ranking" => self.render_number(&col, format!("{:.0}", stock.day_120_ranking)),
-            "day_250_ranking" => self.render_number(&col, format!("{:.0}", stock.day_250_ranking)),
+            "change" => self.render_change(col, stock.change, text, cx),
+            "pre_market_change" => self.render_change(col, stock.pre_market_change, text, cx),
+            "post_market_change" => self.render_change(col, stock.post_market_change, text, cx),
+            "change_percent" => self.render_percent(col, stock.change_percent, text, cx),
+            "year_change_percent" => self.render_percent(col, stock.year_change_percent, text, cx),
+            "pre_market_percent" => self.render_percent(col, stock.pre_market_percent, text, cx),
+            "post_market_percent" => self.render_percent(col, stock.post_market_percent, text, cx),
             _ => self
-                .value_cell(&col)
-                .text_color(cx.theme().muted_foreground)
-                .child("--")
+                .value_cell(col)
+                .font_weight(weight)
+                .child(text)
                 .into_any_element(),
         }
     }
@@ -743,8 +808,12 @@ impl TableDelegate for StockTableDelegate {
         _: &mut Window,
         _: &mut Context<TableState<Self>>,
     ) {
-        let col = self.columns.remove(col_ix);
-        self.columns.insert(to_ix, col);
+        // Extra columns are generated, so only moves between source columns
+        // are kept.
+        if let (Ok(col_ix), Ok(to_ix)) = (self.source_col_ix(col_ix), self.source_col_ix(to_ix)) {
+            let col = self.columns.remove(col_ix);
+            self.columns.insert(to_ix, col);
+        }
     }
 
     fn perform_sort(
@@ -754,7 +823,11 @@ impl TableDelegate for StockTableDelegate {
         _: &mut Window,
         _: &mut Context<TableState<Self>>,
     ) {
-        if let Some(col) = self.columns.get_mut(col_ix) {
+        if let Some(col) = self
+            .source_col_ix(col_ix)
+            .ok()
+            .and_then(|ix| self.columns.get_mut(ix))
+        {
             match col.key.as_ref() {
                 "id" => self.stocks.sort_by(|a, b| match sort {
                     ColumnSort::Descending => b.id.cmp(&a.id),
@@ -838,7 +911,7 @@ impl TableDelegate for StockTableDelegate {
         let Some(stock) = self.stocks.get(row_ix) else {
             return String::new();
         };
-        let Some(col) = self.columns.get(col_ix) else {
+        let Some(col) = self.source_column(col_ix) else {
             return String::new();
         };
 
@@ -893,11 +966,68 @@ impl TableDelegate for StockTableDelegate {
     }
 }
 
+/// The text `render_td` draws for `stock` in the column `key`, with its weight,
+/// or `None` for a column it has no value for.
+///
+/// `fit_column` measures the same text, so a column fits what is drawn.
+fn format_cell(stock: &Stock, key: &str) -> Option<(String, FontWeight)> {
+    let text = match key {
+        "id" => stock.id.to_string(),
+        "market" => stock.counter.market.to_string(),
+        "symbol" => return Some((stock.counter.symbol_code().to_string(), FontWeight::MEDIUM)),
+        "name" => stock.counter.name.to_string(),
+        "price" => return Some((format!("{:.2}", stock.price), FontWeight::SEMIBOLD)),
+        "change" => format!("{:+.2}", stock.change),
+        "change_percent" => format!("{:+.2}%", stock.change_percent * 100.),
+        "volume" => compact(stock.volume),
+        "turnover" => compact(stock.turnover),
+        "market_cap" => compact(stock.market_cap),
+        "ttm" => compact(stock.ttm),
+        "five_mins_ranking" => format!("{:.0}", stock.five_mins_ranking),
+        "th60_days_ranking" => format!("{:.0}", stock.th60_days_ranking),
+        "year_change_percent" => format!("{:+.2}%", stock.year_change_percent * 100.),
+        "bid" => format!("{:.2}", stock.bid),
+        "bid_volume" => compact(stock.bid_volume),
+        "ask" => format!("{:.2}", stock.ask),
+        "ask_volume" => compact(stock.ask_volume),
+        "open" => format!("{:.2}", stock.open),
+        "prev_close" => format!("{:.2}", stock.prev_close),
+        "high" => format!("{:.2}", stock.high),
+        "low" => format!("{:.2}", stock.low),
+        "turnover_rate" => format!("{:.2}%", stock.turnover_rate * 100.),
+        "rise_rate" => format!("{:.2}%", stock.rise_rate * 100.),
+        "amplitude" => format!("{:.2}%", stock.amplitude * 100.),
+        "pe_status" => format!("{:.2}", stock.pe_status),
+        "pb_status" => format!("{:.2}", stock.pb_status),
+        "volume_ratio" => format!("{:.2}", stock.volume_ratio),
+        "bid_ask_ratio" => format!("{:.2}", stock.bid_ask_ratio),
+        "latest_pre_close" => format!("{:.2}", stock.latest_pre_close),
+        "latest_post_close" => format!("{:.2}", stock.latest_post_close),
+        "pre_market_cap" => compact(stock.pre_market_cap),
+        "pre_market_percent" => format!("{:+.2}%", stock.pre_market_percent * 100.),
+        "pre_market_change" => format!("{:+.2}", stock.pre_market_change),
+        "post_market_cap" => compact(stock.post_market_cap),
+        "post_market_percent" => format!("{:+.2}%", stock.post_market_percent * 100.),
+        "post_market_change" => format!("{:+.2}", stock.post_market_change),
+        "float_cap" => compact(stock.float_cap),
+        "shares" => compact(stock.shares as f64),
+        "shares_float" => compact(stock.shares_float as f64),
+        "day_5_ranking" => format!("{:.0}", stock.day_5_ranking),
+        "day_10_ranking" => format!("{:.0}", stock.day_10_ranking),
+        "day_30_ranking" => format!("{:.0}", stock.day_30_ranking),
+        "day_120_ranking" => format!("{:.0}", stock.day_120_ranking),
+        "day_250_ranking" => format!("{:.0}", stock.day_250_ranking),
+        _ => return None,
+    };
+    Some((text, FontWeight::NORMAL))
+}
+
 pub struct DataTableStory {
     table: Entity<TableState<StockTableDelegate>>,
     stripe: bool,
     refresh_data: bool,
     size: Size,
+    header_row_height: Option<Pixels>,
 
     _subscriptions: Vec<Subscription>,
     _load_task: Task<()>,
@@ -980,6 +1110,7 @@ impl DataTableStory {
             stripe: false,
             refresh_data: false,
             size: Size::default(),
+            header_row_height: None,
             _subscriptions,
             _load_task,
             _load_rows_task: Task::ready(()),
@@ -1056,6 +1187,20 @@ impl DataTableStory {
 
     fn on_change_size(&mut self, a: &ChangeSize, _: &mut Window, cx: &mut Context<Self>) {
         self.size = a.0;
+        self.table.update(cx, |table, cx| {
+            table.delegate_mut().size = a.0;
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    fn on_change_header_row_height(
+        &mut self,
+        a: &ChangeHeaderRowHeight,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.header_row_height = a.0;
         cx.notify();
     }
 
@@ -1173,6 +1318,7 @@ impl Render for DataTableStory {
         let rows_count = delegate.rows_count(cx);
         let columns_count = delegate.columns_count(cx);
         let size = self.size;
+        let header_row_height = self.header_row_height;
         let loop_selection = table.loop_selection;
         let col_resizable = table.col_resizable;
         let col_movable = table.col_movable;
@@ -1190,6 +1336,7 @@ impl Render for DataTableStory {
 
         v_flex()
             .on_action(cx.listener(Self::on_change_size))
+            .on_action(cx.listener(Self::on_change_header_row_height))
             .on_action(cx.listener(|this, action: &ChangeRows, _, cx| {
                 if action.0 == this.table.read(cx).delegate().stocks.len() {
                     return;
@@ -1332,6 +1479,30 @@ impl Render for DataTableStory {
                                 "XSmall",
                                 size == Size::XSmall,
                                 Box::new(ChangeSize(Size::XSmall)),
+                            )
+                        },
+                    )
+                    .dropdown_child(
+                        Button::new("header-row-height").label(format!(
+                            "Header Row Height: {}",
+                            header_row_height
+                                .map_or("Default".to_string(), |height| height.to_string())
+                        )),
+                        move |menu, _, _| {
+                            menu.menu_with_check(
+                                "Default",
+                                header_row_height.is_none(),
+                                Box::new(ChangeHeaderRowHeight(None)),
+                            )
+                            .menu_with_check(
+                                "40px",
+                                header_row_height == Some(px(40.)),
+                                Box::new(ChangeHeaderRowHeight(Some(px(40.)))),
+                            )
+                            .menu_with_check(
+                                "48px",
+                                header_row_height == Some(px(48.)),
+                                Box::new(ChangeHeaderRowHeight(Some(px(48.)))),
                             )
                         },
                     )
@@ -1492,6 +1663,9 @@ impl Render for DataTableStory {
                     .child(
                         DataTable::new(&self.table)
                             .with_size(self.size)
+                            .when_some(self.header_row_height, |this, height| {
+                                this.header_row_height(height)
+                            })
                             .stripe(self.stripe),
                     )
                     .child(

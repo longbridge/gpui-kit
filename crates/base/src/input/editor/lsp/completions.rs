@@ -9,15 +9,121 @@ use lsp_types::{
 use ropey::Rope;
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
-use crate::input::InputBaseState;
+use crate::input::{InputBaseState, ShowCompletions};
 
 /// Default debounce duration for inline completions.
 const DEFAULT_INLINE_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// Decides which bytes of a completion label the menu paints as the match.
+///
+/// `query` is the word typed since the menu opened. Returned ranges are byte
+/// offsets into [`CompletionItem::label`].
+pub type CompletionHighlighter = dyn Fn(&str, &CompletionItem) -> Vec<Range<usize>>;
+
+/// Highlight a prefix of the completion label, matching today's menu.
+///
+/// The painted length is [`CompletionItem::filter_text`] when the item sets
+/// one, otherwise the query. It is shortened so the range never splits a
+/// character. An empty length paints nothing.
+pub fn highlight_prefix(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    let matched_len = item
+        .filter_text
+        .as_ref()
+        .map(|text| text.len())
+        .unwrap_or(query.len())
+        .min(item.label.len());
+    let end = item.label.floor_char_boundary(matched_len);
+    if end == 0 { Vec::new() } else { vec![0..end] }
+}
+
+/// Highlight the first case-insensitive occurrence of `query` in the label.
+///
+/// An empty query, or a query that does not occur as a contiguous span,
+/// paints nothing.
+pub fn highlight_contains(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    let query: Vec<char> = query.chars().collect();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let label: Vec<(usize, char)> = item.label.char_indices().collect();
+    let Some(last_start) = label.len().checked_sub(query.len()) else {
+        return Vec::new();
+    };
+
+    for start in 0..=last_start {
+        let matched = query
+            .iter()
+            .zip(label[start..].iter())
+            .all(|(query_char, (_, label_char))| chars_eq_ignore_case(*query_char, *label_char));
+        if !matched {
+            continue;
+        }
+
+        let byte_start = label[start].0;
+        let (last_index, last_char) = label[start + query.len() - 1];
+        return vec![byte_start..last_index + last_char.len_utf8()];
+    }
+    Vec::new()
+}
+
+/// Highlight each character of `query` in order, skipping characters in between.
+///
+/// Matching is case-insensitive. Adjacent hits merge into one range, so a
+/// contiguous match still paints as a single span. A query that cannot be
+/// matched in full paints nothing.
+pub fn highlight_characters(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    let mut rest = item.label.as_str();
+    let mut base = 0usize;
+    for query_char in query.chars() {
+        let Some((index, matched)) = rest
+            .char_indices()
+            .find(|(_, label_char)| chars_eq_ignore_case(query_char, *label_char))
+        else {
+            return Vec::new();
+        };
+
+        let start = base + index;
+        let end = start + matched.len_utf8();
+        let next = index + matched.len_utf8();
+        base += next;
+        rest = &rest[next..];
+        if let Some(last) = ranges.last_mut() {
+            if last.end == start {
+                last.end = end;
+                continue;
+            }
+        }
+        ranges.push(start..end);
+    }
+    ranges
+}
+
+fn chars_eq_ignore_case(left: char, right: char) -> bool {
+    left == right
+        || left.eq_ignore_ascii_case(&right)
+        || left.to_lowercase().eq(right.to_lowercase())
+}
+
 /// Display options for the LSP completion popover.
 ///
 /// Accessed through [`super::Lsp::completion_menu`] so embedders can tweak the
-/// popover without growing the [`InputBaseState`] API.
+/// popover without growing the [`InputBaseState`] API. Label highlighting is
+/// configured separately, on [`super::Lsp::completion_highlighter`].
+///
+/// ```
+/// use gpui_base::input::CompletionMenuOptions;
+/// let options = CompletionMenuOptions {
+///     max_width: gpui::px(480.),
+/// };
+/// let _copied = options;
+/// let _again = options;
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct CompletionMenuOptions {
     /// Maximum width of the popover.
@@ -121,7 +227,7 @@ impl Default for InlineCompletion {
 impl InputBaseState<EditorMode> {
     pub(crate) fn handle_completion_trigger(
         &mut self,
-        range: &Range<usize>,
+        _range: &Range<usize>,
         new_text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -138,19 +244,38 @@ impl InputBaseState<EditorMode> {
         // It will check if menu is open before showing the suggestion.
         self.schedule_inline_completion(window, cx);
 
-        let start = range.end;
         let new_offset = self.cursor();
+        // Measure the inserted text in the current document. The replaced range
+        // uses pre-edit coordinates, which preceding multi-cursor edits can
+        // shift. The active caret ends immediately after the normalized input,
+        // including selection replacements and IME commits.
+        let Some(start) = new_offset.checked_sub(new_text.len()) else {
+            return;
+        };
 
         if !provider.is_completion_trigger(start, new_text, cx) {
             return;
         }
 
-        let start_offset = self
-            .extras
-            .context_menu_content
-            .completion
-            .trigger_start_offset
-            .unwrap_or(start);
+        // `trigger_start_offset` latches where the word a menu was opened for
+        // begins, so later keystrokes refine the same query instead of starting
+        // over at each character. It only describes this edit while the edit
+        // continues that word: the document between the latch and the edit
+        // must still read as a prefix of the last query. Deleting back into
+        // the word keeps it; typing somewhere else, or into a document that
+        // has since been replaced, starts a new query at this edit instead of
+        // handing the provider text the user never typed as a prefix.
+        let completion = &self.extras.context_menu_content.completion;
+        let latched = completion.trigger_start_offset.filter(|&latched| {
+            latched <= start
+                && start <= latched + completion.query.len()
+                && self.text.is_char_boundary(latched)
+                && self.text.is_char_boundary(start)
+                && completion
+                    .query
+                    .starts_with(self.text.slice(latched..start).to_string().as_str())
+        });
+        let start_offset = latched.unwrap_or(start);
         if new_offset < start_offset {
             return;
         }
@@ -164,6 +289,93 @@ impl InputBaseState<EditorMode> {
             )
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
+        self.request_completions(
+            provider,
+            start_offset,
+            query.clone(),
+            CompletionContext {
+                trigger_kind: lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
+                trigger_character: Some(query),
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn on_action_show_completions(
+        &mut self,
+        _: &ShowCompletions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_completions(window, cx);
+    }
+
+    /// Request completions at the caret and focus the editor, without editing text.
+    ///
+    /// The current identifier prefix is used to refine the menu. An empty
+    /// prefix still asks the provider for suggestions. There is no default
+    /// keybinding; applications can dispatch [`ShowCompletions`] in the
+    /// `Input && mode == editor` context or call this method from a command.
+    ///
+    /// Disabled/readonly editors, IME preedit, and an already-open completion
+    /// menu are left alone. A new request cancels the previous overlay request
+    /// and inline suggestion, and closes the code-action menu.
+    pub fn show_completions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled
+            || self.readonly
+            || self.completion_inserting
+            || self.ime_marked_range.is_some()
+            || self.extras.context_menu_content.completion.open
+        {
+            return;
+        }
+        let Some(provider) = self.extras.lsp.completion_provider.clone() else {
+            return;
+        };
+
+        let offset = self.cursor();
+        let word_len: usize = self
+            .text
+            .chars_at(offset)
+            .reversed()
+            .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+            .map(char::len_utf8)
+            .sum();
+        let start_offset = offset - word_len;
+        let query = self.text.slice(start_offset..offset).to_string();
+
+        self.hide_context_menu(cx);
+        self.clear_inline_completion(cx);
+        self.focus(window, cx);
+
+        self.request_completions(
+            provider,
+            start_offset,
+            query,
+            CompletionContext {
+                trigger_kind: lsp_types::CompletionTriggerKind::INVOKED,
+                trigger_character: None,
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Record the word a menu is for and ask `provider` about the caret.
+    fn request_completions(
+        &mut self,
+        provider: Rc<dyn CompletionProvider>,
+        start_offset: usize,
+        query: String,
+        completion_context: CompletionContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_offset = self.cursor();
+        let revision = self.document_revision;
+        self.extras.context_menu_task = Task::ready(Ok(()));
+        self.extras.context_menu_content.code_action.open = false;
         self.extras
             .context_menu_content
             .completion
@@ -173,11 +385,6 @@ impl InputBaseState<EditorMode> {
             .completion
             .query
             .clone_from(&query);
-
-        let completion_context = CompletionContext {
-            trigger_kind: lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some(query),
-        };
 
         let provider_responses =
             provider.completions(&self.text, new_offset, completion_context, window, cx);
@@ -190,31 +397,21 @@ impl InputBaseState<EditorMode> {
                 }
             }
 
-            if completions.is_empty() {
-                editor.update(cx, |editor, cx| {
-                    editor.extras.context_menu_content.completion.open = false;
-                    editor.extras.context_menu_content.completion.items.clear();
-                    editor.extras.context_menu_content.completion.bump();
-                    cx.notify();
-                })?;
-                return Ok(());
-            }
-
             editor
                 .update_in(cx, |editor, window, cx| {
-                    if !editor.focus_handle.is_focused(window) {
+                    if !editor.focus_handle.is_focused(window)
+                        || editor.document_revision != revision
+                        || editor.cursor() != new_offset
+                        || editor.ime_marked_range.is_some()
+                        || editor.disabled
+                        || editor.readonly
+                    {
                         return;
                     }
 
+                    editor.extras.context_menu_content.completion.open = !completions.is_empty();
                     editor.extras.context_menu_content.completion.items = completions;
-                    editor.extras.context_menu_content.completion.open = !editor
-                        .extras
-                        .context_menu_content
-                        .completion
-                        .items
-                        .is_empty();
                     editor.extras.context_menu_content.completion.bump();
-
                     cx.notify();
                 })
                 .ok();
@@ -255,15 +452,7 @@ impl InputBaseState<EditorMode> {
         };
         let handled = handler(kind, action, window, cx);
         if handled && closes_overlay {
-            match kind {
-                super::InputOverlayKind::Completion => {
-                    self.extras.context_menu_content.completion.open = false
-                }
-                super::InputOverlayKind::CodeAction => {
-                    self.extras.context_menu_content.code_action.open = false
-                }
-            }
-            cx.notify();
+            self.hide_context_menu(cx);
         }
         handled
     }
@@ -368,5 +557,73 @@ impl InputBaseState<EditorMode> {
         let completion_text = completion_item.insert_text;
         self.replace_text_in_range_silent(Some(range_utf16), &completion_text, window, cx);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(label: &str, filter_text: Option<&str>) -> CompletionItem {
+        CompletionItem {
+            label: label.to_string(),
+            filter_text: filter_text.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn prefix_uses_the_query_length_unless_filter_text_is_set() {
+        assert_eq!(highlight_prefix("fl", &item("flag", None)), vec![0..2]);
+        assert_eq!(highlight_prefix("fl", &item("flag", Some("f"))), vec![0..1]);
+        assert_eq!(
+            highlight_prefix("flagpole", &item("flag", None)),
+            vec![0..4]
+        );
+        assert!(highlight_prefix("", &item("flag", None)).is_empty());
+    }
+
+    #[test]
+    fn prefix_does_not_split_a_character() {
+        assert_eq!(highlight_prefix("你", &item("你好", None)), vec![0..3]);
+        assert!(highlight_prefix("a", &item("你", None)).is_empty());
+    }
+
+    #[test]
+    fn contains_highlights_the_first_contiguous_match() {
+        // "dialog" itself ends in "log", so that hit comes before the suffix.
+        assert_eq!(
+            highlight_contains("log", &item("dialog_log", None)),
+            vec![3..6]
+        );
+        assert_eq!(
+            highlight_contains("LOG", &item("dialog_log", None)),
+            vec![3..6]
+        );
+        assert_eq!(
+            highlight_contains("log", &item("catalog", None)),
+            vec![4..7]
+        );
+        assert_eq!(
+            highlight_contains("好世", &item("你好世界", None)),
+            vec![3..9]
+        );
+        assert!(highlight_contains("log", &item("flag", None)).is_empty());
+        assert!(highlight_contains("", &item("flag", None)).is_empty());
+    }
+
+    #[test]
+    fn characters_highlight_gaps_and_merge_adjacent_hits() {
+        assert_eq!(highlight_characters("fl", &item("flag", None)), vec![0..2]);
+        assert_eq!(
+            highlight_characters("fl", &item("file_loader", None)),
+            vec![0..1, 2..3]
+        );
+        assert_eq!(
+            highlight_characters("你世", &item("你好世界", None)),
+            vec![0..3, 6..9]
+        );
+        assert!(highlight_characters("fx", &item("flag", None)).is_empty());
+        assert!(highlight_characters("", &item("flag", None)).is_empty());
     }
 }

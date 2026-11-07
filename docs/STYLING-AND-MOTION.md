@@ -175,9 +175,9 @@ where a component needs a tighter or looser curve than the base.
 
 The Base layer keeps its own copy of the theme, because it paints the scrollbar
 and the resize handles without going through `gpui-component`. `Theme::change`
-refreshes that copy; writing to the theme's public fields does not. After
-mutating the theme directly, call `Theme::sync_base(cx)` or the scrollbar thumb
-keeps the radius it was last given.
+and `Theme::update` refresh that copy; writing to the theme's public fields
+through `Theme::global_mut` does not, and the scrollbar thumb keeps the radius
+it was last given until `Theme::sync_base` runs. Prefer `update`.
 
 Two deliberate exceptions:
 
@@ -211,7 +211,8 @@ The transition owns lifecycle mechanics only:
 - easing;
 - animation-frame requests;
 - smooth reversal from the currently sampled value;
-- reduced-motion handling.
+- reduced-motion handling, against the operating system's preference that
+  `gpui_base::init` reads into `App::set_reduce_motion` (see `reduce_motion`).
 
 The caller chooses what the value means and applies it to opacity, color,
 geometry, or another interpolatable property.
@@ -294,6 +295,15 @@ through `ScrollbarTheme::motion`. A zero duration always means "adopt the
 target now", which is also how reduced motion and always-visible scrollbars
 reach the same code path.
 
+`TextView` follows it through `TextViewMotion`. Streamed text is painted glyph
+by glyph inside the view, so only the view can fade the words an update
+appended. Base tracks which rendered text is new and samples the fade, but
+`TextViewMotion::default()` has zero `stream_fade` and `stream_fade_stagger`
+durations; the styled `TextView::stream_fade(true)` projects its own timing
+(350 ms per chunk, measured from claude.ai) the way `ScrollbarTheme` carries
+the scrollbar's, because a reveal that must overlap a model's chunk cadence
+is not one of the four UI transition tiers.
+
 ## Transition Identity
 
 A transition ID identifies one independently animated value. Use a stable
@@ -373,6 +383,60 @@ its parent, and clips paint and hit testing to the visible region. The styled
 The opt-in ID preserves the legacy immediate mount/unmount contract for callers
 that do not request motion.
 
+## Sequencing
+
+`Sequence` chains value transitions so that each step starts when the previous
+one ends. It is the mechanism for "run B when A completes" — a toast that fades
+in, holds, then fades out; a control that overshoots and settles — without a
+timer or a second keyed state per step:
+
+```rust,ignore
+let opacity = gpui_base::Sequence::new(("toast", "opacity"), 0.0)
+    .with_step(1.0, Transition::new(Duration::from_millis(160)))
+    .with_step(0.0, Transition::new(Duration::from_millis(200)).delay(Duration::from_secs(3)))
+    .sample(window, cx);
+
+if opacity.is_finished() {
+    // dismiss
+}
+```
+
+A sequence carries the lifecycle the single transition has and nothing a
+transition does not decide:
+
+- it begins at `from` on the frame it is first sampled and plays once per key;
+  to replay it, put an application-owned generation in the ID;
+- a step ends at an absolute instant, its start plus its delay and duration, and
+  the next step starts at that instant rather than on the frame that noticed
+  it, so frame rate changes how many samples are painted, not where a step is
+  at a given time. Zero-duration steps complete within the frame that reaches
+  them;
+- the sample reports the value, the index of the step being played, and a
+  `MotionStatus`. `Finished` is reported only once the last step completes; a
+  frame that crosses a boundary reports the next step's `Delayed` or `Running`;
+- frames are requested only while a step is delayed or running;
+- under reduced motion the last target is adopted at once, retained state is
+  synchronized with it, and no frame is requested.
+
+A step's target and transition are captured when the step starts. Handing the
+step being played a different target — or fewer steps than the one it is on —
+restarts the sequence from its first step, from the value sampled at that
+instant, which is how a retargeted transition continues from its current value.
+Steps the sequence has not reached are read when it reaches them; a change to
+an earlier step alone has no effect. A sequence does not reverse: play a
+second sequence back to the start under its own key when that is wanted.
+
+`Stagger` composes with it as a delay on the first step, because a stagger is
+nothing more than a per-index delay:
+
+```rust,ignore
+let stagger = Stagger::new(Duration::from_millis(40), StaggerOrigin::First);
+let offset = Sequence::new(("row", index), px(12.))
+    .with_step(px(-2.), Transition::new(Duration::from_millis(120)).delay(stagger.delay(index, count)))
+    .with_step(px(0.), Transition::new(Duration::from_millis(80)))
+    .sample(window, cx);
+```
+
 ## Product Motion Tokens
 
 `gpui-component::MotionTokens` centralizes styled policy. It contains four
@@ -418,5 +482,7 @@ may continue to use its module-qualified API.
 6. Disabled is the last semantic layer.
 7. Part styling is explicit and typed; base does not traverse arbitrary child
    trees to apply styles.
-8. Reduced-motion preferences are honored by generic transitions and springs.
+8. Reduced-motion preferences are honored by generic transitions and springs,
+   and the operating system's preference is read into GPUI's flag at `init`;
+   an application that sets the flag itself is never overridden.
 9. Corner radius is derived from the theme, never written as a literal.

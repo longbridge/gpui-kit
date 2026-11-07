@@ -51,10 +51,30 @@ let value = notes.read(cx).value();
 
 ## 表现
 
-该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../docs/components/textarea.md)。
+该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../component/textarea.md)。
 
 ## 可运行示例
 
 ```bash
 cargo run -p gpui-base-examples -- textarea
 ```
+
+## 原子行内 token
+
+需要让用户整块选中、删除人员提及或资源引用时，可以使用 token。通过已有的 TextareaState 插入：
+
+```rust
+use gpui_kit::base::input::InlineToken;
+
+notes.update(cx, |state, cx| {
+    state.replace_with_token(
+        InlineToken::new("person-1", "@alice").with_label("Alice"),
+        window,
+        cx,
+    ).expect("有效的引用");
+});
+```
+
+token 默认显示为无装饰标签。通过 `token` 槽位提供自己的单行元素，通过 `on_token_click` 打开引用。通过 `on_token_hover` 上报指针进入与离开（`InlineTokenHoverEvent::is_hovered`），不选中、不编辑，可用于提示或预览；禁用 token 从不上报悬停进入，但禁用正在悬停的 token 会发送其退出事件。复制和 `value()` 返回 `@alice` 这样的真实文本。用 `content()` 保存草稿、`set_value(content)` 恢复草稿，可以保留其中的引用。
+
+自定义展示、草稿恢复和范围单位见 [Input 的 token 示例](../../component/input.md#原子行内-token)。数据类型从 `gpui_kit::base::input` 导入。JavaScript 使用 `gpui-base` 中的 `TextareaState.new()`，它提供相同的 token 方法。

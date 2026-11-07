@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
+import { expandDocVariables } from './doc-variables.js';
 
 const SITE_TITLE = 'GPUI Kit';
 const SITE_DESCRIPTION =
@@ -11,6 +12,48 @@ interface PageEntry {
   url: string;
   body: string;
   description?: string;
+  recipes: string[];
+}
+
+interface RecipeInventoryEntry {
+  id: string;
+  documents: string[];
+  trust: string;
+}
+
+const TESTED_RECIPE_LABEL = 'Tested consumer recipe';
+
+/** Keep the machine-readable documentation exports in step with the HTML footer. */
+export function documentationLicenseNotice(lang: 'en' | 'zh-CN', source: string): string {
+  if (lang === 'zh-CN') {
+    return `文档许可：GPUI Kit 有权授权的原创正文与图示另以 CC BY 4.0 提供。复制或改编时请署名 GPUI Kit，链接原文（${source}）及 https://creativecommons.org/licenses/by/4.0/，并注明修改。代码示例与软件源码采用 Apache-2.0；第三方内容保留原许可；既有 Apache-2.0 使用权不受影响。`;
+  }
+  return `Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (${source}) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.`;
+}
+
+function documentationLicenseSummary(lang: 'en' | 'zh-CN', source: string): string {
+  return lang === 'zh-CN'
+    ? `许可：GPUI Kit 有权授权的正文与原创图示另适用 CC BY 4.0；引用请署名 GPUI Kit、链接 ${source} 与 https://creativecommons.org/licenses/by/4.0/ 并注明修改。代码示例适用 Apache-2.0。`
+    : `License: GPUI Kit-authorized prose and original illustrations are also CC BY 4.0; credit GPUI Kit, link ${source} and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples use Apache-2.0.`;
+}
+
+function recipeDestinations(websiteRoot: string): Map<string, string[]> {
+  const destinations = new Map<string, string[]>();
+  try {
+    const inventory = JSON.parse(
+      readFileSync(join(websiteRoot, '..', 'examples/ai_recipes/recipes.json'), 'utf8'),
+    ) as RecipeInventoryEntry[];
+    for (const recipe of inventory) {
+      if (recipe.trust !== TESTED_RECIPE_LABEL) continue;
+      for (const document of recipe.documents) {
+        const path = resolve(websiteRoot, '..', document);
+        destinations.set(path, [...(destinations.get(path) ?? []), recipe.id]);
+      }
+    }
+  } catch {
+    // The website can still build when checked out independently of the recipes workspace.
+  }
+  return destinations;
 }
 
 function parseFrontmatterField(content: string, field: string): string | undefined {
@@ -86,7 +129,12 @@ export function expandSnippets(body: string, fileDir: string): string {
   });
 }
 
-function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
+function scanDir(
+  dir: string,
+  baseDir: string,
+  urlPrefix: string,
+  recipePaths: Map<string, string[]>,
+): PageEntry[] {
   const results: PageEntry[] = [];
   let entries: string[];
   try {
@@ -103,8 +151,8 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
     if (stat.isDirectory()) {
       // `relPath` below is already relative to `baseDir`, so the prefix must
       // stay the tree's root — appending the directory here counted it twice
-      // and produced `/docs/components/components/accordion`.
-      const sub = scanDir(fullPath, baseDir, urlPrefix);
+      // and repeated the nested directory in every URL.
+      const sub = scanDir(fullPath, baseDir, urlPrefix, recipePaths);
       results.push(...sub);
     } else if (extname(name) === '.md') {
       let content = '';
@@ -118,11 +166,17 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
       const relPath = relative(baseDir, fullPath)
         .replace(/\.md$/, '')
         .replace(/index$/, '');
-      const url = `${BASE_URL}/${urlPrefix}/${relPath}`.replace(/\/+/g, '/');
-      const body = expandSnippets(bodyWithoutFrontmatter(content), dir);
+      const url = `${BASE_URL}/${urlPrefix}/${relPath}`.replace(/\/+/g, '/').replace(/\/$/, '');
+      const body = expandDocVariables(expandSnippets(bodyWithoutFrontmatter(content), dir));
 
       try {
-        results.push({ title, url, body, description: parseFrontmatterField(content, 'description') });
+        results.push({
+          title,
+          url,
+          body,
+          description: parseFrontmatterField(content, 'description'),
+          recipes: recipePaths.get(resolve(fullPath)) ?? [],
+        });
       } catch (err) {
         console.warn(`[llms] skipping ${fullPath}:`, err);
       }
@@ -133,9 +187,11 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
 
 const SECTIONS = (root: string) => [
   { dir: join(root, 'docs'), prefix: 'docs' },
+  { dir: join(root, 'component'), prefix: 'component' },
   { dir: join(root, 'shell'), prefix: 'shell' },
   { dir: join(root, 'base'), prefix: 'base' },
   { dir: join(root, 'zh-CN/docs'), prefix: 'zh-CN/docs' },
+  { dir: join(root, 'zh-CN/component'), prefix: 'zh-CN/component' },
   { dir: join(root, 'zh-CN/shell'), prefix: 'zh-CN/shell' },
   { dir: join(root, 'zh-CN/base'), prefix: 'zh-CN/base' },
 ];
@@ -146,32 +202,45 @@ const SECTIONS = (root: string) => [
  * `llms-full.txt` is everything at once.
  */
 export function buildLlmsIndex(websiteRoot: string): string {
-  const entries = SECTIONS(websiteRoot).flatMap(({ dir, prefix }) => scanDir(dir, dir, prefix));
+  const recipePaths = recipeDestinations(websiteRoot);
+  const entries = SECTIONS(websiteRoot).flatMap(({ dir, prefix }) => scanDir(dir, dir, prefix, recipePaths));
   const lines = entries
     .sort((a, b) => a.title.localeCompare(b.title, 'en') || a.url.localeCompare(b.url))
-    .map((entry) => `- [${entry.title}](${entry.url}.md)${entry.description ? `: ${entry.description}` : ''}`);
+    .map((entry) =>
+      `- [${entry.title}](${entry.url}.md)${entry.description ? `: ${entry.description}` : ''}${
+        entry.recipes.length ? ` — ${TESTED_RECIPE_LABEL}: ${entry.recipes.join(', ')}` : ''
+      }`,
+    );
 
-  return `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n## Table of Contents\n\n${lines.join('\n')}\n`;
+  return `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n${documentationLicenseNotice('en', 'https://gpui-kit.com')}\n\n## Table of Contents\n\n${lines.join('\n')}\n`;
 }
 
 export function buildLlmsContent(websiteRoot: string): string {
+  const recipePaths = recipeDestinations(websiteRoot);
   const sections = [
     { dir: join(websiteRoot, 'docs'), prefix: 'docs' },
+    { dir: join(websiteRoot, 'component'), prefix: 'component' },
     { dir: join(websiteRoot, 'shell'), prefix: 'shell' },
     { dir: join(websiteRoot, 'base'), prefix: 'base' },
     { dir: join(websiteRoot, 'zh-CN/docs'), prefix: 'zh-CN/docs' },
+    { dir: join(websiteRoot, 'zh-CN/component'), prefix: 'zh-CN/component' },
     { dir: join(websiteRoot, 'zh-CN/shell'), prefix: 'zh-CN/shell' },
     { dir: join(websiteRoot, 'zh-CN/base'), prefix: 'zh-CN/base' },
   ];
 
-  const header = `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n---\n`;
+  const header = `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n${documentationLicenseNotice('en', 'https://gpui-kit.com')}\n\n---\n`;
 
   const pages: string[] = [];
   for (const { dir, prefix } of sections) {
-    const entries = scanDir(dir, dir, prefix);
+    const entries = scanDir(dir, dir, prefix, recipePaths);
     for (const entry of entries) {
       const body = forPlainText(withoutLeadingHeading(entry.body, entry.title), entry.url);
-      pages.push(`# ${entry.title}\n\nSource: ${entry.url}\n\n${body}`);
+      const provenance = entry.recipes.length
+        ? `\n\n${TESTED_RECIPE_LABEL}: ${entry.recipes.join(', ')}`
+        : '';
+      const lang = entry.url.startsWith(`${BASE_URL}/zh-CN/`) ? 'zh-CN' : 'en';
+      const source = `https://gpui-kit.com${entry.url}`;
+      pages.push(`# ${entry.title}\n\nSource: ${entry.url}${provenance}\n\n${documentationLicenseSummary(lang, source)}\n\n${body}`);
     }
   }
 

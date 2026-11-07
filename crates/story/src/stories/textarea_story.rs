@@ -1,26 +1,46 @@
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, ClickEvent, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement as _, Render, Styled, Subscription, Window, div, px,
+    App, AppContext as _, ClickEvent, ClipboardEntry, Context, Entity, Focusable,
+    InteractiveElement, IntoElement, ParentElement as _, Render, Styled, Subscription, Window, div,
+    px,
 };
 
-use crate::section;
+use crate::{ChangeStorySize, section, story_toolbar};
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable,
-    button::Button,
+    ActiveTheme as _, Icon, IconName, Sizable, Size,
+    attachment::{
+        Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
+        AttachmentMedia, AttachmentTitle,
+    },
+    button::{Button, ButtonVariants as _},
     h_flex,
+    hover_card::HoverCard,
     input::{InputEvent, Textarea, TextareaState},
     v_flex,
 };
 
 pub fn init(_: &mut App) {}
 
+struct ComposerAttachment {
+    id: u64,
+    title: String,
+    detail: String,
+}
+
 pub struct TextareaStory {
+    tokens: Entity<super::input_tokens::TokenExample>,
     textarea: Entity<TextareaState>,
     textarea_auto_grow: Entity<TextareaState>,
     textarea_no_wrap: Entity<TextareaState>,
     textarea_auto_grow_no_wrap: Entity<TextareaState>,
     chat_input: Entity<TextareaState>,
     chat_messages: Vec<String>,
+    composer: Entity<TextareaState>,
+    attachments: Vec<ComposerAttachment>,
+    /// Counter for attachment ids; `Image::id` is a content hash, so pasting
+    /// the same image twice would collide.
+    next_attachment_id: u64,
+    size: Size,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -116,6 +136,12 @@ impl TextareaStory {
                 .placeholder("Type a message, Enter to send, Shift+Enter for newline")
         });
 
+        let composer = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(1, 5)
+                .placeholder("Paste a screenshot here, it becomes an attachment above")
+        });
+
         let _subscriptions = vec![cx.subscribe_in(
             &chat_input,
             window,
@@ -135,12 +161,17 @@ impl TextareaStory {
         )];
 
         Self {
+            tokens: super::input_tokens::TokenExample::new(true, window, cx),
             textarea,
             textarea_auto_grow,
             textarea_no_wrap,
             textarea_auto_grow_no_wrap,
             chat_input,
             chat_messages: Vec::new(),
+            composer,
+            attachments: Vec::new(),
+            next_attachment_id: 0,
+            size: Size::Medium,
             _subscriptions,
         }
     }
@@ -181,12 +212,17 @@ impl Render for TextareaStory {
         v_flex()
             .w_full()
             .gap_3()
+            .on_action(cx.listener(|this, action: &ChangeStorySize, _, cx| {
+                this.size = action.0;
+                cx.notify();
+            }))
+            .child(story_toolbar(self.size))
             .child(
                 section("Textarea").w(px(560.)).child(
                     v_flex()
                         .gap_2()
                         .w_full()
-                        .child(Textarea::new(&self.textarea).h(px(320.)))
+                        .child(Textarea::new(&self.textarea).with_size(self.size).h(px(320.)))
                         .child(
                             h_flex()
                                 .justify_between()
@@ -219,17 +255,17 @@ impl Render for TextareaStory {
             .child(
                 section("No Wrap")
                     .w(px(560.))
-                    .child(Textarea::new(&self.textarea_no_wrap).h(px(200.))),
+                    .child(Textarea::new(&self.textarea_no_wrap).with_size(self.size).h(px(200.))),
             )
             .child(
                 section("Auto Grow")
                     .w(px(560.))
-                    .child(Textarea::new(&self.textarea_auto_grow)),
+                    .child(Textarea::new(&self.textarea_auto_grow).with_size(self.size)),
             )
             .child(
                 section("Auto Grow with No Wrap")
                     .w(px(560.))
-                    .child(Textarea::new(&self.textarea_auto_grow_no_wrap)),
+                    .child(Textarea::new(&self.textarea_auto_grow_no_wrap).with_size(self.size)),
             )
             .child(
                 section("Submit on Enter (Chat)").w(px(560.)).child(
@@ -247,8 +283,100 @@ impl Render for TextareaStory {
                                     .child(msg.clone())
                             }),
                         ))
-                        .child(Textarea::new(&self.chat_input)),
+                        .child(Textarea::new(&self.chat_input).with_size(self.size)),
                 ),
             )
+            .child(
+                section("Paste Images (Composer)")
+                    .description("Paste a screenshot, it lands as an attachment pill above.")
+                    .w(px(560.))
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .w_full()
+                            .when(!self.attachments.is_empty(), |this| {
+                                this.child(AttachmentGroup::new("composer-attachments").children(
+                                    self.attachments.iter().map(|attachment| {
+                                        let id = attachment.id;
+                                        HoverCard::new(("pasted-preview", id))
+                                            .trigger(
+                                                Attachment::new()
+                                                    .media(AttachmentMedia::new().child(
+                                                        Icon::new(IconName::FileText).small(),
+                                                    ))
+                                                    .content(
+                                                        AttachmentContent::new()
+                                                            .title(AttachmentTitle::new(
+                                                                attachment.title.clone(),
+                                                            ))
+                                                            .description(
+                                                                AttachmentDescription::new(
+                                                                    attachment.detail.clone(),
+                                                                ),
+                                                            ),
+                                                    )
+                                                    .actions(
+                                                        AttachmentActions::new().child(
+                                                            Button::new(("remove-pasted", id))
+                                                                .ghost()
+                                                                .xsmall()
+                                                                .icon(IconName::Close)
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        this.attachments.retain(
+                                                                            |item| item.id != id,
+                                                                        );
+                                                                        cx.notify();
+                                                                    },
+                                                                )),
+                                                        ),
+                                                    ),
+                                            )
+                                            .child(div().text_sm().child(attachment.detail.clone()))
+                                            .into_any_element()
+                                    }),
+                                ))
+                            })
+                            .child({
+                                let view = cx.entity().downgrade();
+                                Textarea::new(&self.composer)
+                                    .with_size(self.size)
+                                    .on_paste(move |item, _, cx| {
+                                    let images: Vec<_> = item
+                                        .entries()
+                                        .iter()
+                                        .filter_map(|entry| match entry {
+                                            ClipboardEntry::Image(image) => Some(image.clone()),
+                                            _ => None,
+                                        })
+                                        .collect();
+                                    if images.is_empty() {
+                                        return false;
+                                    }
+                                    view.update(cx, |this: &mut Self, cx| {
+                                        for image in images {
+                                            let id = this.next_attachment_id;
+                                            this.next_attachment_id += 1;
+                                            this.attachments.push(ComposerAttachment {
+                                                id,
+                                                title: format!("pasted-image-{id}.png"),
+                                                detail: format!(
+                                                    "{:?} - {} bytes",
+                                                    image.format,
+                                                    image.bytes.len()
+                                                ),
+                                            });
+                                        }
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                    true
+                                })
+                            }),
+                    ),
+            )
+            .child(section("Atomic inline tokens")
+                .description("References keep their identity through selection, deletion and undo. Copy returns the underlying text.")
+                .w_full().child(self.tokens.clone()))
     }
 }

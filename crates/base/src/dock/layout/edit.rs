@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use gpui::{Bounds, Pixels};
+use gpui::Pixels;
 
 use crate::Placement;
 
-use super::node::{NodeId, NodeKind, PaneNode, PanelId, TilePanel};
+use super::node::{NodeId, NodeKind, PaneNode, PanelId};
 use super::tree::PaneTree;
 
 /// Where a panel should land.
@@ -22,11 +22,6 @@ pub enum InsertTarget {
         placement: Placement,
         size: Option<Pixels>,
     },
-    /// Onto a tiles canvas at the given bounds.
-    Tile {
-        node: NodeId,
-        bounds: Bounds<Pixels>,
-    },
 }
 
 /// What one edit changed.
@@ -34,9 +29,8 @@ pub enum InsertTarget {
 /// Only whether anything changed, for now. An earlier revision also carried
 /// the created and removed nodes, the removed panels, and the activation
 /// edges — but nothing outside tests ever read them, and computing them meant
-/// cloning the whole tree on every edit to diff against, on a path that a
-/// tile drag walks once per mouse move. Fields are private, so any of them
-/// can come back the day something needs one.
+/// cloning the whole tree on every edit to diff against. Fields are private, so
+/// any of them can come back the day something needs one.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EditResult {
     changed: bool,
@@ -123,36 +117,6 @@ impl PaneTree {
             }
             *sizes = new_sizes;
             true
-        })
-    }
-
-    pub fn set_tile_bounds(&mut self, panel: PanelId, bounds: Bounds<Pixels>) -> EditResult {
-        self.edit(|tree| {
-            let mut changed = false;
-            tree.with_tile(panel, |tile| {
-                if tile.bounds() != bounds {
-                    *tile = tile.with_bounds(bounds);
-                    changed = true;
-                }
-            });
-            changed
-        })
-    }
-
-    pub fn bring_to_front(&mut self, panel: PanelId) -> EditResult {
-        self.edit(|tree| {
-            let top = tree.max_z_index();
-            let mut changed = false;
-            tree.with_tile(panel, |tile| {
-                // Already on top is a no-op rather than another increment, so
-                // repeatedly grabbing the front tile neither churns the tree
-                // nor lets z-indices climb forever.
-                if tile.z_index() < top {
-                    *tile = tile.with_z_index(top + 1);
-                    changed = true;
-                }
-            });
-            changed
         })
     }
 }
@@ -250,17 +214,6 @@ impl PaneTree {
                 placement,
                 size,
             } => self.insert_beside(node, panel, placement, size),
-            InsertTarget::Tile { node, bounds } => {
-                let Some(path) = self.path_of_node(node) else {
-                    return false;
-                };
-                let top = self.max_z_index();
-                let NodeKind::Tiles { panels } = self.node_at_mut(&path).kind_mut() else {
-                    return false;
-                };
-                panels.push(TilePanel::new(panel, bounds).with_z_index(top + 1));
-                true
-            }
         }
     }
 
@@ -380,40 +333,8 @@ impl PaneTree {
                 }
                 true
             }
-            NodeKind::Tiles { panels } => {
-                let Some(ix) = panels.iter().position(|p| p.panel() == panel) else {
-                    return false;
-                };
-                panels.remove(ix);
-                true
-            }
             NodeKind::Split { .. } => false,
         }
-    }
-
-    fn with_tile(&mut self, panel: PanelId, f: impl FnOnce(&mut TilePanel)) {
-        let Some(node) = self.find_panel_node(panel) else {
-            return;
-        };
-        let Some(path) = self.path_of_node(node) else {
-            return;
-        };
-        if let NodeKind::Tiles { panels } = self.node_at_mut(&path).kind_mut() {
-            if let Some(tile) = panels.iter_mut().find(|tile| tile.panel() == panel) {
-                f(tile);
-            }
-        }
-    }
-
-    /// Highest z-index across every tiles canvas in the tree.
-    fn max_z_index(&self) -> usize {
-        let mut top = 0;
-        self.root().walk(&mut |node| {
-            if let NodeKind::Tiles { panels } = node.kind_ref() {
-                top = top.max(panels.iter().map(TilePanel::z_index).max().unwrap_or(0));
-            }
-        });
-        top
     }
 }
 
@@ -427,7 +348,7 @@ fn split_parent_of(path: &super::tree::NodePath) -> Option<(super::tree::NodePat
 mod tests {
     use super::super::*;
     use crate::Placement;
-    use gpui::{Axis, Bounds, Pixels, point, px, size};
+    use gpui::{Axis, px};
 
     fn panel(n: u64) -> PanelId {
         PanelId::from_u64(n)
@@ -695,88 +616,6 @@ mod tests {
             before_sizes.as_slice(),
             "the mismatched vector is rejected"
         );
-    }
-
-    fn tile_bounds(x: f32) -> Bounds<Pixels> {
-        Bounds {
-            origin: point(px(x), px(0.)),
-            size: size(px(10.), px(10.)),
-        }
-    }
-
-    #[test]
-    fn inserting_a_tile_places_it_at_the_given_bounds_on_top() {
-        let mut tree = PaneTree::new(RootKind::Any);
-        let canvas = tree.set_root_tiles_for_test(vec![
-            TilePanel::new(panel(1), tile_bounds(0.)).with_z_index(4),
-        ]);
-
-        let result = tree.insert_panel(
-            panel(2),
-            InsertTarget::Tile {
-                node: canvas,
-                bounds: tile_bounds(70.),
-            },
-        );
-
-        assert!(result.changed());
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!("the canvas stays a canvas rather than being split")
-        };
-        assert_eq!(panels.len(), 2);
-        let added = panels.iter().find(|tile| tile.panel() == panel(2)).unwrap();
-        assert_eq!(added.bounds(), tile_bounds(70.), "the bounds are honoured");
-        assert!(
-            added.z_index() > panels[0].z_index(),
-            "a new tile lands on top of the ones already there"
-        );
-    }
-
-    #[test]
-    fn set_tile_bounds_moves_one_tile_and_leaves_its_peers_alone() {
-        let mut tree = PaneTree::new(RootKind::Any);
-        tree.set_root_tiles_for_test(vec![
-            TilePanel::new(panel(1), tile_bounds(0.)).with_z_index(1),
-            TilePanel::new(panel(2), tile_bounds(40.)).with_z_index(2),
-        ]);
-
-        let result = tree.set_tile_bounds(panel(1), tile_bounds(90.));
-
-        assert!(result.changed());
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!()
-        };
-        let moved = panels.iter().find(|tile| tile.panel() == panel(1)).unwrap();
-        let other = panels.iter().find(|tile| tile.panel() == panel(2)).unwrap();
-        assert_eq!(moved.bounds(), tile_bounds(90.));
-        assert_eq!(
-            moved.z_index(),
-            1,
-            "moving a tile does not raise it; that is `bring_to_front`'s job"
-        );
-        assert_eq!(other.bounds(), tile_bounds(40.), "its peer does not move");
-    }
-
-    #[test]
-    fn bring_to_front_raises_the_tile_above_its_peers() {
-        let mut tree = PaneTree::new(RootKind::Any);
-        let bounds = Bounds {
-            origin: point(px(0.), px(0.)),
-            size: size(px(10.), px(10.)),
-        };
-        tree.set_root_tiles_for_test(vec![
-            TilePanel::new(panel(1), bounds).with_z_index(0),
-            TilePanel::new(panel(2), bounds).with_z_index(1),
-        ]);
-
-        tree.bring_to_front(panel(1));
-
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!()
-        };
-        let raised = panels.iter().find(|p| p.panel() == panel(1)).unwrap();
-        let other = panels.iter().find(|p| p.panel() == panel(2)).unwrap();
-        assert!(raised.z_index() > other.z_index());
     }
 
     #[test]

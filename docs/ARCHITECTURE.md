@@ -102,8 +102,8 @@ semantic seams. Base does not walk arbitrary descendant trees to discover them.
 ### 3. Stateful systems
 
 Examples include InputState, TextareaState, EditorState, CalendarState, TreeState, SliderState,
-ResizableState, OtpState, ColorPickerState, ToastManager, ToastStackState, NavStackState, DockArea,
-TabGroup, and TilesState.
+ResizableState, OtpState, ColorPickerState, QuestionnaireState, ToastManager, ToastStackState,
+NavStackState, DockArea, and TabGroup.
 
 These modules retain data because their behavior spans frames or requires
 measurement, subscriptions, history, focus, or incremental updates. State is
@@ -258,9 +258,30 @@ apply to value types whose fields _are_ the definition and cannot grow, such as
 mirror an external schema, such as the LSP `Diagnostic`.
 
 Design-token records (`ColorTokens`, `RadiusTokens`, and the rest of
-`theme_tokens`) still carry `pub` fields. They have the same growth problem, and
-converting them is tracked separately because every theme in `gpui-component`
-constructs them.
+`theme_tokens`) keep `pub` fields: themes read and write them field by field.
+They carry `#[non_exhaustive]` under the rule below.
+
+Where `pub` fields are deliberate — themes, settings records, design tokens,
+serialized schemas — the struct must carry `#[non_exhaustive]` and implement
+`Default` or a constructor. Adding a field is then not a breaking change.
+Outside the defining crate, callers build the value from `Default::default()`
+and assign fields; a struct literal, including `..Default::default()`, does not
+compile there, so other workspace crates use the same form:
+
+```rust
+let mut theme = gpui_base::Theme::default();
+theme.tokens = tokens;
+theme.cursor_blink = cursor_blink;
+```
+
+Apply this to every new type and to any existing type whose fields a change
+adds or alters. Every theme record already carries it: both `Theme` structs,
+the Base token records, the Component theme schema (`ThemeConfig`,
+`ThemeColor`, `ThemeConfigColors` and the `Semantic*Config` types), the
+highlight theme (`HighlightTheme`, `HighlightThemeStyle`, `SyntaxColors`),
+`MotionTokens` and the theme settings records (`ListSettings`,
+`NotificationSettings`, `SheetSettings`). Value types exempt above stay exempt, and remaining existing
+types migrate in their own changes. The Coding Guides state the same rule.
 
 ## Input, Textarea, and Editor Architecture
 
@@ -338,9 +359,106 @@ coordinate system:
 This keeps product values in the presentation layer while keeping coupled text,
 gutter, and scrollbar geometry local to the editing engine.
 
+### Input groups
+
+`gpui-component::input::InputGroup` composes one `Input` or `Textarea` with typed
+addons and buttons in a shared frame. It owns no editing state: the control is
+the ordinary styled `Input`, rendered without its own border, background and
+focus ring, so every capability the input gains — paste hooks, touch
+selection, native menus, accessibility — reaches a group without being
+mirrored. `InputGroup` owns the outer border, radius, focus and error
+treatment, and four logical addon regions; `InputGroupButton` wraps a `Button`
+with compact presentation and sizes through `Sizable`. Textarea viewport
+geometry remains with the editing engine. Validation appearance is
+caller-controlled, separately from edit acceptance.
+
 Platform-specific behavior is isolated behind adapters. For example, folding is
 disabled on WebAssembly, time uses `web_time` where needed, and native text
 content support is conditionally compiled.
+
+## Text Rendering for External Components
+
+`gpui_base::text::editor_host` adapts the same renderer used by `TextView`.
+It is a rendering boundary for externally owned rich-text components, not an
+editing engine. The host projects its own document into `BlockNode` values;
+Base owns shaping, wrapping, inline-object layout and geometry. The host owns
+document identity and revisions, editing semantics, commands, history, selection,
+focus, accessibility integration, native input and scrolling policy.
+
+### Identity and lifecycle
+
+There are two independent identities. A stable GPUI element ID scopes retained
+render state; `BlockNode::render_with_id` provides that scope for top-level
+blocks. Leaf keys identify geometry and decorations within one collection.
+Keys must be unique in that collection. Cloning the AST shares runtime state;
+calling `with_leaf_key` detaches the leaf's runtime text/selection state so
+rekeying a clone does not rename the original leaf. Independently rendered
+instances need distinct keys.
+
+Run `collect_leaf_geometry` around child prepaint, not rendering or painting.
+The scope is synchronous, nests with isolation and restores its predecessor
+during unwinding. Only prepainted leaves are reported. A virtualized or cached
+subtree that does not prepaint is absent; a missing entry does not remove a leaf
+from the host document.
+
+`LeafGeometry` copies bounds and retains immutable shaped lines. It does not
+retain mutable `TextLayout` handles. A later frame cannot change an existing
+snapshot, but that snapshot describes only its original content, typography,
+width and scroll offset. Hosts must associate geometry with their own document
+revision and replace it when those inputs change.
+
+### Coordinates and presentation
+
+Leaf offsets are UTF-8 bytes. Each inline image or custom inline node occupies
+one U+FFFC (three bytes), independent of its fallback text. Window coordinates
+are logical pixels, before display scaling. Hard breaks and empty lines retain
+caret positions, including the final empty line. Native input APIs that use
+UTF-16 require conversion in the host.
+
+Decorations are ordered half-open byte ranges. Text decorations paint behind
+glyphs. Any nonempty overlap with an atom decorates its entire box, over the
+content, so an opaque image can show its selected state. The host supplies the
+color and should use translucency for an atom overlay. Empty ranges paint
+nothing. Decorations do not change layout.
+
+`RenderContext::new` accepts local presentation without application globals;
+`from_app` uses TextView defaults. A host can override syntax highlighting,
+image resolution and link activation locally. Reference links need definitions
+from the entire document, including blocks outside the viewport. Register them
+through `with_link_reference`.
+
+Host foregrounds are render-local presentation, supplied through
+`RenderContext::with_foreground_ranges` for keyed paragraph leaves. They use
+the same UTF-8 byte space as geometry, with U+FFFC for each inline object.
+They override glyph colors from marks and links; later supplied ranges win
+overlaps. Other mark properties and link activation remain intact. Uncovered
+text keeps normal inheritance. The node tree and its cached base mark styles
+never retain these colors: a host can change its theme/surface or remove the
+ranges next frame without rebuilding the document. Custom objects inherit an
+override only when their entire placeholder is covered; images are unchanged.
+
+### Evolution boundary
+
+Keep the sink, layout caches, flow fragments and shaping implementations private.
+The public AST is a projection into the renderer, not a canonical editor model
+or persistence format. Do not add editor-specific document operations, history,
+collaboration or serializer policy to Base merely to serve one consumer.
+
+This boundary currently supports horizontal text rendered through TextView's
+block flow. It is not a complete contract for every future editor. In particular,
+a future extension for visual navigation must represent caret affinity at soft
+wraps and bidirectional runs; a byte index alone is insufficient. Per-position
+caret metrics and range rectangles should be designed together with that
+contract, not inferred from one leaf-wide line height. Pagination, arbitrary
+block-level widgets, native accessibility text ranges and vertical writing need
+their own demonstrated requirements and contract tests before being promised.
+
+The newly public `BlockNode` enum is non-exhaustive so variants may be added.
+Its existing named variant fields still constrain changes to those variants;
+non-exhaustiveness is not permission to rename fields or add required fields.
+Prefer new private-field option types and additive constructors when extending
+the seam. Preserve existing public types and import paths; a pre-1.0 disclaimer
+does not replace this project's compatibility requirement.
 
 ## Overlay and Positioning Architecture
 
@@ -407,7 +525,16 @@ capture phase, locks each gesture to the axis it started on, and stays inert
 while occluded. Edge semantics differ per axis, matching platform scrollers: a
 vertical mask chains to the ancestor at the edge, a horizontal one keeps
 consuming. `horizontal_scroll_area` is the paired viewport and mask, used by the
-Markdown scrolling table.
+Markdown scrolling table. A Markdown code block whose style sets `overflow.y` to
+`Overflow::Scroll` pairs its viewport with a vertical mask and a `Scrollbar`.
+
+A plain mouse wheel has only a vertical axis, which a native horizontal scroller
+with a locked axis ignores. `ScrollableMask::vertical_wheel` sits over such a
+scroller and handles only that wheel: its lines move the scroller sideways and,
+at the edge, chain to the ancestor; trackpad gestures and horizontal wheels go
+on to the scroller with its axis lock and bounce. TabBar, the attachment row,
+the app menu bar and a horizontal `Scrollable` use it. The mask is pinned to its
+parent's top-left corner, so it covers the parent in a row as in a column.
 
 One handle represents one logical viewport. Sharing a handle between nested or
 unrelated scroll areas causes offsets, hitboxes, and scrollbar geometry to
@@ -427,30 +554,30 @@ persists — it draws no chrome at all.
 `PaneTree` is the single source of truth for one region — the center, or
 one of the left/bottom/right docks. It stores no GPUI entity handles:
 containers are addressed by `NodeId`, panels by `PanelId` (the panel entity's
-`EntityId`), and a container's `NodeKind` is one of `Split`, `Tabs`, or
-`Tiles`. There is no leaf variant, so a panel can only ever live inside a
-`Tabs` or `Tiles` node — the invariant a runtime assertion checked in the old
-implementation is expressed in the type instead.
+`EntityId`), and a container's `NodeKind` is one of `Split` or `Tabs`. There
+is no leaf variant, so a panel can only ever live inside a `Tabs` node — the
+invariant a runtime assertion checked in the old implementation is expressed
+in the type instead.
 
 `NodeKind` stays private. Callers read a node through the borrowed `PaneRef`
 projection and never construct one directly; every mutation goes through
 `PaneTree`'s edit methods (`insert_panel`, `remove_panel`, `move_panel`,
-`split`, `set_active`, `set_sizes`, `set_tile_bounds`, `bring_to_front`), each
+`split`, `set_active`, `set_sizes`), each
 of which runs `normalize` before returning. When base needs a fact about a
 panel — its name, its visibility, its dump — it asks a `PanelSource` rather
 than the entity directly, which is what makes the layout algebra testable as
 pure functions with no `TestAppContext`.
 
 Building a layout is entity-free too: `DockLayout` (`h_split`, `v_split`,
-`tabs`, `tiles`, chained with `.child(...)`, `.panel_view(...)`,
-`.tile_view(...)`, and `.active_index(...)`) produces a tree rather than
+`tabs`, chained with `.child(...)`, `.panel_view(...)`, and
+`.active_index(...)`) produces a tree rather than
 constructing containers. `DockArea::set_center` and `set_dock` reconcile a
 `DockLayout` into live entities when it is installed.
 
 Panels go in wrapped: `gpui_component::dock::panel_handle(panel)` is what
 carries a panel's presentation across the renderer seam, and every entry point
-takes one — `DockLayout::panel_view` / `tile_view` when describing a layout,
-`DockArea::add_panel_view` / `add_tile_view` when adding to a live one, and
+takes one — `DockLayout::panel_view` when describing a layout,
+`DockArea::add_panel_view` when adding to a live one, and
 the closure a `register_panel` builder returns.
 
 ```rust,ignore
@@ -460,7 +587,7 @@ let center = DockLayout::h_split()
 dock_area.update(cx, |area, cx| area.set_center(center, window, cx));
 ```
 
-Base's own `DockLayout::panel` / `tile` and `DockArea::add_panel` / `add_tile`
+Base's own `DockLayout::panel` and `DockArea::add_panel`
 take a bare `Entity<P>` instead. They are the base-only forms: the panel docks,
 drags and persists exactly the same, but base stores the bare entity and the
 skin cannot recover presentation from it, so **every tab draws the panel's
@@ -472,7 +599,7 @@ skin cannot recover presentation from it, so **every tab draws the panel's
 One post-order pass, repeated to a fixpoint, replaces the mutually recursive
 parent-pointer collapse the old `StackPanel`/`TabPanel` pair used:
 
-1. An empty `Tabs`, `Tiles`, or `Split` is removed from its parent; the root
+1. An empty `Tabs` or `Split` is removed from its parent; the root
    is exempt.
 2. A `Split` with one child is replaced by that child, which keeps its own
    `NodeId` and inherits the split's slot size.
@@ -505,11 +632,10 @@ state of panels it did not touch.
 `TabGroup` owns the panel list mirrored from the tree, the active index, the
 focus handle, drag-and-drop hit state, and the zoom flag; it renders a
 skeleton and delegates all appearance to a `TabGroupRenderer`.
-`DockAreaRenderer` and `TilesRenderer` do the same for the area frame and a
-tiles canvas. Base attaches the drag source, drop-target hit testing,
-keyboard actions, and focus handling — a renderer implementation never sees a
-drag event, only resolved state through `TabGroupContext`, `DockContext`, and
-`TileContext`.
+`DockAreaRenderer` does the same for the area frame and the docks. Base
+attaches the drag source, drop-target hit testing, keyboard actions, and focus
+handling — a renderer implementation never sees a drag event, only resolved
+state through `TabGroupContext` and `DockContext`.
 
 `Panel` splits at the seam the same way: `gpui_base::dock::Panel` covers
 behavior (`panel_name`, `visible`, `closable`, `zoomable`, `set_active`,
@@ -558,6 +684,9 @@ Call `gpui_base::init(cx)` before constructing base controls. Initialization:
 
 - installs the base global theme if absent;
 - initializes shared global state;
+- reads the operating system's reduced-motion preference into
+  `App::set_reduce_motion` (see `reduce_motion.rs` for the per-platform
+  sources and the rule that an application's own setting wins);
 - registers key bindings and infrastructure for dialog, focus traps, popover,
   sheet, combobox, color picker, select, number input, input, and tree.
 

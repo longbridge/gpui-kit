@@ -1,9 +1,10 @@
+use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
 
 use gpui::{
     AbsoluteLength, AnyElement, App, AppContext as _, AvailableSpace, Context, Entity, FocusHandle,
     Focusable, FontFallbacks, FontFeatures, FontStyle, FontWeight, InteractiveElement, IntoElement,
-    KeyBinding, ListSizingBehavior, ParentElement, Pixels, Render, Role, ScrollStrategy,
+    KeyBinding, Keystroke, ListSizingBehavior, ParentElement, Pixels, Render, Role, ScrollStrategy,
     SharedString, Size, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription,
     TextOverflow, WhiteSpace, Window, div, prelude::FluentBuilder as _, px, size,
 };
@@ -122,6 +123,10 @@ pub struct CommandState {
     row_sizes: Rc<Vec<Size<Pixels>>>,
     list_measurement_key: Option<ListMeasurementKey>,
     needs_measure: bool,
+    /// The keybinding hint each matched item showed when the rows were last
+    /// measured. Hints are looked up on every render, so a keymap change can
+    /// resize a row while the model stays the same.
+    measured_bindings: Vec<Option<Keystroke>>,
     matched: Vec<MatchedItem>,
     selected_index: Option<usize>,
     preserve_no_selection: bool,
@@ -153,6 +158,7 @@ impl CommandState {
             row_sizes: Rc::new(Vec::new()),
             list_measurement_key: None,
             needs_measure: true,
+            measured_bindings: Vec::new(),
             matched: Vec::new(),
             selected_index: None,
             preserve_no_selection: false,
@@ -165,10 +171,32 @@ impl CommandState {
         }
     }
 
+    /// Apply the presentation of the latest [`crate::command::Command`] render.
+    pub(crate) fn set_options(&mut self, options: CommandOptions) {
+        if self.options.style.text != options.style.text {
+            self.needs_measure = true;
+        }
+        self.options = options;
+    }
+
     pub(crate) fn install_model(&mut self, model: CommandModel, cx: &mut Context<Self>) {
         let selected_index_path = self.selected_index();
+        // The model reinstalls on every host re-render, usually unchanged.
+        // Keep the rows and their measured sizes then: measuring lays out
+        // every row, not only the visible ones.
+        let same_layout = self.model.searchable == model.searchable
+            && self.model.filterable == model.filterable
+            && self.model.entries.len() == model.entries.len()
+            && self
+                .model
+                .entries
+                .iter()
+                .zip(&model.entries)
+                .all(|(entry, other)| entry.same_layout(other));
         self.model = model;
-        self.update_matches(cx);
+        if !same_layout {
+            self.update_matches(cx);
+        }
 
         let preserved_selection = selected_index_path.and_then(|selected_index_path| {
             self.matched
@@ -192,8 +220,6 @@ impl CommandState {
         } else {
             self.reset_selection();
         }
-
-        self.needs_measure = true;
     }
 
     /// The current search query.
@@ -472,6 +498,7 @@ impl CommandState {
     fn set_list_measurement_key(
         &mut self,
         measurement_key: ListMeasurementKey,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.list_measurement_key.as_ref() == Some(&measurement_key) {
@@ -479,8 +506,15 @@ impl CommandState {
         }
 
         self.list_measurement_key = Some(measurement_key);
+        self.measure_on_next_frame(window, cx);
+    }
+
+    /// Measure the rows again on the next frame. Called while the list is
+    /// drawn, where a plain notify schedules no new frame.
+    fn measure_on_next_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.needs_measure = true;
-        cx.notify();
+        let entity_id = cx.entity_id();
+        window.on_next_frame(move |_, cx| cx.notify(entity_id));
     }
 
     // MARK: Actions
@@ -606,7 +640,7 @@ impl CommandState {
 
     /// Measure each row before passing the sizes to the virtual list. Custom
     /// item elements can have independent intrinsic heights.
-    fn measure_row_sizes(&self, window: &mut Window, cx: &mut Context<Self>) -> Vec<Size<Pixels>> {
+    fn measure_rows(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let available = size(
             self.list_measurement_key
                 .as_ref()
@@ -617,22 +651,33 @@ impl CommandState {
         );
         let mut text_style = StyleRefinement::default();
         text_style.text = self.options.style.text.clone();
+        let mut bindings = vec![None; self.matched.len()];
 
-        self.rows
+        let row_sizes = self
+            .rows
             .iter()
             .enumerate()
-            .map(|(row_ix, row)| match row {
-                CommandRow::Separator => size(px(0.), px(SEPARATOR_ROW_HEIGHT)),
-                CommandRow::Heading(_) | CommandRow::Item(_) => {
-                    let row_size = div()
-                        .refine_style(&text_style)
-                        .child(self.render_row(row_ix, window, cx))
-                        .into_any_element()
-                        .layout_as_root(available, window, cx);
-                    size(px(0.), row_size.height)
-                }
+            .map(|(row_ix, row)| {
+                let row = match row {
+                    CommandRow::Separator => return size(px(0.), px(SEPARATOR_ROW_HEIGHT)),
+                    CommandRow::Heading(_) => self.render_row(row_ix, window, cx),
+                    CommandRow::Item(matched_ix) => {
+                        let binding = self.item_binding(*matched_ix, window, cx);
+                        bindings[*matched_ix] = binding.as_ref().map(|kbd| kbd.keystroke().clone());
+                        self.render_item_with_binding(*matched_ix, binding, window, cx)
+                    }
+                };
+                let row_size = div()
+                    .refine_style(&text_style)
+                    .child(row)
+                    .into_any_element()
+                    .layout_as_root(available, window, cx);
+                size(px(0.), row_size.height)
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        self.row_sizes = Rc::new(row_sizes);
+        self.measured_bindings = bindings;
     }
 
     // MARK: Rendering
@@ -655,9 +700,28 @@ impl CommandState {
         });
     }
 
+    /// Row corner radius, concentric with the frame: the list's `p_1` (plus the
+    /// border when bordered) sits between a row and the frame's corner. A
+    /// borderless command without its own radius keeps the theme radius, since
+    /// its frame belongs to the host.
+    fn item_radius(&self, window: &Window, cx: &App) -> Pixels {
+        let theme = cx.theme();
+        let rem_size = window.rem_size();
+        let own_radius = self.options.style.corner_radii.top_left;
+        let (outer, border) = match (self.options.bordered, own_radius) {
+            (true, radius) => (
+                radius.map_or(theme.radius_lg, |r| r.to_pixels(rem_size)),
+                px(1.),
+            ),
+            (false, Some(radius)) => (radius.to_pixels(rem_size), px(0.)),
+            (false, None) => return theme.radius,
+        };
+        (outer - rem_size * 0.25 - border).max(px(0.))
+    }
+
     /// The frame every item row shares, so that the measured height matches the
     /// rendered one.
-    fn item_row(&self, selected: bool, cx: &App) -> gpui::Div {
+    fn item_row(&self, selected: bool, window: &Window, cx: &App) -> gpui::Div {
         div()
             .flex()
             .flex_row()
@@ -667,7 +731,7 @@ impl CommandState {
             .px_2()
             .py_1p5()
             .text_sm()
-            .rounded(cx.theme().radius)
+            .rounded(self.item_radius(window, cx))
             .when(selected, |this| {
                 this.bg(cx.theme().accent)
                     .text_color(cx.theme().accent_foreground)
@@ -700,9 +764,57 @@ impl CommandState {
         }
     }
 
+    /// Render a row the virtual list shows. When an item's keybinding hint no
+    /// longer matches the one it was measured with, measure the rows again.
+    fn render_visible_row(
+        &mut self,
+        row_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(&CommandRow::Item(matched_ix)) = self.rows.get(row_ix) else {
+            return self.render_row(row_ix, window, cx);
+        };
+
+        let binding = self.item_binding(matched_ix, window, cx);
+        let measured = self
+            .measured_bindings
+            .get(matched_ix)
+            .and_then(Option::as_ref);
+        if !self.needs_measure && measured != binding.as_ref().map(Kbd::keystroke) {
+            self.measure_on_next_frame(window, cx);
+        }
+
+        self.render_item_with_binding(matched_ix, binding, window, cx)
+    }
+
+    /// The keybinding hint an item shows in its trailing slot. A custom child
+    /// owns its complete presentation, so it has none.
+    fn item_binding(&self, matched_ix: usize, window: &Window, cx: &App) -> Option<Kbd> {
+        let item = self.item_at(matched_ix)?;
+        if item.content.is_some() {
+            return None;
+        }
+
+        let action = item.action.as_ref()?;
+        Kbd::binding_for_action_in(action.as_ref(), &self.focus_handle(cx), window)
+            .or_else(|| Kbd::binding_for_action(action.as_ref(), None, window))
+    }
+
     fn render_item(
         &self,
         matched_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let binding = self.item_binding(matched_ix, window, cx);
+        self.render_item_with_binding(matched_ix, binding, window, cx)
+    }
+
+    fn render_item_with_binding(
+        &self,
+        matched_ix: usize,
+        binding: Option<Kbd>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -718,15 +830,6 @@ impl CommandState {
         } else {
             muted_foreground
         };
-        let binding = if item.content.is_none() {
-            item.action.as_ref().and_then(|action| {
-                Kbd::binding_for_action_in(action.as_ref(), &self.focus_handle(cx), window)
-                    .or_else(|| Kbd::binding_for_action(action.as_ref(), None, window))
-            })
-        } else {
-            None
-        };
-
         let content = match &item.content {
             Some(render) => render(window, cx),
             None => h_flex()
@@ -740,9 +843,15 @@ impl CommandState {
                 .into_any_element(),
         };
 
-        self.item_row(selected, cx)
+        self.item_row(selected, window, cx)
             .id(self.matched[matched_ix].index_path)
+            .test_support()
             .role(Role::ListBoxOption)
+            // The row's text is drawn by a child that isn't an accessibility
+            // node, so the row names itself.
+            .when_some(item.label_text().cloned(), |this, label| {
+                this.aria_label(label)
+            })
             .aria_selected(selected)
             .when(disabled, |this| this.text_color(muted_foreground))
             .when(!disabled, |this| {
@@ -802,7 +911,7 @@ impl Render for CommandState {
 
         if self.needs_measure {
             self.needs_measure = false;
-            self.row_sizes = Rc::new(self.measure_row_sizes(window, cx));
+            self.measure_rows(window, cx);
         }
 
         if let Some(row_ix) = self.pending_scroll.take() {
@@ -816,6 +925,7 @@ impl Render for CommandState {
 
         v_flex()
             .id("command")
+            .test_support()
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::on_action_select_up))
@@ -862,8 +972,9 @@ impl Render for CommandState {
                     // The rows carry their inset on the virtual list itself so
                     // that a mid-scroll clip edge sits flush against the
                     // surrounding dividers; only the empty slot needs the
-                    // container padding.
-                    .when(rows_count == 0, |this| this.p_1())
+                    // container padding, and only while it is shown, so a
+                    // loading list leaves no blank strip under the query.
+                    .when(rows_count == 0 && !self.loading, |this| this.p_1())
                     .on_prepaint({
                         let measure_state = command_state.clone();
                         move |bounds, window, cx| {
@@ -892,6 +1003,7 @@ impl Render for CommandState {
                                             line_clamp: text_style.line_clamp,
                                         },
                                     },
+                                    window,
                                     cx,
                                 )
                             })
@@ -912,7 +1024,7 @@ impl Render for CommandState {
                                 row_sizes,
                                 move |this, visible_range, window, cx| {
                                     visible_range
-                                        .map(|row_ix| this.render_row(row_ix, window, cx))
+                                        .map(|row_ix| this.render_visible_row(row_ix, window, cx))
                                         .collect::<Vec<_>>()
                                 },
                             )
@@ -922,7 +1034,17 @@ impl Render for CommandState {
                             // list edge.
                             .p_1()
                             .with_sizing_behavior(ListSizingBehavior::Infer)
-                            .track_scroll(&self.scroll_handle),
+                            .track_scroll(&self.scroll_handle)
+                            .map(|list| {
+                                gpui_base::ScrollBounce::new(
+                                    "command-scroll-bounce",
+                                    &self.scroll_handle,
+                                    list,
+                                )
+                                .when_some(self.options.scroll_bounce, |bounce, on| {
+                                    bounce.enabled(on)
+                                })
+                            }),
                         )
                         .child(Scrollbar::vertical(&self.scroll_handle))
                     }),
@@ -950,7 +1072,7 @@ mod tests {
 
     use super::{CONTEXT, CommandModel, CommandRow, CommandState, SEPARATOR_ROW_HEIGHT};
     use crate::{
-        Disableable as _, IndexPath,
+        Disableable as _, Icon, IconName, IndexPath,
         actions::{Cancel, Confirm, SelectDown},
         command::{Command, CommandEntry, CommandGroup, CommandItem},
     };
@@ -1464,6 +1586,85 @@ mod tests {
                     0,
                 );
                 assert!(matches!(state.rows.first(), Some(CommandRow::Heading(_))));
+            });
+        });
+    }
+
+    fn custom_entries() -> Vec<CommandEntry> {
+        vec![CommandEntry::Item(
+            CommandItem::new().label("Custom").child(|_, _| div()),
+        )]
+    }
+
+    #[gpui::test]
+    fn reinstalling_an_unchanged_model_keeps_the_measured_rows(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| command_state(window, cx, suggestion_entries()));
+
+            state.update(cx, |state, cx| {
+                // A host re-render rebuilds an equal model: nothing to lay out again.
+                state.needs_measure = false;
+                state.install_model(
+                    CommandModel {
+                        entries: suggestion_entries(),
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                assert!(!state.needs_measure);
+                assert_eq!(state.matched_count(), 5);
+
+                // A custom child can read state outside the item, so it is
+                // always measured again.
+                state.install_model(
+                    CommandModel {
+                        entries: custom_entries(),
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                assert!(state.needs_measure);
+                assert_eq!(state.matched_count(), 1);
+
+                // Even when the host clones entries it built once, which
+                // keeps the same closure.
+                state.needs_measure = false;
+                let entries = state.model.entries.clone();
+                state.install_model(
+                    CommandModel {
+                        entries,
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                assert!(state.needs_measure);
+
+                // A changed label or icon style changes how the label wraps,
+                // and a changed disabled flag changes what can be highlighted.
+                let item = || CommandItem::new().label("Renamed");
+                let icon = || Icon::new(IconName::Check);
+                for entries in [
+                    vec![CommandEntry::Item(item())],
+                    vec![CommandEntry::Item(item().icon(icon()))],
+                    vec![CommandEntry::Item(item().icon(icon().ml_2()))],
+                    vec![CommandEntry::Item(
+                        item().icon(icon().ml_2()).disabled(true),
+                    )],
+                ] {
+                    state.needs_measure = false;
+                    state.install_model(
+                        CommandModel {
+                            entries,
+                            ..CommandModel::default()
+                        },
+                        cx,
+                    );
+                    assert!(state.needs_measure);
+                }
+                assert_eq!(state.selected_index(), None);
             });
         });
     }

@@ -1,52 +1,103 @@
 ---
-title: 框架对比
-description: GPUI Kit 与 Iced、egui、Qt 6 的对比。
-order: 10
+title: Comparison
+description: 从桌面应用的架构与能力出发，比较 GPUI Kit、Iced、egui、Qt 6 和 Slint。
+order: -14
 ---
 
-# 框架对比
+# Comparison
 
-GPUI Kit 与其他桌面 UI 框架的对比。表格由人工维护，如发现任何错误或过时信息，请提交 issue 或 PR。
+本指南比较**跨平台桌面 UI 框架**及其有文档支持的生态能力。绿色表示可用，黄色表示仍需应用补足或验证，红色表示未提供。圆点表示功能覆盖，不代表性能。选型时还要核对版本、后端、平台与许可。
 
-| 特性                | GPUI Kit             | [Iced]             | [egui]                | [Qt 6]                                            |
-| ------------------- | -------------------- | ------------------ | --------------------- | ------------------------------------------------- |
-| 语言                | Rust                 | Rust               | Rust                  | C++/QML                                           |
-| 核心                | GPUI                 | wgpu               | wgpu                  | QT                                                |
-| 许可证              | Apache 2.0           | MIT                | MIT/Apache 2.0        | [Commercial/LGPL](https://www.qt.io/qt-licensing) |
-| 最小二进制大小 [^1] | 12MB                 | 11MB               | 5M                    | 20MB [^2]                                         |
-| 跨平台              | 是                   | 是                 | 是                    | 是                                                |
-| 文档                | 一般                 | 一般               | 一般                  | 良好                                              |
-| Web 支持            | 是（WASM）           | 是                 | 是                    | 是                                                |
-| UI 风格             | 现代                 | 基础               | 基础                  | 基础                                              |
-| CJK 支持            | 是                   | 是                 | 差                    | 是                                                |
-| Chart               | 是                   | 否                 | 否                    | 是                                                |
-| Table（大数据集）   | 是<br>（虚拟行、列） | 否                 | 是<br>（虚拟行）      | 是<br>（虚拟行、列）                              |
-| Table 列宽调整      | 是                   | 否                 | 是                    | 是                                                |
-| 文本基础            | Rope                 | [COSMIC Text] [^3] | trait TextBuffer [^4] | [QTextDocument]                                   |
-| Code Editor         | 简单                 | 简单               | 简单                  | 基础 API                                          |
-| Dock 布局           | 是                   | 是                 | 是                    | 是                                                |
-| 语法高亮            | [Tree Sitter]        | [Syntect]          | [Syntect]             | [QSyntaxHighlighter]                              |
-| Markdown 渲染       | 是                   | 是                 | 基础                  | 否                                                |
-| Markdown 混合 HTML  | 是                   | 否                 | 否                    | 否                                                |
-| HTML 渲染           | 基础                 | 否                 | 否                    | 基础                                              |
-| 文本选择            | TextView             | 否                 | 任意 Label            | 是                                                |
-| 自定义主题          | 是                   | 是                 | 是                    | 是                                                |
-| 内置主题            | 是                   | 否                 | 否                    | 否                                                |
-| 国际化              | 是                   | 是                 | 是                    | 是                                                |
+图例：<comparison-status value="yes" decorative></comparison-status> Yes · <comparison-status value="partial" decorative></comparison-status> Partial · <comparison-status value="no" decorative></comparison-status> No。纳入比较的生态扩展见下文。
 
-[Iced]: https://github.com/iced-rs/iced
-[egui]: https://github.com/emilk/egui
-[QT 6]: https://www.qt.io/product/qt6
-[Tree Sitter]: https://tree-sitter.github.io/tree-sitter/
-[Syntect]: https://github.com/trishume/syntect
-[QSyntaxHighlighter]: https://doc.qt.io/qt-6/qsyntaxhighlighter.html
-[QTextDocument]: https://doc.qt.io/qt-6/qtextdocument.html
-[COSMIC Text]: https://github.com/pop-os/cosmic-text
+| Capability | GPUI Kit | Iced | egui | Qt 6 | Slint |
+| --- | --- | --- | --- | --- | --- |
+| UI model | Declarative passes + retained state | Declarative view + retained state | Immediate | Retained scene | Reactive tree |
+| UI authoring | Rust | Rust | Rust | QML / C++ / Python | `.slint` + Rust / C++ / JavaScript / Python |
+| Visual tooling | Code + component gallery | Code | Code | Qt Quick Designer | Live Preview / SlintPad |
+| Component count | [75+](../component/index.md) | [35](https://docs.rs/iced/0.14.0/iced/widget/#structs) | [16](https://docs.rs/egui/0.36.2/egui/widgets/#structs) | [52](https://doc.qt.io/qt-6/qml-qtquick-controls-control.html) | [24](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/overview/) |
+| Rendering stack | GPUI | wgpu | eframe: glow / wgpu | Qt RHI / scene graph | FemtoVG / Skia / software |
+| Documentation | Complete core + component docs; API + gallery | Book + API | API + demos | Guides + API + designer | Guides + API + preview |
+| Default UI style | Theme-driven components | Styled widgets | egui visuals | Qt Quick styles | Slint widget styles |
+| Desktop OS | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Multiple windows | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Shortcuts | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Themes | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Bundled theme presets | 38 (36 variants + Light/Dark) | 22 built-in variants | Light / Dark | Qt Quick styles | Slint widget styles |
+| Code editor | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| CJK font support | System / bundled fonts | Font-dependent | Custom font required | System fallback | Font-dependent |
+| Text model | Rope | COSMIC Text | TextBuffer | QTextDocument | TextEdit string |
+| Syntax highlighting | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> |
+| Markdown | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Markdown with inline HTML | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="no"></comparison-status> |
+| HTML rendering | <comparison-status value="partial"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> |
+| Rich text | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Text selection | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Advanced data table | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Large-table virtualization | Rows + columns | No | Rows (`egui_extras`) | Rows + columns (`TableView`) | Rows |
+| Resizable table columns | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Virtual list | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Charts | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Docking | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Animation | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| Accessibility | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| I18N | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| UI testing | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
+| Mobile | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| WebAssembly | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
+| License | Apache-2.0 | MIT | MIT / Apache-2.0 | Commercial / LGPLv3 / GPLv3 by module | GPLv3 / commercial / royalty-free |
+| Minimal Binary Size | ~12 MB | ~11 MB | ~5 MB | ~20 MB | ~21 MB |
+| WebView | <comparison-status value="partial"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> |
 
-[^1]: 使用简单 Hello World 示例的 Release 构建。
+**Component count。** GPUI Kit 有 75+ 个已记录的 component 和 primitive。其余数字分别来自 Iced 0.14 的 widget 模块（35）、egui 0.36 的 widgets 模块（16，含 `TextEdit`）、Qt Quick `Control` 派生类型（52）以及 Slint 的标准组件目录（24）。各目录纳入的辅助类型和扩展范围不同，这些数字表示目录规模，不能直接用于排名。
 
-[^2]: [减小 Qt 应用程序的二进制大小](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms)
+**Documentation。** GPUI Kit 的[核心指南](./index.md)、[组件文档](../component/index.md)、[API reference](https://docs.rs/gpui-kit/latest/gpui_kit/)和[交互式 gallery](/gallery/)覆盖当前公开能力；实验性功能也说明了现阶段的限制。
 
-[^3]: Iced Editor: <https://github.com/iced-rs/iced/blob/db5a1f6353b9f8520c4f9633d1cdc90242c2afe1/graphics/src/text/editor.rs#L65-L68>
+**Binary size 数据口径。** 前四个值保留原 `main` 分支的 Hello World Release 估计；原表为 Qt 数据附上了[这篇体积研究](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms)。Slint 的 ~21 MB 来自 Slint 1.18.1 Hello World 在 Linux x86-64 上执行 `cargo build --release`，strip 后为 20,768,216 字节（19.81 MiB）。各值的构建条件不同，是近似参考值，并非已验证的最小体积或同口径跑分。
 
-[^4]: egui TextBuffer: <https://github.com/emilk/egui/blob/0a81372cfd3a4deda640acdecbbaf24bf78bb6a2/crates/egui/src/widgets/text_edit/text_buffer.rs#L20>
+**帧率。** 本表不对帧率排名：没有相同负载、硬件和呈现测量来支持跨框架 FPS 数字。120 Hz 目标意味着相关管线每帧约有 8.3 ms 预算；它不表示空闲窗口持续重绘，也不保证任何复杂界面都能持续每秒显示 120 帧。GPUI 的 draw 和 present 指标见 [FPS Monitor](./fps#120-hz-是帧预算不是刷新承诺)。
+
+## 选型速览
+
+上表记录能力覆盖；下表说明这些能力在选型时的利弊。这些判断基于所引用的 API 与文档，不是性能跑分。
+
+| 需求 | GPUI Kit 的优势 | GPUI Kit 的成本或限制 | 对比对象 |
+| --- | --- | --- | --- |
+| 代码编辑器与高密度数据界面 | [Editor](../component/editor.md)、[DataTable](../component/data-table.md)、[VirtualList](../component/virtual-list.md) 和 [Dock](../component/dock.md) 属于同一 Rust 组件体系。 | 应用仍负责数据排序，也需要在目标平台验证 [Accessibility](./accessibility.md)。 | Qt 的 [Model/View](https://doc.qt.io/qt-6/modelview.html) 和 [QTextDocument](https://doc.qt.io/qt-6/qtextdocument.html) 提供覆盖更广的桌面体系。 |
+| 可选择的 Markdown 与正文 HTML | [TextView](../component/text-view.md) 在同一 UI 树中支持两者。 | HTML 支持不包括通用 CSS 布局和脚本。 | Qt [QTextDocument](https://doc.qt.io/qt-6/richtext-html-subset.html) 支持更广的富文本子集；需要浏览器行为时应评估 WebView。 |
+| 同时面向桌面、移动端与 Web | 可以用同一组件 API 探索 [WebAssembly 展示](./webassembly.md)和实验性的 [iOS 工作](./mobile.md)。 | Mobile 与 Web 集成仍需针对目标应用验证。 | Qt 的[平台列表](https://doc.qt.io/qt-6/supported-platforms.html)，以及 Slint 的 [mobile](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/) 和 [web](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/) 指南覆盖更广目标。 |
+| 可视化 UI 编辑 | Rust 代码和[组件画廊](../component/index.md)让界面与应用逻辑保持接近。 | GPUI Kit 没有内置可视化设计器。 | [Qt Quick Designer](https://doc.qt.io/qtcreator/creator-using-qt-quick-designer.html) 提供可视化编辑；Slint 提供 [Live Preview](https://github.com/slint-ui/slint#tooling)。 |
+
+> AI 可以直接修改 GPUI Kit 的 Rust UI 代码，无需独立的 Visual UI editor。
+
+## 如何理解这些判断
+
+**渲染模式。** GPUI Kit 在 [render](./render) 过程中按当前输入构造元素描述，并保留 [Entity](./entity)、带 ID 的元素状态及可选的 [View Cache](./view-cache)。表格中的说法同时描述这些层次，并不意味着每次屏幕刷新都重建整个 UI；[渲染模式详解](./fps#immediateretained-和-hybrid-描述的是不同层次)将它们分开说明。Iced 将自身描述为 [state/message/update/view 架构](https://book.iced.rs/architecture.html)。egui 明确使用 [immediate mode](https://docs.rs/egui/latest/egui/#understanding-immediate-mode)。Qt Quick [在帧间保留场景图](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint 使用[响应式属性绑定](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/)。
+
+**桌面基础能力。** 五种方案都能构建多窗口桌面应用、处理键盘快捷键并定制主题；实现方式不同。例如 Iced 有[窗口打开 API](https://docs.rs/iced/latest/iced/window/fn.open.html)，eframe 使用[原生 viewport](https://docs.rs/eframe/latest/eframe/trait.App.html)，Slint 提供[按键绑定](https://docs.slint.dev/latest/docs/slint/reference/keyboard-input/overview/)和[标准组件样式](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/style/)。输入法、剪贴板和拖放还应按目标平台实际测试。
+
+**Rendering stack、theme 与 CJK。** `Rendering stack` 行记录框架或可选图形后端，不是 GPU 跑分：egui 的 eframe 可选 [glow 或 wgpu](https://docs.rs/eframe/latest/eframe/enum.Renderer.html)，Qt Quick 使用 [Qt RHI 上的 scene graph](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint 列出 [FemtoVG、Skia 与 software renderer](https://github.com/slint-ui/slint#runtime)。GPUI Kit 的 38 种 theme 是本仓库 `themes/*.json` 中 36 个变体加上 Default Light/Dark；Iced 0.14 有 [22 个预置变体及 Custom](https://docs.rs/iced/0.14.0/iced/theme/enum.Theme.html)。原表把 egui 的 CJK 写成“差”过于笼统：egui [需要额外安装支持亚洲文字的 font](https://docs.rs/egui/latest/egui/#installing-additional-fonts)，Qt 则有[按文字体系查找 fallback font](https://doc.qt.io/qt-6/qfontdatabase.html) 的机制。最终文字覆盖仍取决于打包或系统安装的字体。
+
+**Table column resizing。** GPUI Kit、[egui_extras](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBuilder.html#method.resizable)、[Qt](https://doc.qt.io/qt-6/qheaderview.html) 和 [Slint](https://github.com/slint-ui/slint/blob/master/internal/compiler/widgets/fluent/tableview.slint) 都支持；[Iced](https://docs.rs/iced/latest/iced/widget/table/struct.Column.html) 没有内置拖动列宽。
+
+**Large-table virtualization。** 这一行保留了原表对可见行与可见列的区分：GPUI Kit `DataTable` 的[可见范围](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/table/state.rs)同时记录行和列；[egui_extras `TableBody::rows`](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBody.html#method.rows)只渲染可见行；Qt Quick [`TableView`](https://doc.qt.io/qt-6/qml-qtquick-tableview.html)会复用移出视口的行列 delegate。Iced 的[表格 API](https://docs.rs/iced/0.14.0/iced/widget/table/fn.table.html)没有承诺内置虚拟化。Slint [`StandardTableView` 的实现](https://github.com/slint-ui/slint/blob/master/internal/compiler/widgets/fluent/tableview.slint)将行 repeater 放在 `ListView` 中，因此[只实例化可见行](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/)；列和单元格 repeater 没有采用相同的视口虚拟化。
+
+**编辑器与高亮。** GPUI Kit 的 [Editor](../component/editor.md) 用 [Rope](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/state.rs#L343) 保存文本，并提供折叠、诊断、补全和悬浮提示等代码编辑能力。启用对应语法的 [grammar feature](../component/editor.md) 后，语法高亮使用 [Tree-sitter](https://tree-sitter.github.io/tree-sitter/)；大型文本的解析可以放到后台，编辑时可复用上次的解析树。文本模型与高亮引擎是两个不同维度：使用 Rope 不等于自动获得语法高亮。Iced 的 [TextEditor](https://docs.rs/iced/latest/iced/widget/text_editor/struct.TextEditor.html) 有需要启用 feature 的高亮；egui 的 [TextEdit](https://docs.rs/egui/latest/egui/widgets/text_edit/struct.TextEdit.html) 可传入自定义 layouter，也可用 [egui_extras 高亮](https://docs.rs/egui_extras/latest/egui_extras/syntax_highlighting/)；Qt 提供 [QSyntaxHighlighter](https://doc.qt.io/qt-6/qsyntaxhighlighter.html)。这一行比较 API 是否可用，不代表同样文档规模下的性能对比。
+
+**文本模型。** 表格列出每种编辑器公开的文本存储或编辑抽象：GPUI Kit 将文本保存在 Rope 中；Iced 使用 [COSMIC Text](https://docs.iced.rs/src/iced_graphics/text/editor.rs.html)，egui 接收 [TextBuffer](https://docs.rs/egui/latest/egui/widgets/text_edit/trait.TextBuffer.html)，Qt 暴露 [QTextDocument](https://doc.qt.io/qt-6/qtextdocument.html)。这些是 API 形态，不是速度排名。
+
+**格式化文本。** GPUI Kit 的 [TextView](../component/text-view.md) 能显示并选择 Markdown 和 HTML 文本；Markdown 解析器也会把内嵌 HTML 节点交给 HTML 解析器。Iced 的 [Markdown 组件](https://docs.rs/iced/latest/iced/widget/markdown/)没有提供 HTML item；egui 需借助扩展库显示 Markdown；Qt 的 [QTextEdit](https://doc.qt.io/qt-6/qtextedit.html)仅支持部分内嵌 HTML。此行的“不支持”只表示文档化的内置 Markdown 路径不处理内嵌 HTML，应用仍可另接渲染器。
+
+**HTML 渲染。** [TextView::html](../component/text-view.md#html) 能展示博客或新闻正文常见的标题、段落、链接、图片、列表与表格。它不实现通用 CSS 布局，也不运行脚本，因此标为部分支持；这不是 WebView。Qt 的 [QTextDocument](https://doc.qt.io/qt-6/richtext-html-subset.html)支持更广的 HTML 4 与 CSS 子集，同样不具备浏览器行为。此行比较的是有文档支持的原生 HTML 正文渲染，不把另接 WebView 算入；在比较范围内，Iced、egui 和 Slint 没有同类原生文档渲染器。
+
+**表格与列表。** “高级数据表格”指面向大数据集，具备虚拟化渲染、排序、选择和列管理的组件。GPUI Kit 的 [DataTable](../component/data-table.md) 提供这些交互，底层数据排序由 delegate 实现。Qt 的 [QTableView](https://doc.qt.io/qt-6/qtableview.html)及 Model/View 体系也覆盖这类需求。[egui_extras TableBuilder](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBuilder.html)能虚拟化行并调整列宽，但更多数据行为由应用实现。Slint 的 [StandardTableView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/standardtableview/)有排序回调和选择能力；Iced 的[表格](https://docs.rs/iced/latest/iced/widget/table/fn.table.html)提供较基础的起点。单独看列表，GPUI Kit [VirtualList](../component/virtual-list.md)、egui [ScrollArea::show_rows](https://docs.rs/egui/latest/egui/containers/scroll_area/struct.ScrollArea.html#method.show_rows)、Qt [ListView](https://doc.qt.io/qt-6/qml-qtquick-listview.html)和 Slint [ListView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/)按需创建可见项；Iced 提供[滚动与可见性原语](https://docs.rs/iced/latest/iced/widget/struct.Sensor.html)，虚拟化由应用实现。
+
+**高密度桌面界面。** GPUI Kit 内置 [VirtualList](../component/virtual-list.md)、[DataTable](../component/data-table.md)、[图表](../component/chart.md)、[TextView](../component/text-view.md)和 [Dock](../component/dock.md)。Iced 有[富文本](https://docs.rs/iced/latest/iced/widget/fn.rich_text.html)、[表格](https://docs.rs/iced/latest/iced/widget/table/fn.table.html)、需启用 feature 的 [Markdown 组件](https://docs.rs/iced/latest/iced/widget/markdown/)、[Canvas](https://docs.rs/iced/latest/iced/widget/struct.Canvas.html)和[窗格网格](https://docs.rs/iced/latest/iced/widget/pane_grid/)；虚拟化表格或图表还需要应用实现。egui 生态提供用于 Markdown 的第三方 [egui_commonmark](https://docs.rs/egui_commonmark/latest/egui_commonmark/)、用于停靠布局的 [egui_dock](https://docs.rs/egui_dock/latest/egui_dock/) 以及 [egui_extras 表格](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBuilder.html)与 [egui_plot](https://docs.rs/egui_plot/latest/egui_plot/)。Qt 提供 [Model/View 表格](https://doc.qt.io/qt-6/modelview.html)、[Dock Widget](https://doc.qt.io/qt-6/qdockwidget.html)、[QTextDocument](https://doc.qt.io/qt-6/qtextdocument.html)和单独许可的 [Qt Graphs](https://doc.qt.io/qt-6/qtgraphs-index.html) 模块。Slint 有 [StandardTableView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/standardtableview/)及[只实例化可见项目的 ListView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/)；其 [Path](https://docs.slint.dev/latest/docs/slint/reference/elements/path/) 可用于自绘，但不是现成图表。
+
+**产品就绪程度。** GPUI Kit 的[无障碍](./accessibility.md)、[测试](./test.md)、[国际化](./i18n.md)和[动画](./animation.md)指南说明了当前实现与限制。其组件包含翻译，但应用文案与语言策略仍由应用负责。Iced 的[无障碍集成仍列为未完成工作](https://github.com/iced-rs/iced/issues/552)，同时提供[测试工具](https://docs.rs/iced_test/latest/iced_test/)。egui 文档介绍 [AccessKit 与 egui_kittest](https://github.com/emilk/egui/blob/main/docs/accessibility.md)。Qt 有较完整的[无障碍](https://doc.qt.io/qt-6/accessible.html)、[国际化](https://doc.qt.io/qt-6/internationalization.html)和[Qt Test](https://doc.qt.io/qt-6/qtest-overview.html)设施。Slint 提供[无障碍属性](https://docs.slint.dev/latest/docs/slint/reference/common/#accessibility-properties)和[翻译机制](https://docs.slint.dev/latest/docs/slint/guide/development/translations/)；其[测试后端](https://docs.slint.dev/latest/docs/rust/i_slint_backend_testing/)仍标为初步 API，且属于内部 crate。无障碍一栏的“Yes”仍需要在每个目标平台使用辅助技术验证。
+
+**平台覆盖。** GPUI Kit 有[实验性 iOS 集成](./mobile.md)和可运行的 [WebAssembly 展示示例](./webassembly.md)；本仓库尚未将后者验证为完整应用的成熟分发路径。Iced 有 [Web 示例](https://github.com/iced-rs/iced/blob/master/examples/README.md#tour)，[原生移动端支持仍在讨论](https://github.com/iced-rs/iced/issues/302)。[eframe](https://github.com/emilk/egui/blob/main/README.md#official-integrations)可在 Web 与原生平台运行 egui，但 Android/iOS 集成仍应针对具体应用验证。Qt 文档列出[支持平台](https://doc.qt.io/qt-6/supported-platforms.html)和 [WebAssembly 限制](https://doc.qt.io/qt-6/wasm.html)。Slint 有[移动端](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/)与 [Web](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/)文档；其 Web 输出使用 canvas，不支持浏览器屏幕阅读器。不能默认把这些基于 canvas 的 Wasm 界面当成 HTML 应用。
+
+**WebView。** GPUI Kit 有实验性的 [Wry 集成](./webview.md)。它支持 macOS、Windows 和 Linux（X11 或 XWayland）。使用 GPUI Fast 后端时，macOS 和 Linux 上的 GPUI 浮层可以显示在网页上方；其他情况下原生 WebView 会盖住同一区域的 GPUI 元素，需要叠层时，宜放在独立窗口或弹出层。Qt 提供官方 [WebEngine](https://doc.qt.io/qt-6/qwebengineview.html)与 [WebView](https://doc.qt.io/qt-6/qtwebview-index.html) 模块，但 Qt WebView 与 QML 元素的重叠也有限制。此行统计适用于所比较版本、由框架维护的集成：Iced 虽有第三方 [iced_webview](https://docs.rs/iced_webview/latest/iced_webview/) crate，但它依赖 Iced 0.13，本表未验证其适配当前 Iced 0.14；egui 没有同类受维护的原生集成，Slint 的 [WebView 需求](https://github.com/slint-ui/slint/issues/3930)仍未关闭。红点不排除应用自行桥接。
+
+**许可与比较范围。** GPUI Kit 采用 Apache-2.0；Iced 为 [MIT](https://github.com/iced-rs/iced/blob/master/LICENSE)；egui 为 [MIT 或 Apache-2.0](https://github.com/emilk/egui/blob/main/LICENSE-MIT)；Qt [按模块采用商业、LGPLv3 或 GPLv3 条款](https://doc.qt.io/qt-6/licensing.html)，其中 Qt Graphs 为 GPLv3 或商业许可；Slint 采用 [GPLv3 与商业或免版税条款](https://slint.dev/pricing)。SwiftUI、WinUI 等单平台原生栈的平台覆盖范围不同。Electron 与 Tauri 使用 WebView/JavaScript UI 架构，应单独评估，不在此原生 UI 矩阵中打分。包体积和帧率受构建 feature、渲染器、字体、打包方式及负载影响；应测量准备发布的产品 release 构建。

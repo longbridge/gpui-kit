@@ -1,5 +1,5 @@
-//! Dockable layout: splits, tab groups, and tiles canvases that a host can
-//! rearrange, persist, and restore — with no appearance of its own.
+//! Dockable layout: splits and tab groups that a host can rearrange,
+//! persist, and restore — with no appearance of its own.
 //!
 //! # The tree is the source of truth
 //!
@@ -8,9 +8,8 @@
 //! [`NodeId`], panels by [`PanelId`], and no GPUI entity handle is stored
 //! anywhere in it, which is what lets the layout algebra be exercised without
 //! an `App` and lets a whole layout be compared, normalized, and serialized as
-//! an ordinary value. A container is a `Split`, a `Tabs`, or a `Tiles`; there
-//! is no leaf variant, so a panel can only ever live inside a `Tabs` or a
-//! `Tiles`.
+//! an ordinary value. A container is a `Split` or a `Tabs`; there is no leaf
+//! variant, so a panel can only ever live inside a `Tabs`.
 //!
 //! Both ids are *stable*, and the rest of the design leans on it:
 //!
@@ -32,8 +31,8 @@
 //! # The area reconciles the tree into entities
 //!
 //! [`DockArea`] owns the trees and a cache of container entities keyed by
-//! `NodeId` ([`TabGroup`] for a `Tabs` node, [`TilesState`] for a `Tiles`
-//! one), plus the panel handles keyed by `PanelId`. After any edit that
+//! `NodeId` ([`TabGroup`] for a `Tabs` node), plus the panel handles keyed by
+//! `PanelId`. After any edit that
 //! reports a change it walks the tree, creates entities for ids the cache does
 //! not have, drops entries for ids that are gone — telling those panels
 //! [`Panel::on_removed`] — pushes sizes and active indices into the survivors,
@@ -50,7 +49,7 @@
 //! # The renderer seam
 //!
 //! Base supplies behavior; the host supplies appearance. Nothing in this
-//! module paints a color, a border, or a size. Three traits carry the
+//! module paints a color, a border, or a size. Two traits carry the
 //! appearance in:
 //!
 //! - [`DockAreaRenderer`] — the area frame, each split's frame and the divider
@@ -58,12 +57,11 @@
 //!   build cannot construct.
 //! - [`TabGroupRenderer`] — the tab bar, how the displayed panel is placed,
 //!   and the drop indicator.
-//! - [`TilesRenderer`] — a tiles canvas, its tile frames, and their drag bars.
 //!
 //! A renderer never sees a drag event or a mouse position. Base attaches the
 //! drag sources, drop hit-testing, focus, and keyboard handling to the very
 //! elements the renderer returns, and hands it resolved state through
-//! [`DockContext`], [`TabGroupContext`], and [`TileContext`] — each of which
+//! [`DockContext`] and [`TabGroupContext`] — each of which
 //! also carries the callbacks (`toggle`, `select_tab`, `close`, `resize_to`)
 //! that the renderer invokes rather than reimplementing.
 //!
@@ -180,8 +178,6 @@ mod state_convert;
 mod tab_group;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod tiles_geometry;
-mod tiles_state;
 
 pub use dock_area::{DockArea, DockAreaRenderer, DockContext, DockEvent};
 pub use dock_placement::{Dock, DockSizing};
@@ -191,11 +187,10 @@ pub use drag::{AnyDrag, DragPanel, DropIndicator, DropPlaceholderBounds, DropTar
 // `TabGroupContext::drop_indicator`.
 pub use layout::{
     DockLayout, EditResult, InsertTarget, NodeId, PaneNode, PaneRef, PaneTree, PanelId, RootKind,
-    TilePanel,
 };
 pub use panel::{Panel, PanelEvent, PanelView};
 pub use registry::{PanelBuildContext, PanelRegistry, register_panel};
-pub use state::{DockAreaState, DockPlacement, DockState, PanelInfo, PanelState, TileMeta};
+pub use state::{DockAreaState, DockPlacement, DockState, PanelInfo, PanelState};
 /// Both halves of the persistence seam. `PaneTree::to_state` reads panel
 /// properties through `PanelSource`; `PaneTree::from_state` turns persisted
 /// leaves back into panels through `PanelBuilder`. Exporting only the first
@@ -205,14 +200,3 @@ pub use state_convert::{PanelBuilder, PanelSource};
 pub use tab_group::{
     TabGroup, TabGroupConstraints, TabGroupContext, TabGroupEvent, TabGroupRenderer,
 };
-/// What a skin actually needs off the tiles geometry: the two sizes it has to
-/// draw to, and which edge a resize is pulling.
-pub use tiles_geometry::{DRAG_BAR_HEIGHT, HANDLE_SIZE, ResizeSide};
-// The arithmetic itself is deliberately not re-exported. Base resolves every
-// bound before a renderer sees it — a skin is handed finished `Bounds`, never
-// asked to snap anything — so `magnetic_snap`, `snap_edge`, `round_to_grid`,
-// `round_point_to_grid`, `compute_resized_bounds`, `apply_boundary_constraints`
-// and `content_size` had no caller outside this crate and no purpose there.
-// `ResizeDrag` and `TileChange` are `TilesState`'s own fields, and
-// `MINIMUM_SIZE` is a constraint base applies on the skin's behalf.
-pub use tiles_state::{TileContext, TilesEvent, TilesRenderer, TilesState};

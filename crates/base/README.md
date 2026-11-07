@@ -52,7 +52,7 @@ features to skip the styled layers:
 
 ```toml
 [dependencies]
-gpui-kit = { version = "0.6", default-features = false }
+gpui-kit = { version = "0.7", default-features = false }
 ```
 
 If Cargo reports incompatible GPUI types, check whether your application pulls
@@ -81,6 +81,19 @@ fn main() {
 ```
 
 If the application already calls `gpui_kit::init(cx)`, do not call `gpui_kit::base::init(cx)` again. The higher-level initializer includes base initialization.
+
+## Retained Rich-Text Selection
+
+Managed `TextViewState` retains completed logical selections and their Copy
+payload across style, syntax-highlighting, font, and width changes by default.
+Current styles and wrapping still apply; an old pointer rectangle is not used to
+reconstruct the selection after reflow. Later outer-layout origin changes also
+preserve the selected text. A new selection gesture or explicit clear replaces
+or clears the selection normally.
+
+Replacing the source or Markdown parser configuration still invalidates selection.
+The owning view must retain the state and its painted selection participant; this
+behavior does not pin rows unmounted by an outer virtual list.
 
 ## Quick Start
 

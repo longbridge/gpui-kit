@@ -8,6 +8,16 @@ use sum_tree::Bias;
 use super::{InputBaseState, RopeExt as _};
 use crate::text_boundary::word_range_from_chars;
 
+/// Unique identifier for a cursor/selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+pub(super) struct CursorId(usize);
+
+impl CursorId {
+    pub(super) fn new(id: usize) -> Self {
+        Self(id)
+    }
+}
+
 impl<M: InputModeKind> InputBaseState<M> {
     /// Select the word at the given offset on double-click.
     ///
@@ -26,8 +36,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
 
         self.undo_manager.break_transaction_coalescing();
-        self.selected_range = (range.start..range.end).into();
-        self.selected_word_range = Some(self.selected_range);
+        self.selections.remove_all_but_active();
+        self.set_selection(range.start, range.end);
+        self.selected_word_range = Some(*self.active_selection());
         cx.notify()
     }
 
@@ -37,7 +48,8 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub(super) fn select_line(&mut self, offset: usize, _: &mut Window, cx: &mut Context<Self>) {
         let range = TextSelector::line_range(&self.text, offset);
         self.undo_manager.break_transaction_coalescing();
-        self.selected_range = (range.start..range.end).into();
+        self.selections.remove_all_but_active();
+        self.set_selection(range.start, range.end);
         self.selected_word_range = None;
         cx.notify()
     }

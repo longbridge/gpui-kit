@@ -1,7 +1,8 @@
 ---
-title: 元素
+title: Elements
 description: 构造器、用 child / children / when 组合，以及元素描述为什么只能使用一次。
 order: 4
+maturity: [preview]
 ---
 
 # Elements
@@ -59,6 +60,8 @@ div().relative().size_full().child(content).child(fps_monitor());
 ### 为什么是 `.new(id)` 而不是 `new Button(id)`
 
 JavaScript 的习惯写法是 `new Button(id)`。运行时不提供它，理由正是本页的主题：`new` 承诺的是一个有身份的对象——可以保存、可以挂在实例上、可以再次使用。而描述恰恰不是这种东西。`Button.new(id)` 读起来是“构造一段描述”，它做的也正是这件事，并且与 Rust 侧一字不差。
+
+`"gpui-component"` 也用同样的写法：`Button.new("save")`、`InputState.new("Name")`。它的导出同样接受 `new Button(...)`，那是 `.new` 出现之前的脚本写法；新代码请写 `.new`，让同一份文件只有一种构造形态。
 
 View 是相反的情形，用的就是标准写法：`class Counter extends View`。 View 确实有身份、有跨帧状态，并且由 GPUI 拥有。同一份文件里出现两种构造形态，是因为这两类东西的生命周期本来就不同。
 
@@ -175,6 +178,7 @@ when(...) must return the element
 | `.on_mouse_up(button, handler)`   | [可接输入的元素](#哪些元素接了输入) | 松开                                               |
 | `.on_mouse_down_out(handler)`     | [可接输入的元素](#哪些元素接了输入) | 在该元素**之外**任意位置按下                       |
 | `.on_scroll_wheel(handler)`       | [可接输入的元素](#哪些元素接了输入) | 滚轮与触控板滚动                                   |
+| `.on_pinch(handler)`              | [可接输入的元素](#哪些元素接了输入) | 触控板或触摸屏上的双指缩放                         |
 | `.on_action(action, handler)`     | [可接输入的元素](#哪些元素接了输入) | 命名 action 被派发到它或它内部                     |
 | `.key_context(name)`              | [可接输入的元素](#哪些元素接了输入) | 该元素与其子树所处的按键绑定上下文                 |
 
@@ -259,9 +263,19 @@ Checkbox.new(`item-${item.id}`)
 });
 ```
 
+双指缩放按手势的每一步上报缩放变化，乘以 `1 + delta` 就能跟上手势。鼠标和不支持双指缩放的平台仍然要靠旁边的滚轮处理器：
+
+```js
+.on_pinch((event, cx) => {
+  this.zoom *= 1 + event.delta;      // 0.1 表示放大 10%
+  // event.phase                     —— "started"、"moved"、"ended" 或 "cancelled"
+  cx.notify();
+});
+```
+
 ### 哪些元素接了输入
 
-上面这八个方法是 GPUI 自己的 `InteractiveElement` 构建器，shell 把它们装在 `div`、`h_flex`、`v_flex`、`Button`、`Link`、`Checkbox`、`Switch`、`Radio`、`Toggle`、`Tabs` 与 `Tab` 上。
+上面这九个方法是 GPUI 自己的 `InteractiveElement` 构建器，shell 把它们装在 `div`、`h_flex`、`v_flex`、`Button`、`Link`、`Checkbox`、`Switch`、`Radio`、`Toggle`、`Tabs` 与 `Tab` 上。
 
 其余组件各自构建自己的 base 类型、挂自己的监听器，所以写在它们上面的处理器会被记进描述、但永远到不了 GPUI。日志里会说明，而不是留给你自己去发现：
 
@@ -423,6 +437,18 @@ render(cx) {
 ```
 
 [示例应用](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist)就是这样写的：`ui.js` 把 `button`、`label`、`icon`、`checkbox` 等导出为函数，`main.js` 调用它们。读起来像一个组件库，而且不花什么代价——一次函数调用就是一段新描述的来源。
+
+## 嵌套有上限
+
+一份描述最多嵌套 **64 层**。子元素、`content` 这类已填入的 slot、组件以 element 参数接收的元素，都算一层。会嵌套得更深的那次调用直接抛错，并且不记录任何改动：
+
+```text
+this element would nest the description more than 64 levels deep; elements, filled slots and component element arguments may nest at most 64 levels
+```
+
+绘制描述时，原生代码会逐层遍历它。没有这个上限，脚本可以搭出一条足以撑爆原生栈的链，那会直接结束进程，而不是抛出异常。真实布局远到不了 64 层。元素也不能被放进它自己里面，无论直接放还是经由 slot：这同样会抛错。
+
+View 里挂载的 View 和外层共用这个深度。每个 View 计入它自己描述的层数，再加上它自身的一层；一个套一个绘制的 View 合计最多 **65** 层，也就是一个处在上限的 View 所占的层数。[dock area](./api.md#dock) 额外计 4 层。这里不会抛错，因为挂载关系要到窗口绘制时才落实：会越过上限的 View 在该位置什么都不画；View 挂进它自己（直接挂，或经由别的 View、dock 绕回来）也一样。两种情况都会记一条错误日志，窗口其余部分照常绘制。同一个 View 挂在两个互不包含的父 View 下不算递归，两处都会画出来。
 
 ## 回调属于它所在的那次渲染
 

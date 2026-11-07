@@ -46,7 +46,12 @@ The command above supplies application initialization, window creation, and shar
 
 ## Accessibility
 
-Label the trigger, expose expanded/selected state, and support traversal, selection, Escape, and focus return.
+Set `.accessibility_label(...)` on the controlled root and
+`.accessibility_value(...)` to its committed selection, not a temporary search
+cursor. The root exposes its expanded state and accessible activation. Activation
+requests an open-state change and moves focus between the trigger and content.
+Disabled controls do not expose activation. The styled `Select` supplies its
+committed value automatically, falling back to its placeholder when unselected.
 
 ## Notes
 

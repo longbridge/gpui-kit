@@ -1,4 +1,10 @@
-use std::{any::TypeId, borrow::Cow, collections::HashMap, rc::Rc, time::Duration};
+use std::{
+    any::TypeId,
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    time::Duration,
+};
 
 use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, AnyWindowHandle, App, AppContext, ClickEvent,
@@ -6,6 +12,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
     StatefulInteractiveElement, StyleRefinement, Styled, Subscription, SystemNotification,
     SystemNotificationResponse, WeakEntity, Window, WindowId, div, prelude::FluentBuilder, px,
+    relative,
 };
 use gpui_base::{
     Toast as BaseToast, ToastManager, ToastMotion, ToastOptions, ToastStack, ToastStackState,
@@ -455,6 +462,7 @@ impl Render for Notification {
                     .child(
                         Button::new("close")
                             .icon(IconName::Close)
+                            .accessibility_label("Close")
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -527,6 +535,7 @@ impl Render for Notification {
 
 /// The settings for notifications.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NotificationSettings {
     /// The placement of the notifications, default: [`Anchor::TopRight`]
     ///
@@ -695,6 +704,8 @@ pub struct NotificationList {
     pub(crate) notifications: ToastManager<NotificationId, Entity<Notification>>,
     stacks: Vec<(Anchor, AnchorStack)>,
     focus_handle: FocusHandle,
+    /// Mounted notifications that hide themselves after a timeout.
+    autohide_ids: HashSet<NotificationId>,
     /// Whether the lifecycle clock is running. The loop clears it as it exits.
     is_advancing: bool,
     _subscriptions: HashMap<NotificationId, Subscription>,
@@ -706,17 +717,18 @@ impl NotificationList {
             notifications: ToastManager::new(ToastMotion::sonner()),
             stacks: Vec::new(),
             focus_handle: cx.focus_handle().tab_stop(true),
+            autohide_ids: HashSet::new(),
             is_advancing: false,
             _subscriptions: HashMap::new(),
         }
     }
 
-    /// Tick the toast lifecycle until the last notification is unmounted.
+    /// Tick the toast lifecycle while a notification still has time to track.
     ///
     /// It advances the transition phases and samples the pause input (stack
     /// expansion) that reaches the list through no event.
-    /// With nothing mounted there is nothing to do, so an idle window arms no
-    /// timer.
+    /// With nothing mounted, or only persistent notifications at rest, there is
+    /// nothing to do, so the window arms no timer until a push or close.
     fn start_advancing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_advancing {
             return;
@@ -731,7 +743,7 @@ impl NotificationList {
                     .await;
                 let running = view.update_in(cx, |view, window, cx| {
                     view.advance(window, cx);
-                    view.is_advancing = !view.notifications.is_empty();
+                    view.is_advancing = view.needs_clock();
                     view.is_advancing
                 });
                 if !matches!(running, Ok(true)) {
@@ -740,6 +752,17 @@ impl NotificationList {
             }
         })
         .detach();
+    }
+
+    /// Whether a mounted notification is in transition or counting down to
+    /// autohide. A paused countdown still needs its last sample kept current.
+    fn needs_clock(&self) -> bool {
+        self.notifications
+            .iter()
+            .any(|(id, _, status)| match status {
+                ToastTransitionStatus::Present => self.autohide_ids.contains(id),
+                ToastTransitionStatus::Starting | ToastTransitionStatus::Ending => true,
+            })
     }
 
     fn is_expanded(&self) -> bool {
@@ -821,18 +844,28 @@ impl NotificationList {
         let dismiss_id = id.clone();
         self._subscriptions.insert(
             id.clone(),
-            cx.subscribe(&notification, move |view, _, _: &DismissRequest, cx| {
-                if view
-                    .notifications
-                    .dismiss(&dismiss_id, cx.background_executor().now())
-                {
-                    if let Some(note) = view.notifications.get(&dismiss_id) {
-                        note.update(cx, |note, cx| note.begin_close(cx));
+            cx.subscribe_in(
+                &notification,
+                window,
+                move |view, _, _: &DismissRequest, window, cx| {
+                    if view
+                        .notifications
+                        .dismiss(&dismiss_id, cx.background_executor().now())
+                    {
+                        if let Some(note) = view.notifications.get(&dismiss_id) {
+                            note.update(cx, |note, cx| note.begin_close(cx));
+                        }
+                        SystemNotificationRegistry::dismiss(cx, &dismiss_id, window_id);
+                        view.start_advancing(window, cx);
                     }
-                    SystemNotificationRegistry::dismiss(cx, &dismiss_id, window_id);
-                }
-            }),
+                },
+            ),
         );
+        if autohide {
+            self.autohide_ids.insert(id.clone());
+        } else {
+            self.autohide_ids.remove(&id);
+        }
 
         self.notifications.push(
             id,
@@ -887,6 +920,7 @@ impl NotificationList {
         }
         for (id, note) in changes.removed {
             self._subscriptions.remove(&id);
+            self.autohide_ids.remove(&id);
             note.update(cx, |note, cx| note.complete_close(window, cx));
         }
         if changes.changed {
@@ -911,6 +945,7 @@ impl NotificationList {
             if let Some(n) = self.notifications.get(&id) {
                 n.update(cx, |note, cx| note.begin_close(cx))
             }
+            self.start_advancing(window, cx);
         }
         cx.notify();
     }
@@ -944,6 +979,7 @@ impl NotificationList {
                 .dismiss(&id, cx.background_executor().now())
             {
                 n.update(cx, |note, cx| note.begin_close(cx));
+                self.start_advancing(window, cx);
             }
         }
         cx.notify();
@@ -958,6 +994,7 @@ impl NotificationList {
             if let Some(note) = self.notifications.get(&id) {
                 note.update(cx, |note, cx| note.begin_close(cx));
             }
+            self.start_advancing(window, cx);
         }
         cx.notify();
     }
@@ -976,7 +1013,7 @@ impl Render for NotificationList {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let size = window.viewport_size();
+        let size = window.fully_visible_bounds().size;
         let settings = &cx.theme().notification;
         let (placement, margins, width) =
             (settings.placement, settings.margins.clone(), settings.width);
@@ -1022,12 +1059,13 @@ impl Render for NotificationList {
                 .map(|this| match anchor {
                     Anchor::TopLeft => this.top(margins.top).left(margins.left),
                     Anchor::TopRight => this.top(margins.top).right(margins.right),
-                    Anchor::TopCenter => this.top(margins.top).left_0().right_0().mx_auto(),
+                    Anchor::TopCenter => this.top(margins.top).left(relative(0.5)).ml(-width / 2.),
                     Anchor::BottomLeft => this.bottom(margins.bottom).left(margins.left),
                     Anchor::BottomRight => this.bottom(margins.bottom).right(margins.right),
-                    Anchor::BottomCenter => {
-                        this.bottom(margins.bottom).left_0().right_0().mx_auto()
-                    }
+                    Anchor::BottomCenter => this
+                        .bottom(margins.bottom)
+                        .left(relative(0.5))
+                        .ml(-width / 2.),
                     Anchor::LeftCenter => this.left(margins.left).top_0().bottom_0().my_auto(),
                     Anchor::RightCenter => this.right(margins.right).top_0().bottom_0().my_auto(),
                 })
@@ -1296,6 +1334,61 @@ mod tests {
         cx.background_executor
             .advance_clock(NOTIFICATION_TRANSITION_DURATION + Duration::from_secs(5));
         cx.run_until_parked();
+        flush_dismiss(cx);
+        assert!(ids(&list, cx).is_empty());
+        assert!(!list.read_with(cx, |list, _| list.is_advancing));
+    }
+
+    #[gpui::test]
+    fn lifecycle_clock_rests_while_only_persistent_notifications_are_shown(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| cx.set_global(Theme::default()));
+        let (root, cx) = cx.add_window_view(|window, cx| TestRoot {
+            list: cx.new(|cx| NotificationList::new(window, cx)),
+            other_focus: cx.focus_handle(),
+        });
+        cx.update(|window, _| window.activate_window());
+        let list = root.read_with(cx, |root, _| root.list.clone());
+
+        list.update_in(cx, |list, window, cx| {
+            list.push(
+                Notification::info("first").id::<FooKind>().autohide(false),
+                window,
+                cx,
+            );
+            list.push(
+                Notification::info("second").id::<BarKind>().autohide(false),
+                window,
+                cx,
+            );
+        });
+        assert!(list.read_with(cx, |list, _| list.is_advancing));
+
+        // Once both have entered, nothing is left to time.
+        cx.background_executor
+            .advance_clock(NOTIFICATION_TRANSITION_DURATION + NOTIFICATION_ADVANCE_INTERVAL);
+        cx.run_until_parked();
+        assert!(!list.read_with(cx, |list, _| list.is_advancing));
+        assert_eq!(ids(&list, cx).len(), 2);
+
+        // A programmatic close restarts the clock to finish the exit.
+        list.update_in(cx, |list, window, cx| {
+            list.close(TypeId::of::<FooKind>(), window, cx);
+        });
+        assert!(list.read_with(cx, |list, _| list.is_advancing));
+        flush_dismiss(cx);
+        assert_eq!(
+            ids(&list, cx),
+            [NotificationId::from(TypeId::of::<BarKind>())]
+        );
+        assert!(!list.read_with(cx, |list, _| list.is_advancing));
+
+        // So does a dismiss requested by the notification itself.
+        let note = list.read_with(cx, |list, _| list.notifications()[0].clone());
+        note.update_in(cx, |note, window, cx| note.dismiss(window, cx));
+        cx.run_until_parked();
+        assert!(list.read_with(cx, |list, _| list.is_advancing));
         flush_dismiss(cx);
         assert!(ids(&list, cx).is_empty());
         assert!(!list.read_with(cx, |list, _| list.is_advancing));

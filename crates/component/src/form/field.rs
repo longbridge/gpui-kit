@@ -167,6 +167,11 @@ impl Field {
         self
     }
 
+    /// Returns whether the form field is visible.
+    pub(super) fn is_visible(&self) -> bool {
+        self.visible
+    }
+
     /// Set the required status of the form field, default is `false`.
     pub fn required(mut self, required: bool) -> Self {
         self.required = required;
@@ -276,6 +281,7 @@ impl RenderOnce for Field {
             .when_some(self.col_start, |this, start| this.col_start(start))
             .when_some(self.col_end, |this, end| this.col_end(end))
             .refine_style(&self.style)
+            .when(!self.visible, |this| this.hidden())
             .child(
                 // This warp for aligning the Label + Input
                 wrap_div(layout)

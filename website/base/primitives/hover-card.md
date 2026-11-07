@@ -10,6 +10,8 @@ A delayed floating card associated with a pointer or keyboard trigger.
 
 Like every `gpui-base` primitive, Hover Card supplies behavior and semantic structure without imposing a product visual language. Apply GPUI styles and compose the exported parts to match your design system.
 
+On iOS and Android, the trigger toggles the card on click and an outside click dismisses it. Hover and its open/close delays are ignored.
+
 ## Example
 
 The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.

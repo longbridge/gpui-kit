@@ -1,21 +1,31 @@
 [package]
 name = "gpui-base-examples"
 default-run = "components"
-version = "0.6.0"
+version = "0.9.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
+chrono = "0.4.38"
 gpui.workspace = true
+gpui-fast = { workspace = true, optional = true }
 gpui-base = { path = "../.." }
 gpui_platform.workspace = true
+gpui-fast-platform = { workspace = true, optional = true }
 reqwest_client.workspace = true
 syntect.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui-fast = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
 
 # The shared showcase is included with `#[path]`, which cargo-machete cannot
-# follow when detecting its `gpui`, `gpui_base`, and `syntect` imports.
+# follow when detecting its `chrono`, `gpui`, `gpui_base`, and `syntect` imports.
 [package.metadata.cargo-machete]
-ignored = ["gpui", "gpui-base", "syntect"]
+ignored = ["chrono", "gpui", "gpui-base", "syntect"]
+
+[features]
+gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform"]

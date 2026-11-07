@@ -107,10 +107,19 @@ impl WrapMap {
         new_text: &Rope,
         cx: &mut App,
     ) {
+        self.wrapper.adjust_inline_metrics(range, new_text.len());
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 
     /// Update layout parameters (wrap width or font)
+    pub(super) fn set_inline_metrics(
+        &mut self,
+        metrics: std::rc::Rc<[(std::ops::Range<usize>, Pixels)]>,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_inline_metrics(metrics, cx);
+    }
+
     pub(super) fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrapper.set_wrap_width(wrap_width, cx);
     }
@@ -118,6 +127,11 @@ impl WrapMap {
     /// Set the wrapping indent mode for continuation lines.
     pub(super) fn set_wrapping_indent(&mut self, wrapping_indent: WrappingIndent, cx: &mut App) {
         self.wrapper.set_wrapping_indent(wrapping_indent, cx);
+    }
+
+    /// Set the number of spaces per tab stop. Returns whether it changed.
+    pub(super) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) -> bool {
+        self.wrapper.set_tab_size(tab_size, cx)
     }
 
     /// Set font parameters

@@ -2,15 +2,17 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt,
+    ops::Range,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
 };
 
-use gpui::{AnyElement, App, IntoElement, SharedString, Window};
+use gpui::{AnyElement, App, Div, IntoElement, SharedString, Window};
 use markdown::{ParseOptions, mdast};
 
+use super::{InlineElement, InlineRenderContext};
 use crate::text::node::Span;
 
 static MARKDOWN_EXTENSIONS_REVISION: AtomicU64 = AtomicU64::new(1);
@@ -30,12 +32,23 @@ pub type MarkdownBlockParserFn =
 pub type MarkdownBlockRenderFn =
     dyn Fn(&MarkdownNode, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
+/// Builds the container of a [block surface](MarkdownExtensions::block_surface).
+pub type BlockSurfaceRenderFn = dyn Fn(&mut Window, &mut App) -> Div + Send + Sync;
+
+/// Parser for a single inline AST node; follows the block parser contract.
+type MarkdownInlineParserFn = MarkdownBlockParserFn;
+
+/// Produces a native GPUI inline element, or `None` for atomic text fallback.
+/// Read prepared resources here; start asynchronous work outside rendering.
+type MarkdownInlineRenderFn = dyn Fn(&MarkdownNode, &InlineRenderContext, &mut Window, &mut App) -> Option<InlineElement>
+    + Send
+    + Sync;
+
 /// A reusable Markdown extension that parses and renders one custom node.
 pub trait MarkdownPlugin: Send + Sync + 'static {
     /// Whether this plugin produces block-level nodes.
     ///
-    /// Plugins are inline by default. TextView does not support inline custom
-    /// Markdown rendering yet, so block plugins should return `true`.
+    /// Plugins are inline by default. Block plugins should return `true`.
     fn is_block(&self) -> bool {
         false
     }
@@ -47,7 +60,21 @@ pub trait MarkdownPlugin: Send + Sync + 'static {
     fn parse(&self, node: &mdast::Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode>;
 
     /// Render a custom Markdown node produced by this plugin.
-    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement;
+    fn render(&self, node: &MarkdownNode, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        node.as_text().to_string()
+    }
+
+    /// Render an inline node using the existing `render` implementation.
+    /// Override this only when inherited layout context or an explicit baseline is needed.
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        _context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        Some(InlineElement::new(self.render(node, window, cx)))
+    }
 }
 
 /// Context passed to custom Markdown parsers.
@@ -85,6 +112,7 @@ pub struct MarkdownNode {
     name: SharedString,
     text: SharedString,
     markdown: SharedString,
+    accessibility_label: Option<SharedString>,
     data: Arc<dyn Any + Send + Sync>,
     pub(crate) span: Option<Span>,
 }
@@ -99,6 +127,7 @@ impl MarkdownNode {
             name: name.into(),
             text: SharedString::default(),
             markdown: SharedString::default(),
+            accessibility_label: None,
             data: Arc::new(data),
             span: None,
         }
@@ -117,6 +146,48 @@ impl MarkdownNode {
     /// Markdown representation of this custom node.
     pub fn as_markdown(&self) -> &str {
         &self.markdown
+    }
+
+    /// Full-document UTF-8 source byte range, including syntax delimiters.
+    pub fn source_range(&self) -> Option<Range<usize>> {
+        self.span.map(|span| span.start..span.end)
+    }
+
+    /// Name exposed to accessibility clients, defaulting to the plain text.
+    pub fn accessibility_name(&self) -> &str {
+        self.accessibility_label.as_deref().unwrap_or(&self.text)
+    }
+
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        let label = label.into();
+        self.accessibility_label = (!label.is_empty()).then_some(label);
+        self
+    }
+
+    /// Plain text, sharing this node's buffer.
+    ///
+    /// The inline flow rebuilds its items every frame and holds text by value,
+    /// so going through [`Self::as_text`] would allocate a `String` per object
+    /// per frame.
+    pub(crate) fn shared_text(&self) -> SharedString {
+        self.text.clone()
+    }
+
+    /// Accessible name, sharing this node's buffer. Defaults to the plain text.
+    pub(crate) fn shared_accessibility_name(&self) -> SharedString {
+        self.accessibility_label
+            .clone()
+            .unwrap_or_else(|| self.text.clone())
+    }
+
+    pub(crate) fn with_inline_source(mut self, source: &str) -> Self {
+        if self.text.is_empty() {
+            self.text = source.to_string().into();
+        }
+        if self.markdown.is_empty() {
+            self.markdown = source.to_string().into();
+        }
+        self
     }
 
     /// Set the text representation of this custom node.
@@ -168,6 +239,7 @@ impl PartialEq for MarkdownNode {
         self.name == other.name
             && self.text == other.text
             && self.markdown == other.markdown
+            && self.accessibility_label == other.accessibility_label
             && self.span == other.span
     }
 }
@@ -176,12 +248,37 @@ impl PartialEq for MarkdownNode {
 #[derive(Clone, Default)]
 pub struct MarkdownExtensions {
     enable_mdx: bool,
+    enable_frontmatter: bool,
     block_parsers: Vec<Arc<MarkdownBlockParserFn>>,
     block_renderers: HashMap<SharedString, Arc<MarkdownBlockRenderFn>>,
+    inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
+    inline_renderers: HashMap<SharedString, Arc<MarkdownInlineRenderFn>>,
+    block_surfaces: HashMap<SharedString, Arc<BlockSurfaceRenderFn>>,
     revision: u64,
+    parser_revision: u64,
 }
 
 impl MarkdownExtensions {
+    /// Change this revision when parser captures or plugin configuration change.
+    /// Reusing it allows equivalent registrations rebuilt during rendering to
+    /// retain the parsed document. Renderer-only changes do not need a new value.
+    pub fn parser_revision(mut self, revision: u64) -> Self {
+        self.parser_revision = revision;
+        self.bump_revision();
+        self
+    }
+
+    /// Enable YAML frontmatter parsing.
+    ///
+    /// Frontmatter is disabled by default because it is not part of CommonMark
+    /// or GFM. Register a block parser or [`MarkdownPlugin`] to render the
+    /// resulting [`mdast::Node::Yaml`] node.
+    pub fn frontmatter(mut self) -> Self {
+        self.enable_frontmatter = true;
+        self.bump_revision();
+        self
+    }
+
     /// Enable MDX JSX/expression constructs.
     ///
     /// This disables raw HTML constructs because `markdown-rs` gives HTML
@@ -214,6 +311,62 @@ impl MarkdownExtensions {
         self
     }
 
+    /// Draw a top-level blockquote that opens with the marker `[!name]` inside
+    /// a container.
+    ///
+    /// ```markdown
+    /// > [!summary]
+    /// > Blocks of any kind, as many as you like.
+    /// >
+    /// > - They stay part of the document.
+    /// ```
+    ///
+    /// This is the syntax of GitHub alerts, with names of your own, and other
+    /// renderers show it as a blockquote. Names match ASCII-case-insensitively,
+    /// so `[!NOTE]` opens a surface registered as `note`. The marker is alone on
+    /// the first line, and is not document text; the lines after it are the
+    /// first paragraph.
+    ///
+    /// `render` runs each time the document renders and returns the container
+    /// with its background, shape, padding and text style, and any children to
+    /// show before the blocks, such as an icon and a title. The blocks are
+    /// appended to it and bring the view's paragraph gap, so a `gap` on the
+    /// container adds to that. Read theme colors in `render`, so a theme change
+    /// needs no new parse. What the container shows itself is not document text.
+    /// Unless the container sets a width, it takes the row's.
+    ///
+    /// The blocks remain the document's: selection, range highlights and
+    /// reveals go across and inside the container, and
+    /// [`rendered_text`](super::TextViewState::rendered_text) has them without
+    /// the marker. A select-all copies the source verbatim. A partial source
+    /// copy is quoted under the marker line, as a blockquote's is quoted.
+    ///
+    /// Only a blockquote at the top level of a Markdown view, with a registered
+    /// name, is a surface. A nested one stays a blockquote, and so does one with
+    /// text after the marker on its line, such as Obsidian's `> [!note] Title`:
+    /// the container shows its own title. Surfaces do not nest. The marker is
+    /// markup, so escape text you don't control, as with any other Markdown.
+    ///
+    /// A surface is one row of a scrollable view, so keep it to what fits a few
+    /// screens. While it is the last block of a streaming view, each append
+    /// parses and measures all of it again, so streaming one costs time
+    /// quadratic in its length. Until its marker line is complete, it shows as
+    /// a blockquote.
+    pub fn block_surface<F>(mut self, name: impl Into<SharedString>, render: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) -> Div + Send + Sync + 'static,
+    {
+        let name = name.into();
+        let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            name.to_ascii_lowercase().into()
+        } else {
+            name
+        };
+        self.block_surfaces.insert(name, Arc::new(render));
+        self.bump_revision();
+        self
+    }
+
     /// Apply a reusable Markdown plugin.
     pub fn plugin<P>(self, plugin: P) -> Self
     where
@@ -231,7 +384,18 @@ impl MarkdownExtensions {
             });
             extensions
         } else {
-            panic!("inline Markdown plugins are not supported by TextView yet")
+            let mut extensions = self;
+            extensions
+                .inline_parsers
+                .push(Arc::new(move |node, cx| parser.parse(node, cx)));
+            extensions.inline_renderers.insert(
+                name,
+                Arc::new(move |node, context, window, cx| {
+                    renderer.render_inline(node, context, window, cx)
+                }),
+            );
+            extensions.bump_revision();
+            extensions
         }
     }
 
@@ -245,9 +409,22 @@ impl MarkdownExtensions {
     /// Their globally unique revisions differ, but the parser shape remains
     /// stable; render handles may be refreshed without reparsing the document.
     pub(crate) fn has_same_parser_configuration(&self, other: &Self) -> bool {
-        self.enable_mdx == other.enable_mdx
+        self.parser_revision == other.parser_revision
+            && self.enable_mdx == other.enable_mdx
+            && self.enable_frontmatter == other.enable_frontmatter
             && self.block_parsers.len() == other.block_parsers.len()
             && self.block_renderers.len() == other.block_renderers.len()
+            && self.inline_parsers.len() == other.inline_parsers.len()
+            && self.inline_renderers.len() == other.inline_renderers.len()
+            && self.block_surfaces.len() == other.block_surfaces.len()
+            && self
+                .block_surfaces
+                .keys()
+                .all(|name| other.block_surfaces.contains_key(name))
+            && self
+                .inline_renderers
+                .keys()
+                .all(|name| other.inline_renderers.contains_key(name))
             && self
                 .block_renderers
                 .keys()
@@ -279,6 +456,12 @@ impl MarkdownExtensions {
 
     pub(crate) fn parse_options(&self) -> ParseOptions {
         let mut options = ParseOptions::gfm();
+        options.constructs.frontmatter = self.enable_frontmatter;
+        options.constructs.math_text = true;
+        // Both fences or neither: with only `math_text` on, the inline
+        // construct swallows a `$$` block, so a block plugin matching
+        // `Node::Math` never fires and the formula renders inline.
+        options.constructs.math_flow = true;
         if self.enable_mdx {
             options.constructs.html_flow = false;
             options.constructs.html_text = false;
@@ -288,6 +471,32 @@ impl MarkdownExtensions {
             options.constructs.mdx_jsx_text = true;
         }
         options
+    }
+
+    pub(crate) fn has_block_surfaces(&self) -> bool {
+        !self.block_surfaces.is_empty()
+    }
+
+    /// The registered name that `written` matches, ignoring ASCII case.
+    pub(crate) fn block_surface_name(&self, written: &str) -> Option<SharedString> {
+        let name = if written.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            self.block_surfaces
+                .get_key_value(written.to_ascii_lowercase().as_str())
+        } else {
+            self.block_surfaces.get_key_value(written)
+        };
+        name.map(|(name, _)| name.clone())
+    }
+
+    pub(crate) fn render_block_surface(
+        &self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Div> {
+        self.block_surfaces
+            .get(name)
+            .map(|render| render(window, cx))
     }
 
     pub(crate) fn parse_block(
@@ -303,6 +512,28 @@ impl MarkdownExtensions {
         None
     }
 
+    pub(crate) fn parse_inline(
+        &self,
+        node: &mdast::Node,
+        cx: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        self.inline_parsers
+            .iter()
+            .find_map(|parser| parser(node, cx))
+    }
+
+    pub(crate) fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        self.inline_renderers
+            .get(node.name())
+            .and_then(|render| render(node, context, window, cx))
+    }
+
     pub(crate) fn render_block(
         &self,
         node: &MarkdownNode,
@@ -316,5 +547,69 @@ impl MarkdownExtensions {
 
     fn bump_revision(&mut self) {
         self.revision = MARKDOWN_EXTENSIONS_REVISION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Test fixture that exercises the same plugin registration path as applications.
+#[cfg(test)]
+pub(super) struct TestInlinePlugin {
+    name: &'static str,
+    parser: Option<Arc<MarkdownInlineParserFn>>,
+    renderer: Option<Arc<MarkdownInlineRenderFn>>,
+}
+
+#[cfg(test)]
+impl TestInlinePlugin {
+    pub(super) fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            parser: None,
+            renderer: None,
+        }
+    }
+
+    pub(super) fn parse_with<F>(mut self, parser: F) -> Self
+    where
+        F: for<'a> Fn(&mdast::Node, &MarkdownParseContext<'a>) -> Option<MarkdownNode>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.parser = Some(Arc::new(parser));
+        self
+    }
+
+    pub(super) fn render_with<F>(mut self, renderer: F) -> Self
+    where
+        F: Fn(&MarkdownNode, &InlineRenderContext, &mut Window, &mut App) -> Option<InlineElement>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.renderer = Some(Arc::new(renderer));
+        self
+    }
+}
+
+#[cfg(test)]
+impl MarkdownPlugin for TestInlinePlugin {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn parse(&self, node: &mdast::Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        self.parser.as_ref().and_then(|parse| parse(node, cx))
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        self.renderer
+            .as_ref()
+            .and_then(|render| render(node, context, window, cx))
     }
 }

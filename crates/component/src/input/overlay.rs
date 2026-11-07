@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{AnyElement, App, Entity, EntityId, Global, IntoElement, WeakEntity, Window};
 use ropey::Rope;
@@ -8,6 +9,7 @@ use super::{
     popovers::{CodeActionMenu, CompletionMenu, DiagnosticPopover, HoverPopover},
     search::SearchPanel,
 };
+use gpui_base::input::CompletionHighlighter;
 
 struct InputOverlayRegistry<M: OverlayMode> {
     hosts: HashMap<EntityId, (WeakEntity<InputBaseState<M>>, InputOverlayHost<M>)>,
@@ -71,6 +73,11 @@ pub(crate) struct LspOverlays {
     code_action_signature: OverlaySignature,
     hover_signature: Option<std::ops::Range<usize>>,
     diagnostic_signature: Option<std::rc::Rc<gpui_base::input::DiagnosticEntry>>,
+    /// Highlighter last copied onto the completion menu.
+    ///
+    /// Compared by `Rc` identity, so swapping the host's closure repaints an
+    /// open menu without rebuilding its items.
+    completion_highlight: Option<Rc<CompletionHighlighter>>,
 }
 
 /// What the state read out of the engine for one sync pass.
@@ -194,6 +201,7 @@ impl OverlayMode for crate::input::EditorMode {
             code_action_signature: OverlaySignature::default(),
             hover_signature: None,
             diagnostic_signature: None,
+            completion_highlight: None,
         })
     }
 
@@ -205,6 +213,17 @@ impl OverlayMode for crate::input::EditorMode {
         cx: &mut App,
     ) {
         let cursor = snapshot.cursor;
+
+        let highlight = state.read(cx).lsp().completion_highlighter().clone();
+        if lsp
+            .completion_highlight
+            .as_ref()
+            .is_none_or(|current| !Rc::ptr_eq(current, &highlight))
+        {
+            lsp.completion_highlight = Some(highlight.clone());
+            lsp.completion
+                .update(cx, |menu, cx| menu.set_highlight(highlight, cx));
+        }
 
         if snapshot.completion != lsp.completion_signature {
             lsp.completion_signature = OverlaySignature {
@@ -319,6 +338,7 @@ impl<M: OverlayMode> InputOverlayHost<M> {
             )
         };
 
+        let panel_replace_mode = self.search.read(cx).replace_mode();
         self.search
             .update(cx, |panel, _| panel.sync_session(&search_session));
 
@@ -330,16 +350,20 @@ impl<M: OverlayMode> InputOverlayHost<M> {
             activation_revision,
         };
         if search_signature != self.search_signature {
-            // The panel writes what the user types back into the session, which
-            // lands here as a changed query on the next frame. Re-showing the
-            // panel for that echo would select the field out from under them, so
-            // recognise it: the same open session, moved only by the query the
-            // panel itself already holds.
+            // The panel writes query and replacement-mode changes back into the
+            // session. Re-showing it for that echo would select the query or steal
+            // focus from replacement, so preserve changes the panel already holds.
+            // External mode changes still move focus out of a hidden replace field.
+            //
+            // `anchor_offset` stays out of this comparison. A changed query records
+            // the viewport there in the same write the panel just made, and treating
+            // that as a new session selects the field, so the next character
+            // replaces the one just typed.
             let was = &self.search_signature;
             let query_echo = search_open
                 && was.open
-                && was.replace_mode == search_signature.replace_mode
-                && was.anchor_offset == search_signature.anchor_offset
+                && (was.replace_mode == search_signature.replace_mode
+                    || panel_replace_mode == search_signature.replace_mode)
                 && was.activation_revision == search_signature.activation_revision
                 && self.search.read(cx).query(cx) == search_session.query;
             self.search_signature = search_signature;
@@ -430,7 +454,7 @@ pub(super) fn render_overlays<M: OverlayMode>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{AppContext as _, Render, SharedString, div};
+    use gpui::{AppContext as _, ParentElement, Render, SharedString, Styled, div};
     use gpui_base::input::CodeActionItem;
     use gpui_base::input::DiagnosticEntry;
     use lsp_types::{CodeAction, CompletionItem, Hover, HoverContents, MarkedString};
@@ -704,5 +728,110 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(dropped_owner.upgrade().is_none());
+    }
+
+    /// Typing a query must keep every character, including the first.
+    ///
+    /// Opening search anchors nothing when the query did not change. The first
+    /// character anchors the matcher to the viewport, and that anchor change
+    /// used to look like a new search session: the next frame selected the
+    /// field, so the following character replaced the one just typed.
+    ///
+    /// Each character is its own update, with a frame after the query write,
+    /// the same split as a real keystroke. One update that types the whole
+    /// word hides the bug, because the anchor is set and cleared again before
+    /// the overlay looks.
+    #[gpui::test]
+    fn typing_a_search_query_keeps_the_first_character(cx: &mut gpui::TestAppContext) {
+        use crate::input::Editor;
+        use gpui::{Bounds, WindowBounds, WindowOptions, px, size};
+
+        struct SearchProbe {
+            state: Entity<crate::input::EditorState>,
+        }
+
+        impl Render for SearchProbe {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .child(Editor::new(&self.state).size_full())
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let window = cx
+            .update(|cx| {
+                cx.open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds {
+                            origin: Default::default(),
+                            size: size(px(800.), px(480.)),
+                        })),
+                        ..Default::default()
+                    },
+                    |window, cx| {
+                        let state = cx.new(|cx| {
+                            crate::input::EditorState::new(window, cx)
+                                .default_value("{\"host\": \"a.test\"}")
+                        });
+                        editor = Some(state.clone());
+                        let probe = cx.new(|_| SearchProbe { state });
+                        cx.new(|cx| crate::Root::new(probe, window, cx))
+                    },
+                )
+            })
+            .unwrap();
+        let state = editor.unwrap();
+        let mut cx = gpui::VisualTestContext::from_window(window.into(), cx);
+
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|_window, cx| {
+            state.update(cx, |state, cx| state.open_search(false, cx));
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        let search_input = cx.update(|_, cx| {
+            cx.global::<InputOverlayRegistry<crate::input::EditorMode>>()
+                .hosts
+                .get(&state.entity_id())
+                .expect("open search registers an overlay host")
+                .1
+                .search
+                .clone()
+        });
+        let search_input = search_input.read_with(&cx, |panel, _| panel.search_input().clone());
+        cx.update(|window, cx| {
+            search_input.update(cx, |input, cx| input.focus(window, cx));
+        });
+
+        let mut expected = String::new();
+        for ch in ['h', 'o', 's', 't'] {
+            cx.update(|window, cx| {
+                let text = ch.to_string();
+                let mut key = gpui::Keystroke::parse_with_os(&text, cx.platform_info().os)
+                    .expect("a letter is a keystroke");
+                key.key_char = Some(text.into());
+                window.dispatch_keystroke(key, cx);
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+            expected.push(ch);
+            search_input.read_with(&cx, |input, _| {
+                assert_eq!(
+                    input.value().to_string(),
+                    expected,
+                    "the search field must keep every character typed so far"
+                );
+            });
+        }
+        state.read_with(&cx, |state, _| {
+            assert_eq!(state.search_session().query, "host");
+        });
     }
 }

@@ -111,10 +111,16 @@ impl RenderOnce for SearchableListItemElement {
             .refine_style(&self.style)
             .when(!self.disabled, |this| {
                 this.when(!self.selected, |this| {
-                    this.hover(|this| this.bg(cx.theme().accent.opacity(0.7)))
+                    this.hover(|this| {
+                        this.bg(cx.theme().accent.opacity(0.7))
+                            .text_color(cx.theme().accent_foreground)
+                    })
                 })
             })
-            .when(self.selected, |this| this.bg(cx.theme().tokens.accent))
+            .when(self.selected, |this| {
+                this.bg(cx.theme().tokens.accent)
+                    .text_color(cx.theme().accent_foreground)
+            })
             .when(self.disabled, |this| {
                 this.cursor_not_allowed()
                     .text_color(cx.theme().muted_foreground)
@@ -122,14 +128,24 @@ impl RenderOnce for SearchableListItemElement {
             .child(
                 h_flex()
                     .w_full()
+                    .min_w_0()
                     .items_center()
                     .justify_between()
                     .gap_x_1()
-                    .child(h_flex().w_full().items_center().children(self.children))
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .items_center()
+                            .children(self.children),
+                    )
                     .when_some(self.check_icon, |this, icon| {
+                        // The check inherits the row's text color, so it stays
+                        // legible on the accent fill alongside the label.
                         this.child(
                             icon.xsmall()
-                                .text_color(cx.theme().foreground)
+                                .flex_shrink_0()
                                 .when(!self.checked, |this| this.invisible()),
                         )
                     }),

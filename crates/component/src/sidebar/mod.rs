@@ -331,6 +331,15 @@ impl SidebarToggleButton {
         self
     }
 
+    /// Set the accessibility label of the toggle button.
+    ///
+    /// The default toggle is icon-only; without an explicit label it has no
+    /// accessible name.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.btn = self.btn.accessibility_label(label);
+        self
+    }
+
     /// Add a click handler to the toggle button.
     pub fn on_click(
         mut self,
@@ -443,7 +452,9 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
                         .px_3()
                         .gap_y_3()
                         .when(layout.icon_collapsed, |this| this.p_2())
-                        .child(
+                        .child(gpui_base::ScrollBounce::new(
+                            "bounce",
+                            &list_state,
                             list(list_state.clone(), {
                                 move |ix, window, cx| {
                                     let group = self.content.get(ix).cloned();
@@ -466,7 +477,7 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
                                 }
                             })
                             .size_full(),
-                        )
+                        ))
                         .vertical_scrollbar(&list_state),
                 ),
             )

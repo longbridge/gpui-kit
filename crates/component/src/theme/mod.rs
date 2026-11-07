@@ -2,7 +2,10 @@ use crate::{
     highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
     scroll::ScrollbarMode, sheet::SheetSettings,
 };
-use gpui::{App, Global, Hsla, IsZero as _, Pixels, SharedString, Window, WindowAppearance, px};
+use gpui::{
+    App, Global, Hsla, IsZero as _, Pixels, SharedString, Window, WindowAppearance,
+    prelude::FluentBuilder as _, px,
+};
 pub use gpui_base::{
     ColorTokens, RadiusTokens, SemanticThemeTokens, ShadowTokens, SpacingTokens, TextStyleToken,
     TypographyTokens,
@@ -17,9 +20,11 @@ use std::{
 };
 
 mod color;
+mod mono_font;
 mod motion;
 mod registry;
 mod schema;
+mod system_font;
 mod theme_color;
 
 pub use color::*;
@@ -56,6 +61,23 @@ fn default_true() -> bool {
 /// renderer, so this is simply "as round as it goes".
 const RADIUS_FULL: Pixels = px(9999.);
 
+/// How long a chart's data takes to draw in the first time it is painted.
+///
+/// The mainstream chart libraries agree on about a second: ECharts, Chart.js
+/// and Highcharts all default to 1000 ms, ApexCharts to 800 ms and Recharts to
+/// 1500 ms.
+const PLOT_APPEAR: Duration = Duration::from_millis(1000);
+
+/// The curve a chart's data draws in on: Chart.js' default `easeOutQuart`.
+///
+/// Not the design system's enter curve. That one is an exponential ease-out
+/// built for a popover, done nine-tenths of the way in the first quarter, which
+/// makes a second of drawing in read as a flash. The quartic still leads with
+/// most of the motion but leaves the data a visible glide into place.
+fn plot_appear_easing(t: f32) -> f32 {
+    1. - (1. - t).powi(4)
+}
+
 /// How long the scrollbar stays visible after the last scroll, drag, or hover.
 const SCROLLBAR_IDLE: Duration = Duration::from_secs(2);
 /// How long the scrollbar takes to appear.
@@ -64,6 +86,44 @@ const SCROLLBAR_ENTER: Duration = Duration::from_millis(300);
 const SCROLLBAR_EXIT: Duration = Duration::from_millis(500);
 /// How long the thumb takes to reach its hovered or resting width.
 const SCROLLBAR_EXPAND: Duration = Duration::from_millis(300);
+
+/// The resting thumb width on iOS and Android, matching the 3pt indicator
+/// those platforms draw. Hover and drag keep Base's desktop widths, so a
+/// grabbed thumb still grows under the finger.
+const MOBILE_SCROLLBAR_THUMB_WIDTH: Pixels = px(3.);
+/// How far the resting thumb sits from the edge on iOS and Android. Base's
+/// desktop inset leaves a 3px thumb floating too far from the edge.
+const MOBILE_SCROLLBAR_THUMB_INSET: Pixels = px(2.);
+/// Base's resting thumb width, restated so the hovered thumb keeps it when
+/// the mobile resting width would otherwise cascade into it.
+const SCROLLBAR_THUMB_HOVER_WIDTH: Pixels = px(6.);
+/// Base's dragged thumb width, restated for the same reason.
+const SCROLLBAR_THUMB_ACTIVE_WIDTH: Pixels = px(8.);
+/// Base's hovered and dragged thumb inset, restated for the same reason.
+const SCROLLBAR_THUMB_INSET: Pixels = px(4.);
+
+/// The plot hover motion this design system projects onto Base.
+///
+/// A pointer chases the cursor across neighbouring data, so it has to arrive
+/// well within the time the cursor takes to reach the next datum: ECharts moves
+/// its axis pointer over 200 ms on an exponential ease-out, which is most of
+/// the way there in the first third. The fast tier as a critically damped
+/// response lands in the same place, and the tolerance is sub-pixel so the
+/// spring rests once nothing visible moves. The hover fades on the same tier.
+/// The data draws in over [`PLOT_APPEAR`] on [`plot_appear_easing`].
+fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
+    gpui_base::PlotMotion::default()
+        .with_pointer(gpui_base::Spring::new(motion.duration_fast).with_epsilon(0.1))
+        .with_enter(
+            gpui_base::motion::Transition::new(motion.duration_fast)
+                .easing(motion.easing_enter.clone()),
+        )
+        .with_exit(
+            gpui_base::motion::Transition::new(motion.duration_fast)
+                .easing(motion.easing_exit.clone()),
+        )
+        .with_appear(gpui_base::motion::Transition::new(PLOT_APPEAR).ease(plot_appear_easing))
+}
 
 /// The scrollbar motion this design system projects onto Base.
 ///
@@ -83,7 +143,11 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
 }
 
 /// The global theme configuration.
+///
+/// Construct with [`Theme::default`] and assign fields; new fields may be
+/// added without a breaking change.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct Theme {
     pub colors: ThemeColor,
     /// Component-specific resolved tokens retained for legacy compatibility.
@@ -98,6 +162,11 @@ pub struct Theme {
 
     pub mode: ThemeMode,
     /// The font family for the application, default is `.SystemUIFont`.
+    ///
+    /// When the system font resolves to an installed fallback family instead
+    /// of itself (Linux desktops without the family GPUI maps it to),
+    /// [`Theme::change`] names that family here, so every text lookup hits
+    /// the font cache. A family set explicitly is used as-is.
     pub font_family: SharedString,
     /// The base font size for the application, default is 16px.
     pub font_size: Pixels,
@@ -108,6 +177,11 @@ pub struct Theme {
     /// - macOS: `Menlo`
     /// - Windows: `Consolas`
     /// - Linux: `DejaVu Sans Mono`
+    ///
+    /// When that default is not installed, [`Theme::change`] swaps it for the
+    /// first installed alternative (`Monaco`, `Cascadia Mono`, `Noto Sans Mono`
+    /// and the like) and finally `.SystemUIFont`, so a missing font cannot
+    /// crash text layout. A family set explicitly is used as-is.
     pub mono_font_family: SharedString,
     /// The monospace font size for the application, default is 13px.
     pub mono_font_size: Pixels,
@@ -121,7 +195,8 @@ pub struct Theme {
     /// The ring is painted outside the element, so any ancestor that clips its
     /// content will cut it off. An application whose layout clips heavily can
     /// turn it off here: focused controls then show only their tinted border,
-    /// which costs no space and cannot be clipped.
+    /// or a 1px ring just inside their edge when they have none. Neither costs
+    /// space or can be clipped.
     #[serde(default = "default_true")]
     pub focus_ring: bool,
     pub transparent: Hsla,
@@ -131,12 +206,6 @@ pub struct Theme {
     /// The notification setting.
     #[serde(skip)]
     pub notification: NotificationSettings,
-    /// Tile grid size, default is 4px.
-    pub tile_grid_size: Pixels,
-    /// The shadow of the tile panel.
-    pub tile_shadow: bool,
-    /// The border radius of the tile panel, default is 0px.
-    pub tile_radius: Pixels,
     /// The list settings.
     pub list: ListSettings,
     /// The sheet settings.
@@ -144,6 +213,9 @@ pub struct Theme {
     /// Semantic motion policy for styled components.
     #[serde(skip)]
     pub motion: MotionTokens,
+    /// Application-wide caret blink behavior.
+    #[serde(skip)]
+    pub cursor_blink: gpui_base::input::CursorBlink,
 }
 
 impl Default for Theme {
@@ -175,14 +247,99 @@ impl Theme {
         cx.global::<Theme>()
     }
 
-    /// Returns the global theme mutable reference
+    /// Returns the global theme mutable reference.
     ///
-    /// Changes to fields the Base layer mirrors — the radius, the colors, the
-    /// fonts — reach the scrollbar and resize handles only once
-    /// [`Theme::sync_base`] runs.
+    /// An edit made through this reference reaches nothing but the field it
+    /// touches: [`Theme::tokens`] keeps the colors it had, and so does the
+    /// Base projection until [`Theme::sync_base`] rebuilds it. Prefer
+    /// [`Theme::update`], which does both after the edit and refreshes every
+    /// window. Keep this for an edit that must not trigger any of that.
     #[inline(always)]
     pub fn global_mut(cx: &mut App) -> &mut Theme {
         cx.global_mut::<Theme>()
+    }
+
+    /// Edits the global theme and keeps every copy of it in step.
+    ///
+    /// The theme holds the same colors twice — [`Theme::colors`] as solid
+    /// colors and [`Theme::tokens`] as renderable backgrounds that may carry a
+    /// gradient — and the Base layer keeps a projection of its own for the
+    /// scrollbar and resize handles. Editing one of them through
+    /// [`Theme::global_mut`] leaves the others where they were, so a sidebar
+    /// can paint its text from the new colors and its background from the old
+    /// tokens. This is the write path that cannot drift:
+    ///
+    /// ```ignore
+    /// Theme::update(cx, |theme| {
+    ///     theme.colors = my_colors;
+    ///     theme.radius = px(8.);
+    /// });
+    /// ```
+    ///
+    /// After the closure returns, a color edited on `colors` replaces its
+    /// token (dropping any gradient — the edit asked for that solid color), a
+    /// token edited on its own writes its solid color back to `colors`, an
+    /// untouched field keeps the gradient a theme file gave it, the Base
+    /// projection is rebuilt, and every window is refreshed.
+    ///
+    /// A field the closure sets to the value it already had counts as
+    /// untouched: assigning a whole palette keeps the gradient of any field
+    /// whose color did not change. Edit the token to replace one.
+    ///
+    /// Setting [`Theme::mode`] loads that mode's registered theme, the same
+    /// as [`Theme::change`]; that load replaces the colors, so edit colors in
+    /// a second `update` after switching mode rather than in the same closure.
+    /// [`Theme::apply_config`] installs a theme file and switches to its mode
+    /// in one step, and the closure may go on editing after it — nothing is
+    /// loaded over its edits.
+    pub fn update<R>(cx: &mut App, edit: impl FnOnce(&mut Theme) -> R) -> R {
+        Self::edit(cx, false, edit)
+    }
+
+    /// The write path behind [`Theme::update`] and [`Theme::change`].
+    ///
+    /// `reload_mode` loads the current mode's registered theme even when the
+    /// mode did not change, which is what `change` promises: a caller that
+    /// swapped [`Theme::light_theme`] or [`Theme::dark_theme`] and then asks
+    /// for that mode gets the new theme applied.
+    fn edit<R>(cx: &mut App, reload_mode: bool, edit: impl FnOnce(&mut Theme) -> R) -> R {
+        let theme = Theme::global_mut(cx);
+        let colors_before = theme.colors;
+        let tokens_before = theme.tokens;
+        let mode_before = theme.mode;
+        let light_before = theme.light_theme.clone();
+        let dark_before = theme.dark_theme.clone();
+        let fonts_before = (theme.font_family.clone(), theme.mono_font_family.clone());
+
+        let result = edit(theme);
+
+        theme
+            .tokens
+            .reconcile(&mut theme.colors, &colors_before, &tokens_before);
+        let mode_changed = theme.mode != mode_before;
+        let (config, config_before) = if theme.mode.is_dark() {
+            (&theme.dark_theme, &dark_before)
+        } else {
+            (&theme.light_theme, &light_before)
+        };
+        // `apply_config` registers the file it applies and switches to its
+        // mode, so a mode change that arrives with a newly registered config
+        // has already loaded it. Loading it again would put the file's radius,
+        // fonts and colors back over whatever the closure edited after it.
+        let installed_by_edit = mode_changed && !Rc::ptr_eq(config, config_before);
+        if (mode_changed || reload_mode) && !installed_by_edit {
+            let config = config.clone();
+            theme.apply_config(&config);
+        }
+        let fonts_changed =
+            (&theme.font_family, &theme.mono_font_family) != (&fonts_before.0, &fonts_before.1);
+        if mode_changed || reload_mode || fonts_changed {
+            system_font::resolve_default_font(cx);
+            mono_font::resolve_default_mono_font(cx);
+        }
+        Self::sync_base(cx);
+        cx.refresh_windows();
+        result
     }
 
     /// Returns true if the theme is dark.
@@ -222,19 +379,21 @@ impl Theme {
         Self::set_scrollbar_mode(mode, cx);
     }
 
-    /// Changes the scrollbar display mode and synchronizes the Base projection.
+    /// Changes the scrollbar display mode through [`Theme::update`], which
+    /// projects it onto the Base scrollbar and refreshes every window.
     pub fn set_scrollbar_mode(mode: ScrollbarMode, cx: &mut App) {
-        Theme::global_mut(cx).scrollbar_mode = mode;
-        let base_theme = gpui_base::Theme::global_mut(cx);
-        base_theme.scrollbar = base_theme
-            .scrollbar
-            .clone()
-            .with_mode(mode)
-            .with_motion(scrollbar_motion(mode));
+        Self::update(cx, |theme| theme.scrollbar_mode = mode);
     }
 
     /// Change the theme mode.
-    pub fn change(mode: impl Into<ThemeMode>, window: Option<&mut Window>, cx: &mut App) {
+    ///
+    /// Loads the registered theme for `mode` — even when `mode` is already
+    /// current, so a caller that swapped [`Theme::light_theme`] or
+    /// [`Theme::dark_theme`] sees the new theme — through [`Theme::update`],
+    /// which keeps every copy of the theme in step and refreshes every
+    /// window. `window` is accepted for compatibility; every window is
+    /// refreshed either way, so it is not read.
+    pub fn change(mode: impl Into<ThemeMode>, _window: Option<&mut Window>, cx: &mut App) {
         let mode = mode.into();
         if !cx.has_global::<Theme>() {
             let mut theme = Theme::default();
@@ -243,61 +402,64 @@ impl Theme {
             cx.set_global(theme);
         }
 
-        let theme = {
-            let theme = cx.global_mut::<Theme>();
-            theme.mode = mode;
-            if mode.is_dark() {
-                theme.apply_config(&theme.dark_theme.clone());
-            } else {
-                theme.apply_config(&theme.light_theme.clone());
-            }
-            theme.clone()
-        };
-
-        let base_theme = theme.base_theme();
-        cx.set_global(base_theme);
-        crate::text::install_text_view_defaults(&theme, cx);
-
-        if let Some(window) = window {
-            window.refresh();
-        }
+        Self::edit(cx, true, |theme| theme.mode = mode);
     }
 
     /// This theme projected onto the Base layer, which owns the scrollbar and
     /// resize handles and reads the semantic tokens.
     fn base_theme(&self) -> gpui_base::Theme {
-        gpui_base::Theme {
-            appearance: if self.mode.is_dark() {
-                gpui_base::ThemeAppearance::Dark
-            } else {
-                gpui_base::ThemeAppearance::Light
-            },
-            tokens: self.semantic_tokens(),
-            scrollbar: gpui_base::ScrollbarTheme::new()
-                .with_mode(self.scrollbar_mode)
-                .with_motion(scrollbar_motion(self.scrollbar_mode))
-                .with_styles(
-                    gpui_base::ScrollbarStyles::default()
-                        .track(|style| style.bg(self.scrollbar))
-                        .track_hover(|style| style.bg(self.scrollbar))
-                        .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
-                        .thumb(|style| style.bg(self.tokens.scrollbar_thumb).radius(self.radius))
-                        .thumb_hover(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb_hover)
-                                .radius(self.radius)
-                        })
-                        .thumb_active(|style| {
-                            style
-                                .bg(self.tokens.scrollbar_thumb_hover)
-                                .radius(self.radius)
-                        }),
-                ),
-            resizable: gpui_base::ResizableTheme {
-                handle: Some(self.border),
-                active_handle: Some(self.drag_border),
-            },
-        }
+        let mut theme = gpui_base::Theme::default();
+        theme.appearance = if self.mode.is_dark() {
+            gpui_base::ThemeAppearance::Dark
+        } else {
+            gpui_base::ThemeAppearance::Light
+        };
+        theme.tokens = self.semantic_tokens();
+        theme.scrollbar = gpui_base::ScrollbarTheme::new()
+            .with_mode(self.scrollbar_mode)
+            .with_motion(scrollbar_motion(self.scrollbar_mode))
+            .with_styles(
+                gpui_base::ScrollbarStyles::default()
+                    .track(|style| style.bg(self.scrollbar))
+                    .track_hover(|style| style.bg(self.scrollbar))
+                    .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
+                    .thumb(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
+                                    .inset(MOBILE_SCROLLBAR_THUMB_INSET)
+                                    .radius(RADIUS_FULL)
+                            })
+                    })
+                    .thumb_hover(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb_hover)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(SCROLLBAR_THUMB_HOVER_WIDTH)
+                                    .inset(SCROLLBAR_THUMB_INSET)
+                            })
+                    })
+                    .thumb_active(|style| {
+                        style
+                            .bg(self.tokens.scrollbar_thumb_hover)
+                            .radius(self.radius)
+                            .when(gpui_base::is_mobile(), |style| {
+                                style
+                                    .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
+                                    .inset(SCROLLBAR_THUMB_INSET)
+                            })
+                    }),
+            );
+        theme.resizable.handle = Some(self.border);
+        theme.resizable.active_handle = Some(self.drag_border);
+        theme.plot = gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion));
+        theme.cursor_blink = self.cursor_blink;
+        theme
     }
 
     /// Push the current theme down to the Base layer.
@@ -308,16 +470,12 @@ impl Theme {
     /// copy, but writing to the theme's public fields directly does not, so a
     /// scrollbar keeps painting with the radius and colors it was last given.
     ///
-    /// Call this after mutating the theme through [`Theme::global_mut`]:
-    ///
-    /// ```ignore
-    /// Theme::global_mut(cx).radius = px(0.);
-    /// Theme::sync_base(cx);
-    /// ```
+    /// [`Theme::update`] and [`Theme::change`] call this after their edits.
+    /// After editing through [`Theme::global_mut`], call it yourself, then
+    /// refresh the windows.
     ///
     /// It rebuilds the Base theme from scratch, so any style written straight
-    /// onto the Base global is replaced — the same thing [`Theme::change`]
-    /// does.
+    /// onto the Base global is replaced. It does not touch [`Theme::tokens`].
     pub fn sync_base(cx: &mut App) {
         let theme = Theme::global(cx).clone();
         let base_theme = theme.base_theme();
@@ -351,13 +509,13 @@ impl Theme {
     /// theme. The snapshot is computed from the legacy public fields so direct
     /// mutations of those fields are reflected immediately.
     pub fn semantic_tokens(&self) -> SemanticThemeTokens {
-        SemanticThemeTokens {
-            colors: self.color_tokens(),
-            radius: self.radius_tokens(),
-            spacing: self.spacing_tokens(),
-            typography: self.typography_tokens(),
-            shadow: self.shadow_tokens(),
-        }
+        let mut tokens = SemanticThemeTokens::default();
+        tokens.colors = self.color_tokens();
+        tokens.radius = self.radius_tokens();
+        tokens.spacing = self.spacing_tokens();
+        tokens.typography = self.typography_tokens();
+        tokens.shadow = self.shadow_tokens();
+        tokens
     }
 
     /// Returns the styled layer's semantic motion policy.
@@ -366,26 +524,26 @@ impl Theme {
     }
 
     pub fn color_tokens(&self) -> ColorTokens {
-        ColorTokens {
-            background: self.background,
-            foreground: self.foreground,
-            surface: self.popover,
-            surface_foreground: self.popover_foreground,
-            primary: self.primary,
-            primary_foreground: self.primary_foreground,
-            secondary: self.secondary,
-            secondary_foreground: self.secondary_foreground,
-            muted: self.muted,
-            muted_foreground: self.muted_foreground,
-            accent: self.accent,
-            accent_foreground: self.accent_foreground,
-            destructive: self.danger,
-            destructive_foreground: self.danger_foreground,
-            border: self.border,
-            input: self.input,
-            ring: self.ring,
-            selection: self.selection,
-        }
+        let mut colors = ColorTokens::default();
+        colors.background = self.background;
+        colors.foreground = self.foreground;
+        colors.surface = self.popover;
+        colors.surface_foreground = self.popover_foreground;
+        colors.primary = self.primary;
+        colors.primary_foreground = self.primary_foreground;
+        colors.secondary = self.secondary;
+        colors.secondary_foreground = self.secondary_foreground;
+        colors.muted = self.muted;
+        colors.muted_foreground = self.muted_foreground;
+        colors.accent = self.accent;
+        colors.accent_foreground = self.accent_foreground;
+        colors.destructive = self.danger;
+        colors.destructive_foreground = self.danger_foreground;
+        colors.border = self.border;
+        colors.input = self.input;
+        colors.ring = self.ring;
+        colors.selection = self.selection;
+        colors
     }
 
     /// The radius of a shape that reads as a circle or a pill — an avatar, a
@@ -423,14 +581,14 @@ impl Theme {
     }
 
     pub fn radius_tokens(&self) -> RadiusTokens {
-        RadiusTokens {
-            none: px(0.),
-            sm: self.radius / 2.,
-            md: self.radius,
-            lg: self.radius_lg,
-            xl: self.radius * 2.,
-            full: self.radius_full(),
-        }
+        let mut radius = RadiusTokens::default();
+        radius.none = px(0.);
+        radius.sm = self.radius / 2.;
+        radius.md = self.radius;
+        radius.lg = self.radius_lg;
+        radius.xl = self.radius * 2.;
+        radius.full = self.radius_full();
+        radius
     }
 
     pub fn spacing_tokens(&self) -> SpacingTokens {
@@ -617,14 +775,7 @@ impl From<&ThemeColor> for Theme {
             transparent: Hsla::transparent_black(),
             font_family: ".SystemUIFont".into(),
             font_size: px(16.),
-            mono_font_family: if cfg!(target_os = "macos") {
-                // https://en.wikipedia.org/wiki/Menlo_(typeface)
-                "Menlo".into()
-            } else if cfg!(target_os = "windows") {
-                "Consolas".into()
-            } else {
-                "DejaVu Sans Mono".into()
-            },
+            mono_font_family: mono_font::default_mono_font_family(),
             mono_font_size: px(13.),
             radius: px(6.),
             radius_lg: px(8.),
@@ -632,9 +783,6 @@ impl From<&ThemeColor> for Theme {
             focus_ring: true,
             scrollbar_mode: ScrollbarMode::default(),
             notification: NotificationSettings::default(),
-            tile_grid_size: px(8.),
-            tile_shadow: true,
-            tile_radius: px(0.),
             list: ListSettings::default(),
             colors: *colors,
             tokens: ThemeTokens::from(colors),
@@ -643,6 +791,7 @@ impl From<&ThemeColor> for Theme {
             highlight_theme: HighlightTheme::default_light(),
             sheet: SheetSettings::default(),
             motion: MotionTokens::default(),
+            cursor_blink: gpui_base::input::CursorBlink::default(),
         }
     }
 }
@@ -693,6 +842,181 @@ impl From<WindowAppearance> for ThemeMode {
 }
 
 #[cfg(test)]
+mod update_tests {
+    use super::*;
+    use gpui::{TestAppContext, linear_color_stop, linear_gradient};
+
+    fn gradient(from: Hsla, to: Hsla) -> ThemeToken {
+        ThemeToken::new(
+            from,
+            linear_gradient(135., linear_color_stop(from, 0.), linear_color_stop(to, 1.)),
+        )
+    }
+
+    /// A color edited on `colors` reaches the token the components paint
+    /// with, and the Base projection the scrollbar paints with.
+    #[gpui::test]
+    fn editing_colors_updates_the_tokens_and_the_base_projection(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let sidebar = gpui::rgb(0x123456).into();
+            let primary = gpui::rgb(0xabcdef).into();
+
+            Theme::update(cx, |theme| {
+                theme.sidebar = sidebar;
+                theme.colors.primary = primary;
+                theme.radius = px(0.);
+            });
+
+            let theme = Theme::global(cx);
+            assert_eq!(theme.tokens.sidebar.color, sidebar);
+            assert_eq!(theme.tokens.sidebar.background, sidebar.into());
+            assert_eq!(theme.tokens.primary.color, primary);
+            assert_eq!(gpui_base::Theme::global(cx).tokens.colors.primary, primary);
+            assert!(gpui_base::Theme::global(cx).tokens.radius.md.is_zero());
+        });
+    }
+
+    /// Replacing the whole `colors` struct, as an application installing its
+    /// own palette does, rewrites every token.
+    #[gpui::test]
+    fn replacing_the_palette_rewrites_every_token(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let palette = *ThemeColor::dark();
+
+            Theme::update(cx, |theme| theme.colors = palette);
+
+            assert_eq!(Theme::global(cx).tokens, ThemeTokens::from(palette));
+        });
+    }
+
+    /// A gradient a theme file gave a token survives edits to other fields;
+    /// editing that field's color replaces the gradient with the solid color.
+    #[gpui::test]
+    fn a_gradient_survives_until_its_own_color_is_edited(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let from = gpui::rgb(0x4f46e5).into();
+            let to = gpui::rgb(0x06b6d4).into();
+            let token = gradient(from, to);
+            Theme::update(cx, |theme| theme.tokens.primary = token);
+            // The token's solid color is written back, so text painted with
+            // `theme.primary` matches the gradient's representative color.
+            assert_eq!(Theme::global(cx).primary, from);
+
+            Theme::update(cx, |theme| theme.secondary = gpui::rgb(0x222222).into());
+            assert_eq!(Theme::global(cx).tokens.primary, token);
+
+            let solid = gpui::rgb(0x999999).into();
+            Theme::update(cx, |theme| theme.primary = solid);
+            assert_eq!(Theme::global(cx).tokens.primary, solid.into());
+        });
+    }
+
+    /// Setting `mode` through `update` loads that mode's theme, the same as
+    /// `change`, and the Base projection follows.
+    #[gpui::test]
+    fn setting_the_mode_loads_that_modes_theme(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let light_background = Theme::global(cx).background;
+
+            Theme::update(cx, |theme| theme.mode = ThemeMode::Dark);
+
+            let theme = Theme::global(cx);
+            assert!(theme.is_dark());
+            assert_ne!(theme.background, light_background);
+            assert_eq!(theme.tokens.background.color, theme.background);
+            assert_eq!(
+                gpui_base::Theme::global(cx).appearance,
+                gpui_base::ThemeAppearance::Dark
+            );
+            assert_eq!(
+                gpui_base::Theme::global(cx).tokens.colors.background,
+                theme.background
+            );
+        });
+    }
+
+    /// Applying a theme file through `update` keeps the gradients it
+    /// declares: the config sets `colors` and `tokens` to one color, which is
+    /// not a conflict to resolve.
+    #[gpui::test]
+    fn applying_a_config_keeps_its_gradients(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let config: ThemeConfig = serde_json::from_value(serde_json::json!({
+                "name": "Gradient",
+                "mode": "light",
+                "colors": {
+                    "primary": "#4F46E5",
+                    "primary.background": "linear-gradient(135deg, #4F46E5, #06B6D4)"
+                }
+            }))
+            .unwrap();
+            let config = Rc::new(config);
+
+            Theme::update(cx, |theme| theme.apply_config(&config));
+
+            let theme = Theme::global(cx);
+            assert_eq!(theme.tokens.primary.color, theme.primary);
+            assert_ne!(
+                theme.tokens.primary.background,
+                theme.primary.into(),
+                "the gradient must survive the reconcile"
+            );
+        });
+    }
+
+    /// `apply_config` switches to the file's mode itself, so `edit` must not
+    /// load that mode's theme a second time over what the closure went on to
+    /// set — the same closure has to land the same result from either mode.
+    #[gpui::test]
+    fn edits_after_applying_a_config_of_the_other_mode_survive(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let config: ThemeConfig = serde_json::from_value(serde_json::json!({
+                "name": "Rounded Dark",
+                "mode": "dark",
+                "radius": 12,
+                "colors": { "primary": "#4F46E5" }
+            }))
+            .unwrap();
+            let config = Rc::new(config);
+            assert!(!Theme::global(cx).is_dark());
+
+            let red = gpui::red();
+            Theme::update(cx, |theme| {
+                theme.apply_config(&config);
+                theme.radius = px(0.);
+                theme.colors.primary = red;
+            });
+
+            let theme = Theme::global(cx);
+            assert!(theme.is_dark());
+            assert!(Rc::ptr_eq(&theme.dark_theme, &config));
+            assert_eq!(theme.radius, px(0.), "the file's radius must not reload");
+            assert_eq!(theme.primary, red);
+            assert_eq!(theme.tokens.primary, red.into());
+            assert_eq!(gpui_base::Theme::global(cx).tokens.colors.primary, red);
+        });
+    }
+
+    #[gpui::test]
+    fn update_returns_the_closure_result(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let radius = Theme::update(cx, |theme| {
+                theme.radius = px(6.);
+                theme.radius
+            });
+            assert_eq!(radius, px(6.));
+        });
+    }
+}
+
+#[cfg(test)]
 mod base_theme_projection_tests {
     use super::*;
     use gpui::TestAppContext;
@@ -713,6 +1037,29 @@ mod base_theme_projection_tests {
                 gpui_base::ScrollbarMode::Always
             );
             assert_styled_projection(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn cursor_blink_survives_theme_updates_and_mode_changes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            Theme::update(cx, |theme| {
+                theme.cursor_blink = gpui_base::input::CursorBlink::steady();
+            });
+            assert_eq!(
+                gpui_base::Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::steady()
+            );
+            Theme::change(ThemeMode::Dark, None, cx);
+            assert_eq!(
+                Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::steady()
+            );
+            assert_eq!(
+                gpui_base::Theme::global(cx).cursor_blink,
+                gpui_base::input::CursorBlink::steady()
+            );
         });
     }
 

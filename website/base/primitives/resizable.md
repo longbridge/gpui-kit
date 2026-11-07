@@ -32,9 +32,19 @@ The authoritative module is [`components/resizable.rs`](https://github.com/longb
 
 ## State and events
 
-Panel sizes live in resizable state; dragging handles updates adjacent panels subject to minimums.
+Panel sizes live in resizable state; dragging handles updates adjacent panels subject to minimums. When the container resizes, the panels keep their proportions, except a panel marked `fixed()`, which keeps its size.
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.
+
+## Handle appearance
+
+Base owns a handle's hit band, its cursor and the drag; what is painted inside it is the consumer's. `ResizeHandleRenderer` is handed a `ResizeHandleContext` carrying the axis and a `ResizeHandleState` — `Idle`, `Hovered`, `Pressed` or `Dragging`. The last two are tracked by base because a drag takes the pointer out of the nine-pixel band almost at once, so GPUI's hover reads false for most of a drag.
+
+Returning `None` keeps base's own one-pixel line, so a renderer can override some handles and leave the rest alone.
+
+## Standalone handle
+
+`resize_handle(id, axis)` builds the same handle for an edge no panel group owns. The drag goes through the handle's own `on_drag`, and what it resizes stays with the caller. The handle also implements `InteractiveElement` and `StatefulInteractiveElement`, so `on_drag_move`, `on_hover`, `on_double_click` and any other listener attach the usual way. `inside(HandleEdge)` keeps the band within its container; without it the band straddles the boundary.
 
 ## Complete Rust example
 

@@ -12,6 +12,15 @@ use smallvec::SmallVec;
 ///
 /// https://cubic-bezier.com
 pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> impl Fn(f32) -> f32 {
+    // Keep the [0, 1] output this function has always had for
+    // `Animation::with_easing` callers; clamp away solver and rounding error.
+    let ease = unclamped_cubic_bezier(x1, y1, x2, y2);
+    move |t: f32| ease(t).clamp(0.0, 1.0)
+}
+
+/// [`cubic_bezier`] without the output clamp, so y control points outside
+/// `0..=1` keep their anticipation and overshoot. Input progress stays clamped.
+pub(crate) fn unclamped_cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> impl Fn(f32) -> f32 {
     // Polynomial form of the unit bezier, where p0 = (0, 0) and p3 = (1, 1).
     let (cx, cy) = (3.0 * x1, 3.0 * y1);
     let (bx, by) = (3.0 * (x2 - x1) - cx, 3.0 * (y2 - y1) - cy);
@@ -56,9 +65,8 @@ pub fn cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32) -> impl Fn(f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         // `t` is elapsed progress along x, not the curve parameter: solve
         // `x(s) = t` before sampling y, otherwise the curve reads much slower
-        // than the same control points do in CSS. GPUI asserts easing deltas
-        // stay within [0, 1], so clamp away solver and rounding error.
-        sample_y(solve_s(t)).clamp(0.0, 1.0)
+        // than the same control points do in CSS.
+        sample_y(solve_s(t))
     }
 }
 
@@ -374,7 +382,7 @@ mod tests {
                     (y - expected).abs() < 5e-4,
                     "cubic_bezier({x1}, {y1}, {x2}, {y2})({t}) = {y}, CSS = {expected}"
                 );
-                // GPUI panics when an easing delta leaves [0, 1].
+                // The public `cubic_bezier` keeps its output in [0, 1].
                 assert!((0.0..=1.0).contains(&y), "ease({t}) = {y} out of range");
             }
         }

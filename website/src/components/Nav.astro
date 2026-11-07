@@ -1,5 +1,7 @@
 ---
 import DocSearch from './DocSearch.astro';
+import ThemePalette from './ThemePalette.astro';
+import { currentVersion, currentVersionPath, latestVersion, siteVersions, versionHref } from '../lib/versions';
 
 export interface Props {
   lang?: 'en' | 'zh-CN';
@@ -14,27 +16,34 @@ export interface Props {
 }
 
 const { lang = 'en', currentPath = '', starCount = 0, langSwitchHref: langSwitchOverride } = Astro.props;
-const base = import.meta.env.BASE_URL;
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 const isZh = lang === 'zh-CN';
+const versionPath = currentVersionPath(currentPath, base);
 
 function url(path: string) {
   return `${base}${path}`.replace(/\/+/g, '/');
+}
+
+function sharedUrl(path: string) {
+  return `/${path.replace(/^\/+/, '')}`;
 }
 
 const starLabel = starCount >= 1000 ? `${(starCount / 1000).toFixed(1)}k` : `${starCount}`;
 
 const navLinks = isZh
   ? [
-      { text: '组件', href: url('zh-CN/docs/components') },
-      { text: 'Shell', href: url('zh-CN/shell') },
+      { text: '文档', href: url('zh-CN/docs') },
+      { text: '组件', href: url('zh-CN/component') },
       { text: 'Base', href: url('zh-CN/base') },
-      { text: '应用案例', href: url('zh-CN/apps') },
+      { text: 'Shell', href: url('zh-CN/shell') },
+      { text: '应用案例', href: sharedUrl('zh-CN/apps') },
     ]
   : [
-      { text: 'Components', href: url('docs/components') },
-      { text: 'Shell', href: url('shell') },
+      { text: 'Docs', href: url('docs') },
+      { text: 'Component', href: url('component') },
       { text: 'Base', href: url('base') },
-      { text: 'App Stories', href: url('apps') },
+      { text: 'Shell', href: url('shell') },
+      { text: 'App Stories', href: sharedUrl('apps') },
     ];
 
 const resourceLinks = isZh
@@ -62,8 +71,9 @@ const zhRoot = `${siteRoot}/zh-CN`;
 
 function swapLocale(path: string) {
   if (isZh) {
-    const rest = path.startsWith(zhRoot) ? path.slice(zhRoot.length) : path;
-    return rest || siteRoot || '/';
+    if (!path.startsWith(zhRoot)) return path;
+    // Keep the version prefix: `/versions/main/zh-CN/docs` → `/versions/main/docs`.
+    return `${siteRoot}${path.slice(zhRoot.length)}` || '/';
   }
   const rest = path.startsWith(siteRoot) ? path.slice(siteRoot.length) : path;
   return `${zhRoot}${rest === '/' ? '' : rest}`;
@@ -72,14 +82,55 @@ function swapLocale(path: string) {
 const langSwitchHref = langSwitchOverride ?? swapLocale(currentPath);
 const langLabel = isZh ? 'EN' : '中';
 const resourcesLabel = isZh ? '资源' : 'Resources';
+const projectsLabel = isZh ? '切换项目' : 'Switch project';
+const nativeShellUrl = isZh ? 'https://nsh.dev/zh-CN' : 'https://nsh.dev';
+const versionsLabel = isZh ? '版本' : 'Versions';
+const currentVersionLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 ---
 
 <nav class="site-nav" aria-label="Primary">
   <div class="site-nav__inner">
     <a href={base} class="site-nav__brand">
-      <img src={`${base}logo.svg`} alt="" class="site-nav__logo" />
+      <svg class="site-nav__logo" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M4 4h24v5H10v14h18v5H4V4Z" />
+        <path d="M16 13h12v10h-5v-5h-7v-5Z" />
+      </svg>
       <span>GPUI Kit</span>
     </a>
+
+    <details class="site-nav__projects">
+      <summary aria-label={projectsLabel} title={projectsLabel}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </summary>
+      <div class="site-nav__projects-menu">
+        <a href={base} class="is-current" aria-current="true">
+          <svg class="site-nav__logo site-nav__project-logo" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M4 4h24v5H10v14h18v5H4V4Z" />
+            <path d="M16 13h12v10h-5v-5h-7v-5Z" />
+          </svg>
+          <div class="site-nav__project-copy">
+            <strong>GPUI Kit</strong>
+            <span>{isZh ? 'GPUI 桌面应用的组件与工具集' : 'Components and tools for GPUI desktop apps'}</span>
+          </div>
+        </a>
+        <a href={nativeShellUrl} target="_blank" rel="noopener noreferrer">
+          <svg class="site-nav__project-logo site-nav__native-shell-logo" viewBox="14 12 100 100" aria-hidden="true">
+            <defs>
+              <linearGradient id="nav-native-shell-gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" class="site-nav__native-shell-top" />
+                <stop offset="1" class="site-nav__native-shell-bottom" />
+              </linearGradient>
+            </defs>
+            <path d="M30 100 V58 a34 34 0 0 1 68 0 V100" fill="none" stroke="url(#nav-native-shell-gradient)" stroke-width="20" stroke-linecap="round" />
+            <circle cx="64" cy="76" r="11" fill="currentColor" />
+          </svg>
+          <div class="site-nav__project-copy">
+            <strong>Native Shell</strong>
+            <span>{isZh ? '由 AI 生成、原生渲染的 UI' : 'AI-generated UI, rendered natively'}</span>
+          </div>
+        </a>
+      </div>
+    </details>
 
     <div class="site-nav__links" id="site-nav-links">
       {navLinks.map(link => (
@@ -111,6 +162,27 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
           ))}
         </div>
       </div>
+
+      <div class="site-nav__dropdown site-nav__version-dropdown">
+        <button class="site-nav__dropdown-btn site-nav__link" type="button" aria-haspopup="true" aria-expanded="false">
+          {currentVersionLabel}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <div class="site-nav__dropdown-menu" aria-label={versionsLabel}>
+          {siteVersions.map((version) => (
+            <a
+              href={versionHref(version, versionPath)}
+              data-version-link
+              class:list={["site-nav__dropdown-item", { "is-current": version.id === currentVersion }]}
+              aria-current={version.id === currentVersion ? 'page' : undefined}
+            >
+              {version.label}{version.id === latestVersion ? ` (${isZh ? '最新' : 'latest'})` : ''}
+            </a>
+          ))}
+        </div>
+      </div>
     </div>
 
     <div class="site-nav__actions">
@@ -138,19 +210,7 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
       </a>
 
       <!-- Theme toggle -->
-      <button
-        id="theme-toggle"
-        class="theme-toggle"
-        aria-label={isZh ? '切换主题' : 'Toggle color theme'}
-        type="button"
-      >
-        <svg class="theme-toggle__sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-        </svg>
-        <svg class="theme-toggle__moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-        </svg>
-      </button>
+      <ThemePalette lang={lang} />
 
       <!-- Mobile menu toggle -->
       <button
@@ -173,6 +233,16 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
 </nav>
 
 <script>
+  const projects = document.querySelector<HTMLDetailsElement>('.site-nav__projects');
+  document.addEventListener('click', (event) => {
+    if (projects?.open && !projects.contains(event.target as Node)) projects.open = false;
+  });
+  projects?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    projects.open = false;
+    projects.querySelector('summary')?.focus();
+  });
+
   // Visibility is owned by CSS (`:hover`, `:focus-within`), so `aria-expanded`
   // is derived from the element rather than tracked separately — two sources of
   // truth drift apart. Escape adds the one state CSS cannot express: dismissed
@@ -210,25 +280,6 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
       sync();
     });
   });
-
-  const toggle = document.getElementById('theme-toggle');
-  const sun = toggle?.querySelector('.theme-toggle__sun') as HTMLElement | null;
-  const moon = toggle?.querySelector('.theme-toggle__moon') as HTMLElement | null;
-
-  function updateIcon() {
-    const isDark = document.documentElement.classList.contains('dark');
-    if (sun) sun.style.display = isDark ? 'none' : '';
-    if (moon) moon.style.display = isDark ? '' : 'none';
-  }
-
-  updateIcon();
-
-  toggle?.addEventListener('click', () => {
-    const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    updateIcon();
-  });
-
 
   // Mobile nav drawer
   const burger = document.getElementById('nav-burger');

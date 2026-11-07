@@ -30,6 +30,14 @@ use gpui_kit::base::{Popover};
 
 ## 状态与事件
 
+使用 `.anchor(Anchor::TopCenter).offset(px(8.))` 可让弹层在触发器下方居中，并留出八像素间距。
+Base 的 offset 默认为零。`Top*` 在下方，`Bottom*` 在上方，
+`LeftCenter` 在右侧，`RightCenter` 在左侧。anchor 描述弹层自身的锚点。
+窗口边界限制不会翻转弹层或更改 anchor。
+
+`on_position` 在内容 prepaint 前提供最终弹层和触发器边界，供自定义绘制使用。
+Base 不绘制箭头；带样式的 Component Popover 提供 `.arrow(true)`（默认 `false`），箭头跟随 anchor 对齐。
+
 触发器切换打开状态；点击外部或 Escape 可按配置关闭。
 
 受控状态应保存在父渲染类型或 GPUI entity 中；在回调中更新并调用 `cx.notify()`，不要在每次渲染时重建持久 entity。

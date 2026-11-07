@@ -241,7 +241,7 @@ For normal elements, stacking is usually controlled by:
 - Absolute positioning
 - Render order of siblings (later siblings paint above earlier ones)
 
-If you see a `z_index(...)` method in this repository, make sure it belongs to the specific component you are using. For example, `TileItem::z_index(...)` in the dock tiles system is a custom component API, not a general GPUI `Div` styling method.
+If you see a `z_index(...)` method in this repository, make sure it belongs to the specific component you are using: a component's own ordering API is not a general GPUI `Div` styling method.
 
 ## Theme Integration
 

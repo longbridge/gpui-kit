@@ -2,12 +2,13 @@ use crate::input::InputModeKind;
 use std::rc::Rc;
 use std::{cell::RefCell, ops::Range};
 
-use gpui::{Context, SharedString, Window};
+use gpui::{Context, Window};
 use ropey::Rope;
 
 use super::DisplayMap;
 use crate::input::{
-    DiagnosticSet, InputEdit, InputHighlighter, InputHighlighterFactory, RopeExt as _, TabSize,
+    DiagnosticSet, EditorLanguage, InputEdit, InputHighlighter, InputHighlighterFactory,
+    LanguageConfig, RopeExt as _, TabSize,
 };
 
 /// What changed, handed to the syntax highlighter.
@@ -16,6 +17,9 @@ pub(crate) struct HighlighterUpdate<'a> {
     pub(super) old_text: &'a Rope,
     pub(super) new_text: &'a Rope,
     pub(super) change_text: &'a str,
+    /// An edit already computed for this replacement. When absent, the
+    /// highlighter derives one from the fields above.
+    pub(super) input_edit: Option<InputEdit>,
     pub(super) force: bool,
 }
 
@@ -40,12 +44,16 @@ pub(crate) enum LayoutMode {
         rows: usize,
         /// Show line number
         line_number: bool,
-        language: SharedString,
+        language: Box<EditorLanguage>,
         indent_guides: bool,
         folding: bool,
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
         diagnostics: DiagnosticSet,
+        /// Automatic delimiter ranges, adjusted with document edits.
+        auto_closed_pairs: super::auto_close::AutoClosedPairs,
+        auto_close: bool,
+        smart_indent: bool,
     },
 }
 
@@ -68,17 +76,20 @@ impl LayoutMode {
     /// Create a code editor input mode with default settings.
     ///
     /// Starts with no language; the state sets one through its own builder.
-    pub(super) fn code_editor() -> Self {
+    pub(super) fn code_editor(language: EditorLanguage) -> Self {
         LayoutMode::CodeEditor {
             rows: 2,
             tab: TabSize::default(),
-            language: SharedString::default(),
+            language: Box::new(language),
             highlighter: Rc::new(RefCell::new(None)),
             highlighter_factory: None,
             line_number: true,
             indent_guides: true,
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
+            auto_closed_pairs: Default::default(),
+            auto_close: true,
+            smart_indent: true,
         }
     }
 
@@ -99,6 +110,93 @@ impl LayoutMode {
         }
 
         matches!(self, LayoutMode::CodeEditor { folding: true, .. })
+    }
+
+    pub(super) fn language_config(&self) -> Option<Rc<LanguageConfig>> {
+        match self {
+            Self::CodeEditor { language, .. } => Some(language.config()),
+            _ => None,
+        }
+    }
+
+    pub(super) fn syntax_context_at(
+        &self,
+        text: &Rope,
+        offset: usize,
+    ) -> crate::input::SyntaxContext {
+        match self {
+            Self::CodeEditor { language, .. } => language.context_at(text, offset),
+            _ => crate::input::SyntaxContext::Code,
+        }
+    }
+
+    pub(super) fn is_auto_close(&self) -> bool {
+        matches!(
+            self,
+            Self::CodeEditor {
+                auto_close: true,
+                ..
+            }
+        )
+    }
+
+    pub(super) fn is_smart_indent(&self) -> bool {
+        matches!(
+            self,
+            Self::CodeEditor {
+                smart_indent: true,
+                ..
+            }
+        )
+    }
+
+    pub(super) fn set_auto_close(&mut self, enabled: bool) {
+        if let Self::CodeEditor { auto_close, .. } = self {
+            *auto_close = enabled;
+        }
+    }
+
+    pub(super) fn set_smart_indent(&mut self, enabled: bool) {
+        if let Self::CodeEditor { smart_indent, .. } = self {
+            *smart_indent = enabled;
+        }
+    }
+
+    pub(super) fn auto_closed_pairs(&self) -> &super::auto_close::AutoClosedPairs {
+        match self {
+            Self::CodeEditor {
+                auto_closed_pairs, ..
+            } => auto_closed_pairs,
+            _ => super::auto_close::AutoClosedPairs::empty(),
+        }
+    }
+
+    pub(super) fn restore_auto_closed_pairs(&mut self, pairs: super::auto_close::AutoClosedPairs) {
+        if let Self::CodeEditor {
+            auto_closed_pairs, ..
+        } = self
+        {
+            *auto_closed_pairs = pairs;
+        }
+    }
+
+    pub(super) fn track_auto_closed_pair(&mut self, open: Range<usize>, close: Range<usize>) {
+        if let Self::CodeEditor {
+            auto_closed_pairs, ..
+        } = self
+        {
+            auto_closed_pairs.record(open, close);
+        }
+    }
+
+    pub(super) fn adjust_auto_closed_pair(&mut self, edit: &Range<usize>, new_len: usize) {
+        let Self::CodeEditor {
+            auto_closed_pairs, ..
+        } = self
+        else {
+            return;
+        };
+        auto_closed_pairs.adjust(edit, new_len);
     }
 
     #[inline]
@@ -127,8 +225,12 @@ impl LayoutMode {
     /// Grow the row count to fit the content.
     ///
     /// Callers gate this on the input being multi-line; a single-line field
-    /// keeps its one row.
+    /// keeps its one row. Only auto grow follows the content: in the other
+    /// modes `rows` is the configured height.
     pub(super) fn update_auto_grow(&mut self, display_map: &DisplayMap) {
+        if !self.is_auto_grow() {
+            return;
+        }
         let wrapped_lines = display_map.wrap_row_count();
         self.set_rows(wrapped_lines);
     }
@@ -189,30 +291,46 @@ impl LayoutMode {
                 if !update.force && highlighter.borrow().is_some() {
                     return;
                 }
-
-                let mut highlighter_ref = highlighter.borrow_mut();
-                if highlighter_ref.is_none() {
-                    let Some(factory) = highlighter_factory else {
-                        return;
-                    };
-                    *highlighter_ref = factory(language);
-                }
-
-                if highlighter_ref.is_none() {
+                if !ensure_highlighter(highlighter, highlighter_factory.as_ref(), language) {
                     return;
                 }
-                drop(highlighter_ref);
 
-                let edit = replacement_input_edit(
-                    update.old_text,
-                    update.new_text,
-                    update.selected_range,
-                    update.change_text,
-                );
+                let edit = update.input_edit.unwrap_or_else(|| {
+                    replacement_input_edit(
+                        update.old_text,
+                        update.new_text,
+                        update.selected_range,
+                        update.change_text,
+                    )
+                });
                 M::drive_highlighter(highlighter, edit, update.new_text, *folding, window, cx);
             }
             _ => {}
         }
+    }
+
+    /// Drive the highlighter once for several edits applied as one change,
+    /// each paired with the text right after it, in application order.
+    pub(crate) fn update_highlighter_batch<M: InputModeKind>(
+        &mut self,
+        edits: &[(InputEdit, Rope)],
+        window: &mut Window,
+        cx: &mut Context<crate::input::InputBaseState<M>>,
+    ) {
+        let LayoutMode::CodeEditor {
+            language,
+            highlighter,
+            highlighter_factory,
+            folding,
+            ..
+        } = &self
+        else {
+            return;
+        };
+        if !ensure_highlighter(highlighter, highlighter_factory.as_ref(), language) {
+            return;
+        }
+        M::drive_highlighter_batch(highlighter, edits, *folding, window, cx);
     }
 
     #[allow(unused)]
@@ -263,11 +381,27 @@ impl LayoutMode {
     }
 }
 
+/// Create the highlighter from the factory if there is none yet. Returns
+/// whether one is installed.
+fn ensure_highlighter(
+    highlighter: &RefCell<Option<Box<dyn InputHighlighter>>>,
+    highlighter_factory: Option<&InputHighlighterFactory>,
+    language: &EditorLanguage,
+) -> bool {
+    let mut highlighter = highlighter.borrow_mut();
+    if highlighter.is_none()
+        && let Some(factory) = highlighter_factory
+    {
+        *highlighter = factory(&language.name());
+    }
+    highlighter.is_some()
+}
+
 /// Builds the tree-sitter edit for a text replacement.
 ///
 /// Byte offsets and positions for `start`/`old_end` come from `old_text`;
 /// `new_end` byte/position come from the post-edit `text`.
-fn replacement_input_edit(
+pub(super) fn replacement_input_edit(
     old_text: &Rope,
     new_text: &Rope,
     selected_range: &Range<usize>,
@@ -310,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_code_editor() {
-        let mode = LayoutMode::code_editor();
+        let mode = LayoutMode::code_editor(Default::default());
         assert_eq!(mode.line_number(), true);
         assert_eq!(mode.has_indent_guides(), true);
         assert_eq!(mode.max_rows(), usize::MAX);
@@ -323,15 +457,20 @@ mod tests {
             folding: false,
             rows: 0,
             tab: Default::default(),
-            language: "rust".into(),
+            language: Box::default(),
             highlighter: Default::default(),
             highlighter_factory: None,
             diagnostics: DiagnosticSet::new(&Rope::new()),
+            auto_closed_pairs: Default::default(),
+            auto_close: false,
+            smart_indent: false,
         };
         assert_eq!(mode.line_number(), false);
         assert_eq!(mode.has_indent_guides(), false);
         assert_eq!(mode.min_rows(), 1);
         assert_eq!(mode.is_folding(), false);
+        assert_eq!(mode.is_auto_close(), false);
+        assert_eq!(mode.is_smart_indent(), false);
     }
 
     #[test]

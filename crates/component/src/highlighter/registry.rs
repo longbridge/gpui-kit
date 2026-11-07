@@ -5,13 +5,15 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     collections::HashMap,
     ops::Deref,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
-use crate::{
-    ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode,
-    highlighter::{Language, languages},
-};
+use anyhow::Result;
+
+use crate::{ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode, highlighter::languages};
 
 pub(super) const HIGHLIGHT_NAMES: [&str; 41] = [
     "attribute",
@@ -67,6 +69,9 @@ pub struct LanguageConfig {
     pub locals: SharedString,
 }
 
+/// Explicit name for grammar resources; editing rules use `input::language_config::LanguageConfig`.
+pub type GrammarConfig = LanguageConfig;
+
 impl LanguageConfig {
     pub fn new(
         name: impl Into<SharedString>,
@@ -108,6 +113,7 @@ impl LanguageConfig {
 ///
 /// https://docs.rs/tree-sitter-highlight/0.26.8/tree_sitter_highlight/
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SyntaxColors {
     pub attribute: Option<ThemeStyle>,
     pub boolean: Option<ThemeStyle>,
@@ -341,6 +347,12 @@ pub struct StatusColors {
     hint_background: Option<Hsla>,
     #[serde(rename = "hint.border")]
     hint_border: Option<Hsla>,
+    #[serde(rename = "created")]
+    created: Option<Hsla>,
+    #[serde(rename = "modified")]
+    modified: Option<Hsla>,
+    #[serde(rename = "deleted")]
+    deleted: Option<Hsla>,
 }
 
 impl StatusColors {
@@ -428,9 +440,31 @@ impl StatusColors {
     pub fn hint_border(&self, cx: &App) -> Hsla {
         self.hint_border.unwrap_or(self.hint(cx))
     }
+
+    /// The color for something new, such as an added file or line in version
+    /// control. Uses `success` when the theme has no `created` value.
+    #[inline]
+    pub fn created(&self, cx: &App) -> Hsla {
+        self.created.unwrap_or_else(|| self.success(cx))
+    }
+
+    /// The color for something changed, such as a modified line in version
+    /// control. Uses `warning` when the theme has no `modified` value.
+    #[inline]
+    pub fn modified(&self, cx: &App) -> Hsla {
+        self.modified.unwrap_or_else(|| self.warning(cx))
+    }
+
+    /// The color for something removed, such as a deleted line in version
+    /// control. Uses `error` when the theme has no `deleted` value.
+    #[inline]
+    pub fn deleted(&self, cx: &App) -> Hsla {
+        self.deleted.unwrap_or_else(|| self.error(cx))
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightThemeStyle {
     #[serde(rename = "editor.background")]
     pub editor_background: Option<Hsla>,
@@ -460,6 +494,7 @@ pub struct HighlightThemeStyle {
 ///
 /// https://zed.dev/docs/extensions/languages#syntax-highlighting
 #[derive(Debug, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightTheme {
     pub name: String,
     #[serde(default)]
@@ -491,9 +526,20 @@ impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
     }
 }
 
+/// A factory that produces a fresh Tree-sitter parser and grammar for a language.
+///
+/// Dynamic grammars (for example WASM-compiled parsers loaded at runtime) register
+/// a factory here; when the highlighter needs to parse a buffer it prefers the
+/// factory over the statically linked grammar.
+pub type LanguageParserFactory =
+    Arc<dyn Fn() -> Result<(tree_sitter::Parser, tree_sitter::Language)> + Send + Sync>;
+
 /// Registry for code highlighter languages.
 pub struct LanguageRegistry {
-    languages: Mutex<HashMap<SharedString, LanguageConfig>>,
+    languages: Mutex<HashMap<SharedString, GrammarConfig>>,
+    parser_factories: Mutex<HashMap<SharedString, LanguageParserFactory>>,
+    /// Bumped by every registration; see [`Self::generation`].
+    generation: AtomicU64,
 }
 
 impl LanguageRegistry {
@@ -505,16 +551,96 @@ impl LanguageRegistry {
                     .map(|language| (language.name().into(), language.config()))
                     .collect(),
             ),
+            parser_factories: Mutex::new(HashMap::new()),
+            generation: AtomicU64::new(0),
         });
         &INSTANCE
     }
 
     /// Registers a new language configuration to the registry.
-    pub fn register(&self, lang: &str, config: &LanguageConfig) {
+    pub fn register(&self, lang: &str, config: &GrammarConfig) {
         self.languages
             .lock()
             .unwrap()
             .insert(lang.to_string().into(), config.clone());
+        self.generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Registers a parser factory for a dynamically loaded language.
+    ///
+    /// The factory takes precedence over the language's statically linked grammar
+    /// whenever a buffer in that language is parsed.
+    pub fn register_parser_factory(&self, lang: &str, factory: LanguageParserFactory) {
+        self.parser_factories
+            .lock()
+            .unwrap()
+            .insert(lang.to_string().into(), factory);
+        self.generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A counter that changes whenever a language or parser factory is
+    /// registered, so caches of highlighted output can tell when a language
+    /// they could not resolve before may now resolve.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
+    }
+
+    /// Returns a fresh parser and grammar for `name`, preferring a registered
+    /// parser factory over the statically linked grammar.
+    pub(crate) fn parser(
+        &self,
+        name: &str,
+    ) -> Result<(tree_sitter::Parser, tree_sitter::Language)> {
+        let config = self
+            .language(name)
+            .ok_or_else(|| anyhow::anyhow!("language {name:?} is not registered"))?;
+        // Bind the clone in its own statement so the guard is dropped before
+        // calling the factory. Otherwise a factory that re-enters the registry
+        // self-deadlocks on the non-reentrant mutex, every call is serialized
+        // behind the factory, and a panicking factory poisons the singleton.
+        let factory = self
+            .parser_factories
+            .lock()
+            .unwrap()
+            .get(&config.name)
+            .cloned();
+        if let Some(factory) = factory {
+            return factory();
+        }
+
+        let language = config
+            .language
+            .ok_or_else(|| anyhow::anyhow!("language {name:?} has no grammar"))?;
+        Ok((tree_sitter::Parser::new(), language))
+    }
+
+    /// Returns whether `name` can produce a parser, either through a registered
+    /// parser factory or a statically linked grammar.
+    pub(crate) fn has_parser(&self, name: &str) -> bool {
+        let Some(config) = self.language(name) else {
+            return false;
+        };
+
+        config.language.is_some()
+            || self
+                .parser_factories
+                .lock()
+                .unwrap()
+                .contains_key(&config.name)
+    }
+
+    /// Returns the grammar for `name`, preferring a registered parser factory.
+    pub(crate) fn grammar(&self, name: &str) -> Result<tree_sitter::Language> {
+        Ok(self.parser(name)?.1)
+    }
+
+    pub(crate) fn editing_language_name(&self, name: &str) -> SharedString {
+        self.languages
+            .lock()
+            .unwrap()
+            .get_key_value(name)
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| super::language_name(name))
     }
 
     /// Returns a list of all registered language names.
@@ -523,28 +649,76 @@ impl LanguageRegistry {
     }
 
     /// Returns the language configuration for the given language name.
-    pub fn language(&self, name: &str) -> Option<LanguageConfig> {
-        // Try to get by name first, there may have a custom language registered
-        // Then try to get built-in language to support short language names, e.g. "js" for "javascript"
+    pub fn language(&self, name: &str) -> Option<GrammarConfig> {
         let languages = self.languages.lock().unwrap();
         languages.get(name).cloned().or_else(|| {
-            Language::from_name(name).and_then(|language| languages.get(language.name()).cloned())
+            languages::Language::from_name(name)
+                .and_then(|language| languages.get(language.name()).cloned())
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::highlighter::LanguageConfig;
+    use crate::highlighter::GrammarConfig;
+
+    #[test]
+    fn registrations_preserve_exact_names_before_alias_fallback() {
+        let registry = super::LanguageRegistry {
+            languages: std::sync::Mutex::new(std::collections::HashMap::new()),
+            parser_factories: std::sync::Mutex::new(std::collections::HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        };
+        registry.register("json", &GrammarConfig::plain("canonical"));
+        assert_eq!(registry.language("jsonc").unwrap().name, "canonical");
+        registry.register("jsonc", &GrammarConfig::plain("custom alias"));
+        registry.register("JSON", &GrammarConfig::plain("custom uppercase"));
+        assert_eq!(registry.language("json").unwrap().name, "canonical");
+        assert_eq!(registry.language("jsonc").unwrap().name, "custom alias");
+        assert_eq!(registry.language("JSON").unwrap().name, "custom uppercase");
+        assert!(registry.language("Json").is_none());
+        let mut names = registry.languages();
+        names.sort();
+        assert_eq!(names, vec!["JSON", "json", "jsonc"]);
+        assert_eq!(registry.editing_language_name("jsonc"), "jsonc");
+        assert_eq!(registry.editing_language_name("JSON"), "JSON");
+        assert_eq!(registry.editing_language_name("pyi"), "python");
+    }
+
+    #[cfg(not(feature = "tree-sitter-typescript"))]
+    #[test]
+    fn custom_canonical_registration_does_not_enable_disabled_aliases() {
+        let registry = super::LanguageRegistry {
+            languages: std::sync::Mutex::new(std::collections::HashMap::new()),
+            parser_factories: std::sync::Mutex::new(std::collections::HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        };
+        registry.register("typescript", &GrammarConfig::plain("typescript"));
+        assert!(registry.language("ts").is_none());
+        registry.register("ts", &GrammarConfig::plain("custom"));
+        assert_eq!(registry.language("ts").unwrap().name, "custom");
+    }
+
+    #[test]
+    fn public_language_lookup_retains_case_sensitive_aliases() {
+        use super::languages::Language;
+        assert_eq!(Language::from_str("jsonc"), Language::Json);
+        assert_eq!(Language::from_str("JSON"), Language::Plain);
+        assert_eq!(Language::from_str("pyi"), Language::Plain);
+        #[cfg(feature = "tree-sitter-typescript")]
+        {
+            assert_eq!(Language::from_str("typescript"), Language::TypeScript);
+            assert_eq!(Language::from_str("ts"), Language::TypeScript);
+        }
+    }
 
     #[test]
     fn test_registry() {
         use super::LanguageRegistry;
         let registry = LanguageRegistry::singleton();
-
         registry.register(
             "foo",
-            &LanguageConfig::new("foo", tree_sitter_json::LANGUAGE.into(), vec![], "", "", ""),
+            &GrammarConfig::new("foo", tree_sitter_json::LANGUAGE.into(), vec![], "", "", ""),
         );
 
         assert!(registry.language("foo").is_some());
@@ -573,5 +747,85 @@ mod tests {
             assert!(registry.language("javascript").is_none());
             assert!(registry.language("js").is_none());
         }
+    }
+
+    #[test]
+    fn dynamic_language_uses_registered_parser_factory() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        use super::LanguageRegistry;
+
+        let registry = LanguageRegistry::singleton();
+        let called = Arc::new(AtomicBool::new(false));
+        registry.register(
+            "__dynamic_json__",
+            &GrammarConfig::new(
+                "__dynamic_json__",
+                tree_sitter_json::LANGUAGE.into(),
+                vec![],
+                "",
+                "",
+                "",
+            ),
+        );
+        registry.register_parser_factory("__dynamic_json__", {
+            let called = called.clone();
+            Arc::new(move || {
+                called.store(true, Ordering::Relaxed);
+                Ok((
+                    tree_sitter::Parser::new(),
+                    tree_sitter_json::LANGUAGE.into(),
+                ))
+            })
+        });
+
+        let (_, language) = registry.parser("__dynamic_json__").unwrap();
+
+        assert!(called.load(Ordering::Relaxed));
+        assert_eq!(language, tree_sitter_json::LANGUAGE.into());
+    }
+
+    #[test]
+    fn factory_only_language_highlights_without_static_grammar() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        use super::LanguageRegistry;
+        use crate::highlighter::SyntaxHighlighter;
+
+        let registry = LanguageRegistry::singleton();
+        let called = Arc::new(AtomicBool::new(false));
+        // No statically linked grammar: `language` is `None`, so the grammar can
+        // only come from the registered factory.
+        registry.register(
+            "__dynamic_factory_only__",
+            &GrammarConfig::plain("__dynamic_factory_only__"),
+        );
+        assert!(
+            !registry
+                .language("__dynamic_factory_only__")
+                .unwrap()
+                .has_grammar()
+        );
+        registry.register_parser_factory("__dynamic_factory_only__", {
+            let called = called.clone();
+            Arc::new(move || {
+                called.store(true, Ordering::Relaxed);
+                Ok((
+                    tree_sitter::Parser::new(),
+                    tree_sitter_json::LANGUAGE.into(),
+                ))
+            })
+        });
+
+        let highlighter = SyntaxHighlighter::new("__dynamic_factory_only__");
+
+        assert!(called.load(Ordering::Relaxed));
+        assert_eq!(highlighter.language().as_ref(), "__dynamic_factory_only__");
     }
 }

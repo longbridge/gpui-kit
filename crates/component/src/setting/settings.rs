@@ -1,18 +1,19 @@
 use std::ops::Range;
 
 use crate::{
-    IconName, Sizable, Size, StyledExt,
+    Icon, IconName, Sizable, Size, StyledExt,
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
-    input::{Input, InputState},
+    input::{Escape, Input, InputState},
     resizable_panel,
-    setting::{SettingGroup, SettingPage},
+    setting::SettingPage,
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, container_query, div, prelude::FluentBuilder as _,
-    px, relative,
+    App, AppContext as _, Axis, ElementId, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
 
@@ -109,64 +110,51 @@ impl Settings {
         self
     }
 
-    fn filtered_pages(&self, query: &str, cx: &App) -> Vec<SettingPage> {
-        self.pages
-            .iter()
-            .filter_map(|page| {
-                let filtered_groups: Vec<SettingGroup> = page
-                    .groups
-                    .iter()
-                    .filter_map(|group| {
-                        let mut group = group.clone();
-                        group.items = group
-                            .items
-                            .iter()
-                            .filter(|item| item.is_match(&query, cx))
-                            .cloned()
-                            .collect();
-                        if group.items.is_empty() {
-                            None
-                        } else {
-                            Some(group)
-                        }
-                    })
-                    .collect();
-                let mut page = page.clone();
-                page.groups = filtered_groups;
-                if page.groups.is_empty() {
-                    None
-                } else {
-                    Some(page)
-                }
-            })
-            .collect()
-    }
-
     fn render_active_page(
         &self,
         state: &Entity<SettingsState>,
-        pages: &Vec<SettingPage>,
+        filter: &SettingsFilter,
         options: &RenderOptions,
         window: &mut Window,
         cx: &mut App,
     ) -> gpui::AnyElement {
-        let selected_index = state.read(cx).selected_index;
-
-        for (ix, page) in pages.into_iter().enumerate() {
-            if selected_index.page_ix == ix {
-                return page
-                    .render(ix, state, &options, window, cx)
-                    .into_any_element();
-            }
+        let page_ix = state.read(cx).selected_index.page_ix;
+        if let Some(page) = self.pages.get(page_ix)
+            && !filter.groups[page_ix].is_empty()
+        {
+            return page
+                .render(page_ix, &filter.groups[page_ix], state, options, window, cx)
+                .into_any_element();
         }
 
-        return div().into_any_element();
+        if filter.visible_pages().next().is_none() {
+            return div()
+                .size_full()
+                .debug_selector(|| "settings-no-results".into())
+                .child(Self::render_no_results())
+                .into_any_element();
+        }
+
+        div().into_any_element()
+    }
+
+    fn render_no_results() -> impl IntoElement {
+        Empty::new().size_full().header(
+            EmptyHeader::new()
+                .media(
+                    EmptyMedia::new()
+                        .with_variant(EmptyMediaVariant::Icon)
+                        .child(Icon::new(IconName::Search)),
+                )
+                .title(EmptyTitle::new().child(t!("Settings.no_results")))
+                .description(EmptyDescription::new().child(t!("Settings.no_results_description"))),
+        )
     }
 
     fn render_sidebar(
         &self,
         state: &Entity<SettingsState>,
-        pages: &Vec<SettingPage>,
+        filter: &SettingsFilter,
         _: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
@@ -183,12 +171,30 @@ impl Settings {
                 div()
                     .w_full()
                     .refine_style(&self.header_style)
+                    // The input passes on an Escape it has no use for. Clear a
+                    // non-empty query with it; otherwise let it reach an enclosing
+                    // dialog or window. On Android, Escape is the back button,
+                    // which never edits a field.
+                    .on_action({
+                        let search_input = search_input.clone();
+                        move |_: &Escape, window, cx| {
+                            if search_input.read(cx).value().is_empty()
+                                || cfg!(target_os = "android")
+                            {
+                                cx.propagate();
+                                return;
+                            }
+                            search_input.update(cx, |input, cx| input.clean(window, cx));
+                        }
+                    })
                     .child(Input::new(&search_input).prefix(IconName::Search)),
             )
             .child(
-                SidebarMenu::new().children(pages.iter().enumerate().map(|(page_ix, page)| {
-                    let is_page_active =
-                        selected_index.page_ix == page_ix && selected_index.group_ix.is_none();
+                SidebarMenu::new().children(filter.visible_pages().map(|page_ix| {
+                    let page = &self.pages[page_ix];
+                    let groups = &filter.groups[page_ix];
+                    let is_page_active = selected_index.page_ix == page_ix
+                        && (selected_index.group_ix.is_none() || groups.len() == 1);
                     SidebarMenuItem::new(page.title.clone())
                         .click_to_open(true)
                         .when_some(page.icon.clone(), |this, icon| this.icon(icon))
@@ -202,17 +208,19 @@ impl Settings {
                                         page_ix,
                                         ..Default::default()
                                     };
+                                    state.deferred_scroll_group_ix = None;
                                     cx.notify();
                                 })
                             }
                         })
-                        .when(page.groups.len() > 1, |this| {
+                        .when(groups.len() > 1, |this| {
                             this.children(
-                                page.groups
+                                groups
                                     .iter()
-                                    .filter(|g| g.title.is_some())
-                                    .enumerate()
-                                    .map(|(group_ix, group)| {
+                                    .copied()
+                                    .filter(|&ix| page.groups[ix].title.is_some())
+                                    .map(|group_ix| {
+                                        let group = &page.groups[group_ix];
                                         let is_active = selected_index.page_ix == page_ix
                                             && selected_index.group_ix == Some(group_ix);
                                         let title = group.title.clone().unwrap_or_default();
@@ -242,6 +250,54 @@ impl Sizable for Settings {
     fn with_size(mut self, size: impl Into<Size>) -> Self {
         self.size = size.into();
         self
+    }
+}
+
+/// Visible groups in each original page. Filtering never renumbers source data.
+struct SettingsFilter {
+    groups: Vec<Vec<usize>>,
+}
+
+impl SettingsFilter {
+    fn new(pages: &[SettingPage], query: &str, cx: &App) -> Self {
+        Self {
+            groups: pages
+                .iter()
+                .map(|page| {
+                    page.groups
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(ix, group)| group.is_match(query, cx).then_some(ix))
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+
+    fn visible_pages(&self) -> impl Iterator<Item = usize> + '_ {
+        self.groups
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, groups)| (!groups.is_empty()).then_some(ix))
+    }
+
+    fn selected_index(&self, selected: SelectIndex) -> SelectIndex {
+        let page_ix = self
+            .visible_pages()
+            .find(|&ix| ix == selected.page_ix)
+            .or_else(|| self.visible_pages().next());
+        let Some(page_ix) = page_ix else {
+            // Keep the selection while there are no results so clearing the query
+            // can restore it. The empty filter prevents rendering a stale page.
+            return selected;
+        };
+
+        SelectIndex {
+            page_ix,
+            group_ix: selected
+                .group_ix
+                .filter(|ix| page_ix == selected.page_ix && self.groups[page_ix].contains(ix)),
+        }
     }
 }
 
@@ -377,14 +433,33 @@ impl RenderOnce for Settings {
             }
         });
 
-        let query = state.read(cx).search_input.read(cx).value();
-        let filtered_pages = self.filtered_pages(&query, cx);
+        // The placeholder is localized when the state is created, and rebuilding
+        // the state would lose the selected page, so follow a runtime locale
+        // change here. `set_placeholder` notifies, so only write on a change.
+        let placeholder = t!("Settings.search_placeholder");
+        let search_input = state.read(cx).search_input.clone();
+        if search_input.read(cx).presentation().placeholder() != &*placeholder {
+            search_input.update(cx, |input, cx| {
+                input.set_placeholder(placeholder, window, cx);
+            });
+        }
+
+        let query = search_input.read(cx).value();
+        let filter = SettingsFilter::new(&self.pages, &query, cx);
+        let previous = state.read(cx).selected_index;
+        let selected = filter.selected_index(previous);
+        if selected.page_ix != previous.page_ix || selected.group_ix != previous.group_ix {
+            state.update(cx, |state, _| {
+                state.selected_index = selected;
+                state.deferred_scroll_group_ix = None;
+            });
+        }
         let options = RenderOptions::new()
             .with_size(self.size)
             .with_group_variant(self.group_variant);
         let sidebar_size_range = self.sidebar_size_range.clone();
         let sidebar = self
-            .render_sidebar(&state, &filtered_pages, window, cx)
+            .render_sidebar(&state, &filter, window, cx)
             .into_any_element();
 
         h_resizable(self.id.clone())
@@ -401,8 +476,12 @@ impl RenderOnce for Settings {
                     } else {
                         Axis::Horizontal
                     });
-                    self.render_active_page(&state, &filtered_pages, &options, window, cx)
+                    self.render_active_page(&state, &filter, &options, window, cx)
                 })),
             )
     }
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

@@ -1,83 +1,286 @@
 ---
-title: 开始使用
-description: 学习如何在项目中安装并使用 GPUI Component。
+title: Getting Started
+description: 通过一个依赖和一个视图构建首个 GPUI Kit 桌面应用。
 order: -2
 ---
 
-# 开始使用
+# Getting Started
 
-## 安装
+本指南创建一个带 GPUI Kit 按钮的小型桌面窗口。你需要 Rust、Cargo，以及对应平台的系统库；macOS、Windows 和 Linux 的要求见[安装](./installation.md)。学习这里的视图模型后，如需浏览器目标可继续阅读 [WebAssembly](./webassembly.md)。
 
-在 `Cargo.toml` 中添加依赖：
+## 创建项目
+
+```sh
+cargo new gpui-hello
+cd gpui-hello
+```
+
+在生成的 `Cargo.toml` 中加入 GPUI Kit：
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
-anyhow = "1.0"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
-:::tip
-`gpui-kit` 始终引入 GPUI 和 `gpui-base`，并默认带上 `gpui-component` 和默认图标集。如果你希望自行管理图标与资源文件，只保留需要的 feature 即可：
+只需这一个依赖，即可使用 GPUI、GPUI Base、带样式的 GPUI Component 和默认图标资源。应用代码通过 `use gpui_kit::*;` 使用 GPUI，通过 `gpui_kit::component` 使用组件。以后可以调整 feature 选择，详见[图标与资源](./assets.md)。
+
+### 使用 GPUI Fast
+
+GPUI Kit 默认使用固定版本的上游 GPUI 快照。启用 `gpui-fast` 后，可切换到
+GPUI Fast 的保留渲染和布局引擎：
 
 ```toml
-gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
+[dependencies]
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["gpui-fast"] }
 ```
-更多说明见 [资源与图标](./assets.md)。
-:::
 
-## 快速开始
+这个 feature 会统一切换 GPUI、原生平台、WebAssembly 后端，以及所有已启用的 Kit 层。
+继续使用 `gpui_kit::*`、`gpui_kit::component` 和 `#[gpui_kit::test]` 即可，
+无需 `[patch]`、额外的引擎依赖或 crate 别名。它也支持 `default-features = false`，
+并可与 `assets`、`test-support`、`inspector`、`profiler` 配合使用。
+GPUI Fast 依赖采用 `0.1.0` 版本要求，`cargo update` 可以更新到兼容的 `0.1.x` 版本。
 
-下面是一个最小可运行示例：
+Cargo features 是累加的：启用 Fast 后，整个依赖图通过 Kit 使用的公开类型都会来自 Fast，
+但上游包仍然是构建依赖。不要将 Kit 的 Fast 类型与直接依赖上游 GPUI 得到的类型混用。
+单独使用 Base、Component、资源、FPS、WebView 或 Shell 时，也可以启用各自的
+`gpui-fast` feature 来显式选择后端。
+
+在此仓库中，可以分别运行 `cargo run` 和 `cargo run --features gpui-fast` 对比组件展厅。
+WebAssembly 构建使用 [WebAssembly](./webassembly.md) 中说明的 nightly 工具链。
+
+### macOS 文字渲染：`font-kit`
+
+**macOS 需要启用 `gpui-pre-platform` 的 `font-kit` feature 才能渲染文字。**
+上面的 `gpui-kit` 依赖已经启用了它，按本指南创建应用时无需额外添加依赖或配置 feature。
+
+如果你维护的应用直接依赖 GPUI，需要在 `gpui_platform` 依赖上启用这个 feature。
+仅面向 macOS 的 GPUI 应用可使用以下依赖配置：
+
+```toml
+[dependencies]
+gpui = { package = "gpui-pre", version = "={{gpui_pre_version}}" }
+gpui_platform = { package = "gpui-pre-platform", version = "={{gpui_pre_version}}", features = ["font-kit"] }
+```
+
+保留应用原有的其他平台 features，并保持 GPUI 快照版本一致。这是直接使用 GPUI 时的配置；
+本页后续 Kit 示例仍只需 `gpui-kit` 一个依赖。不要把 `features = ["font-kit"]` 加到
+`gpui` 或 `gpui-kit` 上，也无需单独添加 `font-kit` crate：这个 feature 属于
+`gpui-pre-platform`，会启用 `gpui-pre-macos/font-kit`。
+
+`gpui-pre-platform` 默认不启用 `font-kit`。未启用时，macOS 后端会使用 `NoopTextSystem`：
+窗口可以打开，但不会渲染文字，`all_font_names()` 也会返回空列表。修改 manifest 后，
+重新运行 `cargo run`。在 macOS 上，可以用 `cargo tree -e features -i gpui-pre-macos`
+查看后端的 features 由哪些依赖启用，确认其中包含 `font-kit`。
+
+## 添加视图
+
+将 `src/main.rs` 替换为：
 
 ```rust
-use gpui_kit::component::button::*;
-use gpui_kit::component::*;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::*;
 
-pub struct HelloWorld;
+struct HelloWorld;
 
 impl Render for HelloWorld {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-            .v_flex()
-            .gap_2()
+            .flex()
+            .flex_col()
             .size_full()
             .items_center()
             .justify_center()
+            .gap_2()
             .child("Hello, World!")
             .child(
-                Button::new("ok")
+                Button::new("hello")
                     .primary()
-                    .label("Let's Go!")
+                    .label("Click me")
                     .on_click(|_, _, _| println!("Clicked!")),
             )
     }
 }
 
 fn main() {
-    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    application()
+        .with_assets(assets::Assets)
+        .run(|cx| {
+            init(cx);
 
-    app.run(move |cx| {
-        gpui_kit::init(cx);
-
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| HelloWorld);
-                cx.new(|cx| Root::new(view, window, cx))
+            open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|_| HelloWorld)
             })
             .expect("Failed to open window");
-        })
-        .detach();
-    });
+        });
 }
 ```
 
-:::info
-请确保在 `app.run` 闭包中尽早调用 `gpui_kit::init(cx);`。它会初始化主题和全局配置。
-:::
+在项目目录执行 `cargo run`。窗口会显示文字和按钮；点击按钮后，终端会输出 `Clicked!`。
 
-## 后续阅读
+启动过程分为三步：
 
-- [组件总览](./components/index)
-- [资源与图标](./assets.md)
+1. `gpui_kit::application()` 创建桌面应用；`.with_assets(...)` 注册默认图标资源。
+2. `gpui_kit::init(cx)` 初始化启用的 Kit 层，包括组件主题。只调用一次，并且要先于打开应用窗口或构造组件。
+3. `gpui_kit::open_window(...)` 从闭包创建 `Entity<HelloWorld>`，再用 [`Root`](./window) 包裹它。`Root` 管理窗口的浮层，包括对话框、抽屉和通知。闭包返回内容视图，不要再自行返回一个 `Root`。
 
+`HelloWorld` 实现 GPUI 的 [`Render`](./render) trait。GPUI 渲染视图时，`render` 返回[元素树](./element)：一个包含文字和 `Button` 的 `div`。按钮是在本次渲染中构建的值；如果控件需要持久状态，比如输入框文字，所属视图应保存对应的状态 [Entity](./entity)，不要在 `render` 中重新创建。
+
+## 一个简短的心智模型
+
+[Entity<T>](./entity) 保存跨帧状态。它可以持有不参与绘制的 model；当 `T` 实现 `Render` 且被挂载时，这个 Entity 就是持久的 **View**，每次渲染都会生成新的元素树。[RenderOnce](./render-once) 组件则把输入作为一个值，描述树中可复用的一部分。调用方提供当前状态和 handler 时适合用它；它仍可使用少量带 key 的元素状态。复杂状态、订阅和任务则需要持久的 owner。
+
+```text
+Application entry → feature units (model, command, view)
+                    ├─ Entity<Model>       retains state
+                    └─ Entity<View>        persistent view; View implements Render
+                          └─ Element tree   rebuilt on each render
+                               └─ RenderOnce values compose reusable parts
+```
+
+应用增长后，拥有独立流程的功能可以把 model 和 View 放在同一个 feature crate 内；只有需要真正面向整个应用的状态时，才在其中使用私有 [Global](./global)。功能之间通过小型公开接口、event 或 `Entity` handle 协作。这样可复用部分容易接入，团队成员或 AI 代理并行修改时也有清晰边界。何时拆分以及如何确定所有权和依赖方向，详见[编码指南](./coding-guides)。
+
+## 接下来读什么
+
+随着应用扩展，可按顺序阅读：
+
+1. 阅读 [Entity](./entity.md)、[Context](./context.md) 和 [Render](./render.md)：持有一个值，在按钮回调中修改它，并确认窗口显示新值。再读 [Window](./window.md)，了解 `Root` 如何承载视图和浮层。
+2. 阅读 [Element](./element.md) 和 [RenderOnce](./render-once.md)：区分每次重建的元素树与持久状态。跟着 [Paint](./paint.md) 运行 Brush 练习，确认按下指针会改变绘制结果。
+3. 阅读 [Focus](./focus.md)、[Action](./action.md) 和 [Event](./event.md)：用 Tab 到达交互目标，触发一个命令并观察状态变化。再按 [Task](./task.md) 运行流式示例；连续点击两次 Replay，确认旧分片不会重新出现。
+4. 阅读[无障碍](./accessibility.md)和[测试](./test.md)：用键盘完成 Save 流程，检查焦点与可见结果，再运行文档中的 UI 测试，确认渲染状态和保存的模型值。在目标平台上另行检查辅助技术的实际表现。
+5. 从[组件目录](../component/index.md)选择应用需要的控件；按界面需求继续阅读[图标与资源](./assets.md)和[字体](./fonts.md)。
+
+如需了解持久输入状态与订阅，请看[应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)中的测试用例。[编码指南](./coding-guides.md)说明了这些示例遵循的约定。
+
+## 完整且经过测试的 View
+
+以下设置界面展示如何持有 InputState 并管理订阅。代码会与[对应的 Rust 源文件](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs)保持同步。仓库中的 `gpui-kit-recipes` 默认可执行程序只打开一个简单的 bootstrap 视图，不会显示这个设置界面。[设置界面交互测试](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/tests/settings.rs)会在 GPUI 测试窗口中挂载 `Settings`。在仓库根目录执行：
+
+```sh
+cargo test -p gpui-kit-recipes --test settings
+```
+
+测试通过时，输入后预览值先变为 `a`；在一次无关的重新绘制后继续输入，预览值变为 `ab`，变更次数依次为 1 和 2。这验证了测试窗口内的输入订阅和状态生命周期，不等同于原生界面的视觉验收。
+
+<!-- recipe:settings:start -->
+```rust
+use gpui_kit::component::{
+    ActiveTheme, IconName, WindowExt,
+    button::Button,
+    checkbox::Checkbox,
+    form::{Field, Form},
+    input::{Input, InputEvent, InputState},
+    radio::RadioGroup,
+    switch::Switch,
+};
+use gpui_kit::{
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Subscription, Window, div,
+};
+
+pub struct Settings {
+    name: Entity<InputState>,
+    preview: SharedString,
+    changes: usize,
+    enabled: bool,
+    remember: bool,
+    delivery: Option<usize>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Settings {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
+        let subscription = cx.subscribe_in(&name, window, |this, state, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.preview = state.read(cx).value().to_string().into();
+                this.changes += 1;
+                cx.notify();
+            }
+        });
+        Self {
+            name,
+            preview: "".into(),
+            changes: 0,
+            enabled: false,
+            remember: false,
+            delivery: Some(0),
+            _subscriptions: vec![subscription],
+        }
+    }
+
+    pub fn input(&self) -> Entity<InputState> {
+        self.name.clone()
+    }
+
+    pub fn preview(&self) -> &SharedString {
+        &self.preview
+    }
+
+    pub fn changes(&self) -> usize {
+        self.changes
+    }
+}
+
+impl Render for Settings {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .p_4()
+            .gap_3()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child("Profile")
+            .child(
+                Form::new()
+                    .child(Field::new().label("Name").child(Input::new(&self.name)))
+                    .child(Field::new().label("Preview").child(self.preview.clone()))
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Checkbox::new("remember")
+                                .label("Remember name")
+                                .checked(self.remember)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.remember = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Switch::new("enabled")
+                                .label("Enable notifications")
+                                .checked(self.enabled)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.enabled = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label("Delivery").child(
+                            RadioGroup::new("delivery")
+                                .children(["Immediately", "Daily summary"])
+                                .selected_index(self.delivery)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.delivery = Some(*value);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .footer(
+                        Button::new("about")
+                            .label("About…")
+                            .icon(IconName::Info)
+                            .on_click(|_, window, cx| {
+                                window.open_dialog(cx, |dialog, _, _| {
+                                    dialog.title("About").child("A complete GPUI Kit window")
+                                });
+                            }),
+                    ),
+            )
+    }
+}
+```
+<!-- recipe:settings:end -->

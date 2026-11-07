@@ -15,6 +15,7 @@ mod easing;
 mod keyframes;
 mod presence;
 mod reveal;
+mod sequence;
 mod stagger;
 mod timing;
 
@@ -22,6 +23,7 @@ pub use easing::{Easing, EasingError, LinearStop, StepPosition};
 pub use keyframes::{Discrete, DiscreteError, Keyframe, KeyframeError, Keyframes};
 pub use presence::{Presence, PresencePhase, PresenceSample};
 pub use reveal::MotionReveal;
+pub use sequence::{Sequence, SequenceSample, SequenceStep};
 pub use stagger::{Stagger, StaggerOrigin};
 pub use timing::{
     IterationCount, MotionPhase, PlaybackDirection, SignedDuration, Timing, TimingSample,
@@ -101,6 +103,16 @@ impl Interpolate for MotionTransform {
     }
 }
 
+/// How a value transition responds to the application's reduced-motion setting.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ReducedMotion {
+    /// Adopt the target immediately. Appropriate for spatial motion.
+    #[default]
+    Finish,
+    /// Keep the transition timing, for non-spatial effects such as fades.
+    Continue,
+}
+
 /// CSS-like timing policy for a target-value transition.
 ///
 /// This type is intentionally separate from [`crate::animation::Transition`],
@@ -111,6 +123,7 @@ pub struct Transition {
     duration: Duration,
     delay: SignedDuration,
     easing: Easing,
+    reduced_motion: ReducedMotion,
 }
 
 impl Transition {
@@ -119,7 +132,18 @@ impl Transition {
             duration,
             delay: SignedDuration::ZERO,
             easing: Easing::Custom(Rc::new(ease_out_cubic)),
+            reduced_motion: ReducedMotion::Finish,
         }
+    }
+
+    /// Select reduced-motion behavior for this transition only.
+    /// The application's preference and other motion channels are unchanged.
+    ///
+    /// [`transition`] and [`transition_with_status`] read it. [`Presence`]
+    /// still finishes at once under reduced motion.
+    pub fn reduced_motion(mut self, behavior: ReducedMotion) -> Self {
+        self.reduced_motion = behavior;
+        self
     }
 
     pub fn delay(mut self, delay: impl Into<SignedDuration>) -> Self {
@@ -141,6 +165,12 @@ impl Transition {
         self.easing.sample(progress)
     }
 
+    /// The easing curve, for a caller that samples one timeline at several
+    /// offsets, such as a staggered plot appear.
+    pub(crate) fn curve(&self) -> &Easing {
+        &self.easing
+    }
+
     fn progress(&self, elapsed: Duration, duration: Duration) -> (f32, MotionStatus) {
         let Some(active_elapsed) = self.delay.active_elapsed(elapsed) else {
             return (0.0, MotionStatus::Delayed);
@@ -152,6 +182,15 @@ impl Transition {
             active_elapsed.as_secs_f32() / duration.as_secs_f32(),
             MotionStatus::Running,
         )
+    }
+
+    /// The elapsed time at which [`Self::progress`] over the transition's own
+    /// duration first reports `Finished`.
+    fn finishes_after(&self) -> Duration {
+        match self.delay {
+            SignedDuration::Positive(delay) => delay.saturating_add(self.duration),
+            SignedDuration::Negative(delay) => self.duration.saturating_sub(delay),
+        }
     }
 }
 
@@ -220,6 +259,12 @@ where
 #[derive(Clone)]
 struct ValueTransition<T> {
     from: T,
+    /// Where the running transition logically started, before any reversal
+    /// shortened it: what a CSS transition calls its reversing-adjusted start.
+    reversing_adjusted_start: T,
+    /// The policy the running transition started with, kept until it is
+    /// retargeted.
+    policy: Transition,
     target: T,
     started_at: Instant,
     reversing_factor: f32,
@@ -275,6 +320,8 @@ where
     let now = cx.background_executor().now();
     let state = window.use_keyed_state(id, cx, |_, _| ValueTransition {
         from: target.clone(),
+        reversing_adjusted_start: target.clone(),
+        policy: policy.clone(),
         target: target.clone(),
         started_at: now,
         reversing_factor: 1.0,
@@ -283,10 +330,14 @@ where
 
     let snapshot = state.read(cx).clone();
 
-    if cx.reduce_motion() || policy.duration.is_zero() {
+    if (cx.reduce_motion() && policy.reduced_motion == ReducedMotion::Finish)
+        || policy.duration.is_zero()
+    {
         if snapshot.from != target || snapshot.target != target {
             state.update(cx, |state, _| {
                 state.from = target.clone();
+                state.reversing_adjusted_start = target.clone();
+                state.policy = policy.clone();
                 state.target = target.clone();
                 state.started_at = now;
                 state.reversing_factor = 1.0;
@@ -300,31 +351,47 @@ where
     }
 
     let elapsed = now.saturating_duration_since(snapshot.started_at);
-    let (progress, status) = policy.progress(elapsed, snapshot.duration);
+    let (progress, status) = snapshot.policy.progress(elapsed, snapshot.duration);
     let sampled = snapshot
         .from
-        .interpolate(&snapshot.target, policy.sample(progress));
+        .interpolate(&snapshot.target, snapshot.policy.sample(progress));
 
     let (value, status) = if snapshot.target != target {
-        let reversing = target == snapshot.from;
+        // As CSS transitions do: only a running transition sent back to where
+        // it logically started is a reversal.
+        let reversing = matches!(status, MotionStatus::Running | MotionStatus::Delayed)
+            && target == snapshot.reversing_adjusted_start;
         let reversing_factor = if reversing {
-            (policy.sample(progress) * snapshot.reversing_factor
+            (snapshot.policy.sample(progress) * snapshot.reversing_factor
                 + (1.0 - snapshot.reversing_factor))
+                .abs()
                 .clamp(0.0, 1.0)
         } else {
             1.0
         };
-        let duration = policy.duration.mul_f32(reversing_factor);
+        let duration = policy.duration.mul_f64(f64::from(reversing_factor));
+        // A reversal shortens a negative delay by the same factor.
+        let mut active_policy = policy.clone();
+        if reversing && let SignedDuration::Negative(delay) = policy.delay {
+            active_policy.delay =
+                SignedDuration::negative(delay.mul_f64(f64::from(reversing_factor)));
+        }
         state.update(cx, |state, _| {
+            state.reversing_adjusted_start = if reversing {
+                snapshot.target.clone()
+            } else {
+                sampled.clone()
+            };
+            state.policy = active_policy.clone();
             state.from = sampled.clone();
             state.target = target.clone();
             state.started_at = now;
             state.reversing_factor = reversing_factor;
             state.duration = duration;
         });
-        let (initial_progress, initial_status) = policy.progress(Duration::ZERO, duration);
+        let (initial_progress, initial_status) = active_policy.progress(Duration::ZERO, duration);
         (
-            sampled.interpolate(&target, policy.sample(initial_progress)),
+            sampled.interpolate(&target, active_policy.sample(initial_progress)),
             initial_status,
         )
     } else {
@@ -641,7 +708,7 @@ mod css_timing_tests {
         Easing, IterationCount, LinearStop, MotionPhase, PlaybackDirection, SignedDuration,
         StepPosition, Timing,
     };
-    use std::time::Duration;
+    use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
     #[test]
     fn css_keyword_easing_matches_published_reference_samples() {
@@ -658,6 +725,19 @@ mod css_timing_tests {
                     "{easing:?}({progress}) = {actual}, expected {expected}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn cubic_bezier_easing_keeps_anticipation_and_overshoot() {
+        let anticipate = Easing::cubic_bezier(1.0, -0.4, 0.35, 0.95).unwrap();
+        let overshoot = Easing::cubic_bezier(0.175, 0.885, 0.32, 1.275).unwrap();
+
+        assert!(anticipate.sample(0.2) < 0.0);
+        assert!(overshoot.sample(0.8) > 1.0);
+        for easing in [anticipate, overshoot] {
+            assert_eq!(easing.sample(-1.0), 0.0);
+            assert_eq!(easing.sample(2.0), 1.0);
         }
     }
 
@@ -699,6 +779,29 @@ mod css_timing_tests {
         assert!(
             Easing::linear_stops([LinearStop::at(0.0, 0.8), LinearStop::at(1.0, 0.2)]).is_err()
         );
+    }
+
+    #[test]
+    fn curves_built_without_stops_or_jumps_sample_linearly() {
+        // Both are rejected by the constructors, but the variants are public.
+        let no_stops = Easing::LinearStops(Arc::from([]));
+        let no_jumps = Easing::Steps {
+            count: NonZeroU32::MIN,
+            position: StepPosition::JumpNone,
+        };
+
+        for (progress, expected) in [(-1.0, 0.0), (0.25, 0.25), (2.0, 1.0)] {
+            assert_eq!(
+                no_stops.sample(progress),
+                expected,
+                "no stops at {progress}"
+            );
+            assert_eq!(
+                no_jumps.sample(progress),
+                expected,
+                "no jumps at {progress}"
+            );
+        }
     }
 
     #[test]
@@ -940,6 +1043,162 @@ mod tests {
         assert_eq!(fixture.render(cx, 0.0).value, 0.25);
     }
 
+    #[gpui::test]
+    fn repeated_reversals_keep_the_logical_start(cx: &mut TestAppContext) {
+        let fixture =
+            StatusFixture::open(cx, Transition::new(Duration::from_millis(1000)).ease(|t| t));
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        assert!((fixture.render(cx, 0.0).value - 0.4).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert!((fixture.render(cx, 1.0).value - 0.3).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert!((fixture.render(cx, 0.0).value - 0.4).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(401));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+        assert_eq!(fixture.render(cx, 0.0).value, 0.0);
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!((fixture.render(cx, 1.0).value - 0.5).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn reversal_scales_negative_delay(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .delay(SignedDuration::negative(Duration::from_millis(200)))
+                .ease(|t| t),
+        );
+        assert_eq!(fixture.render(cx, 1.0).value, 0.2);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        // At 0.4, reverse with duration 400ms and delay -80ms.
+        assert!((fixture.render(cx, 0.0).value - 0.32).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(321));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn reversal_uses_absolute_shortening_for_anticipation(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000)).ease(|t| if t < 0.5 { -t } else { t }),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(250));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Running);
+        cx.executor().advance_clock(Duration::from_millis(250));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn non_reversing_retarget_uses_full_duration(cx: &mut TestAppContext) {
+        let fixture =
+            StatusFixture::open(cx, Transition::new(Duration::from_millis(1000)).ease(|t| t));
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        fixture.render(cx, 0.0);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        fixture.render(cx, 2.0);
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!((fixture.render(cx, 2.0).value - 1.15).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn active_policy_is_retained_until_retarget(cx: &mut TestAppContext) {
+        let fixture =
+            StatusFixture::open(cx, Transition::new(Duration::from_millis(1000)).ease(|t| t));
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(400));
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy = Transition::new(Duration::from_millis(1000))
+                    .ease(|t| t * t)
+                    .delay(SignedDuration::negative(Duration::from_millis(200)));
+            })
+            .unwrap();
+        assert!((fixture.render(cx, 1.0).value - 0.4).abs() < 1e-6);
+        // Old linear sample 0.4; new quadratic curve starts at 0.2^2.
+        assert!((fixture.render(cx, 2.0).value - 0.464).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn reversal_keeps_positive_delay(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .delay(Duration::from_millis(200))
+                .ease(|t| t),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(600));
+        assert!((fixture.render(cx, 0.0).value - 0.4).abs() < 1e-6);
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Delayed);
+        cx.executor().advance_clock(Duration::from_millis(501));
+        assert_eq!(fixture.render(cx, 0.0).status, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn effects_opt_in_keeps_timing_under_reduced_motion(cx: &mut TestAppContext) {
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .ease(|t| t)
+                .reduced_motion(ReducedMotion::Continue),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.update(|cx| cx.set_reduce_motion(true));
+        assert!((fixture.render(cx, 1.0).value - 0.2).abs() < 1e-6);
+        cx.update(|cx| assert!(cx.reduce_motion()));
+        cx.executor().advance_clock(Duration::from_millis(800));
+        assert_eq!(fixture.render(cx, 1.0).status, MotionStatus::Finished);
+        fixture.render(cx, 0.0);
+        cx.executor().advance_clock(Duration::from_millis(500));
+        assert!((fixture.render(cx, 0.0).value - 0.5).abs() < 1e-6);
+        cx.update(|cx| cx.set_reduce_motion(false));
+        assert!((fixture.render(cx, 0.0).value - 0.5).abs() < 1e-6);
+    }
+
+    #[gpui::test]
+    fn current_reduced_motion_policy_and_zero_duration_take_effect(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let fixture = StatusFixture::open(
+            cx,
+            Transition::new(Duration::from_millis(1000))
+                .ease(|t| t)
+                .reduced_motion(ReducedMotion::Continue),
+        );
+        fixture.render(cx, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy = view.policy.clone().reduced_motion(ReducedMotion::Finish);
+            })
+            .unwrap();
+        assert_eq!(fixture.render(cx, 1.0).value, 1.0);
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy = view.policy.clone().reduced_motion(ReducedMotion::Continue);
+            })
+            .unwrap();
+        assert_eq!(fixture.render(cx, 0.0).value, 1.0);
+        cx.executor().advance_clock(Duration::from_millis(200));
+        assert!((fixture.render(cx, 0.0).value - 0.8).abs() < 1e-6);
+        fixture
+            .window
+            .update(cx, |view, _, _| {
+                view.policy =
+                    Transition::new(Duration::ZERO).reduced_motion(ReducedMotion::Continue);
+            })
+            .unwrap();
+        assert_eq!(fixture.render(cx, 0.0).value, 0.0);
+    }
+
     struct KeyframeView {
         track: Keyframes<f32>,
         timing: Timing,
@@ -1118,6 +1377,289 @@ mod tests {
             0
         );
         assert_eq!(fixture.render(cx, false).phase, PresencePhase::Absent);
+    }
+
+    struct SequenceView {
+        steps: Rc<RefCell<Vec<SequenceStep<f32>>>>,
+        samples: Rc<RefCell<Vec<SequenceSample<f32>>>>,
+    }
+
+    impl Render for SequenceView {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            self.samples.borrow_mut().push(
+                Sequence::new("sequence-test", 0.0)
+                    .with_steps(self.steps.borrow().iter().cloned())
+                    .sample(window, cx),
+            );
+            Empty
+        }
+    }
+
+    struct SequenceFixture {
+        window: WindowHandle<SequenceView>,
+        steps: Rc<RefCell<Vec<SequenceStep<f32>>>>,
+        samples: Rc<RefCell<Vec<SequenceSample<f32>>>>,
+    }
+
+    impl SequenceFixture {
+        fn open(cx: &mut TestAppContext, steps: Vec<SequenceStep<f32>>) -> Self {
+            let steps = Rc::new(RefCell::new(steps));
+            let samples = Rc::new(RefCell::new(Vec::new()));
+            let window = cx.open_window(size(px(100.), px(100.)), {
+                let steps = steps.clone();
+                let samples = samples.clone();
+                move |_, _| SequenceView { steps, samples }
+            });
+            cx.run_until_parked();
+            Self {
+                window,
+                steps,
+                samples,
+            }
+        }
+
+        fn linear(millis: u64) -> Transition {
+            Transition::new(Duration::from_millis(millis)).ease(|t| t)
+        }
+
+        fn last(&self) -> SequenceSample<f32> {
+            *self.samples.borrow().last().unwrap()
+        }
+
+        fn render(&self, cx: &mut TestAppContext) -> SequenceSample<f32> {
+            self.window
+                .update(cx, |_, window, _| window.refresh())
+                .unwrap();
+            cx.run_until_parked();
+            self.last()
+        }
+
+        fn advance(&self, cx: &mut TestAppContext, millis: u64) -> SequenceSample<f32> {
+            cx.executor().advance_clock(Duration::from_millis(millis));
+            self.render(cx)
+        }
+
+        fn pending_frame(&self, cx: &mut TestAppContext) -> usize {
+            self.window
+                .update(cx, |_, window, cx| window.simulate_next_frame(cx))
+                .unwrap()
+        }
+    }
+
+    fn assert_sample(sample: SequenceSample<f32>, value: f32, step: usize, status: MotionStatus) {
+        assert_eq!(
+            (*sample.value(), sample.step(), sample.status()),
+            (value, step, status)
+        );
+    }
+
+    #[gpui::test]
+    fn sequence_steps_advance_in_order_at_their_boundaries(cx: &mut TestAppContext) {
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+                SequenceStep::new(
+                    20.0,
+                    SequenceFixture::linear(100).delay(Duration::from_millis(50)),
+                ),
+            ],
+        );
+        assert_sample(fixture.last(), 0.0, 0, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 50), 5.0, 0, MotionStatus::Running);
+
+        // The first step ends and the second begins within one frame; nothing
+        // reports the first step as finished in between.
+        assert_sample(fixture.advance(cx, 50), 10.0, 1, MotionStatus::Delayed);
+        assert_sample(fixture.advance(cx, 50), 10.0, 1, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 50), 15.0, 1, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 50), 20.0, 1, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn a_sequence_starts_its_next_step_where_the_previous_ended_not_at_the_frame(
+        cx: &mut TestAppContext,
+    ) {
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+                SequenceStep::new(20.0, SequenceFixture::linear(100)),
+            ],
+        );
+        // One frame at 50 ms, the next at 175 ms: the boundary at 100 ms fell
+        // between them, and the second step is sampled as if it started there.
+        fixture.advance(cx, 50);
+        assert_sample(fixture.advance(cx, 125), 17.5, 1, MotionStatus::Running);
+    }
+
+    #[gpui::test]
+    fn zero_duration_steps_complete_within_the_frame_that_reaches_them(cx: &mut TestAppContext) {
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(5.0, SequenceFixture::linear(0)),
+                SequenceStep::new(6.0, SequenceFixture::linear(0)),
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+            ],
+        );
+        assert_sample(fixture.last(), 6.0, 2, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 50), 8.0, 2, MotionStatus::Running);
+    }
+
+    #[gpui::test]
+    fn a_sequence_reports_finished_once_and_then_stops_requesting_frames(cx: &mut TestAppContext) {
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+                SequenceStep::new(20.0, SequenceFixture::linear(100)),
+            ],
+        );
+        assert_eq!(fixture.pending_frame(cx), 1);
+        cx.run_until_parked();
+
+        cx.executor().advance_clock(Duration::from_millis(100));
+        assert_eq!(fixture.pending_frame(cx), 1);
+        cx.run_until_parked();
+        assert_eq!(fixture.last().status(), MotionStatus::Running);
+        assert!(
+            fixture
+                .samples
+                .borrow()
+                .iter()
+                .all(|sample| !sample.is_finished()),
+            "the first step's end must not read as the sequence finishing"
+        );
+
+        assert_sample(fixture.advance(cx, 100), 20.0, 1, MotionStatus::Finished);
+        fixture.pending_frame(cx);
+        cx.run_until_parked();
+        assert_eq!(fixture.pending_frame(cx), 0);
+        assert_sample(fixture.advance(cx, 1_000), 20.0, 1, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn reduced_motion_adopts_a_sequences_last_target_without_requesting_a_frame(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+                SequenceStep::new(20.0, SequenceFixture::linear(100)),
+            ],
+        );
+        assert_sample(fixture.last(), 20.0, 1, MotionStatus::Finished);
+        assert_eq!(fixture.pending_frame(cx), 0);
+    }
+
+    #[gpui::test]
+    fn a_changed_step_target_restarts_the_sequence_from_the_sampled_value(cx: &mut TestAppContext) {
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+                SequenceStep::new(20.0, SequenceFixture::linear(100)),
+            ],
+        );
+        fixture.advance(cx, 150);
+        assert_sample(fixture.last(), 15.0, 1, MotionStatus::Running);
+
+        *fixture.steps.borrow_mut() = vec![
+            SequenceStep::new(10.0, SequenceFixture::linear(100)),
+            SequenceStep::new(35.0, SequenceFixture::linear(100)),
+        ];
+        assert_sample(fixture.render(cx), 15.0, 0, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 50), 12.5, 0, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 100), 22.5, 1, MotionStatus::Running);
+
+        // Fewer steps than the one being played is a different sequence too.
+        *fixture.steps.borrow_mut() = vec![SequenceStep::new(0.0, SequenceFixture::linear(100))];
+        assert_sample(fixture.render(cx), 22.5, 0, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 100), 0.0, 0, MotionStatus::Finished);
+    }
+
+    #[gpui::test]
+    fn a_change_to_a_step_not_being_played_does_not_restart_the_sequence(cx: &mut TestAppContext) {
+        let fixture = SequenceFixture::open(
+            cx,
+            vec![
+                SequenceStep::new(10.0, SequenceFixture::linear(100)),
+                SequenceStep::new(20.0, SequenceFixture::linear(100)),
+            ],
+        );
+        fixture.advance(cx, 50);
+        *fixture.steps.borrow_mut() = vec![
+            SequenceStep::new(10.0, SequenceFixture::linear(100)),
+            SequenceStep::new(30.0, SequenceFixture::linear(100)),
+        ];
+        assert_sample(fixture.render(cx), 5.0, 0, MotionStatus::Running);
+        assert_sample(fixture.advance(cx, 100), 20.0, 1, MotionStatus::Running);
+    }
+
+    struct SingleStepView {
+        armed: Rc<Cell<bool>>,
+        samples: Rc<RefCell<Vec<(SequenceSample<f32>, MotionValue<f32>)>>>,
+    }
+
+    impl Render for SingleStepView {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let policy = Transition::new(Duration::from_millis(100))
+                .delay(Duration::from_millis(20))
+                .easing(Easing::EaseInOut);
+            // A plain transition adopts its first target where a sequence
+            // plays from `from` at once, so the transition is primed at 0.0
+            // and both leave for 10.0 on the frame that arms the view.
+            if !self.armed.get() {
+                transition_with_status("plain", 0.0, policy, window, cx);
+                return Empty;
+            }
+            let sequence = Sequence::new("single-step", 0.0)
+                .with_step(10.0, policy.clone())
+                .sample(window, cx);
+            let plain = transition_with_status("plain", 10.0, policy, window, cx);
+            self.samples.borrow_mut().push((sequence, plain));
+            Empty
+        }
+    }
+
+    #[gpui::test]
+    fn a_single_step_sequence_matches_a_plain_transition(cx: &mut TestAppContext) {
+        let armed = Rc::new(Cell::new(false));
+        let samples = Rc::new(RefCell::new(Vec::new()));
+        let window = cx.open_window(size(px(100.), px(100.)), {
+            let armed = armed.clone();
+            let samples = samples.clone();
+            move |_, _| SingleStepView { armed, samples }
+        });
+        cx.run_until_parked();
+        armed.set(true);
+        for millis in [0, 10, 30, 70, 120] {
+            cx.executor().advance_clock(Duration::from_millis(millis));
+            window.update(cx, |_, window, _| window.refresh()).unwrap();
+            cx.run_until_parked();
+            let (sequence, plain) = *samples.borrow().last().unwrap();
+            assert_eq!(*sequence.value(), plain.value, "value after {millis} ms");
+            assert_eq!(sequence.status(), plain.status, "status after {millis} ms");
+            assert_eq!(sequence.step(), 0);
+        }
+    }
+
+    #[gpui::test]
+    fn an_empty_sequence_idles_at_its_starting_value(cx: &mut TestAppContext) {
+        let fixture = SequenceFixture::open(cx, Vec::new());
+        assert_sample(fixture.last(), 0.0, 0, MotionStatus::Idle);
+        assert_eq!(fixture.pending_frame(cx), 0);
     }
 
     #[test]

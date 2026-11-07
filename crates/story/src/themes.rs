@@ -25,9 +25,7 @@ struct State {
 }
 
 fn apply_theme_config(theme_config: std::rc::Rc<ThemeConfig>, cx: &mut App) {
-    let mode = theme_config.mode;
-    Theme::global_mut(cx).apply_config(&theme_config);
-    Theme::change(mode, None, cx);
+    Theme::update(cx, |theme| theme.apply_config(&theme_config));
 }
 
 impl Default for State {
@@ -73,14 +71,14 @@ fn apply_persisted_radius(state: &State, cx: &mut App) {
         return;
     };
 
-    let theme = Theme::global_mut(cx);
-    theme.radius = gpui_kit::px(radius);
-    theme.radius_lg = if radius > 0. {
-        gpui_kit::px(radius + 2.)
-    } else {
-        gpui_kit::px(0.)
-    };
-    Theme::sync_base(cx);
+    Theme::update(cx, |theme| {
+        theme.radius = gpui_kit::px(radius);
+        theme.radius_lg = if radius > 0. {
+            gpui_kit::px(radius + 2.)
+        } else {
+            gpui_kit::px(0.)
+        };
+    });
 }
 
 pub fn init(cx: &mut App) {

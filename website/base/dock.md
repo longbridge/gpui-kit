@@ -1,6 +1,6 @@
 ---
 title: Dock
-description: A dockable workspace — splits, tab groups, tiles, and edge docks — whose layout is pure data and whose appearance is entirely yours.
+description: A dockable workspace — splits, tab groups, and edge docks — whose layout is pure data and whose appearance is entirely yours.
 order: 6
 example: dock
 exampleKind: base
@@ -8,23 +8,22 @@ exampleKind: base
 
 # Dock
 
-A dockable workspace: nested splits, tab groups with draggable tabs, a free-positioning tiles canvas, and left/right/bottom docks that fold away. `gpui-base` owns all of the behavior and draws none of it.
+A dockable workspace: nested splits, tab groups with draggable tabs, and left/right/bottom docks that fold away. `gpui-base` owns all of the behavior and draws none of it.
 
-The layout is not a tree of views. It is a value — a `PaneTree` — that you can build, compare, serialize, and edit without a `Window` or an `App` in sight. `DockArea` reconciles that value into live entities, and three renderer traits supply every pixel.
+The layout is not a tree of views. It is a value — a `PaneTree` — that you can build, compare, serialize, and edit without a `Window` or an `App` in sight. `DockArea` reconciles that value into live entities, and two renderer traits supply every pixel.
 
 This page is long because Dock is the largest system in `gpui-base`. If you only need to stand one up, [Get started](#get-started) and [Supply the appearance](#supply-the-appearance) are enough.
 
 ## The model
 
-Three container shapes, and nothing else:
+Two container shapes, and nothing else:
 
 | Container | Holds                            | Notes                                      |
 | --------- | -------------------------------- | ------------------------------------------ |
 | `Split`   | Other containers, along one axis | Each child slot has an optional fixed size |
 | `Tabs`    | Panels, one displayed at a time  | Carries the displayed index                |
-| `Tiles`   | Panels at free positions         | Each tile has bounds and a z-index         |
 
-There is no leaf variant, so **a panel can only ever live inside a `Tabs` or a `Tiles`**. A region whose center is a single panel is still a `Tabs` holding one panel.
+There is no leaf variant, so **a panel can only ever live inside a `Tabs`**. A region whose center is a single panel is still a `Tabs` holding one panel.
 
 Four regions exist: the center, plus an optional left, right and bottom dock. Each is one independent `PaneTree`.
 
@@ -46,9 +45,9 @@ Neither the tree nor any node stores a GPUI entity handle.
 | `DockLayout`                                              | Describes a layout without constructing anything                            |
 | `Panel`                                                   | What a dockable view implements — behavior only                             |
 | `PanelView`                                               | Object-safe panel handle, `Arc<dyn PanelView>`                              |
-| `TabGroup` / `TilesState`                                 | The entity behind a `Tabs` node and a `Tiles` node                          |
-| `DockAreaRenderer` / `TabGroupRenderer` / `TilesRenderer` | Where every visual decision goes                                            |
-| `DockContext` / `TabGroupContext` / `TileContext`         | Resolved state and callbacks handed to a renderer                           |
+| `TabGroup`                                                | The entity behind a `Tabs` node                                             |
+| `DockAreaRenderer` / `TabGroupRenderer`                   | Where every visual decision goes                                            |
+| `DockContext` / `TabGroupContext`                         | Resolved state and callbacks handed to a renderer                           |
 | `DockAreaState`                                           | The serializable form of a whole area                                       |
 
 ## Get started
@@ -108,8 +107,6 @@ DockLayout::h_split()
 | `tabs()`                  | A tab group                       |
 | `panel(entity)`           | Adds a panel to a tab group       |
 | `active_index(ix)`        | Which tab starts displayed        |
-| `tiles()`                 | A tiles canvas                    |
-| `tile(entity, bounds)`    | Places a panel on a canvas        |
 
 Misuse — a panel added to a split, a child added to a tab group — trips a `debug_assert!` and is otherwise ignored.
 
@@ -126,7 +123,7 @@ A layout with every slot `None` divides the space evenly. When a panel is later 
 
 Every edit runs one collapse pass to a fixpoint before returning. The rules, applied bottom up:
 
-1. An empty `Tabs`, `Tiles`, or `Split` is removed from its parent.
+1. An empty `Tabs` or `Split` is removed from its parent.
 2. A `Split` with one child is replaced by that child, which keeps its own `NodeId` and inherits the slot size.
 3. A `Split` whose child is a `Split` of the same axis splices that child's children into itself, scaling their sizes to fill the slot.
 4. `active_ix` is clamped to the panel count.
@@ -204,13 +201,12 @@ Each replaces whatever was there. Panels that were displaced — and are not par
 
 ```rust
 area.add_panel(panel, DockPlacement::Left, Some(px(240.)), window, cx);
-area.add_tile(panel, DockPlacement::Center, bounds, window, cx);
 area.remove_panel(panel, window, cx);
 area.move_panel(panel_id, target, window, cx);
 area.split_at(node, panel_id, Placement::Right, window, cx);
 ```
 
-`add_panel` lands the panel in the region's first tab group, creating the region if it has none. `add_tile` needs a tiles canvas in that region; without one it is a no-op. Both have `_view` variants taking an `Arc<dyn PanelView>` for callers holding an erased handle.
+`add_panel` lands the panel in the region's first tab group, creating the region if it has none. It has an `add_panel_view` variant taking an `Arc<dyn PanelView>` for callers holding an erased handle.
 
 ### Docks
 
@@ -234,10 +230,9 @@ area.set_zoomed_in(node, window, cx);
 area.set_zoomed_out(window, cx);
 area.is_zoomed();
 area.zoomed_group();   // Option<NodeId>
-area.zoomed_tile();    // Option<PanelId>
 ```
 
-The usual entry point is not these but `TabGroupContext::toggle_zoom` / `TileContext::toggle_zoom`, which a skin already has wherever it draws a zoom control. Zoom ends when the zoomed container leaves the dock, or when the container clears it — not when some unrelated panel is removed.
+The usual entry point is not these but `TabGroupContext::toggle_zoom`, which a skin already has wherever it draws a zoom control. Zoom ends when the zoomed container leaves the dock, or when the container clears it — not when some unrelated panel is removed.
 
 ### Locking
 
@@ -264,8 +259,6 @@ tree.move_panel(panel, target);
 tree.split(node, panel, Placement::Right, Some(px(320.)));
 tree.set_active(node, 2);
 tree.set_sizes(node, vec![Some(px(200.)), None]);
-tree.set_tile_bounds(panel, bounds);
-tree.bring_to_front(panel);
 ```
 
 `InsertTarget` says where a panel lands:
@@ -274,7 +267,6 @@ tree.bring_to_front(panel);
 | --------------------------------- | -------------------------------------------------- |
 | `Tabs { node, ix, activate }`     | Into an existing tab group, optionally at an index |
 | `Split { node, placement, size }` | Beside a node, in a new tab group                  |
-| `Tile { node, bounds }`           | Onto a tiles canvas at those bounds                |
 
 Every edit returns an `EditResult`: `changed()`, plus `created_nodes()`, `removed_nodes()`, `removed_panels()`, `activated()`, `deactivated()`. **`removed_panels` excludes moves** — a moved panel's entity survives, so it must not receive `on_removed`.
 
@@ -290,13 +282,12 @@ tree.find_panel_node(panel_id);   // Option<NodeId>
 match node.kind() {
     PaneRef::Split { axis, children, sizes } => { /* ... */ }
     PaneRef::Tabs { panels, active_ix } => { /* ... */ }
-    PaneRef::Tiles { panels } => { /* ... */ }
 }
 ```
 
 ## Supply the appearance
 
-Nothing in `gpui_kit::base::dock` paints a color, a border, or a size. Three traits carry appearance in.
+Nothing in `gpui_kit::base::dock` paints a color, a border, or a size. Two traits carry appearance in.
 
 ### `DockAreaRenderer`
 
@@ -309,7 +300,6 @@ Nothing in `gpui_kit::base::dock` paints a color, a border, or a size. Three tra
 | `render_dock`         | One dock's chrome: title strip, collapse affordance, resize handle | The content, unwrapped         |
 | `build_placeholder`   | The stand-in for a panel this build cannot construct               | `None` → draws nothing         |
 | `tab_group_renderer`  | _required_                                                         | —                              |
-| `tiles_renderer`      | _required_                                                         | —                              |
 
 ### `TabGroupRenderer`
 
@@ -322,25 +312,11 @@ Nothing in `gpui_kit::base::dock` paints a color, a border, or a size. Three tra
 | `render_drop_indicator` | The highlight showing where a drop lands | Nothing                      |
 | `render_empty`          | What an empty group shows                | Nothing                      |
 
-### `TilesRenderer`
-
-| Method                  | Supplies                                 | Default     |
-| ----------------------- | ---------------------------------------- | ----------- |
-| `frame`                 | The canvas                               | Bare `div`  |
-| `tile_frame`            | One tile's outer element                 | Bare `div`  |
-| `render_drag_bar`       | _required_ — the strip that moves a tile | —           |
-| `render_resize_handles` | The tile's resize affordances            | Nothing     |
-| `panel_frame`           | The element the panel sits in            | Bare `div`  |
-| `render_overlay`        | Anything drawn above every tile          | Nothing     |
-| `grid_size`             | Snap granularity                         | No snapping |
-
 ### Contexts
 
 A renderer never sees a drag event or a mouse position. Base attaches drag sources, drop hit-testing, focus and keyboard handling to the very elements the renderer returns, and hands it resolved state plus callbacks:
 
 **`TabGroupContext`** — `node()`, `panels()`, `active_ix()`, `active_panel()`, `drop_indicator()`, `is_zoomed()`, `is_collapsed()`, `can_close()`, `is_locked()`, `is_draggable()`, `is_droppable()`; and the actions `select_tab()`, `close()`, `toggle_zoom()`, `drag_panel()`, `drop_panel()`, `drop_item()`.
-
-**`TileContext`** — `node()`, `panel()`, `panel_id()`, `bounds()`, `z_index()`, `is_moving()`, `is_resizing()`, `can_close()`, `is_zoomed()`, `can_zoom()`; and `begin_move()` / `move_to()` / `end_move()`, `begin_resize()` / `resize_to()` / `end_resize()`, `bring_to_front()`, `toggle_zoom()`, `close()`.
 
 **`DockContext`** — `placement()`, `size()`, `is_open()`, `is_collapsible()`; and `toggle()`, `resize_to()`.
 
@@ -374,42 +350,15 @@ A tab drag has three parts, and a skin supplies only the middle one.
 
 **Applying.** `drop_panel()` on release turns the hover into a `TabGroupEvent::Drop { panel, source, target }`, which the area applies as a single `PaneTree::move_panel`. Dropping onto the middle merges into the group; dropping towards an edge splits there; dropping onto the tab strip inserts at that index.
 
-**Host-owned drags.** Anything of your own can be dropped into the dock. Wrap it in `AnyDrag`, and `drop_item()` reports it as `DockEvent::DragDrop { item, target }` where `target` says whether it landed on a tab group or the tiles canvas. The dock does not interpret the payload.
-
-## Tiles canvas
-
-A `Tiles` node holds panels at free positions instead of stacking them as tabs. `TilesState` owns the geometry: moving, resizing from any of five sides, magnetic snapping to neighbors and to a grid, z-ordering, per-gesture undo history, and single-tile zoom.
-
-A tile's drag bar is the one required piece of a `TilesRenderer`, because a tile with no drag bar cannot be moved. Everything else has a default.
-
-```rust
-impl TilesRenderer for MySkin {
-    fn render_drag_bar(&self, tile: &TileContext, _: &mut Window, _: &mut App) -> AnyElement {
-        div()
-            .h(px(28.))
-            .on_mouse_down(MouseButton::Left, {
-                let tile = tile.clone();
-                move |event, window, cx| tile.begin_move(event.position, window, cx)
-            })
-            .into_any_element()
-    }
-
-    fn grid_size(&self, _: &App) -> Pixels {
-        px(8.)
-    }
-}
-```
-
-Snapping geometry is exported for skins that want to preview a drop: `magnetic_snap`, `snap_edge`, `round_to_grid`, `compute_resized_bounds`, `apply_boundary_constraints`.
+**Host-owned drags.** Anything of your own can be dropped into the dock. Wrap it in `AnyDrag`, and `drop_item()` reports it as `DockEvent::DragDrop { item, target }` where `target` names the tab group it landed on and the edge it resolved. The dock does not interpret the payload.
 
 ## Events
 
 | Emitter      | Event                                                                               | Meaning                                                                                                          |
 | ------------ | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `DockArea`   | `LayoutChanged`                                                                     | Something changed. Fires on **every** edit, including each step of a tile drag — debounce before writing to disk |
+| `DockArea`   | `LayoutChanged`                                                                     | Something changed. Fires on **every** edit — debounce before writing to disk                                       |
 | `DockArea`   | `DragDrop { item, target }`                                                         | A host-owned drag landed                                                                                         |
 | `TabGroup`   | `Drop` / `DragDrop` / `ClosePanel` / `ActiveChanged` / `ZoomIn` / `ZoomOut`         | A group's intent, applied by the area                                                                            |
-| `TilesState` | `BoundsChanged` / `BringToFront` / `ClosePanel` / `DragDrop` / `ZoomIn` / `ZoomOut` | A canvas's intent                                                                                                |
 | `Panel`      | `ZoomIn` / `ZoomOut` / `LayoutChanged`                                              | A panel's own signal                                                                                             |
 
 Container events are the container asking the area for something; the area is what actually edits the tree. A host normally subscribes only to `DockEvent`.

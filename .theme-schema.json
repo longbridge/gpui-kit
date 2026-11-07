@@ -173,6 +173,18 @@
           "description": "Chart 5 color.",
           "type": ["string", "null"]
         },
+        "chart.bullish": {
+          "description": "Bullish color for candlestick charts (upward price movement).",
+          "type": ["string", "null"]
+        },
+        "chart.bearish": {
+          "description": "Bearish color for candlestick charts (downward price movement).",
+          "type": ["string", "null"]
+        },
+        "chart.grid": {
+          "description": "Chart grid line color.",
+          "type": ["string", "null"]
+        },
         "danger.background": {
           "description": "Danger background color.",
           "type": ["string", "null"]
@@ -483,10 +495,6 @@
         },
         "title_bar.border": {
           "description": "TitleBar border color.",
-          "type": ["string", "null"]
-        },
-        "tiles.background": {
-          "description": "Background color for Tiles.",
           "type": ["string", "null"]
         },
         "warning.background": {

@@ -3,7 +3,7 @@ use gpui_base::{TextView, TextViewStyle};
 use super::*;
 use crate::showcase::palette::ExamplePalette;
 
-pub const MARKDOWN: &str = include_str!("../../../../story/examples/fixtures/test.md");
+pub const MARKDOWN: &str = include_str!("../../../../../examples/fixtures/test.md");
 
 fn text_view_style(palette: ExamplePalette) -> TextViewStyle {
     let is_dark = palette.canvas == ExamplePalette::for_dark(true).canvas;
@@ -53,8 +53,8 @@ mod tests {
     use std::time::Duration;
 
     use gpui::{
-        Modifiers, MouseButton, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext,
-        point, px,
+        Modifiers, MouseButton, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point,
+        px,
     };
     use gpui_base::{TextSelection, TextViewStyle};
 
@@ -134,7 +134,7 @@ mod tests {
             let offset = view.text_view.read(cx).list_state().logical_scroll_top();
             (offset.item_ix, offset.offset_in_item)
         });
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: example.center(),
             delta: ScrollDelta::Pixels(point(px(0.), px(-120.))),
             ..Default::default()

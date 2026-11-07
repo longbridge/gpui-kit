@@ -9,7 +9,7 @@ repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/fps"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.6.0"
+version = "0.9.0"
 
 [lib]
 doctest = false
@@ -18,6 +18,7 @@ doctest = false
 # `gpui/profiler` belongs here, not on the workspace dependency: this is the
 # only crate that uses it, and cargo unifies features across the graph.
 gpui = { workspace = true, features = ["profiler"] }
+gpui-fast = { workspace = true, features = ["profiler"] , optional = true }
 web-time = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -57,6 +58,10 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+gpui-fast = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["dep:gpui-fast"]

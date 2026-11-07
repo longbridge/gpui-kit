@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// A theme token that keeps a solid representative color and its renderable background.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct ThemeToken {
     pub color: Hsla,
     pub background: Background,
@@ -55,7 +56,8 @@ impl From<ThemeToken> for Fill {
 }
 
 /// Theme colors used throughout the UI components.
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct ThemeColor {
     /// Used for accents such as hover background on MenuItem, ListItem, etc.
     pub accent: Hsla,
@@ -129,20 +131,22 @@ pub struct ThemeColor {
     pub group_box_foreground: Hsla,
     /// Input caret color (Blinking cursor).
     pub caret: Hsla,
-    /// Chart 1 color.
+    /// Chart 1 color (`chart.1` in the theme file).
     pub chart_1: Hsla,
-    /// Chart 2 color.
+    /// Chart 2 color (`chart.2` in the theme file).
     pub chart_2: Hsla,
-    /// Chart 3 color.
+    /// Chart 3 color (`chart.3` in the theme file).
     pub chart_3: Hsla,
-    /// Chart 4 color.
+    /// Chart 4 color (`chart.4` in the theme file).
     pub chart_4: Hsla,
-    /// Chart 5 color.
+    /// Chart 5 color (`chart.5` in the theme file).
     pub chart_5: Hsla,
     /// Bullish color for candlestick charts (upward price movement).
     pub chart_bullish: Hsla,
     /// Bearish color for candlestick charts (downward price movement).
     pub chart_bearish: Hsla,
+    /// Chart grid line color.
+    pub chart_grid: Hsla,
     /// Danger background color.
     pub danger: Hsla,
     /// Danger active background color.
@@ -297,8 +301,6 @@ pub struct ThemeColor {
     pub status_bar: Hsla,
     /// StatusBar border color.
     pub status_bar_border: Hsla,
-    /// Background color for Tiles.
-    pub tiles: Hsla,
     /// Warning background color.
     pub warning: Hsla,
     /// Warning active background color.
@@ -352,9 +354,38 @@ macro_rules! define_theme_tokens {
         /// components should use [`gpui_base::SemanticThemeTokens`] instead. The
         /// legacy fields remain public so existing theme files and direct field
         /// access continue to work unchanged.
-        #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
         pub struct ThemeTokens {
             $(pub $field: ThemeToken,)+
+        }
+
+        impl ThemeTokens {
+            /// Brings the tokens and `colors` back to one value per field after
+            /// an edit, given the two as they were before it.
+            ///
+            /// A field edited on `colors` wins: when its token no longer names
+            /// that color, the token becomes that solid color, dropping any
+            /// gradient it carried — the caller asked for the solid color. A
+            /// field edited only on the tokens writes its solid color back to
+            /// `colors`. A field the edit set on both sides to one color, as
+            /// applying a theme config does, keeps its token, so a gradient
+            /// from a theme file survives; so does an untouched field.
+            pub(crate) fn reconcile(
+                &mut self,
+                colors: &mut ThemeColor,
+                colors_before: &ThemeColor,
+                tokens_before: &ThemeTokens,
+            ) {
+                $(
+                    if colors.$field != colors_before.$field {
+                        if self.$field.color != colors.$field {
+                            self.$field = colors.$field.into();
+                        }
+                    } else if self.$field != tokens_before.$field {
+                        colors.$field = self.$field.color;
+                    }
+                )+
+            }
         }
 
         impl From<ThemeColor> for ThemeTokens {
@@ -417,6 +448,7 @@ define_theme_tokens! {
     chart_5,
     chart_bullish,
     chart_bearish,
+    chart_grid,
     danger,
     danger_active,
     danger_foreground,
@@ -494,7 +526,6 @@ define_theme_tokens! {
     title_bar_border,
     status_bar,
     status_bar_border,
-    tiles,
     warning,
     warning_active,
     warning_hover,

@@ -52,12 +52,29 @@
 //
 // **Not reachable at all.** `value` and `entities`: a `Bridged` and an entity
 // handle are the runtime talking to itself.
+#[cfg(feature = "gpui-fast")]
+pub extern crate gpui_fast as gpui;
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast_platform as gpui_platform;
+// The `gpui-component` catalog is written against the public API, as any
+// embedding host's catalog is, so it names this crate the way they do.
+#[cfg(feature = "components")]
+extern crate self as gpui_shell;
+
 pub(crate) mod a11y;
 pub mod action;
 pub(crate) mod assets;
 pub(crate) mod capability;
 mod component;
 mod component_registry;
+mod input_tokens;
+pub use input_tokens::{
+    InlineTokenCallbacks, inline_token_click_data, inline_token_context_data,
+    inline_token_hover_data, input_token_state_methods, textarea_token_state_methods,
+};
+/// The `gpui-component` catalog, behind the `components` feature.
+#[cfg(feature = "components")]
+pub mod components;
 pub(crate) mod dependencies;
 pub mod dock;
 pub(crate) mod engine;
@@ -90,7 +107,7 @@ pub(crate) mod watch;
 
 pub use anyhow;
 pub use assets::AppAssets;
-pub use capability::{Capabilities, ExecuteGrant, HttpRequestGrant};
+pub use capability::{Capabilities, ExecuteGrant, HttpRequestGrant, is_openable_url};
 pub use component::ComponentArgs;
 #[cfg(test)]
 pub(crate) use component_registry::ComponentState;
@@ -100,11 +117,12 @@ pub use component_registry::{
     ComponentDelegateSnapshot, ComponentDescriptor, ComponentElementCallback,
     ComponentElementFactory, ComponentMaterializer, ComponentPayload, ComponentRegistry,
     ConstructorDescriptor, DEFAULT_COMPONENT_MODULE, FrozenComponentRegistry, MaterializeRequest,
-    MethodDescriptor, RegistryError, StateDescriptor,
+    MethodDescriptor, RegistryError, StateDescriptor, StateMethodDescriptor,
 };
 pub(crate) use component_registry::{ComponentCallbackValue, ComponentId, RecordedComponentMethod};
 pub use engine::{LoadedApplication, ShellRuntime};
 pub use error::ShellError;
+#[cfg(not(feature = "gpui-fast"))]
 pub use gpui;
 pub use host_modules::{
     HostArguments, HostError, HostModule, HostObject, HostResult, HostValue, RESERVED_SPECIFIERS,
@@ -182,6 +200,15 @@ pub fn set_capabilities(capabilities: Capabilities) {
     capability::install(capabilities);
 }
 
+/// The grant of the script call now running, or the default outside one.
+///
+/// A component that reaches a resource for the script checks this grant, as
+/// the runtime's own `fetch` does. Native callbacks run outside any call, so
+/// a component reads the grant when the script asks and keeps it for them.
+pub fn current_capabilities() -> Capabilities {
+    scope::policy().capabilities().clone()
+}
+
 /// Names the application, and puts its data where that name says.
 ///
 /// **This is how a host should place storage.** The bundle id is the
@@ -197,7 +224,8 @@ pub fn set_capabilities(capabilities: Capabilities) {
 ///
 /// Returns the directory it chose, because a host that grants filesystem access
 /// needs to name it. The store is one file inside, which leaves room for other
-/// per-application state later.
+/// per-application state later. Script reads the same directory as
+/// `process.dataDir`.
 ///
 /// The id also becomes the namespace this application's dock panels persist
 /// under — `shell:<id>/<panel>` — for the same reason it places storage: a
@@ -222,7 +250,7 @@ pub fn set_bundle_id(id: &str) -> anyhow::Result<PathBuf> {
     // The same name namespaces the application's dock panels. Storage and a
     // persisted layout are the two things that have to survive a restart under
     // a name rather than a path, so they take the name from one place.
-    policy::update_default(|policy| policy.with_application(id));
+    policy::update_default(|policy| policy.with_application(id).with_data_dir(directory.clone()));
     Ok(directory)
 }
 

@@ -16,7 +16,7 @@ use gpui::{KeyBinding, WindowBounds};
 use gpui_base::ResizeHandleContext;
 use gpui_base::dock::{
     DockArea, DockAreaRenderer, DockContext, DockLayout, DockPlacement, DropIndicator, NodeId,
-    Panel, PanelEvent, PanelView, TabGroupContext, TabGroupRenderer, TileContext, TilesRenderer,
+    Panel, PanelEvent, PanelView, TabGroupContext, TabGroupRenderer,
 };
 use gpui_base::input::InputEditorStyle;
 use gpui_base::input::{EditorState, InputState, TextareaState};
@@ -31,9 +31,9 @@ use gpui_base::{
     NavOperation, NavStack, NavStackState, OtpState, Popup, Scrollbar, ScrollbarMode, Select,
     Sheet, Slider, SliderIndicator, SliderThumb, SliderTrack, Switch, SwitchThumb, SwitchTrack,
     Tab, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tabs, TextSelectionEvent,
-    TextSelectionHandle, TextSelectionLayer, TextViewState, Textarea, Toast, ToastTransitionStatus,
-    Toggle, ToggleGroup, Tooltip, Tree, TreeItem, TreeState, VirtualListScrollHandle,
-    v_virtual_list,
+    TextSelectionHandle, TextSelectionLayer, TextViewState, Textarea, TimeFieldState,
+    TimePrecision, Toast, ToastTransitionStatus, Toggle, ToggleGroup, Toolbar, ToolbarGroup,
+    Tooltip, Tree, TreeItem, TreeState, VirtualListScrollHandle, v_virtual_list,
 };
 use palette::{activate as activate_palette, canvas as example_canvas, example_rgb};
 #[cfg(target_family = "wasm")]
@@ -92,6 +92,7 @@ pub const COMPONENTS: &[&str] = &[
     "dialog",
     "dock",
     "editor",
+    "grid-layout",
     "hover-card",
     "input",
     "link",
@@ -115,9 +116,11 @@ pub const COMPONENTS: &[&str] = &[
     "text-selection",
     "text-view",
     "textarea",
+    "time-field",
     "toast",
     "toggle",
     "toggle-group",
+    "toolbar",
     "tooltip",
     "tree",
     "virtual-list",
@@ -132,6 +135,8 @@ pub struct BaseShowcase {
     switch_checked: bool,
     toggle_pressed: bool,
     toggle_group_selection: u8,
+    toolbar_action: gpui::SharedString,
+    toolbar_search: gpui::Entity<InputState>,
     selected_tab: usize,
     select_open: bool,
     select_index: usize,
@@ -155,8 +160,10 @@ pub struct BaseShowcase {
     textarea: gpui::Entity<TextareaState>,
     editor: gpui::Entity<EditorState>,
     otp: gpui::Entity<OtpState>,
+    time_field: gpui::Entity<TimeFieldState>,
     calendar: gpui::Entity<CalendarState>,
     tree: gpui::Entity<TreeState>,
+    grid_layout: gpui::Entity<gpui_base::GridLayoutState>,
     date_focus: gpui::FocusHandle,
     scroll: ScrollHandle,
     example_scroll: ScrollHandle,
@@ -193,7 +200,28 @@ impl BaseShowcase {
             });
             state
         });
+        let toolbar_search = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder("Search");
+            state.set_editor_style(InputEditorStyle {
+                foreground: example_rgb(0x171717).into(),
+                muted_foreground: example_rgb(0x737373).into(),
+                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
+                caret: example_rgb(0x171717).into(),
+                ..InputEditorStyle::default()
+            });
+            state
+        });
         let otp = cx.new(|cx| OtpState::new(6, window, cx).default_value("12"));
+        let time_field = cx.new(|cx| {
+            let mut state = TimeFieldState::new(window, cx).precision(TimePrecision::Second);
+            state.set_time(
+                chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap_or_default(),
+                window,
+                cx,
+            );
+            state
+        });
+        cx.observe(&time_field, |_, _, cx| cx.notify()).detach();
         let textarea = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .rows(3)
@@ -259,6 +287,8 @@ impl BaseShowcase {
             editor.update(cx, |state, cx| state.focus(window, cx));
         } else if component == "otp-input" {
             otp.update(cx, |state, cx| state.focus(window, cx));
+        } else if component == "time-field" {
+            time_field.update(cx, |state, cx| state.focus(window, cx));
         }
 
         let slider = cx.new(|_| SliderState::new().min(0.).max(100.).default_value(64.));
@@ -322,6 +352,8 @@ impl BaseShowcase {
             switch_checked: true,
             toggle_pressed: true,
             toggle_group_selection: 0,
+            toolbar_action: "No command yet".into(),
+            toolbar_search,
             selected_tab: 0,
             select_open: false,
             select_index: 0,
@@ -345,7 +377,27 @@ impl BaseShowcase {
             textarea,
             editor,
             otp,
+            time_field,
             calendar: cx.new(|cx| CalendarState::new(window, cx)),
+            grid_layout: cx.new(|cx| {
+                gpui_base::GridLayoutState::new(cx).cols(6).default_areas([
+                    gpui_base::GridArea::new("revenue").col_span(4).row_span(3),
+                    gpui_base::GridArea::new("orders")
+                        .col(4)
+                        .col_span(2)
+                        .row_span(2),
+                    gpui_base::GridArea::new("visitors")
+                        .row(3)
+                        .col_span(3)
+                        .row_span(2),
+                    gpui_base::GridArea::new("notes")
+                        .col(4)
+                        .row(2)
+                        .col_span(2)
+                        .row_span(3)
+                        .locked(true),
+                ])
+            }),
             tree: cx.new(|cx| {
                 TreeState::new(cx).items(vec![
                     TreeItem::new("src", "src").expanded(true).children(vec![
@@ -398,6 +450,8 @@ impl BaseShowcase {
         self.textarea
             .update(cx, |state, _| state.set_editor_style(style()));
         self.combobox_query
+            .update(cx, |state, _| state.set_editor_style(style()));
+        self.toolbar_search
             .update(cx, |state, _| state.set_editor_style(style()));
         self.editor.update(cx, |state, _| {
             state.set_editor_style(InputEditorStyle {
@@ -487,7 +541,7 @@ impl Render for BaseShowcase {
             .bg(example_canvas())
             .text_color(example_rgb(0x171717))
             .text_xs()
-            .font_family("Inter Variable")
+            .font_family(".SystemUIFont")
             .child(TextSelectionLayer)
             .when(show_bar, |this| {
                 this.child(
@@ -556,6 +610,7 @@ impl BaseShowcase {
             "date-picker" => self.date_picker(cx).into_any_element(),
             "dialog" => self.dialog(cx).into_any_element(),
             "editor" => self.editor().into_any_element(),
+            "grid-layout" => self.grid_layout().into_any_element(),
             "hover-card" => self.hover_card().into_any_element(),
             "input" => self.input().into_any_element(),
             "link" => self.link().into_any_element(),
@@ -579,9 +634,11 @@ impl BaseShowcase {
             "text-selection" => self.text_selection(window, cx).into_any_element(),
             "text-view" => self.text_view(window).into_any_element(),
             "textarea" => self.textarea().into_any_element(),
+            "time-field" => self.time_field(cx).into_any_element(),
             "toast" => self.toast(cx).into_any_element(),
             "toggle" => self.toggle(cx).into_any_element(),
             "toggle-group" => self.toggle_group(cx).into_any_element(),
+            "toolbar" => self.toolbar(cx).into_any_element(),
             "tooltip" => self.tooltip(cx).into_any_element(),
             "tree" => self.tree().into_any_element(),
             "dock" => self.dock(cx).into_any_element(),
@@ -671,10 +728,13 @@ pub fn run(app: Application, component: impl Into<String>) {
             })
             .detach();
         }
+        // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex Sans and
+        // ships no fonts of its own, so the family has to be bundled or the first
+        // text layout panics and the canvas stays blank (see #2933).
         #[cfg(target_family = "wasm")]
         cx.text_system()
             .add_fonts(vec![Cow::Borrowed(
-                include_bytes!("../../../story-web/fonts/Inter-Regular.ttf").as_slice(),
+                include_bytes!("../../../story-web/fonts/IBMPlexSans-Regular.ttf").as_slice(),
             )])
             .expect("failed to load gpui-base example font");
         let options = WindowOptions {
@@ -695,9 +755,12 @@ pub fn run_embedded(app: Application, component: impl Into<String>) -> gpui::App
     let component = component.into();
     app.run_embedded(move |cx: &mut App| {
         gpui_base::init(cx);
+        // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex Sans and
+        // ships no fonts of its own, so the family has to be bundled or the first
+        // text layout panics and the canvas stays blank (see #2933).
         cx.text_system()
             .add_fonts(vec![Cow::Borrowed(
-                include_bytes!("../../../story-web/fonts/Inter-Regular.ttf").as_slice(),
+                include_bytes!("../../../story-web/fonts/IBMPlexSans-Regular.ttf").as_slice(),
             )])
             .expect("failed to load gpui-base example font");
         cx.open_window(WindowOptions::default(), move |window, cx| {

@@ -39,6 +39,24 @@ pub trait InputHighlighter {
         cx: &mut Context<EditorState>,
     );
 
+    /// Apply several edits made as one change, such as typing with multiple
+    /// cursors. Each entry is an edit with the text as it stood right after
+    /// it, in the order the edits were applied.
+    ///
+    /// The default hands each edit to [`Self::update`] in turn. Override it to
+    /// reparse once for the whole change.
+    fn update_batch(
+        &mut self,
+        edits: &[(InputEdit, Rope)],
+        folding: bool,
+        window: &mut Window,
+        cx: &mut Context<EditorState>,
+    ) {
+        for (edit, text) in edits {
+            self.update(Some(*edit), text, folding, window, cx);
+        }
+    }
+
     /// Return ordered, non-overlapping style runs that fully cover `range`.
     /// Use [`HighlightStyle::default`] for text without a semantic style.
     fn styles(
@@ -58,6 +76,26 @@ pub trait InputHighlighter {
 pub type InputHighlighterFactory = Rc<dyn Fn(&str) -> Option<Box<dyn InputHighlighter>>>;
 pub type SharedHighlightStyleResolver = Arc<dyn HighlightStyleResolver>;
 pub type FoldIconRenderer = Rc<dyn Fn(usize, bool) -> AnyElement>;
+pub type FoldPlaceholderRenderer = Rc<dyn Fn(usize) -> AnyElement>;
+
+/// Where in the syntax tree an offset sits, for editing decisions.
+///
+/// Parser-independent: `gpui-component` answers from tree-sitter, apps may
+/// answer heuristically. `None` (no provider installed) means `Code`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxContext {
+    Code,
+    String,
+    Comment,
+}
+
+/// Answers syntax context for editing decisions (pairing, skip, indent).
+///
+/// Created per editor by the application's [`super::LanguageProvider`].
+/// Base never imports a parser; implementations live in UI crates or apps.
+pub trait SyntaxContextProvider {
+    fn context_at(&self, text: &Rope, offset: usize) -> SyntaxContext;
+}
 
 #[derive(Clone, Copy, Default)]
 pub struct DiagnosticColors {

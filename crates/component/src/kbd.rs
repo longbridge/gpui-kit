@@ -1,7 +1,10 @@
 use gpui::{
-    Action, AsKeystroke, FocusHandle, Half, IntoElement, KeyContext, Keystroke, ParentElement as _,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative,
+    Action, AsKeystroke, FocusHandle, Half, InteractiveElement as _, IntoElement, KeyBinding,
+    KeyContext, Keystroke, ParentElement as _, RenderOnce, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder as _, relative,
 };
+
+use gpui_base::TestTextExt as _;
 
 use crate::{ActiveTheme, StyledExt};
 
@@ -36,6 +39,11 @@ impl Kbd {
         }
     }
 
+    /// The keystroke this tag shows.
+    pub(crate) fn keystroke(&self) -> &Keystroke {
+        &self.stroke
+    }
+
     /// Set the appearance of the keybinding, default is `true`.
     pub fn appearance(mut self, appearance: bool) -> Self {
         self.appearance = appearance;
@@ -62,25 +70,34 @@ impl Kbd {
             None => window.highest_precedence_binding_for_action(action),
         }?;
 
-        if let Some(key) = binding.keystrokes().first() {
-            Some(Self::new(key.as_keystroke().clone()))
-        } else {
-            None
-        }
+        Self::from_binding(&binding)
     }
 
     /// Return the first keybinding for the given action and focus handle.
+    ///
+    /// GPUI resolves the handle in the previously rendered frame, so this
+    /// finds nothing for a handle whose element is drawn for the first time
+    /// in the current frame.
     pub fn binding_for_action_in(
         action: &dyn Action,
         focus_handle: &FocusHandle,
         window: &Window,
     ) -> Option<Self> {
         let binding = window.highest_precedence_binding_for_action_in(action, focus_handle)?;
-        if let Some(key) = binding.keystrokes().first() {
-            Some(Self::new(key.as_keystroke().clone()))
-        } else {
-            None
-        }
+        Self::from_binding(&binding)
+    }
+
+    /// Return the first keybinding for the given action that was registered
+    /// without a key context, so it applies wherever focus is.
+    pub fn global_binding_for_action(action: &dyn Action, window: &Window) -> Option<Self> {
+        let binding = window
+            .highest_precedence_binding_for_action_in_context(action, KeyContext::default())?;
+        Self::from_binding(&binding)
+    }
+
+    fn from_binding(binding: &KeyBinding) -> Option<Self> {
+        let key = binding.keystrokes().first()?;
+        Some(Self::new(key.as_keystroke().clone()))
     }
 
     /// Return the Platform specific keybinding string by KeyStroke
@@ -221,6 +238,9 @@ impl RenderOnce for Kbd {
         }
 
         div()
+            // Lets a test ask whether a given shortcut hint was painted this
+            // frame; a no-op outside test-support builds.
+            .debug_selector(|| format!("kbd:{}", self.stroke.unparse(cx.platform_info().os)))
             .text_color(cx.theme().muted_foreground)
             .bg(cx.theme().tokens.muted)
             .when(self.outline, |this| {
@@ -239,6 +259,7 @@ impl RenderOnce for Kbd {
             .flex_shrink_0()
             .refine_style(&self.style)
             .child(Self::format(&self.stroke))
+            .test_text(Self::format(&self.stroke))
             .into_any_element()
     }
 }
@@ -255,10 +276,7 @@ mod tests {
             assert_eq!(Kbd::format(&Keystroke::parse("cmd--").unwrap()), "⌘-");
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-+").unwrap()), "⌘+");
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-enter").unwrap()), "⌘⏎");
-            assert_eq!(
-                Kbd::format(&Keystroke::parse("secondary-f12").unwrap()),
-                "⌘F12"
-            );
+            assert_eq!(Kbd::format(&Keystroke::parse("cmd-f12").unwrap()), "⌘F12");
             assert_eq!(
                 Kbd::format(&Keystroke::parse("shift-pagedown").unwrap()),
                 "⇧Page Down"

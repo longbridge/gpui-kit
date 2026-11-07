@@ -434,6 +434,107 @@ fn notify_from_an_input_subscription_rebuilds_its_own_view(cx: &mut TestAppConte
     assert_eq!(runtime.metrics().read().script_renders(), 2);
 }
 
+/// `gpui-component`'s `InputState` answers `on(...)` exactly as `gpui-base`'s
+/// does — same events, same payload — and both modules construct with
+/// `Type.new(...)`. Before, the component state had no way to hear Enter at
+/// all, and `InputState.new` was not a function.
+#[cfg(feature = "components")]
+#[gpui::test]
+fn a_component_input_state_reports_change_and_submit(cx: &mut TestAppContext) {
+    const SOURCE: &str = r#"
+import { View } from "gpui-kit";
+import { v_flex, InputState as BaseInputState } from "gpui-base";
+import { Input, InputState } from "gpui-component";
+
+export default class Form extends View {
+  init(_props, cx) {
+    this.changes = 0;
+    this.submits = [];
+    this.field = InputState.new("Name");
+    this.field.on("change", (_event, cx) => {
+      this.changes += 1;
+      cx.notify();
+    });
+    this.field.on("submit", (event, cx) => {
+      this.submits.push(event.shift ? "shift" : "plain");
+      cx.notify();
+    });
+    try {
+      this.field.on("press_enter", () => {});
+    } catch (error) {
+      this.refused = String(error.message);
+    }
+    this.base = BaseInputState.new({});
+  }
+
+  render() {
+    let mixed = "accepted";
+    try {
+      Input.new(this.base);
+    } catch (error) {
+      mixed = String(error.message);
+    }
+    return v_flex()
+      .child(`changes: ${this.changes}; submits: ${this.submits.join(",")}`)
+      .child(`refused: ${this.refused}`)
+      .child(`mixed: ${mixed}`)
+      .child(Input.new(this.field));
+  }
+}
+"#;
+
+    cx.update(crate::components::init);
+    let runtime = crate::components::new_isolated_runtime().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let view_type = runtime
+        .load_source("component-input.js", SOURCE)
+        .expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let view = context
+        .update(|window, cx| runtime.instantiate_view(&view_type, window, cx))
+        .expect("instantiate");
+    render_once(&mut context, &view);
+    assert!(
+        snapshot_text(&mut context, &view).contains("refused: unknown input event `press_enter`"),
+        "an unknown event must name the valid ones"
+    );
+    // A base state shares the kind name and could share the handle number,
+    // so it is refused by name rather than resolved in the wrong table.
+    assert!(
+        snapshot_text(&mut context, &view)
+            .contains("mixed: Input(state) expects the InputState from"),
+        "{}",
+        snapshot_text(&mut context, &view)
+    );
+
+    // The isolated runtime's first retained state is the script's only one.
+    let input = runtime
+        .with_component_state::<Entity<gpui_component::input::InputState>, _>(
+            0,
+            "InputState",
+            Clone::clone,
+        )
+        .expect("the script created an input state");
+    context.update(|_, cx| {
+        input.update(cx, |_, cx| {
+            cx.emit(gpui_base::input::InputEvent::Change);
+            cx.emit(gpui_base::input::InputEvent::PressEnter {
+                secondary: false,
+                shift: true,
+            });
+        });
+    });
+    context.run_until_parked();
+    render_once(&mut context, &view);
+
+    assert!(
+        snapshot_text(&mut context, &view).contains("changes: 1; submits: shift"),
+        "{}",
+        snapshot_text(&mut context, &view)
+    );
+}
+
 #[gpui::test]
 fn notifying_three_times_rebuilds_once(cx: &mut TestAppContext) {
     let (runtime, mut context, view) = script_view(cx, TOGGLE);

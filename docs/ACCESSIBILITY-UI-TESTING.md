@@ -1,8 +1,11 @@
 # Accessibility-driven UI testing
 
-Use the macOS accessibility tree for interactive UI verification. This is the
-default manual testing method for component behavior that depends on focus,
-keyboard input, selection, menus, or other real window-system state.
+When a UI change needs manual interactive verification, use the macOS
+accessibility tree by default for behavior that depends on focus, keyboard
+input, selection, menus, or other real window-system state. Review the relevant
+automated UI coverage first; do not repeat manual checks for behavior those
+tests already cover. Use this guide for uncovered behavior that needs a real
+window-system check.
 
 ## Start the application
 
@@ -58,12 +61,23 @@ Undo                                -> empty
 Redo                                -> value "ab"
 ```
 
+For Input, Textarea and Editor, require the named, typed text node itself to
+match keyboard editor focus. A named outer frame or a window-root focus is not
+equivalent. Exercise both Tab directions with independently focusable prefix
+and suffix buttons, activate those buttons, and confirm they neither keep the
+text node focused nor edit its value. Component-ID queries retain frame geometry
+and addon scopes while reading semantics from that same native editor; labels
+are not a required replacement for an assigned component ID. The developer
+accessibility ID belongs to the semantic editor. Recheck native SetValue after
+read-only/disabled transitions, and verify masked or password-typed content
+never publishes its hidden source as a value.
+
 Also verify that a no-op edit, such as Backspace at offset zero, does not
 destroy an existing redo branch.
 
-## Required completion evidence
+## Manual verification evidence
 
-For UI-affecting changes, report:
+When manual accessibility verification is needed, report:
 
 - the app and story tested;
 - the accessibility roles/labels used to find the controls;
@@ -72,4 +86,6 @@ For UI-affecting changes, report:
 - automated test, formatting, and lint results separately.
 
 Accessibility-driven testing complements Rust tests. It does not replace unit
-or integration coverage for the same state transitions.
+or integration coverage for the same state transitions. In a review, identify
+the specific behavior the automated tests do not cover before requesting a
+manual check; report automated and manual evidence separately.

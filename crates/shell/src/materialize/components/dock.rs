@@ -51,13 +51,13 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, AppContext as _, Div, DragMoveEvent, Empty, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, Refineable as _, Stateful,
-    StatefulInteractiveElement as _, Styled as _, Window, div,
+    IntoElement, ParentElement as _, Refineable as _, Stateful, StatefulInteractiveElement as _,
+    Styled as _, Window, div,
 };
 use gpui_base::dock::{DragPanel, PanelId};
 
 use crate::{
-    dock::{DockChromeHooks, DockCommand, DockContexts, MovingTile, ResizingDock, ResizingTile},
+    dock::{DockChromeHooks, DockCommand, DockContexts, ResizingDock},
     engine::ShellRuntime,
     entities::EntityHandle,
     materialize::{Behavior, Children, StateStyles, warn_ignored_key, warn_unhonoured_a11y},
@@ -86,7 +86,7 @@ pub(in crate::materialize) fn dock_area(
              which are added with add_panel(...) rather than described"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles are ignored on a dock_area: it has no interactive state of its own. \
              Put them on the chrome you draw for it, or on an element around the area"
@@ -122,7 +122,13 @@ pub(in crate::materialize) fn dock_area(
     // failure with no visible cause on screen.
     let mut frame = div().size_full();
     frame.style().refine(&refinement);
-    frame.child(area).into_any_element()
+    frame
+        .child(crate::view::nesting_frame(
+            area.entity_id(),
+            crate::view::DOCK_AREA_LEVELS,
+            area.into_any_element(),
+        ))
+        .into_any_element()
 }
 
 /// Where the dock's own content goes inside the chrome drawn around it.
@@ -254,96 +260,5 @@ fn wire(
                     dock.resize_to(event.event.position, window, cx);
                 }
             }),
-        DockCommand::MoveTile { panel } => {
-            let begin = contexts.clone();
-            let moving = contexts.clone();
-            element
-                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                    if let Some(tile) = begin.tile(panel) {
-                        tile.bring_to_front(window, cx);
-                        tile.begin_move(event.position, window, cx);
-                    }
-                })
-                .on_drag(MovingTile(panel), |drag, _, _, cx| {
-                    cx.stop_propagation();
-                    cx.new(|_| *drag)
-                })
-                .on_drag_move(move |event: &DragMoveEvent<MovingTile>, window, cx| {
-                    if event.drag(cx).0 != panel {
-                        return;
-                    }
-                    if let Some(tile) = moving.tile(panel) {
-                        tile.move_to(event.event.position, window, cx);
-                    }
-                })
-                // A gesture can end with the pointer anywhere, so both halves
-                // are wired; each is a no-op unless this tile is the one moving.
-                .on_mouse_up(MouseButton::Left, {
-                    let contexts = contexts.clone();
-                    move |_, window, cx| {
-                        if let Some(tile) = contexts.tile(panel) {
-                            tile.end_move(window, cx);
-                        }
-                    }
-                })
-                .on_mouse_up_out(MouseButton::Left, move |_, window, cx| {
-                    if let Some(tile) = contexts.tile(panel) {
-                        tile.end_move(window, cx);
-                    }
-                })
-        }
-        DockCommand::ResizeTile { panel, side } => {
-            let begin = contexts.clone();
-            let resizing = contexts.clone();
-            element
-                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                    if let Some(tile) = begin.tile(panel) {
-                        tile.begin_resize(side, event.position, window, cx);
-                    }
-                    cx.stop_propagation();
-                })
-                .on_drag(ResizingTile(panel), |drag, _, _, cx| {
-                    cx.stop_propagation();
-                    cx.new(|_| *drag)
-                })
-                .on_drag_move(move |event: &DragMoveEvent<ResizingTile>, window, cx| {
-                    if event.drag(cx).0 != panel {
-                        return;
-                    }
-                    if let Some(tile) = resizing.tile(panel) {
-                        tile.resize_to(event.event.position, window, cx);
-                    }
-                })
-                .on_mouse_up(MouseButton::Left, {
-                    let contexts = contexts.clone();
-                    move |_, window, cx| {
-                        if let Some(tile) = contexts.tile(panel) {
-                            tile.end_resize(window, cx);
-                        }
-                    }
-                })
-                .on_mouse_up_out(MouseButton::Left, move |_, window, cx| {
-                    if let Some(tile) = contexts.tile(panel) {
-                        tile.end_resize(window, cx);
-                    }
-                })
-        }
-        DockCommand::RaiseTile { panel } => {
-            element.on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                if let Some(tile) = contexts.tile(panel) {
-                    tile.bring_to_front(window, cx);
-                }
-            })
-        }
-        DockCommand::ToggleTileZoom { panel } => element.on_click(move |_, window, cx| {
-            if let Some(tile) = contexts.tile(panel) {
-                tile.toggle_zoom(window, cx);
-            }
-        }),
-        DockCommand::CloseTile { panel } => element.on_click(move |_, window, cx| {
-            if let Some(tile) = contexts.tile(panel) {
-                tile.close(window, cx);
-            }
-        }),
     }
 }

@@ -27,7 +27,7 @@
 //! registered inside one would outlive the temporary description unpredictably.
 //! Instead a chrome element carries a
 //! [`DockCommand`](crate::dock::DockCommand) — `select_tab(group, i)`,
-//! `close_panel(group, id)`, `move_tile(tile)` — which names a container and
+//! `close_panel(group, id)`, `toggle_dock(dock)` — which names a container and
 //! what to ask it, and is resolved against the contexts the last drawn frame
 //! recorded. Nothing about it is a script value, so there is nothing to retire.
 //!
@@ -40,22 +40,23 @@
 //! read on the way out. Both are ordinary methods on the view class, because a
 //! panel *is* a view — there is no second object to introduce.
 
+use crate::engine::quickjs::js_error;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Empty, Entity, EntityId, IntoElement as _,
-    ParentElement as _, Styled as _, Window, div, point, px, size,
+    AnyElement, App, AppContext as _, Empty, Entity, EntityId, IntoElement as _,
+    ParentElement as _, Styled as _, Window, div, px,
 };
 use gpui_base::dock::{
-    DockContext, DockEvent, DockPlacement, DropIndicator, PanelId, TabGroupContext, TileContext,
+    DockContext, DockEvent, DockPlacement, DropIndicator, PanelId, TabGroupContext,
 };
-use rquickjs::{Ctx, Exception, Object, Persistent, Result as JsResult, Value, function::Func};
+use rquickjs::{Ctx, Object, Persistent, Result as JsResult, Value, function::Func};
 use serde_json::{Value as Json, json};
 
 use crate::{
     dock::{
         DockChrome, PanelScript, ScriptDockSkin, ScriptPanel, dock_data, drop_indicator_data,
-        tab_group_data, tile_data,
+        tab_group_data,
     },
     entities::EntityHandle,
     materialize::dock_placement,
@@ -90,7 +91,7 @@ pub fn install(
                     .transpose()?
                     .map(|value| {
                         usize::try_from(value).map_err(|_| {
-                            Exception::throw_range(
+                            js_error::range_error(
                                 &ctx,
                                 "DockArea.new version exceeds this platform's index range",
                             )
@@ -111,7 +112,7 @@ pub fn install(
                         .map_err(|_| super::entity_api::entity_limit_reached(&ctx))
                 })
                 .ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "DockArea.new(id) needs a live host call; call it from init() or an \
                          event handler",
@@ -207,9 +208,6 @@ pub fn install(
                                 gpui_base::dock::PaneRef::Tabs { panels, active_ix } => {
                                     (panels.to_vec(), Some(active_ix))
                                 }
-                                gpui_base::dock::PaneRef::Tiles { panels } => {
-                                    (panels.iter().map(|tile| tile.panel()).collect(), None)
-                                }
                                 gpui_base::dock::PaneRef::Split { .. } => return,
                             };
                             for (index, id) in panels.into_iter().enumerate() {
@@ -247,7 +245,7 @@ pub fn install(
                 let state = scope::with_current_app(|cx| area.read(cx).dump(cx))
                     .ok_or_else(|| needs_call(&ctx, "dump()"))?;
                 serde_json::to_string(&state).map_err(|error| {
-                    Exception::throw_type(&ctx, &format!("this layout has no JSON form: {error}"))
+                    js_error::type_error(&ctx, &format!("this layout has no JSON form: {error}"))
                 })
             },
         ),
@@ -270,7 +268,7 @@ pub fn install(
                     return Err(released(&ctx));
                 }
                 let state = serde_json::from_value(state.0).map_err(|error| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         &format!("this is not a layout written by dump(): {error}"),
                     )
@@ -513,8 +511,6 @@ pub(in crate::engine) struct PanelOptions {
     name: String,
     placement: String,
     size: Option<f32>,
-    /// Present only for a tile: bounds name a place only a tiles canvas has.
-    bounds: Option<Bounds<gpui::Pixels>>,
     closable: bool,
     zoomable: bool,
     visible: bool,
@@ -523,28 +519,11 @@ pub(in crate::engine) struct PanelOptions {
 impl<'js> rquickjs::FromJs<'js> for PanelOptions {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
         let object = value.as_object().ok_or_else(|| {
-            Exception::throw_type(ctx, "add_panel(view, options) expects an options object")
+            js_error::type_error(ctx, "add_panel(view, options) expects an options object")
         })?;
-        let bounds = match object.get::<_, Option<Object>>("bounds")? {
-            Some(bounds) => {
-                let x = bounds.get::<_, f32>("x")?;
-                let y = bounds.get::<_, f32>("y")?;
-                let width = bounds.get::<_, f32>("width")?;
-                let height = bounds.get::<_, f32>("height")?;
-                finite_number(ctx, x, "add_panel bounds.x")?;
-                finite_number(ctx, y, "add_panel bounds.y")?;
-                finite_non_negative(ctx, width, "add_panel bounds.width")?;
-                finite_non_negative(ctx, height, "add_panel bounds.height")?;
-                Some(Bounds {
-                    origin: point(px(x), px(y)),
-                    size: size(px(width), px(height)),
-                })
-            }
-            None => None,
-        };
         let name = object.get::<_, String>("name")?;
         if name.is_empty() {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "add_panel(view, options) expects a non-empty name",
             ));
@@ -559,7 +538,6 @@ impl<'js> rquickjs::FromJs<'js> for PanelOptions {
                 .get::<_, Option<String>>("placement")?
                 .unwrap_or_else(|| "center".to_owned()),
             size,
-            bounds,
             closable: object.get::<_, Option<bool>>("closable")?.unwrap_or(true),
             zoomable: object.get::<_, Option<bool>>("zoomable")?.unwrap_or(true),
             visible: object.get::<_, Option<bool>>("visible")?.unwrap_or(true),
@@ -579,7 +557,7 @@ struct PanelClass(Persistent<Object<'static>>);
 impl<'js> rquickjs::FromJs<'js> for PanelClass {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
         let class = value.as_object().ok_or_else(|| {
-            Exception::throw_type(
+            js_error::type_error(
                 ctx,
                 "register_panel(name, Class) expects the View subclass the panel is rebuilt from",
             )
@@ -625,8 +603,6 @@ enum ChromeSlotKey {
     /// [`DropIndicator`] carries no node id to key on either.
     DropIndicator,
     Dock(DockPlacement),
-    TileDragBar(u64),
-    TileResizeHandles(u64),
 }
 
 struct ChromeSpec {
@@ -801,36 +777,6 @@ impl DockChrome for ScriptChrome {
             (None, None) => Empty.into_any_element(),
         }
     }
-
-    fn tile_drag_bar(&self, tile: &TileContext, window: &mut Window, cx: &mut App) -> AnyElement {
-        let hooks = self.slots.get();
-        let payload = tile_data(tile, cx);
-        self.draw(
-            ChromeSlotKey::TileDragBar(tile.panel_id().as_u64()),
-            hooks.tile_drag_bar,
-            payload,
-            window,
-            cx,
-        )
-        .unwrap_or_else(|| Empty.into_any_element())
-    }
-
-    fn tile_resize_handles(
-        &self,
-        tile: &TileContext,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Option<AnyElement> {
-        let hooks = self.slots.get();
-        let payload = tile_data(tile, cx);
-        self.draw(
-            ChromeSlotKey::TileResizeHandles(tile.panel_id().as_u64()),
-            hooks.tile_resize_handles,
-            payload,
-            window,
-            cx,
-        )
-    }
 }
 
 /// The script side of one registered panel: a view class, and the two methods
@@ -936,7 +882,7 @@ fn install_elements(globals: &Object<'_>, runtime: std::rc::Weak<ShellRuntime>) 
             let runtime = alive(&ctx, &area)?;
             let live = { runtime.entities().dock(handle).is_some() };
             if !live {
-                return Err(Exception::throw_type(
+                return Err(js_error::type_error(
                     &ctx,
                     "this dock area has been released and can no longer be drawn",
                 ));
@@ -944,7 +890,7 @@ fn install_elements(globals: &Object<'_>, runtime: std::rc::Weak<ShellRuntime>) 
             runtime
                 .arena_mut()
                 .push_dock_area(handle)
-                .map_err(|error| Exception::throw_type(&ctx, &error.to_string()))
+                .map_err(|error| js_error::type_error(&ctx, &error.to_string()))
         }),
     )?;
 
@@ -967,12 +913,11 @@ fn subscribe_dock(
     handler: super::entity_api::Handler,
 ) -> JsResult<bool> {
     if name != "layout_changed" {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "unknown dock event `{name}`; the only one is \"layout_changed\", which fires on \
-                 every edit — including each step of a tile drag, so save on a timer rather than \
-                 on every one"
+                 every edit, so save on a timer rather than on every one"
             ),
         ));
     }
@@ -1008,7 +953,7 @@ fn qualified_name(panel: &str) -> String {
 
 fn placement_of(ctx: &Ctx<'_>, name: &str) -> JsResult<DockPlacement> {
     dock_placement(name).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "`{name}` is not a dock placement; expected \"center\", \"left\", \"right\" or \
@@ -1031,18 +976,18 @@ fn area_of(
 fn alive(ctx: &Ctx<'_>, runtime: &std::rc::Weak<ShellRuntime>) -> JsResult<Rc<ShellRuntime>> {
     runtime
         .upgrade()
-        .ok_or_else(|| Exception::throw_type(ctx, "the shell runtime is no longer available"))
+        .ok_or_else(|| js_error::type_error(ctx, "the shell runtime is no longer available"))
 }
 
 fn released(ctx: &Ctx<'_>) -> rquickjs::Error {
-    Exception::throw_type(
+    js_error::type_error(
         ctx,
         "this dock area has been released; a handle cannot be used after release()",
     )
 }
 
 fn needs_call(ctx: &Ctx<'_>, api: &str) -> rquickjs::Error {
-    Exception::throw_type(
+    js_error::type_error(
         ctx,
         &format!("{api} needs a live host call; call it from init() or an event handler"),
     )
@@ -1050,7 +995,7 @@ fn needs_call(ctx: &Ctx<'_>, api: &str) -> rquickjs::Error {
 
 fn finite_number(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
     if !value.is_finite() {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("{api} expects a finite number"),
         ));
@@ -1061,7 +1006,7 @@ fn finite_number(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
 fn finite_non_negative(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
     finite_number(ctx, value, api)?;
     if value < 0.0 {
-        return Err(Exception::throw_range(
+        return Err(js_error::range_error(
             ctx,
             &format!("{api} expects a non-negative number"),
         ));
@@ -1072,7 +1017,7 @@ fn finite_non_negative(ctx: &Ctx<'_>, value: f32, api: &str) -> JsResult<()> {
 fn non_negative_integer(ctx: &Ctx<'_>, value: f64, api: &str) -> JsResult<u64> {
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 9_007_199_254_740_991.0
     {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("{api} expects a whole, non-negative safe integer"),
         ));
@@ -1092,7 +1037,7 @@ fn refuse_in_render(ctx: &Ctx<'_>, api: &str) -> JsResult<()> {
         scope::current_phase(),
         Some(ScopePhase::Render | ScopePhase::Layout)
     ) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "{api} changes the layout and cannot be called while one is being described or \
@@ -1194,9 +1139,8 @@ pub(super) fn apply_edit(
                 }
                 panel
             });
-            area.update(cx, |area, cx| match options.bounds {
-                Some(bounds) => area.add_tile(panel, placement, bounds, window, cx),
-                None => area.add_panel(panel, placement, options.size.map(px), window, cx),
+            area.update(cx, |area, cx| {
+                area.add_panel(panel, placement, options.size.map(px), window, cx)
             });
             Ok(())
         }

@@ -13,7 +13,7 @@
 //! Render it wherever it should appear, guarded by your own flag:
 //!
 //! ```no_run
-//! # use gpui::*;
+//! # use gpui::{prelude::*, *};
 //! # use gpui_fps::fps_monitor;
 //! # struct Example { show_fps: bool }
 //! # impl Render for Example {
@@ -33,6 +33,9 @@
 //!
 //! This crate depends only on `gpui`, so it can be used from any GPUI
 //! application.
+
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
 
 #[cfg(not(target_family = "wasm"))]
 mod gpu;
@@ -61,7 +64,7 @@ use gpui::{App, AppContext as _, Entity, Global, Window, WindowId};
 /// when it should be visible:
 ///
 /// ```no_run
-/// # use gpui::*;
+/// # use gpui::{prelude::*, *};
 /// # use gpui_fps::fps_monitor;
 /// # struct Example { show_fps: bool }
 /// # impl Render for Example {

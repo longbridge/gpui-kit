@@ -13,6 +13,31 @@ decorations, highlighting, search infrastructure, diagnostics, and LSP hooks.
 Use [Input](./input.md) for single-line values and
 [Textarea](./textarea.md) for ordinary multi-line text.
 
+## Language editing rules
+
+The Base editor accepts `LanguageConfig` and independent `auto_close` / `smart_indent`
+preferences. It loads registered language configurations without a parser;
+Component installs a `LanguageProvider` for built-in names, defaults, and syntax
+providers during initialization. Base clients can install their own service
+with `set_language_provider`; configurations are set with `set_language_config`.
+See [Language editing rules](../../component/editor.md#language-editing-rules)
+for the configuration fields and language registration; import the same types
+from `gpui_kit::base::input` when using Base directly.
+
+
+## Keyboard shortcuts
+
+The base and styled editors share keyboard and mouse behavior. See
+[Keyboard shortcuts and column selection](../../component/editor.md#keyboard-shortcuts-and-column-selection)
+for the macOS, Linux, and Windows bindings, multi-cursor editing, and column-selection details.
+
+## Search
+
+The editor has a built-in search panel. Press `Ctrl-F` (Windows/Linux) or
+`Cmd-F` (macOS) while the editor is focused to open it. See
+[Search](../../component/editor.md#search) for the programmatic API
+(`open_search`, `close_search`, `set_searchable`) and read-only behavior.
+
 ## Import
 
 ```rust
@@ -53,7 +78,20 @@ let decorations = editor.update(cx, |state, cx| {
 ```
 
 Decoration collections track ranges as the text changes. Keep the returned
-collection alive for as long as its decorations should remain active.
+handle to update or clear its entries; dropping it does not remove decorations.
+
+`create_range_decorations_collection` creates an independent collection of
+paint-only `RangeDecoration` fills or frames. Text and geometric collections
+share UTF-8 normalization and edit tracking. See
+[Geometric range decorations](../../component/editor.md#geometric-range-decorations)
+for ownership, boundary affinity, deletion, undo/redo, folding, layering, and
+indexing semantics; import the same types from `gpui_kit::base::input`.
+
+Use `create_gutter_decorations_collection` to mark whole lines in a strip before
+the line numbers. Use `create_overview_ruler_decorations_collection` to mark lines
+on the vertical scrollbar track. Monaco calls this track the overview ruler. These
+collections keep empty ranges, which mark line boundaries. See
+[Gutter and overview ruler decorations](../../component/editor.md#gutter-and-overview-ruler-decorations).
 
 ## Highlighting and language features
 
@@ -88,14 +126,14 @@ div()
 
 A relative `line_height` keeps the rows in step with the glyphs at any size; an
 absolute one stays put. For a ready-made monospace treatment, see the
-[`gpui-component` Editor](../../docs/components/editor.md).
+[`gpui-component` Editor](../../component/editor.md).
 
 ## Presentation
 
 The application owns editor colors, gutter appearance, fold icons, and overlay
 content. Use `InputEditorStyle`, `FoldIconRenderer`, and the provider traits to
 connect those adapters. For the repository's ready-made visual treatment, see
-the [`gpui-component` Editor](../../docs/components/editor.md).
+the [`gpui-component` Editor](../../component/editor.md).
 
 ## Runnable example
 

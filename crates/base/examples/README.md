@@ -4,6 +4,9 @@
 component. It selects one component from the shared `showcase` implementation, so native and
 WebAssembly previews exercise the same Rust code without producing one binary per component.
 
+These low-level fixtures initialize Base and use GPUI's window API directly.
+These examples depend on Base and GPUI without depending on the higher-level Kit crate.
+
 Run an individual component natively:
 
 ```bash
@@ -18,7 +21,7 @@ Run without a component slug to show the overview:
 cargo run -p gpui-base-examples
 ```
 
-Motion has a separate example because it demonstrates continuous behavior rather than a component catalog entry. It contains focused pages for transitions, springs, keyframes, presence, and stagger:
+Motion has a separate example because it demonstrates continuous behavior rather than a component catalog entry. It contains focused pages for transitions, springs, keyframes, presence, stagger, and sequences:
 
 ```bash
 cargo run -p gpui-base-examples --bin motion
@@ -31,9 +34,9 @@ component using the `?component=<slug>` query parameter.
 
 `dock` is a showcase component like the rest, but a larger one: a dockable workspace — nested
 splits, tab groups, and a bottom dock — built on `gpui-base` alone. Because the base dock draws
-nothing, `showcase/components/dock.rs` implements the `DockAreaRenderer`, `TabGroupRenderer`, and
-`TilesRenderer` traits itself, which is what makes it worth reading: it is the smallest complete
-skin over the dock's renderer seam.
+nothing, `showcase/components/dock.rs` implements the `DockAreaRenderer` and `TabGroupRenderer`
+traits itself, which is what makes it worth reading: it is the smallest complete skin over the
+dock's renderer seam.
 
 ```bash
 cargo run -p gpui-base dock

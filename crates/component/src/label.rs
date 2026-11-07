@@ -5,6 +5,8 @@ use gpui::{
     Styled, StyledText, Window, div, prelude::FluentBuilder, rems,
 };
 
+use gpui_base::TestTextExt as _;
+
 use crate::{ActiveTheme, StyledExt};
 
 const MASKED: &'static str = "•";
@@ -151,6 +153,10 @@ impl Label {
         length: usize,
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
+        if self.masked {
+            return None;
+        }
+
         let ranges = self.highlight_ranges(length);
         if ranges.is_empty() {
             return None;
@@ -209,12 +215,80 @@ impl RenderOnce for Label {
             .child(
                 StyledText::new(&text).when_some(highlights, |this, hl| this.with_highlights(hl)),
             )
+            .test_text(text)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MaskedLabels;
+
+    impl gpui::Render for MaskedLabels {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div()
+                .child(Label::new("Hello").secondary("World").masked(true))
+                .child(Label::new("Hello").highlights("ell").masked(true))
+                .child(
+                    Label::new("é🙂")
+                        .secondary("世界")
+                        .highlights("🙂 世")
+                        .masked(true),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn masked_secondary_text_and_highlights_render(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            let label = Label::new("é🙂")
+                .secondary("世界")
+                .highlights("🙂 世")
+                .masked(true);
+            assert!(
+                label
+                    .measure_highlights(label.full_text().len(), cx)
+                    .is_none()
+            );
+        });
+        let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
+        cx.update(|window, cx| crate::test_redraw(window, cx));
+    }
+
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn records_displayed_text_under_its_identified_parent(cx: &mut gpui::TestAppContext) {
+        use gpui::InteractiveElement as _;
+
+        struct Labels;
+        impl gpui::Render for Labels {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+                    .id("box")
+                    .child(Label::new("Hello"))
+                    .child(Label::new("secret").masked(true))
+            }
+        }
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| Labels);
+        // Root starts each frame; this window has none.
+        cx.update(|window, cx| {
+            gpui_base::test_support::begin_frame(window);
+            crate::test_redraw(window, cx)
+        });
+        cx.update(|window, _| {
+            let texts: Vec<_> = gpui_base::test_support::texts(window)
+                .iter()
+                .map(|text| {
+                    assert!(text.path().contains(&"box".into()), "{:?}", text.path());
+                    text.text().to_owned()
+                })
+                .collect();
+            assert_eq!(texts, ["Hello", "••••••"]);
+        });
+    }
 
     #[test]
     fn test_highlight_ranges() {

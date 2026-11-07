@@ -23,7 +23,10 @@ fi
 # Step 1: Build WASM
 echo -e "${GREEN}Step 1: Building WASM...${NC}"
 cd "$PROJECT_ROOT"
-cargo build --target wasm32-unknown-unknown $RELEASE_FLAG
+# ButtonStory's large render tree needs more than wasm-ld's default 1 MiB
+# stack in debug builds. Apply this at the final link, for both build modes.
+cargo rustc -p gpui-component-story-web --target wasm32-unknown-unknown $RELEASE_FLAG -- \
+    -C link-arg=-zstack-size=8388608
 
 # Determine the build directory
 if [[ "$RELEASE_FLAG" == "--release" ]]; then

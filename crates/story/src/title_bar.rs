@@ -121,32 +121,20 @@ impl FontSizeSelector {
         }
     }
 
-    fn on_select_font(
-        &mut self,
-        font_size: &SelectFont,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        Theme::global_mut(cx).font_size = px(font_size.0 as f32);
-        Theme::sync_base(cx);
-        window.refresh();
+    fn on_select_font(&mut self, font_size: &SelectFont, _: &mut Window, cx: &mut Context<Self>) {
+        Theme::update(cx, |theme| theme.font_size = px(font_size.0 as f32));
     }
 
-    fn on_select_radius(
-        &mut self,
-        radius: &SelectRadius,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        Theme::global_mut(cx).radius = px(radius.0 as f32);
-        Theme::global_mut(cx).radius_lg = if cx.theme().radius > px(0.) {
-            cx.theme().radius + px(2.)
-        } else {
-            px(0.)
-        };
-        // The scrollbar paints from the Base layer's own copy of the theme.
-        Theme::sync_base(cx);
-        window.refresh();
+    fn on_select_radius(&mut self, radius: &SelectRadius, _: &mut Window, cx: &mut Context<Self>) {
+        let radius = px(radius.0 as f32);
+        Theme::update(cx, |theme| {
+            theme.radius = radius;
+            theme.radius_lg = if radius > px(0.) {
+                radius + px(2.)
+            } else {
+                px(0.)
+            };
+        });
     }
 
     fn on_select_scrollbar_mode(
@@ -162,12 +150,12 @@ impl FontSizeSelector {
     fn on_toggle_list_active_highlight(
         &mut self,
         _: &ToggleListActiveHighlight,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let theme = Theme::global_mut(cx);
-        theme.list.active_highlight = !theme.list.active_highlight;
-        window.refresh();
+        Theme::update(cx, |theme| {
+            theme.list.active_highlight = !theme.list.active_highlight
+        });
     }
 
     fn on_toggle_fps_monitor(
@@ -216,45 +204,55 @@ impl Render for FontSizeSelector {
                     .small()
                     .ghost()
                     .icon(IconName::Settings2)
-                    .dropdown_menu(move |this, _, cx| {
-                        this.scrollable(true)
-                            .check_side(Side::Right)
-                            .max_h(px(480.))
-                            .label("Font Size")
-                            .menu_with_check("Large", font_size == 18, Box::new(SelectFont(18)))
-                            .menu_with_check(
-                                "Medium (default)",
-                                font_size == 16,
-                                Box::new(SelectFont(16)),
-                            )
-                            .menu_with_check("Small", font_size == 14, Box::new(SelectFont(14)))
-                            .separator()
-                            .label("Border Radius")
-                            .menu_with_check("8px", radius == 8, Box::new(SelectRadius(8)))
-                            .menu_with_check(
-                                "6px (default)",
-                                radius == 6,
-                                Box::new(SelectRadius(6)),
-                            )
-                            .menu_with_check("4px", radius == 4, Box::new(SelectRadius(4)))
-                            .menu_with_check("0px", radius == 0, Box::new(SelectRadius(0)))
-                            .separator()
-                            .label("Scrollbar")
-                            .menu_with_check(
-                                "Scrolling to show",
-                                scroll_show == ScrollbarMode::Scrolling,
-                                Box::new(SelectScrollbarMode(ScrollbarMode::Scrolling)),
-                            )
-                            .menu_with_check(
-                                "Hover to show",
-                                scroll_show == ScrollbarMode::Hover,
-                                Box::new(SelectScrollbarMode(ScrollbarMode::Hover)),
-                            )
-                            .menu_with_check(
-                                "Always show",
-                                scroll_show == ScrollbarMode::Always,
-                                Box::new(SelectScrollbarMode(ScrollbarMode::Always)),
-                            )
+                    .dropdown_menu(move |this, window, cx| {
+                        this.check_side(Side::Right)
+                            .submenu("Font Size", window, cx, move |menu, _, _| {
+                                menu.check_side(Side::Right)
+                                    .menu_with_check(
+                                        "Large",
+                                        font_size == 18,
+                                        Box::new(SelectFont(18)),
+                                    )
+                                    .menu_with_check(
+                                        "Medium (default)",
+                                        font_size == 16,
+                                        Box::new(SelectFont(16)),
+                                    )
+                                    .menu_with_check(
+                                        "Small",
+                                        font_size == 14,
+                                        Box::new(SelectFont(14)),
+                                    )
+                            })
+                            .submenu("Border Radius", window, cx, move |menu, _, _| {
+                                menu.check_side(Side::Right)
+                                    .menu_with_check("8px", radius == 8, Box::new(SelectRadius(8)))
+                                    .menu_with_check(
+                                        "6px (default)",
+                                        radius == 6,
+                                        Box::new(SelectRadius(6)),
+                                    )
+                                    .menu_with_check("4px", radius == 4, Box::new(SelectRadius(4)))
+                                    .menu_with_check("0px", radius == 0, Box::new(SelectRadius(0)))
+                            })
+                            .submenu("Scrollbar", window, cx, move |menu, _, _| {
+                                menu.check_side(Side::Right)
+                                    .menu_with_check(
+                                        "Scrolling to show",
+                                        scroll_show == ScrollbarMode::Scrolling,
+                                        Box::new(SelectScrollbarMode(ScrollbarMode::Scrolling)),
+                                    )
+                                    .menu_with_check(
+                                        "Hover to show",
+                                        scroll_show == ScrollbarMode::Hover,
+                                        Box::new(SelectScrollbarMode(ScrollbarMode::Hover)),
+                                    )
+                                    .menu_with_check(
+                                        "Always show",
+                                        scroll_show == ScrollbarMode::Always,
+                                        Box::new(SelectScrollbarMode(ScrollbarMode::Always)),
+                                    )
+                            })
                             .separator()
                             .menu_with_check(
                                 "List Active Highlight",

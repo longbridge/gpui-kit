@@ -1,10 +1,13 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Root, h_flex,
+    ActiveTheme as _, IconName, WindowExt as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::*;
-use gpui_wry::WebView;
+use gpui_webview::WebView;
 
 pub struct Example {
     focus_handle: FocusHandle,
@@ -19,36 +22,7 @@ impl Example {
             #[cfg(any(debug_assertions, feature = "inspector"))]
             let builder = builder.with_devtools(true);
 
-            #[cfg(not(any(
-                target_os = "windows",
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "android"
-            )))]
-            let webview = {
-                use gtk::prelude::*;
-                use wry::WebViewBuilderExtUnix;
-                // borrowed from https://github.com/tauri-apps/wry/blob/dev/examples/gtk_multiwebview.rs
-                // doesn't work yet
-                // TODO: How to initialize this fixed?
-                let fixed = gtk::Fixed::builder().build();
-                fixed.show_all();
-                builder.build_gtk(&fixed).unwrap()
-            };
-            #[cfg(any(
-                target_os = "windows",
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "android"
-            ))]
-            let webview = {
-                use raw_window_handle::HasWindowHandle;
-
-                let window_handle = window.window_handle().expect("No window handle");
-                builder.build_as_child(&window_handle).unwrap()
-            };
-
-            WebView::new(webview, window, cx)
+            WebView::build(builder, window, cx).expect("Failed to create WebView")
         });
 
         let address_input =
@@ -88,10 +62,15 @@ impl Example {
         self.webview.update(cx, |webview, _| webview.hide())
     }
 
-    #[allow(unused)]
-    fn go_back(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn go_back(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.webview.update(cx, |webview, _| {
             webview.back().unwrap();
+        });
+    }
+
+    fn go_forward(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.webview.update(cx, |webview, _| {
+            webview.forward().unwrap();
         });
     }
 }
@@ -114,7 +93,45 @@ impl Render for Example {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(Input::new(&self.address_input)),
+                    .child(
+                        Button::new("back")
+                            .ghost()
+                            .icon(IconName::ChevronLeft)
+                            .on_click(cx.listener(Self::go_back)),
+                    )
+                    .child(
+                        Button::new("forward")
+                            .ghost()
+                            .icon(IconName::ChevronRight)
+                            .on_click(cx.listener(Self::go_forward)),
+                    )
+                    .child(Input::new(&self.address_input))
+                    .child(
+                        Button::new("more")
+                            .ghost()
+                            .icon(IconName::Ellipsis)
+                            .dropdown_menu({
+                                let webview = self.webview.clone();
+                                move |menu, _, _| {
+                                    let reload = webview.clone();
+                                    menu.item(PopupMenuItem::new("Reload").on_click(
+                                        move |_, _, cx| {
+                                            let _ = reload.read(cx).raw().reload();
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("About").on_click(|_, window, cx| {
+                                            window.open_dialog(cx, |dialog, _, _| {
+                                                dialog.title("About").child(
+                                                    "A WebView embedded in a GPUI Kit window.",
+                                                )
+                                            });
+                                        }),
+                                    )
+                                }
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -134,17 +151,19 @@ fn main() {
         std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "true");
     }
 
-    gpui_kit::application().run(move |cx| {
+    // WebKitGTK embeds only into X11 windows, so use XWayland in a Wayland session.
+    #[cfg(target_os = "linux")]
+    let app = gpui_kit::platform::linux(WindowingModes::X11);
+    #[cfg(not(target_os = "linux"))]
+    let app = gpui_kit::application();
+
+    app.with_assets(gpui_kit::assets::Assets).run(move |cx| {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = Example::new(window, cx);
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            Example::new(window, cx)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

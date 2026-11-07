@@ -1,7 +1,7 @@
 use std::{ops::Range, time::Duration};
 
 use gpui::{
-    AnyElement, App, Axis, Context, ElementId, Entity, FollowMode, Hsla, InteractiveElement as _,
+    AnyElement, App, Context, ElementId, Entity, FollowMode, Hsla, InteractiveElement as _,
     IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
@@ -9,10 +9,7 @@ use gpui::{
 use gpui_base::motion::{Transition, transition};
 
 use crate::{ActiveTheme as _, Disableable as _, IconName, StyledExt as _, button::Button};
-use crate::{
-    button::ButtonVariants as _,
-    scroll::{ScrollableElement as _, ScrollableMask},
-};
+use crate::{button::ButtonVariants as _, scroll::ScrollableElement as _};
 
 const LIST_OVERDRAW: gpui::Pixels = px(400.);
 const JUMP_BUTTON_TRANSITION: Duration = Duration::from_millis(200);
@@ -66,6 +63,17 @@ impl MessageScrollerState {
         self.list_state.is_following_tail()
     }
 
+    /// Return the row at the top of the viewport and how far into it the list
+    /// is scrolled.
+    ///
+    /// Wheel, trackpad, and scrollbar scrolls and [`Self::scroll_to_item`]
+    /// update it at once. [`Self::scroll_to_end`] and tail following settle it
+    /// when the list next lays out; right after `scroll_to_end`, `item_ix` is
+    /// [`Self::item_count`] until then.
+    pub fn logical_scroll_top(&self) -> ListOffset {
+        self.list_state.logical_scroll_top()
+    }
+
     /// Reset the list to `item_count` rows.
     pub fn reset(&mut self, item_count: usize, cx: &mut Context<Self>) {
         self.list_state.reset(item_count);
@@ -88,6 +96,7 @@ impl MessageScrollerState {
         }
 
         let neighbor = old_range.start.checked_sub(1);
+        let touches_start = old_range.start == 0;
         self.list_state.splice(old_range, count);
 
         // The default row wrapper pads every row except the last, so a row
@@ -98,6 +107,16 @@ impl MessageScrollerState {
             self.list_state.remeasure_items(last..last + 1);
             if let Some(neighbor) = neighbor.filter(|neighbor| *neighbor != last) {
                 self.list_state.remeasure_items(neighbor..neighbor + 1);
+            }
+        }
+
+        // A surviving former first row may have lost its list inset, or a
+        // surviving row may have become the first after a removal.
+        if touches_start {
+            for index in [0, count] {
+                if index < self.list_state.item_count() {
+                    self.list_state.remeasure_items(index..index + 1);
+                }
             }
         }
 
@@ -334,9 +353,19 @@ impl RenderOnce for MessageScroller {
         // GPUI's `list` lays rows out at the full list width and offsets them
         // only by vertical padding, so the horizontal component of the list
         // style must be carried by every row wrapper instead.
+        //
+        // The vertical padding rides on the rows as well. A list measures its
+        // scroll extent from its items alone, so a list that carries padding
+        // of its own reports a scroll range that stops short of its end: the
+        // scrollbar thumb can never reach the last row, the tail never
+        // resumes, and the list never reports itself as scrolled to the end.
+        // Padding on the rows is part of the content, so the extent covers
+        // it.
         let mut list_style = self.list_style;
         let row_inset_left = list_style.padding.left.take();
         let row_inset_right = list_style.padding.right.take();
+        let row_inset_top = list_style.padding.top.take();
+        let row_inset_bottom = list_style.padding.bottom.take();
 
         // Read the count outside the row closure: the list holds a mutable
         // borrow of its state while rendering rows, so the closure must not
@@ -345,20 +374,29 @@ impl RenderOnce for MessageScroller {
         let list = list(list_state.clone(), move |index, window, cx| {
             div()
                 .w_full()
-                .min_w_0()
-                .px_3()
-                // Spacing between rows only, like a CSS gap: the list's own
-                // bottom padding owns the gap after the last row.
-                .when(index + 1 < item_count, |this| this.pb_8())
-                .when_some(row_inset_left, |this, left| this.pl(left))
-                .when_some(row_inset_right, |this, right| this.pr(right))
-                .refine_style(&row_style)
-                .child(renderer(index, window, cx))
+                .when(index == 0, |this| match row_inset_top {
+                    Some(top) => this.pt(top),
+                    None => this.pt_2(),
+                })
+                .when(index + 1 == item_count, |this| match row_inset_bottom {
+                    Some(bottom) => this.pb(bottom),
+                    None => this.pb_2(),
+                })
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .px_3()
+                        .when(index + 1 < item_count, |this| this.pb_8())
+                        .when_some(row_inset_left, |this, left| this.pl(left))
+                        .when_some(row_inset_right, |this, right| this.pr(right))
+                        .refine_style(&row_style)
+                        .child(renderer(index, window, cx)),
+                )
                 .into_any_element()
         })
         .size_full()
         .min_h_0()
-        .py_2()
         .refine_style(&list_style);
 
         let viewport = div()
@@ -369,7 +407,17 @@ impl RenderOnce for MessageScroller {
             .size_full()
             .min_h_0()
             .min_w_0()
-            .child(list)
+            .child(
+                // The bounce scrolls the list itself, past the list's own
+                // scroll handler; tell the state, as that handler would.
+                gpui_base::ScrollBounce::new((root_id.clone(), "bounce"), &list_state, list)
+                    .on_scroll({
+                        let state = self.state.downgrade();
+                        move |_, cx| {
+                            let _ = state.update(cx, |_, cx| cx.notify());
+                        }
+                    }),
+            )
             // The fade sits above the rows but below the scrollbar and the
             // jump button, so neither control is washed out by it.
             .when_some(
@@ -401,11 +449,6 @@ impl RenderOnce for MessageScroller {
             .min_h_0()
             .overflow_hidden()
             .child(viewport)
-            // Keep vertical wheel scrolling from leaking into an ancestor
-            // scroller (like in Table): the mask consumes vertical-dominant
-            // wheel events while the list can move and chains to the ancestor
-            // only at the edges.
-            .child(ScrollableMask::new(Axis::Vertical, &list_state).id(root_id.clone()))
             .when(self.jump_button && jump_button_visibility > 0., |this| {
                 let state = self.state.clone();
 
@@ -481,6 +524,184 @@ mod tests {
                 assert!(state.is_following_tail());
             });
         });
+    }
+
+    struct ScrollerHarness {
+        state: Entity<MessageScrollerState>,
+    }
+
+    impl gpui::Render for ScrollerHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size(px(400.)).child(
+                MessageScroller::new("messages", self.state.clone(), |_, _, _| div().h(px(40.)))
+                    .scrollbar(false)
+                    .jump_button(false),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn test_logical_scroll_top_reports_the_row_at_the_top(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.new(|cx| MessageScrollerState::new(30, cx));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| ScrollerHarness { state }
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+        let top = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|_, cx| state.read(cx).logical_scroll_top())
+        };
+        draw(cx);
+
+        // Following the tail, layout settles on the row the tail starts on.
+        let tail = top(cx);
+        assert!(
+            tail.item_ix > 0 && tail.item_ix < 30,
+            "the row at the top while following the tail: {tail:?}"
+        );
+
+        cx.update(|_, cx| state.update(cx, |state, cx| state.scroll_to_item(10, cx)));
+        draw(cx);
+        assert_eq!(top(cx).item_ix, 10);
+
+        // A wheel scroll by one row: its 40px and the 32px gap after it.
+        cx.simulate_event(gpui::ScrollEvent {
+            position: gpui::point(px(200.), px(200.)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-72.))),
+            ..Default::default()
+        });
+        let after_wheel = top(cx);
+        assert_eq!(
+            (after_wheel.item_ix, after_wheel.offset_in_item),
+            (11, px(0.))
+        );
+    }
+
+    /// A scrollbar drag to the bottom of the track must reach the end of the
+    /// content: the thumb's range is the list's scroll extent, and an extent
+    /// that stops short of the end leaves the reader above the last row,
+    /// with the tail-follow off and the jump button showing.
+    #[gpui::test]
+    fn the_scrollbar_drag_range_reaches_the_end_of_the_content(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.new(|cx| MessageScrollerState::new(10, cx));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| ScrollerHarness { state }
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+
+        // Drag the thumb to the bottom of the track: the scrollbar maps that
+        // to the largest offset it reports for the list.
+        cx.update(|_, cx| {
+            let list_state = state.read(cx).list_state.clone();
+            list_state.scrollbar_drag_started();
+            let max = list_state.max_offset_for_scrollbar().y;
+            list_state.set_offset_from_scrollbar(gpui::point(px(0.), -max));
+            list_state.scrollbar_drag_ended();
+        });
+
+        cx.update(|_, cx| {
+            let list_state = state.read(cx).list_state.clone();
+            assert_eq!(
+                list_state.is_scrolled_to_end(),
+                Some(true),
+                "the drag must land on the end of the content"
+            );
+            assert!(
+                list_state.is_following_tail(),
+                "the drag to the end must resume the tail"
+            );
+            assert!(
+                !state.read(cx).is_scrolled_up(),
+                "the jump-to-latest button must hide at the end of the content"
+            );
+        });
+    }
+
+    struct PaddedScrollerHarness {
+        state: Entity<MessageScrollerState>,
+        list_style: StyleRefinement,
+    }
+
+    impl gpui::Render for PaddedScrollerHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size(px(400.)).child(
+                MessageScroller::new("messages", self.state.clone(), |_, _, _| div().h(px(40.)))
+                    .scrollbar(false)
+                    .jump_button(false)
+                    .with_list_style(self.list_style.clone())
+                    .with_row_style(StyleRefinement::default().pt(px(6.)).pb(px(6.))),
+            )
+        }
+    }
+
+    /// A custom list padding must ride on the first and the last row, the
+    /// way the list's own padding does. Carried by every row it would give
+    /// every message the list's padding instead of giving it to the list.
+    #[gpui::test]
+    fn a_custom_list_padding_rides_on_the_first_and_the_last_row(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+
+        let first = cx.new(|cx| MessageScrollerState::new(10, cx));
+        let second = cx.new(|cx| MessageScrollerState::new(10, cx));
+        let third = cx.new(|cx| MessageScrollerState::new(10, cx));
+
+        let extent = |cx: &mut gpui::TestAppContext,
+                      state: Entity<MessageScrollerState>,
+                      list_style: StyleRefinement| {
+            let (_, context) = cx.add_window_view({
+                let state = state.clone();
+                move |_, _| PaddedScrollerHarness { state, list_style }
+            });
+            context.run_until_parked();
+            context.update(|window, cx| {
+                _ = window.draw(cx);
+                state.read(cx).list_state.max_offset_for_scrollbar().y
+            })
+        };
+
+        let first_extent = extent(
+            cx,
+            first,
+            StyleRefinement::default().pt(px(20.)).pb(px(40.)),
+        );
+        let second_extent = extent(
+            cx,
+            second,
+            StyleRefinement::default().pt(px(20.)).pb(px(20.)),
+        );
+        let third_extent = extent(
+            cx,
+            third,
+            StyleRefinement::default().pt(px(40.)).pb(px(20.)),
+        );
+
+        // The bottom inset rides on the last row only, so the content grows
+        // by the difference between the two bottom insets, not once per row.
+        assert_eq!(
+            first_extent - second_extent,
+            px(20.),
+            "the bottom inset must ride on the last row only"
+        );
+        // The top inset rides on the first row only.
+        assert_eq!(
+            third_extent - second_extent,
+            px(20.),
+            "the top inset must ride on the first row only"
+        );
     }
 
     #[gpui::test]

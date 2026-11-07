@@ -17,6 +17,8 @@ export interface SidebarGeneratorConfig {
   rootGroupText: string;
   /** If set, prepend this as the first item pointing to baseUrl */
   rootLinkText?: string;
+  /** Read page labels from the matching files here, keeping content and order local. */
+  labelContentDir?: string;
 }
 
 function parseFrontmatter(content: string): { title?: string; order?: number } {
@@ -76,7 +78,7 @@ interface FileEntry {
   items?: FileEntry[];
 }
 
-function scanDir(dir: string, baseDir: string): FileEntry[] {
+function scanDir(dir: string, baseDir: string, labelDir?: string): FileEntry[] {
   let entries: FileEntry[];
   try {
     entries = readdirSync(dir).map((name) => {
@@ -84,19 +86,24 @@ function scanDir(dir: string, baseDir: string): FileEntry[] {
       const relPath = relative(baseDir, fullPath);
       const isDir = statSync(fullPath).isDirectory();
       if (isDir) {
-        const children = scanDir(fullPath, baseDir);
+        const children = scanDir(fullPath, baseDir, labelDir);
         return { name, path: relPath, isDir: true, order: 999, title: titleCase(name), items: children };
       }
       if (extname(name) !== '.md') return null;
       if (name === 'index.md') return null;
       let content = '';
       try { content = readFileSync(fullPath, 'utf-8'); } catch {}
+      let labelContent = content;
+      if (labelDir) {
+        // A missing English counterpart falls back to the filename, never to a localized heading.
+        try { labelContent = readFileSync(join(labelDir, relPath), 'utf-8'); } catch { labelContent = ''; }
+      }
       return {
         name,
         path: relPath,
         isDir: false,
         order: getFileOrder(content),
-        title: getFileTitle(relPath, content),
+        title: getFileTitle(relPath, labelContent),
       };
     }).filter(Boolean) as FileEntry[];
   } catch {
@@ -160,7 +167,7 @@ function entriesToSidebarItems(
 }
 
 export function generateSidebar(config: SidebarGeneratorConfig): SidebarItem[] {
-  const entries = scanDir(config.contentDir, config.contentDir);
+  const entries = scanDir(config.contentDir, config.contentDir, config.labelContentDir);
   const items = entriesToSidebarItems(entries, config.baseUrl);
 
   const rootGroup: SidebarItem = {
@@ -191,7 +198,8 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 export const enDocsSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'docs'),
   baseUrl: `${BASE}/docs`,
-  rootGroupText: 'Introduction',
+  rootGroupText: 'GPUI Kit',
+  rootLinkText: 'GPUI Kit',
 });
 
 export const enShellSidebar = generateSidebar({
@@ -209,19 +217,38 @@ export const enBaseSidebar = generateSidebar({
 
 export const zhDocsSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'zh-CN/docs'),
+  labelContentDir: join(WEBSITE_ROOT, 'docs'),
   baseUrl: `${BASE}/zh-CN/docs`,
-  rootGroupText: '文档',
+  rootGroupText: 'GPUI Kit',
+  rootLinkText: 'GPUI Kit',
 });
 
 export const zhShellSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'zh-CN/shell'),
+  labelContentDir: join(WEBSITE_ROOT, 'shell'),
   baseUrl: `${BASE}/zh-CN/shell`,
   rootGroupText: 'GPUI Shell',
-  rootLinkText: '简介',
+  rootLinkText: 'Introduction',
 });
 
 export const zhBaseSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'zh-CN/base'),
+  labelContentDir: join(WEBSITE_ROOT, 'base'),
   baseUrl: `${BASE}/zh-CN/base`,
   rootGroupText: 'GPUI Base',
+});
+
+export const enComponentSidebar = generateSidebar({
+  contentDir: join(WEBSITE_ROOT, 'component'),
+  baseUrl: `${BASE}/component`,
+  rootGroupText: 'GPUI Component',
+  rootLinkText: 'Components',
+});
+
+export const zhComponentSidebar = generateSidebar({
+  contentDir: join(WEBSITE_ROOT, 'zh-CN/component'),
+  labelContentDir: join(WEBSITE_ROOT, 'component'),
+  baseUrl: `${BASE}/zh-CN/component`,
+  rootGroupText: 'GPUI Component',
+  rootLinkText: 'Components',
 });

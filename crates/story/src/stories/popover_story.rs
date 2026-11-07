@@ -1,6 +1,7 @@
 use gpui_kit::component::{
-    ActiveTheme, StyledExt, WindowExt,
+    ActiveTheme, Sizable, StyledExt, WindowExt,
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex,
     input::{Input, InputState},
     list::{List, ListDelegate, ListItem, ListState},
@@ -137,6 +138,7 @@ pub struct PopoverStory {
     list: Entity<ListState<DropdownListDelegate>>,
     form_popover_open: bool,
     list_popover_open: bool,
+    arrow: bool,
     checked: bool,
     message: String,
 }
@@ -175,6 +177,7 @@ impl PopoverStory {
             checked: true,
             form_popover_open: false,
             list_popover_open: false,
+            arrow: false,
             focus_handle: cx.focus_handle(),
             message: "".to_string(),
         }
@@ -389,60 +392,45 @@ impl Render for PopoverStory {
             .child(
                 section("Anchor")
                     .description("Position content from each edge of the trigger.")
-                    .w_full()
-                    .min_h(px(360.))
-                    .v_flex()
-                    .child(
-                        div().absolute().top_0().left_0().w_full().h_10().child(
-                            h_flex()
-                                .items_center()
-                                .justify_between()
-                                .child(
-                                    Popover::new("anchor-top-left")
-                                        .max_w(px(600.))
-                                        .anchor(Anchor::TopLeft)
-                                        .trigger(Button::new("btn").outline().label("TopLeft"))
-                                        .child("Anchored to the trigger's top-left."),
-                                )
-                                .child(
-                                    Popover::new("anchor-top-center")
-                                        .max_w(px(600.))
-                                        .anchor(Anchor::TopCenter)
-                                        .trigger(Button::new("btn").outline().label("TopCenter"))
-                                        .child("Anchored to the trigger's top-center."),
-                                )
-                                .child(
-                                    Popover::new("anchor-top-right")
-                                        .anchor(Anchor::TopRight)
-                                        .trigger(Button::new("btn").outline().label("TopRight"))
-                                        .child("Anchored to the trigger's top-right."),
-                                ),
-                        ),
+                    .sub_title(
+                        Checkbox::new("anchor-arrow")
+                            .label("Arrow")
+                            .checked(self.arrow)
+                            .on_change(cx.listener(|this, checked, _, cx| {
+                                this.arrow = *checked;
+                                cx.notify();
+                            })),
                     )
-                    .child(
-                        div().absolute().bottom_0().left_0().w_full().h_10().child(
+                    .w_full()
+                    .min_h(rems(14.))
+                    .v_flex()
+                    .justify_between()
+                    .children(
+                        [
+                            vec![Anchor::TopLeft, Anchor::TopCenter, Anchor::TopRight],
+                            vec![Anchor::LeftCenter, Anchor::RightCenter],
+                            vec![
+                                Anchor::BottomLeft,
+                                Anchor::BottomCenter,
+                                Anchor::BottomRight,
+                            ],
+                        ]
+                        .into_iter()
+                        .map(|anchors| {
                             h_flex()
-                                .items_center()
+                                .w_full()
                                 .justify_between()
-                                .child(
-                                    Popover::new("anchor-bottom-left")
-                                        .trigger(Button::new("btn").outline().label("BottomLeft"))
-                                        .anchor(Anchor::BottomLeft)
-                                        .child("Anchored to the trigger's bottom-left."),
-                                )
-                                .child(
-                                    Popover::new("anchor-bottom-center")
-                                        .trigger(Button::new("btn").outline().label("BottomCenter"))
-                                        .anchor(Anchor::BottomCenter)
-                                        .child("Anchored to the trigger's bottom-center."),
-                                )
-                                .child(
-                                    Popover::new("anchor-bottom-right")
-                                        .anchor(Anchor::BottomRight)
-                                        .trigger(Button::new("btn").outline().label("BottomRight"))
-                                        .child("Anchored to the trigger's bottom-right."),
-                                ),
-                        ),
+                                .children(anchors.into_iter().map(|anchor| {
+                                    let label = format!("{anchor:?}");
+                                    Popover::new(SharedString::from(format!("anchor-{label}")))
+                                        .anchor(anchor)
+                                        .arrow(self.arrow)
+                                        .trigger(
+                                            Button::new("trigger").small().outline().label(label),
+                                        )
+                                        .child("Popover content")
+                                }))
+                        }),
                     ),
             )
     }

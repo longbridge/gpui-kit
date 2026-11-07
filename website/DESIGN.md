@@ -19,7 +19,7 @@ single screen, what this project is — and then prove it is real.
    examples. Homepage capability previews are deliberately diagrams, not fake
    product screenshots.
 3. **Verifiable facts over adjectives.** Star count, licence, platforms, real
-   type names (`DockArea`, `Rope`, `Tiles`), real numbers from the README (120
+   type names (`DockArea`, `Rope`, `TabGroup`), real numbers from the README (120
    FPS, 200K lines). A developer judges credibility from specifics.
 4. **Same palette and typeface as the library.** Colours come from
    `crates/component/src/theme/default-theme.json`; code colours come from the same
@@ -52,9 +52,13 @@ site and the documented components share one palette.
 Rules that follow from this:
 
 - **The brand colour is near-black (near-white in dark mode).** It is used for
-  primary buttons, focus rings and the active sidebar indicator — never as an
+  primary buttons and focus rings — never as an
   "accent" to add interest, because it is the same value as body text. Section
   kickers and captions use `--muted-foreground` instead.
+- **The active sidebar item is a fill, not a bar.** It takes `--sidebar-accent`
+  (stronger than the `--secondary` hover fill) and a heavier weight. Never mark
+  it — or any selected item — with a leading-edge bar or one-sided border; see
+  the selection rule in the Design Guides.
 - **Never use `--brand` as a background behind text you did not also invert.**
   Text selection in particular uses `--selection`: black text on a near-black
   selection is unreadable.
@@ -89,6 +93,9 @@ Chinese. Monospace prefers `ui-monospace` / SF Mono and falls back to
 - **Body** — 1rem, line-height 1.7; docs prose is capped at `46rem`.
 - **Kicker / label** — 0.66–0.68rem mono, uppercase, wide tracking, muted.
   Small mono labels, not colour, mark structure.
+- **Maturity labels** (`maturity` frontmatter) sit between a page title and its
+  standfirst as the same mono labels on a hairline border. Preview and
+  Experimental are not warnings, so they take no status colour.
 
 Two constraints that are easy to get wrong:
 
@@ -210,8 +217,8 @@ through motion alone.
 
 ## Content rules
 
-- The crate is **not published**. Installation must show the git dependency,
-  never `cargo add`, and the UI must not display a version number.
+- `gpui-shell` is published to crates.io from 0.8.1. Installation should show
+  the released crate; Git dependencies are for unreleased development builds.
 - Code samples must be real API, verified against `crates/component` and
   `crates/base`.
 - The release notes page is rendered at build time from GitHub Releases

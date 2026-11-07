@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use gpui::{
     App, Context, ElementId, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    RenderOnce, StyleRefinement, Styled, Window, div,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
 use crate::{
@@ -35,6 +35,7 @@ pub struct Tree {
     style: StyleRefinement,
     render_item: Rc<RenderItem>,
     context_menu_builder: Option<Rc<ContextMenuBuilder>>,
+    scroll_bounce: Option<bool>,
 }
 
 impl Tree {
@@ -48,6 +49,7 @@ impl Tree {
             style: StyleRefinement::default(),
             render_item: Rc::new(render_item),
             context_menu_builder: None,
+            scroll_bounce: None,
         }
     }
 
@@ -58,6 +60,13 @@ impl Tree {
             + 'static,
     {
         self.context_menu_builder = Some(Rc::new(f));
+        self
+    }
+
+    /// Bounce at the vertical boundaries. On by default on iOS, Android and
+    /// macOS, off elsewhere; reduced motion disables displacement.
+    pub fn scroll_bounce(mut self, enabled: bool) -> Self {
+        self.scroll_bounce = Some(enabled);
         self
     }
 }
@@ -81,10 +90,12 @@ impl RenderOnce for Tree {
             .child(
                 gpui_base::Tree::new(&self.state)
                     .item(move |ix, entry, entry_state, window, cx| {
-                        let entry = entry.clone();
+                        // Capture only the id: cloning the entry would deep-clone
+                        // its whole subtree for every visible row on every frame.
+                        let id = entry.item().id.clone();
                         let context_menu_builder = context_menu_builder.clone();
                         let context_menu_state = state.clone();
-                        let item = render_item(ix, &entry, entry_state.is_selected(), window, cx)
+                        let item = render_item(ix, entry, entry_state.is_selected(), window, cx)
                             .disabled(entry.is_disabled())
                             .selected(entry_state.is_selected())
                             .secondary_selected(entry_state.is_right_clicked());
@@ -92,20 +103,30 @@ impl RenderOnce for Tree {
                         div()
                             .child(item)
                             .context_menu(move |menu, window, cx| {
-                                let Some(build) = context_menu_builder
-                                    .as_ref()
-                                    .filter(|_| !entry.is_disabled())
-                                else {
+                                let Some(build) = context_menu_builder.as_ref() else {
                                     return menu;
                                 };
-                                context_menu_state
-                                    .update(cx, |_, cx| build(ix, &entry, menu, window, cx))
+                                context_menu_state.update(cx, |state, cx| {
+                                    let Some(entry) = state
+                                        .entry(ix)
+                                        .filter(|entry| entry.item().id == id)
+                                        .filter(|entry| !entry.is_disabled())
+                                        .cloned()
+                                    else {
+                                        return menu;
+                                    };
+                                    build(ix, &entry, menu, window, cx)
+                                })
                             })
                             .into_any_element()
                     })
                     .list_style(StyleRefinement::default().flex_grow_1().size_full())
                     .relative()
-                    .size_full(),
+                    .size_full()
+                    .map(|tree| {
+                        gpui_base::ScrollBounce::new("tree-scroll-bounce", &scroll_handle, tree)
+                            .when_some(self.scroll_bounce, |bounce, on| bounce.enabled(on))
+                    }),
             )
             .refine_style(&self.style)
             .vertical_scrollbar(&scroll_handle)

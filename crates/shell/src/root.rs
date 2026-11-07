@@ -64,9 +64,11 @@ const TOAST_WIDTH: gpui::Pixels = px(320.);
 
 /// The window-level overlay host: content, one sheet, a dialog stack, toasts.
 ///
-/// The first view of a shell window is always a `ShellRoot`, the same way the
-/// first view of a `gpui-component` window is always a `Root`. Scripts reach it
-/// through [`ShellRoot::update`], never by constructing overlays themselves.
+/// The first view of a shell window is a `ShellRoot`, the same way the first
+/// view of a `gpui-component` window is a `Root` — or, when a component catalog
+/// opens the window around its own `Root`, the view directly inside that.
+/// Scripts reach it through [`ShellRoot::update`], never by constructing
+/// overlays themselves.
 ///
 /// # Stacking order
 ///
@@ -254,15 +256,15 @@ impl ShellRoot {
     ///
     /// This is how a script-facing binding gets from the `&mut Window` its call
     /// scope carries to the overlay host, without the script ever holding the
-    /// root itself. `None` when the window's first view is not a `ShellRoot`,
-    /// which is a host wiring mistake rather than a script error — hence an
-    /// `Option` and not a panic.
+    /// root itself. `None` when the window has no `ShellRoot` (see
+    /// [`Self::find`]), which is a host wiring mistake rather than a script
+    /// error — hence an `Option` and not a panic.
     pub fn update<R>(
         window: &mut Window,
         cx: &mut App,
         f: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) -> R,
     ) -> Option<R> {
-        let root = window.root::<Self>().flatten()?;
+        let root = Self::find(window, cx)?;
         Some(root.update(cx, |root, cx| f(root, window, cx)))
     }
 
@@ -271,11 +273,26 @@ impl ShellRoot {
     /// The counterpart to [`ShellRoot::update`] for the one overlay a script
     /// never opens by hand: a tooltip trigger is an element, so what reaches it
     /// is a hover listener holding a `&mut Window`, not a call scope. `None`
-    /// when the window's first view is not a `ShellRoot` — the same host wiring
-    /// mistake `update` reports, and the same reason it is not a panic.
+    /// when the window has no `ShellRoot` — the same host wiring mistake
+    /// `update` reports, and the same reason it is not a panic.
     pub fn tooltip_overlay(window: &mut Window, cx: &mut App) -> Option<Entity<TooltipOverlay>> {
-        let root = window.root::<Self>().flatten()?;
+        let root = Self::find(window, cx)?;
         Some(root.read(cx).tooltip_overlay.clone())
+    }
+
+    /// The `ShellRoot` of `window`: its first view, or the view directly inside
+    /// a [`gpui_base::Root`] that is.
+    ///
+    /// A component catalog may open the window itself so that its own
+    /// overlays find the `Root` they require (see
+    /// [`ComponentWindowOpener`](crate::ComponentWindowOpener)); the runtime's
+    /// root then renders one level down, and is still the one this window has.
+    fn find(window: &Window, cx: &App) -> Option<Entity<Self>> {
+        if let Some(root) = window.root::<Self>().flatten() {
+            return Some(root);
+        }
+        let root = window.root::<gpui_base::Root>().flatten()?;
+        root.read(cx).view().clone().downcast::<Self>().ok()
     }
 
     /// The view this window was opened with, below every overlay.

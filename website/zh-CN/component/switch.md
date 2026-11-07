@@ -1,0 +1,242 @@
+---
+title: Switch
+description: 用于在选中和未选中之间切换的开关控件。
+---
+
+# Switch
+
+Switch 是一个二元开关组件，适合表示开启 / 关闭状态。它支持平滑动画、不同尺寸、标签、禁用状态和自定义颜色。
+
+使用 `on_change` 接收请求的新值，由状态所有者保存并调用 `cx.notify()`。原有的 `on_click` 保留为兼容名称；两者设置的是同一个回调，最后一次设置生效。
+
+## 导入
+
+```rust
+use gpui_kit::component::switch::Switch;
+```
+
+## 用法
+
+### 基础 Switch
+
+```rust
+Switch::new("my-switch")
+    .checked(false)
+    .on_change(|checked, _, _| {
+        println!("Switch is now: {}", checked);
+    })
+```
+
+### 受控 Switch
+
+```rust
+struct MyView {
+    is_enabled: bool,
+}
+
+impl Render for MyView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        Switch::new("switch")
+            .checked(self.is_enabled)
+            .on_change(cx.listener(|view, checked, _, cx| {
+                view.is_enabled = *checked;
+                cx.notify();
+            }))
+    }
+}
+```
+
+### 带标签
+
+```rust
+Switch::new("notifications")
+    .label("Enable notifications")
+    .checked(true)
+    .on_change(|checked, _, _| {
+        println!("Notifications: {}", if *checked { "enabled" } else { "disabled" });
+    })
+```
+
+### 不带标签
+
+没有可见文字的 Switch 没有无障碍名称，屏幕阅读器无法将它与其他开关区分开。用 `.accessibility_label(...)` 设置名称；这不会添加可见标签：
+
+```rust
+Switch::new("airplane-mode")
+    .accessibility_label("Airplane mode")
+    .checked(false)
+```
+
+### 不同尺寸
+
+```rust
+Switch::new("small-switch")
+    .small()
+    .label("Small switch")
+
+Switch::new("medium-switch")
+    .label("Medium switch")
+
+Switch::new("custom-switch")
+    .with_size(Size::Small)
+    .label("Custom size")
+```
+
+### 禁用状态
+
+```rust
+Switch::new("disabled-off")
+    .label("Disabled (off)")
+    .disabled(true)
+    .checked(false)
+
+Switch::new("disabled-on")
+    .label("Disabled (on)")
+    .disabled(true)
+    .checked(true)
+```
+
+### 自定义颜色
+
+`color()` 用于覆盖选中状态下的背景色；禁用态透明度会自动叠加：
+
+```rust
+Switch::new("switch")
+    .label("Success")
+    .checked(true)
+    .color(cx.theme().success)
+
+Switch::new("switch")
+    .label("Danger")
+    .checked(true)
+    .color(cx.theme().danger)
+
+Switch::new("switch")
+    .label("Disabled")
+    .checked(true)
+    .color(cx.theme().success)
+    .disabled(true)
+```
+
+### 带 Tooltip
+
+```rust
+Switch::new("switch")
+    .label("Airplane mode")
+    .tooltip("Enable airplane mode to disable all wireless connections")
+    .checked(false)
+```
+
+### 键盘焦点
+
+Switch 默认是一个 Tab 停靠点，获得焦点时会在轨道外侧绘制主题焦点环，与 `Checkbox`、`Button` 一致。若焦点样式由外层绘制，传入 `focus_ring(false)` 关闭焦点环；用 `tab_stop` / `tab_index` 调整它在 Tab 顺序中的位置。
+
+```rust
+Switch::new("switch")
+    .label("Custom tab order")
+    .tab_index(2)
+    .tab_stop(true)
+
+// 外层行自己绘制焦点样式
+Switch::new("switch")
+    .label("Quiet focus")
+    .focus_ring(false)
+```
+
+## API 参考
+
+### Switch
+
+| 方法 | 说明 |
+| --- | --- |
+| `new(id)` | 使用给定 ID 创建开关 |
+| `checked(bool)` | 设置当前选中状态 |
+| `label(text)` | 设置标签文本 |
+| `label_side(side)` | 设置标签位置，`Side::Left` 或 `Side::Right` |
+| `accessibility_label(text)` | 屏幕阅读器朗读的名称；没有可见标签时需要设置 |
+| `disabled(bool)` | 设置禁用状态 |
+| `tooltip(text)` | 添加提示文本 |
+| `color(color)` | 设置选中时的背景色，默认 `theme.primary` |
+| `on_change(fn)` | 点击回调，参数为新的 `&bool` 状态 |
+| `focus_ring(bool)` | 获得焦点时是否在轨道外侧绘制焦点环，默认 `true` |
+| `tab_stop(bool)` | 是否参与 Tab 焦点遍历，默认 `true` |
+| `tab_index(isize)` | 在 tab group 内的 Tab 顺序，默认 `0` |
+
+### 样式
+
+实现了 `Sizable` 和 `Disableable` trait：
+
+- `small()`：小尺寸，开关区域约 `28x16px`
+- `medium()`：中尺寸，默认，开关区域约 `36x20px`
+- `with_size(size)`：显式设置尺寸
+- `disabled(bool)`：禁用状态
+
+## 示例
+
+### 设置面板
+
+```rust
+struct SettingsView {
+    marketing_emails: bool,
+    security_emails: bool,
+    push_notifications: bool,
+}
+
+v_flex()
+    .gap_4()
+    .child(
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        v_flex()
+                            .child(Label::new("Marketing emails").text_lg())
+                            .child(
+                                Label::new("Receive emails about new products and features")
+                                    .text_color(theme.muted_foreground)
+                            )
+                    )
+                    .child(
+                        Switch::new("marketing")
+                            .checked(self.marketing_emails)
+                            .on_change(cx.listener(|view, checked, _, cx| {
+                                view.marketing_emails = *checked;
+                                cx.notify();
+                            }))
+                    )
+            )
+    )
+```
+
+### 紧凑设置列表
+
+```rust
+v_flex()
+    .gap_3()
+    .child(
+        Switch::new("wifi")
+            .label("Wi-Fi")
+            .label_side(Side::Left)
+            .checked(true)
+            .small()
+    )
+    .child(
+        Switch::new("bluetooth")
+            .label("Bluetooth")
+            .label_side(Side::Left)
+            .checked(false)
+            .small()
+    )
+```
+
+## 动画
+
+Switch 包含平滑切换动画：
+
+- 切换动画时长约 150ms
+- 背景色会在关闭色与激活色之间过渡
+- 圆点位置会平滑移动
+- 禁用状态下不会触发交互动效

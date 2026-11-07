@@ -123,6 +123,10 @@ impl SelectStory {
         cx.new(|cx| {
             cx.subscribe_in(&country_select, window, Self::on_select_event)
                 .detach();
+            cx.subscribe(&country_select, |_, _, _: &DismissEvent, _| {
+                println!("Country select dismissed");
+            })
+            .detach();
 
             Self {
                 disabled: false,
@@ -289,6 +293,7 @@ impl Render for SelectStory {
                     .items_center()
                     .child(
                         Select::new(&self.simple_select2)
+                            .accessibility_label("Programming language")
                             .w(px(280.))
                             .with_size(self.size)
                             .disabled(self.disabled)

@@ -745,15 +745,9 @@ impl Render for ThemeColorsStory {
                                             .get(&this.selected_theme_name)
                                             .cloned()
                                         {
-                                            let mode = theme_config.mode;
-                                            let theme = Theme::global_mut(cx);
-                                            if mode.is_dark() {
-                                                theme.dark_theme = theme_config;
-                                            } else {
-                                                theme.light_theme = theme_config;
-                                            }
-                                            Theme::change(mode, None, cx);
-                                            cx.refresh_windows();
+                                            Theme::update(cx, |theme| {
+                                                theme.apply_config(&theme_config)
+                                            });
 
                                             // Refresh the select items to update the active checkmark
                                             let active_theme_name = cx.theme().theme_name().clone();

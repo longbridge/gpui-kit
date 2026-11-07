@@ -7,10 +7,21 @@ const pageSchema = z.object({
   order: z.number().optional(),
   example: z.union([z.string(), z.literal(false)]).optional(),
   exampleKind: z.enum(['base', 'component']).optional(),
+  maturity: z.array(z.enum(['stable', 'preview', 'experimental', 'showcase-only', 'platform-dependent'])).optional(),
 });
 
 const docs = defineCollection({
   loader: glob({ pattern: '**/*.md', base: './docs' }),
+  schema: pageSchema,
+});
+
+const component = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './component' }),
+  schema: pageSchema,
+});
+
+const zhComponent = defineCollection({
+  loader: glob({ pattern: '**/*.md', base: './zh-CN/component' }),
   schema: pageSchema,
 });
 
@@ -41,9 +52,11 @@ const zhBase = defineCollection({
 
 export const collections = {
   docs,
+  component,
   shell,
   base,
   'zh-docs': zhDocs,
+  'zh-component': zhComponent,
   'zh-shell': zhShell,
   'zh-base': zhBase,
 };

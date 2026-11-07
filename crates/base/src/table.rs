@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
     RenderOnce, Role, SharedString, Stateful, StatefulInteractiveElement, StyleRefinement, Styled,
@@ -11,7 +12,7 @@ macro_rules! table_part {
         #[doc = $docs]
         #[derive(IntoElement)]
         pub struct $name {
-            base: Stateful<Div>,
+            base: crate::ObservedElement<Stateful<Div>>,
             style: StyleRefinement,
             children: Vec<AnyElement>,
         }
@@ -20,7 +21,7 @@ macro_rules! table_part {
             #[doc = concat!("Create ", $docs)]
             pub fn new(id: impl Into<ElementId>) -> Self {
                 Self {
-                    base: div().id(id),
+                    base: div().id(id).test_support(),
                     style: StyleRefinement::default(),
                     children: Vec::new(),
                 }
@@ -43,6 +44,11 @@ macro_rules! table_part {
             fn interactivity(&mut self) -> &mut Interactivity {
                 self.base.interactivity()
             }
+
+            fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+                self.base = self.base.track_focus(handle);
+                self
+            }
         }
 
         impl StatefulInteractiveElement for $name {}
@@ -61,7 +67,7 @@ macro_rules! table_part {
 /// An unstyled semantic table root.
 #[derive(IntoElement)]
 pub struct Table {
-    base: Stateful<Div>,
+    base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     children: Vec<AnyElement>,
     row_count: Option<usize>,
@@ -73,7 +79,7 @@ impl Table {
     /// Create an unstyled semantic table root.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             children: Vec::new(),
             row_count: None,
@@ -120,6 +126,11 @@ impl InteractiveElement for Table {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
+    }
 }
 
 impl StatefulInteractiveElement for Table {}
@@ -149,7 +160,7 @@ table_part!(TableBody, Role::RowGroup, "An unstyled table body group.");
 /// An unstyled semantic table row.
 #[derive(IntoElement)]
 pub struct TableRow {
-    base: Stateful<Div>,
+    base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     row_index: usize,
     children: Vec<AnyElement>,
@@ -159,7 +170,7 @@ impl TableRow {
     /// Create an unstyled semantic table row with a one-based accessibility index.
     pub fn new(id: impl Into<ElementId>, row_index: usize) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             row_index,
             children: Vec::new(),
@@ -183,6 +194,11 @@ impl InteractiveElement for TableRow {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
+    }
 }
 
 impl StatefulInteractiveElement for TableRow {}
@@ -202,7 +218,7 @@ macro_rules! table_cell {
         #[doc = $docs]
         #[derive(IntoElement)]
         pub struct $name {
-            base: Stateful<Div>,
+            base: crate::ObservedElement<Stateful<Div>>,
             style: StyleRefinement,
             column_index: usize,
             children: Vec<AnyElement>,
@@ -212,7 +228,7 @@ macro_rules! table_cell {
             #[doc = concat!("Create ", $docs, " with a one-based accessibility index.")]
             pub fn new(id: impl Into<ElementId>, column_index: usize) -> Self {
                 Self {
-                    base: div().id(id),
+                    base: div().id(id).test_support(),
                     style: StyleRefinement::default(),
                     column_index,
                     children: Vec::new(),
@@ -235,6 +251,11 @@ macro_rules! table_cell {
         impl InteractiveElement for $name {
             fn interactivity(&mut self) -> &mut Interactivity {
                 self.base.interactivity()
+            }
+
+            fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+                self.base = self.base.track_focus(handle);
+                self
             }
         }
 
@@ -262,7 +283,7 @@ table_cell!(TableCell, Role::Cell, "An unstyled table data cell.");
 /// An unstyled table caption slot.
 #[derive(IntoElement)]
 pub struct TableCaption {
-    base: Stateful<Div>,
+    base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     children: Vec<AnyElement>,
 }
@@ -271,7 +292,7 @@ impl TableCaption {
     /// Create an unstyled table caption slot.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             children: Vec::new(),
         }
@@ -293,6 +314,11 @@ impl ParentElement for TableCaption {
 impl InteractiveElement for TableCaption {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
+    }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
     }
 }
 

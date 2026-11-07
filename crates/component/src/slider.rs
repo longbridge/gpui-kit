@@ -7,7 +7,7 @@ use gpui_base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack,
 use gpui::{
     App, Axis, Background, Corners, DefiniteLength, ElementId, Entity, EntityId, Hsla,
     InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Pixels, RenderOnce,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _, px, relative,
 };
 
@@ -88,6 +88,7 @@ pub struct Slider {
     axis: Axis,
     style: StyleRefinement,
     disabled: bool,
+    accessibility_label: Option<SharedString>,
     reverse: bool,
 }
 
@@ -99,6 +100,7 @@ impl Slider {
             state: state.clone(),
             style: StyleRefinement::default(),
             disabled: false,
+            accessibility_label: None,
             reverse: false,
         }
     }
@@ -118,6 +120,12 @@ impl Slider {
     /// Set the disabled state of the slider, default: false
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Sets the label exposed to accessibility clients.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
         self
     }
 
@@ -261,6 +269,9 @@ impl RenderOnce for Slider {
         BaseSlider::new(&self.state)
             .axis(axis)
             .disabled(self.disabled)
+            .when_some(self.accessibility_label, |this, label| {
+                this.accessibility_label(label)
+            })
             .flex()
             .flex_1()
             .items_center()

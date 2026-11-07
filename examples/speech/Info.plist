@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Speech listens to the microphone to turn what you say into text.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognizes what you say on this Mac to type what you say.</string>
+</dict>
+</plist>

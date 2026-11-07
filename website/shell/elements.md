@@ -2,6 +2,7 @@
 title: Elements
 description: Constructors, composition with child / children / when, and why an element description can only be used once.
 order: 4
+maturity: [preview]
 ---
 
 # Elements
@@ -59,6 +60,8 @@ It is pinned to the top right by default. Use the existing anchor vocabulary to 
 ### Why `.new(id)` and not `new Button(id)`
 
 The JavaScript habit would be `new Button(id)`. The runtime does not offer it, and the reason is the whole subject of this page: `new` promises an object with an identity — something you can keep, store on the instance, and use again. That is exactly what a description is not. `Button.new(id)` reads as "construct a description", which is what it does, and it matches the Rust spelling character for character.
+
+The same form works for `"gpui-component"`: `Button.new("save")`, `InputState.new("Name")`. Its exports also accept `new Button(...)`, which scripts written before `.new` existed use; write `.new` in new code so one file has one construction form.
 
 Views are the opposite case, and use the standard form: `class Counter extends View`. A View genuinely does have an identity and cross-frame state, and it is owned by GPUI. Two construction shapes in one file, because the two kinds of thing have different lifetimes.
 
@@ -175,6 +178,7 @@ These are not styles; they report state to the base layer, which handles the int
 | `.on_mouse_up(button, handler)`   | [input-capable](#where-input-is-installed) | Its release                                                   |
 | `.on_mouse_down_out(handler)`     | [input-capable](#where-input-is-installed) | A press anywhere **outside** this element                     |
 | `.on_scroll_wheel(handler)`       | [input-capable](#where-input-is-installed) | Wheel and trackpad scrolling over it                          |
+| `.on_pinch(handler)`              | [input-capable](#where-input-is-installed) | A trackpad or touch pinch over it                             |
 | `.on_action(action, handler)`     | [input-capable](#where-input-is-installed) | A named action dispatched to it or into it                    |
 | `.key_context(name)`              | [input-capable](#where-input-is-installed) | The key-binding context this element and its subtree sit in   |
 
@@ -259,9 +263,19 @@ A scroll handler receives pixels either way, and the original line count when th
 });
 ```
 
+A pinch arrives as a zoom change per step of the gesture, so multiplying by `1 + delta` follows it. Keep the wheel handler beside it for mice and platforms without a pinch:
+
+```js
+.on_pinch((event, cx) => {
+  this.zoom *= 1 + event.delta;      // 0.1 is a 10% increase
+  // event.phase                     — "started", "moved", "ended" or "cancelled"
+  cx.notify();
+});
+```
+
 ### Where input is installed
 
-The eight methods above are GPUI's own `InteractiveElement` builders, and the shell installs them on `div`, `h_flex`, `v_flex`, `Button`, `Link`, `Checkbox`, `Switch`, `Radio`, `Toggle`, `Tabs` and `Tab`.
+The nine methods above are GPUI's own `InteractiveElement` builders, and the shell installs them on `div`, `h_flex`, `v_flex`, `Button`, `Link`, `Checkbox`, `Switch`, `Radio`, `Toggle`, `Tabs` and `Tab`.
 
 Every other component builds its own base type and hangs its own listeners on it, so a handler written on one of those is recorded in the description and never reaches GPUI. The log says so rather than leaving you to find it:
 
@@ -423,6 +437,18 @@ render(cx) {
 ```
 
 That is how the [example application](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist) is written: `ui.js` exports `button`, `label`, `icon`, `checkbox` and the rest as functions, and `main.js` calls them. It reads like a component library and costs nothing, because a function call is where a fresh description comes from.
+
+## Nesting is bounded
+
+A description nests at most **64 levels**, counting children, filled slots such as `content`, and the elements a component takes as arguments. The call that would go deeper throws, and records nothing:
+
+```text
+this element would nest the description more than 64 levels deep; elements, filled slots and component element arguments may nest at most 64 levels
+```
+
+Drawing a description walks it level by level in native code, so without the bound a script could build a chain deep enough to overflow the native stack, which ends the process rather than throwing. Real layouts stay far below 64. An element still cannot be placed inside itself, directly or through a slot: that throws too.
+
+Views mounted inside one another share the same depth. Each View counts the levels of its own description plus one for itself, and the Views drawn one inside another may add up to at most **65** — what one View at the bound takes. A [dock area](./api.md#dock) counts four levels more. Nothing is thrown here, because the mounts are only resolved while the window is drawn: a View that would cross the bound draws nothing in that position, and so does a View mounted inside itself, directly or through other Views or a dock. Each logs an error; the rest of the window draws as usual. The same View under two parents that do not contain each other is not a recursion, and draws in both places.
 
 ## Callbacks belong to their render
 

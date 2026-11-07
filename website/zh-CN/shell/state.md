@@ -1,7 +1,8 @@
 ---
-title: 状态与 View
+title: State and Views
 description: View、init 与 render、cx.notify()、留存的输入状态，以及异步工作。
 order: 6
+maturity: [preview]
 ---
 
 # State and Views
@@ -56,14 +57,14 @@ GPUI 本身就是显式 `notify` 的模型，两套响应式心智模型放进�
 
 ## `render` 什么时候执行
 
-`render` **不是**每帧执行一次。GPUI 会因为你的应用完全不知情的原因重绘——指针划过一个按钮、文本光标闪烁、列表滚动、动画推进——这些都不构成执行 JavaScript 的理由。
+`render` **不是**每帧执行一次。GPUI 可能因与脚本 View 的数据无关的原因请求一帧，例如指针划过按钮、文本光标闪烁、列表滚动或动画推进。这些事件不必重新执行该 View 的脚本 `render`，也不表示空闲窗口会按屏幕刷新率持续绘制。虚拟列表项渲染器等帧路径回调则是另一种情况；见 [Performance](./performance.md#怎么读那几个计数器)。
 
 所以一次 `render` 调用描述的不是*这一帧*。它把界面描述一次，写进运行时保留的一份 Snapshot：
 
 ```text
-cx.notify()  ──▶  render()  ──▶  Snapshot  ──┬──▶  帧
-                                             ├──▶  帧
-                                             └──▶  帧  …
+cx.notify()  ──▶  render()  ──▶  Snapshot  ──┬──▶  frame
+                                             ├──▶  frame
+                                             └──▶  frame  …
 ```
 
 Snapshot 只在有东西让它失效时才重建：
@@ -77,7 +78,7 @@ Snapshot 只在有东西让它失效时才重建：
 
 三条值得记住的推论：
 
-**你的 `render` 成本跟着用户走，不跟着帧率走。** 一个每秒变化十次的 View，成本就是每秒十次渲染，无论窗口是 60 FPS 还是 120 FPS 在重绘。描述一个大面板之所以负担得起，正是因为它不会为了没有变化的内容被重复描述六十次。
+**脚本 `render` 成本跟着失效走，不单独跟着屏幕刷新率走。** 一个每秒收到十次通知的 View，该秒最多需要十次重建；下一帧前的通知还可能合并。复用 Snapshot 的重绘不会用 JavaScript 重新描述这个 View，但帧中的其他工作仍有成本。
 
 **hover、focus 与 active 样式永远不回调脚本。** `.hover(s => s.opacity(0.8))` 在构建 Snapshot 时就被解析成原生样式描述，之后由 GPUI 自己套用。指针在界面上移动不会执行任何 JavaScript。[`Input`](#留存状态) 的光标与选区同理。
 
@@ -123,7 +124,7 @@ Use cx.spawn or take cx from the callback arguments instead.
 ```js
 async save(cx) {
   await cx.sleep(100);
-  cx.notify();          // 同一个 cx，仍然是对的那个
+  cx.notify();          // The same cx remains valid here.
 }
 ```
 
@@ -194,7 +195,20 @@ this.draft.on("submit", (event, cx) => this.add(cx));
 | `focus` | 获得焦点 |
 | `blur` | 失去焦点 |
 
+在 `TextareaState` 里，回车会先换行，再同样报告 `submit`，所以处理函数读到的文本末尾带着这个换行。回车即发送的消息框调用 `set_submit_on_enter(true)`：此后回车不改动文本，Shift+回车照样换行。Shift+回车仍然报告为 `submit`，`event.shift` 为真，所以处理函数遇到它要提前返回：
+
+```js
+this.draft = TextareaState.new({ rows: 3 });
+this.draft.set_submit_on_enter(true);
+this.draft.on("submit", (event, cx) => {
+  if (event.shift) return;
+  this.send(this.draft.value(), cx);
+});
+```
+
 与渲染期注册的 `on_click` 不同，这个订阅**活得比创建它的那次渲染更久**。订阅由运行时的句柄存储持有而不是由脚本持有，因为脚本没有地方放它，而“因为某个值被回收所以处理函数不再触发”是那种没人找得到的 bug。它随句柄一起释放。
+
+`"gpui-component"` 的 `InputState` 与 `TextareaState` 也以同样的事件、同样的 payload 响应 `on`，所以一个输入框从一个模块换到另一个模块时，订阅不用改。每个模块的 `Input` 只接受本模块的状态；把 `gpui-base` 的 `InputState` 交给 `gpui-component` 的 `Input` 会被拒绝，并写明需要哪个模块的状态。
 
 事件名拼错会列出合法值：
 
@@ -296,7 +310,7 @@ handle.is_done();
 ```text
 setTimeout  -> cx.timer.after(ms, callback)
 setInterval -> cx.timer.every(ms, callback)
-clearTimeout / clearInterval -> 对 after / every 返回的 Task 调用 cancel()
+clearTimeout / clearInterval -> call cancel() on the Task returned by after / every
 ```
 
 `setTimeout`、`setInterval`、`clearTimeout` 与 `clearInterval` 都是会抛错的 stub。一次性工作使用 `cx.timer.after`，重复工作使用 `cx.timer.every`；要停止其中任意一种，都对返回的 `Task` 调用 `cancel()`。全局 `fetch`，以及 [Capabilities](./capabilities.md) 中记录的安全标准模块（包括 `websocket`），都是真实的异步 Host API。CommonJS `require` 仍不可用；请使用 ES module。

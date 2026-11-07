@@ -1,7 +1,8 @@
 ---
-title: 样式
+title: Styling
 description: 流式样式接口、长度与颜色语法、语义主题 token，以及 hover / active / focus 状态样式。
 order: 5
+maturity: [preview]
 ---
 
 # Styling
@@ -80,7 +81,7 @@ percentages and "auto" are not allowed here
 | 字体   | `font_family`                                                              | 字符串           |
 | 绘制   | `opacity`                                                                  | 数字             |
 
-`line_height` 是唯一值得专门记住的例外：**裸数字是倍数，不是像素**。`line_height(1.45)` 表示字号的 1.45 倍，因为业界其他地方都是这个含义，而 1.45px 从来不是任何人的意思。字符串仍然走普通的长度语法。
+`line_height` 是唯一值得专门记住的例外：**裸数字是倍数，不是像素**。`line_height(1.45)` 表示字号的 1.45 倍，与 CSS 中不带单位的 `line-height: 1.45`、Rust 中的 `line_height(relative(1.45))` 相同，因为 1.45px 从来不是任何人的意思。字符串仍然走普通的长度语法，所以 `line_height("18px")` 是固定行高。
 
 ### 刻意没有绑定的
 
@@ -151,6 +152,28 @@ renderSave(cx) {
 
 - **`active` 与 `focus` 需要稳定的元素身份。** 普通 `div` 会按需获得一个，由它在描述中的位置推出；只要树是稳定的，这个身份跨渲染就是稳定的。`Button`、`Checkbox` 与 `Input` 本来就有。
 - **`Switch` 会忽略状态样式。** switch 的根节点不是可交互元素——它的 track 才是——所以挂在根上的状态样式无处落地。运行时会记一条警告，提示改为给它外面那一行加样式，而不是不声不响地丢掉这条声明。
+
+### Group hover
+
+`hover` 作用于指针下方的那个元素。要在指针悬停在某个祖先元素上时给元素加样式，先用 `group(name)` 给祖先命名，再在它里面的元素上声明 `group_hover(name, declare)`：
+
+```js
+renderRow(row, cx) {
+  return h_flex()
+    .group("row")
+    .justify_between()
+    .child(row.title)
+    .child(
+      div()
+        .text_color(cx.theme().colors.muted_foreground)
+        .opacity(0)
+        .group_hover("row", (style) => style.opacity(1))
+        .child(row.id),
+    );
+}
+```
+
+group hover 跟随同名的最近祖先，所以列表的每一行都可以用同一个名字。它和 `hover` 一样在原生层解析，不执行脚本；它是样式而不是 handler，所以虚拟列表的 item 渲染器也可以声明它。会改变元素尺寸或位置的 group hover 需要稳定的身份 `.id(name)`，因为 GPUI 依据元素自己的状态来布局它；只影响绘制的，比如 opacity 或颜色，则不需要。
 
 ## 滚动溢出内容
 

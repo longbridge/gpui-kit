@@ -1,17 +1,21 @@
 [package]
-name = "gpui-wry"
+name = "gpui-webview"
 description = "WebView support for GPUI, based on Wry."
-keywords = ["webview", "gpui","wry"]
+keywords = ["webview", "gpui", "wry"]
 license = "Apache-2.0"
-documentation = "https://docs.rs/gpui-wry"
+documentation = "https://docs.rs/gpui-webview"
 homepage = "https://gpui-kit.com"
 repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/webview"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.6.0"
+version = "0.9.0"
 
 [features]
+# Hosts the native view in GPUI Fast's window composition, so GPUI overlays render above the
+# page on macOS and Linux. `gpui-kit/gpui-fast` selects the backend; enable both together, a
+# mismatch fails to compile. Without either, the native view covers GPUI content in its bounds.
+gpui-fast = ["dep:objc2", "dep:objc2-foundation"]
 inspector = ["wry/devtools"]
 
 [lib]
@@ -19,5 +23,14 @@ doctest = false
 
 [dependencies]
 anyhow.workspace = true
-gpui.workspace = true
+gpui-kit = { path = "../kit", version = "0.9.0", default-features = false }
+log = "0.4"
 wry = { version = "0.53.3", package = "lb-wry" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAppearance", "NSView"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

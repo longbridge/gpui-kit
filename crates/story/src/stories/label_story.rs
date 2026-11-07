@@ -2,7 +2,7 @@ use gpui_kit::*;
 
 use gpui_kit::component::{
     ActiveTheme, IconName, StyledExt,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonVariants as _, Toggle},
     h_flex,
     input::{Input, InputEvent, InputState},
     label::{HighlightsMatch, Label},
@@ -137,7 +137,21 @@ impl Render for LabelStory {
                         v_flex()
                             .w(px(320.))
                             .gap_4()
-                            .child(Input::new(&self.highlights_input))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .gap_2()
+                                    .child(div().flex_1().child(Input::new(&self.highlights_input)))
+                                    .child(
+                                        Toggle::new("highlight-mask")
+                                            .label("Mask")
+                                            .checked(self.masked)
+                                            .on_click(cx.listener(|this, checked, _, cx| {
+                                                this.masked = *checked;
+                                                cx.notify();
+                                            })),
+                                    ),
+                            )
                             .child(
                                 v_flex()
                                     .w_full()
@@ -148,10 +162,15 @@ impl Render for LabelStory {
                                     .border_color(cx.theme().border)
                                     .child(
                                         Label::new("Design system documentation")
-                                            .highlights(ht.clone()),
+                                            .highlights(ht.clone())
+                                            .masked(self.masked),
                                     )
                                     // Keeps the mixed ASCII/CJK matching regression visible.
-                                    .child(Label::new("AAA中文BB").highlights(ht.clone())),
+                                    .child(
+                                        Label::new("AAA中文BB")
+                                            .highlights(ht.clone())
+                                            .masked(self.masked),
+                                    ),
                             ),
                     ),
             )

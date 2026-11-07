@@ -645,6 +645,43 @@ export default class Board extends View {
     );
 }
 
+/// A slot filling `shadow` or `bg` is read for its method, the same as the
+/// direct call: an array of records for one, a `Background` for the other.
+#[gpui::test]
+fn structured_paint_values_fill_style_slots(cx: &mut TestAppContext) {
+    let tree = tree(
+        cx,
+        r##"
+import { View, div, Background } from "gpui-kit";
+import { v_flex } from "gpui-base";
+
+const template = globalThis.__template;
+
+const Card = template((shadows, fill) => div().rounded(10).shadow(shadows).bg(fill));
+
+export default class Board extends View {
+  render() {
+    return v_flex()
+      .child(Card([{ y: 1, blur: 2, color: "#00000066" }], Background.linear_gradient(180, "#f7da74", "#fdcd12")))
+      .child(Card([], "#ffffff"));
+  }
+}
+"##,
+    )
+    .expect("the board renders");
+
+    assert!(
+        tree.contains("shadow[Shadows([ShadowSpec { x: 0.0, y: 1.0, blur: 2.0"),
+        "{tree}"
+    );
+    assert!(tree.contains("shadow[Shadows([])]"), "{tree}");
+    assert!(
+        tree.contains("bg[Background(BackgroundSpec { kind: LinearGradient"),
+        "{tree}"
+    );
+    assert!(tree.contains(r##"bg[Str("#ffffff")]"##), "{tree}");
+}
+
 /// The same for a named slot, which is the other operation carrying a `SpecId`.
 #[gpui::test]
 fn a_named_slot_survives_being_grafted_twice(cx: &mut TestAppContext) {

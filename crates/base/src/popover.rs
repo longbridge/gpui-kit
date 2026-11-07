@@ -3,22 +3,29 @@ use std::rc::Rc;
 use gpui::{
     Anchor, AnyElement, App, Context, DismissEvent, ElementId, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement as _,
-    Render, RenderOnce, Role, StatefulInteractiveElement as _, Subscription, Window, div,
-    prelude::FluentBuilder as _,
+    Render, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled,
+    Subscription, Window, div, prelude::FluentBuilder as _,
 };
 
 use crate::{
-    DeferredPopover, GlobalState, Popup, Selectable,
+    DeferredPopover, GlobalState, Popup, ResolvedPosition, Selectable, StyledExt as _,
     actions::{Cancel, Confirm},
 };
 
 const CONTEXT: &str = "Popover";
+const CONTENT_CONTEXT: &str = "PopoverContent";
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
         KeyBinding::new("space", Confirm { secondary: false }, Some(CONTEXT)),
+        KeyBinding::new("escape", Cancel, Some(CONTENT_CONTEXT)),
+        // The content is still a descendant of the trigger's dispatch node.
+        // Leave activation to its controls, not the trigger or an outer dialog.
+        // More deeply scoped input bindings retain precedence.
+        KeyBinding::new("enter", gpui::NoAction, Some(CONTENT_CONTEXT)),
+        KeyBinding::new("space", gpui::NoAction, Some(CONTENT_CONTEXT)),
     ]);
 }
 
@@ -102,7 +109,10 @@ impl PopoverState {
         self.set_open(opening, cx);
 
         if self.open {
-            let state = cx.entity();
+            // Weak: the subscription is stored on this state, so a strong
+            // handle would keep the state, and its deferred-popover
+            // registration, alive after its trigger is gone.
+            let state = cx.entity().downgrade();
             self.tracked_focus_handle
                 .clone()
                 .unwrap_or_else(|| self.focus_handle.clone())
@@ -111,15 +121,20 @@ impl PopoverState {
             self.dismiss_subscription =
                 Some(
                     window.subscribe(&cx.entity(), cx, move |_, _: &DismissEvent, window, cx| {
-                        state.update(cx, |state, cx| state.dismiss(window, cx));
+                        _ = state.update(cx, |state, cx| state.dismiss(window, cx));
                         window.refresh();
                     }),
                 );
         } else {
             self.dismiss_subscription = None;
-            if let Some(previous) = self.previous_focus_handle.take() {
-                if self.focus_handle.contains_focused(window, cx) {
-                    previous.focus(window, cx);
+            let previous = self.previous_focus_handle.take();
+            if self.focus_handle.contains_focused(window, cx) {
+                match previous {
+                    Some(previous) => previous.focus(window, cx),
+                    // Nothing had focus when the popover opened, so nothing has it now. Left
+                    // alone, focus would stay on the closed popover's own handle, which is no
+                    // longer in the tree.
+                    None => window.blur(cx),
                 }
             }
         }
@@ -165,10 +180,17 @@ type ContentBuilder =
     Box<dyn FnOnce(&mut PopoverState, &mut Window, &mut Context<PopoverState>) -> AnyElement>;
 
 /// An unstyled popover owning trigger interaction, open state, dismissal, and focus.
+///
+/// Enter and Space on the trigger toggle the popover. Inside its content, those
+/// keys belong to the focused control instead; Escape dismisses the popover and
+/// restores the previous focus.
 #[derive(IntoElement)]
 pub struct Popover {
     id: ElementId,
+    style: StyleRefinement,
     anchor: Anchor,
+    offset: gpui::Pixels,
+    on_position: Option<Box<dyn Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>)>>,
     default_open: bool,
     open: Option<bool>,
     tracked_focus_handle: Option<FocusHandle>,
@@ -183,7 +205,10 @@ impl Popover {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
+            style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
+            offset: gpui::px(0.),
+            on_position: None,
             default_open: false,
             open: None,
             tracked_focus_handle: None,
@@ -200,6 +225,21 @@ impl Popover {
         self
     }
 
+    /// Gap from the trigger along the anchor's outward direction, zero by default.
+    pub fn offset(mut self, offset: gpui::Pixels) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Observe geometry to supply presentation such as a pointer arrow.
+    pub fn on_position(
+        mut self,
+        callback: impl Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>) + 'static,
+    ) -> Self {
+        self.on_position = Some(Box::new(callback));
+        self
+    }
+
     pub fn mouse_button(mut self, mouse_button: MouseButton) -> Self {
         self.mouse_button = mouse_button;
         self
@@ -210,8 +250,8 @@ impl Popover {
         T: Selectable + IntoElement + 'static,
     {
         self.trigger = Some(Box::new(|is_open, _, _| {
-            let selected = trigger.is_selected();
-            trigger.selected(selected || is_open).into_any_element()
+            let open = trigger.is_open();
+            trigger.open(open || is_open).into_any_element()
         }));
         self
     }
@@ -266,6 +306,14 @@ impl Popover {
     }
 }
 
+/// Styles the trigger container: the element that takes part in the parent
+/// layout and whose bounds the popup is anchored to.
+impl Styled for Popover {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
 impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| {
@@ -286,7 +334,12 @@ impl RenderOnce for Popover {
         };
         let parent_view_id = window.current_view();
         let popup = Popup::new(self.id, trigger(open, window, cx))
+            .refine_style(&self.style)
             .anchor(self.anchor)
+            .offset(self.offset)
+            .when_some(self.on_position, |this, callback| {
+                this.on_position(callback)
+            })
             .key_context(CONTEXT)
             .on_action({
                 let state = state.clone();
@@ -320,7 +373,7 @@ impl RenderOnce for Popover {
             .occlude()
             .tab_group()
             .track_focus(&focus_handle)
-            .key_context(CONTEXT)
+            .key_context(CONTENT_CONTEXT)
             .on_action(window.listener_for(&state, PopoverState::on_action_cancel))
             .when_some(self.content, |this, content| {
                 this.child(state.update(cx, |state, cx| (content)(state, window, cx)))
@@ -341,7 +394,7 @@ impl RenderOnce for Popover {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{AppContext as _, Context, Render, Styled as _, point, px};
+    use gpui::{AppContext as _, Context, Render, point, px};
     use std::{cell::RefCell, rc::Rc};
 
     /// Popover state lives in element state, which is collected as soon as it
@@ -430,15 +483,26 @@ mod tests {
             }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| assert!(window.focused(cx).is_none(), "nothing has focus yet"));
 
         cx.simulate_click(point(px(20.), px(10.)), Default::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_some());
+        cx.update(|window, cx| assert!(window.focused(cx).is_some(), "the popover takes focus"));
 
         cx.simulate_click(point(px(300.), px(300.)), Default::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_none());
         assert_eq!(&*changes.borrow(), &[true, false]);
+        // Nothing had focus when the popover opened, so nothing has it now, not the closed
+        // popover's own handle.
+        cx.update(|window, cx| {
+            assert!(
+                window.focused(cx).is_none(),
+                "focus stays on {:?}",
+                window.focused(cx)
+            )
+        });
     }
 
     #[gpui::test]
@@ -451,6 +515,85 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_some());
+    }
+
+    /// A trigger that keeps "open" and "selected" apart, the way a downstream
+    /// sidebar row does: it is selected when it is the current view, and open
+    /// only while its popover is showing.
+    #[derive(IntoElement)]
+    struct RecordingTrigger {
+        calls: Rc<RefCell<Vec<(&'static str, bool)>>>,
+        selected: bool,
+        open: bool,
+    }
+
+    impl Selectable for RecordingTrigger {
+        fn selected(mut self, selected: bool) -> Self {
+            self.calls.borrow_mut().push(("selected", selected));
+            self.selected = selected;
+            self
+        }
+
+        fn is_selected(&self) -> bool {
+            self.selected
+        }
+
+        fn open(mut self, open: bool) -> Self {
+            self.calls.borrow_mut().push(("open", open));
+            self.open = open;
+            self
+        }
+
+        fn is_open(&self) -> bool {
+            self.open
+        }
+    }
+
+    impl RenderOnce for RecordingTrigger {
+        fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+            div().size(px(40.)).child("Open")
+        }
+    }
+
+    struct RecordingTriggerHarness {
+        calls: Rc<RefCell<Vec<(&'static str, bool)>>>,
+    }
+
+    impl Render for RecordingTriggerHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            Popover::new("recording-popover")
+                .trigger(RecordingTrigger {
+                    calls: self.calls.clone(),
+                    selected: false,
+                    open: false,
+                })
+                .content(|_, _, _| div().size(px(40.)))
+        }
+    }
+
+    #[gpui::test]
+    fn an_open_popover_tells_its_trigger_it_is_open_not_selected(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let calls = calls.clone();
+            move |_, _| RecordingTriggerHarness { calls }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        calls.borrow_mut().clear();
+
+        cx.simulate_click(point(px(20.), px(10.)), Default::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let calls = calls.borrow();
+        assert!(
+            calls.contains(&("open", true)),
+            "an open popover marks its trigger open, got {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|(name, _)| *name == "selected"),
+            "opening must not touch the trigger's own selection, got {calls:?}"
+        );
     }
 
     #[gpui::test]

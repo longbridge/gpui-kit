@@ -1,3 +1,8 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast_platform as gpui_platform;
+
 #[path = "../../../showcase/mod.rs"]
 mod showcase;
 

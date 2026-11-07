@@ -29,7 +29,7 @@ pub struct OtpState {
 impl OtpState {
     pub fn new(length: usize, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
-        let blink_cursor = cx.new(|_| BlinkCursor::new());
+        let blink_cursor = cx.new(BlinkCursor::new);
         let subscriptions = vec![
             cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
             cx.observe_window_activation(window, |this, window, cx| {

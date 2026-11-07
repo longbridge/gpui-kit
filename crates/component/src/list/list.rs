@@ -28,7 +28,15 @@ pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("escape", Cancel, context),
         KeyBinding::new("enter", Confirm { secondary: false }, context),
-        KeyBinding::new("secondary-enter", Confirm { secondary: true }, context),
+        KeyBinding::new(
+            if cx.platform_info().is_mac() {
+                "cmd-enter"
+            } else {
+                "ctrl-enter"
+            },
+            Confirm { secondary: true },
+            context,
+        ),
         KeyBinding::new("up", SelectUp, context),
         KeyBinding::new("down", SelectDown, context),
     ]);
@@ -45,6 +53,7 @@ pub enum ListEvent {
 }
 
 struct ListOptions {
+    scroll_bounce: Option<bool>,
     size: Size,
     scrollbar_visible: bool,
     search_placeholder: Option<SharedString>,
@@ -55,6 +64,7 @@ struct ListOptions {
 impl Default for ListOptions {
     fn default() -> Self {
         Self {
+            scroll_bounce: None,
             size: Size::default(),
             scrollbar_visible: true,
             max_height: None,
@@ -128,8 +138,10 @@ where
     }
 
     pub fn set_searchable(&mut self, searchable: bool, cx: &mut Context<Self>) {
-        self.searchable = searchable;
-        cx.notify();
+        if self.searchable != searchable {
+            self.searchable = searchable;
+            cx.notify();
+        }
     }
 
     /// Sets whether the list is selectable, default is true.
@@ -223,6 +235,8 @@ where
     }
 
     /// Set a specific list item for measurement.
+    ///
+    /// If the item is absent, measure the first item in the first non-empty section.
     pub fn set_item_to_measure_index(
         &mut self,
         ix: IndexPath,
@@ -430,10 +444,23 @@ where
 
         // Measure the item_height and section header/footer height.
         let available_space = size(AvailableSpace::MinContent, AvailableSpace::MinContent);
-        measured_size.item_size = self
-            .render_list_item(self.item_to_measure_index, window, cx)
-            .into_any_element()
-            .layout_as_root(available_space, window, cx);
+        // Use the fallback for this measurement without overwriting the caller's configured index.
+        let requested = self.item_to_measure_index;
+        let item_to_measure = if requested.section < sections_count
+            && requested.row < self.delegate.items_count(requested.section, cx)
+        {
+            Some(requested)
+        } else {
+            (0..sections_count)
+                .find(|section| self.delegate.items_count(*section, cx) > 0)
+                .map(|section| IndexPath::default().section(section))
+        };
+        if let Some(index) = item_to_measure {
+            measured_size.item_size = self
+                .render_list_item(index, window, cx)
+                .into_any_element()
+                .layout_as_root(available_space, window, cx);
+        }
 
         if let Some(mut el) = self
             .delegate
@@ -493,7 +520,7 @@ where
                     this.selected_index = Some(ix);
                     this.on_action_confirm(
                         &Confirm {
-                            secondary: e.modifiers().secondary(),
+                            secondary: e.modifiers().secondary(cx),
                         },
                         window,
                         cx,
@@ -582,12 +609,18 @@ where
                             this.with_sizing_behavior(ListSizingBehavior::Infer)
                         })
                         .track_scroll(&scroll_handle)
+                        .map(|list| {
+                            gpui_base::ScrollBounce::new("list-scroll-bounce", &scroll_handle, list)
+                                .when_some(self.options.scroll_bounce, |bounce, on| {
+                                    bounce.enabled(on)
+                                })
+                        })
                         .into_any_element(),
                     )
                 }
             })
             .when(scrollbar_visible, |this| {
-                this.child(Scrollbar::vertical(&scroll_handle))
+                this.child(Scrollbar::vertical(&scroll_handle).viewport_from_layout())
             })
     }
 }
@@ -654,6 +687,7 @@ where
             .key_context("List")
             .id("list-state")
             .track_focus(&self.focus_handle)
+            .role(Role::List)
             .size_full()
             .relative()
             .overflow_hidden()
@@ -730,6 +764,13 @@ where
         self
     }
 
+    /// Bounce at the vertical boundaries. On by default on iOS, Android and
+    /// macOS, off elsewhere; reduced motion disables displacement.
+    pub fn scroll_bounce(mut self, enabled: bool) -> Self {
+        self.options.scroll_bounce = Some(enabled);
+        self
+    }
+
     /// Sets the placeholder text for the search input.
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
@@ -774,10 +815,168 @@ where
 
         div()
             .id("list")
-            .role(Role::List)
             .size_full()
             .refine_style(&self.style)
             .child(self.state.clone())
+    }
+}
+
+#[cfg(test)]
+mod measurement_tests {
+    use super::*;
+    use crate::list::ListItem;
+    use gpui::{Element, TestAppContext};
+
+    struct Delegate {
+        counts: Vec<usize>,
+    }
+
+    impl ListDelegate for Delegate {
+        type Item = ListItem;
+        fn sections_count(&self, _: &App) -> usize {
+            self.counts.len()
+        }
+        fn items_count(&self, section: usize, _: &App) -> usize {
+            self.counts[section]
+        }
+        fn set_selected_index(
+            &mut self,
+            _: Option<IndexPath>,
+            _: &mut Window,
+            _: &mut Context<ListState<Self>>,
+        ) {
+        }
+        fn render_item(
+            &mut self,
+            index: IndexPath,
+            _: &mut Window,
+            _: &mut Context<ListState<Self>>,
+        ) -> Option<ListItem> {
+            (index.row < *self.counts.get(index.section)?)
+                .then(|| ListItem::new(index.row).h(px(if index.row == 0 { 36. } else { 48. })))
+        }
+    }
+
+    struct BounceList(Entity<ListState<Delegate>>);
+
+    impl Render for BounceList {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(240.))
+                .h(px(200.))
+                .child(List::new(&self.0).scroll_bounce(true).size_full())
+        }
+    }
+
+    #[gpui::test]
+    fn scroll_bounce_list_accepts_a_reverse_wheel_during_return(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            BounceList(cx.new(|cx| ListState::new(Delegate { counts: vec![40] }, window, cx)))
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        let wheel = |cx: &mut gpui::VisualTestContext, dy| {
+            cx.simulate_event(gpui::ScrollEvent {
+                position: gpui::point(px(100.), px(100.)),
+                delta: gpui::ScrollDelta::Lines(gpui::point(0., dy)),
+                ..Default::default()
+            });
+        };
+        for (dy, phase) in [
+            (-10000., gpui::TouchPhase::Started),
+            (0., gpui::TouchPhase::Ended),
+        ] {
+            cx.simulate_event(gpui::ScrollEvent {
+                position: gpui::point(px(100.), px(100.)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(dy))),
+                touch_phase: phase,
+                ..Default::default()
+            });
+        }
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let end = state.read_with(cx, |state, _| state.scroll_handle.offset().y);
+        assert!(end < px(0.));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(200));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        wheel(cx, 2.);
+        assert!(state.read_with(cx, |state, _| state.scroll_handle.offset().y) > end);
+    }
+
+    #[gpui::test]
+    fn measures_an_existing_row_when_the_requested_item_is_absent(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.draw(
+            gpui::point(px(0.), px(0.)),
+            size(px(300.), px(300.)),
+            |window, cx| {
+                let list = cx.new(|cx| ListState::new(Delegate { counts: vec![0, 2] }, window, cx));
+                list.update(cx, |list, cx| {
+                    for (requested, expected_height) in [
+                        (IndexPath::default(), 36.),
+                        (IndexPath::new(1).section(1), 48.),
+                        (IndexPath::new(99).section(1), 36.),
+                        (IndexPath::new(0).section(99), 36.),
+                    ] {
+                        list.set_item_to_measure_index(requested, window, cx);
+                        list.prepare_items_if_needed(window, cx);
+                        let position = list
+                            .rows_cache
+                            .position_of(&IndexPath::new(0).section(1))
+                            .unwrap();
+                        assert_eq!(
+                            list.rows_cache.entries_sizes[position].height,
+                            px(expected_height)
+                        );
+                        assert_eq!(list.item_to_measure_index, requested);
+                    }
+                    let requested = IndexPath::new(1).section(1);
+                    list.set_item_to_measure_index(requested, window, cx);
+                    // Filtering removes the requested row, then all rows, before restoring it.
+                    for (counts, expected_height) in [
+                        (vec![0, 2], Some(48.)),
+                        (vec![0, 1], Some(36.)),
+                        (vec![0, 0], None),
+                        (vec![0, 2], Some(48.)),
+                    ] {
+                        list.delegate.counts = counts;
+                        list.prepare_items_if_needed(window, cx);
+                        if let Some(height) = expected_height {
+                            let position = list
+                                .rows_cache
+                                .position_of(&IndexPath::new(0).section(1))
+                                .unwrap();
+                            assert_eq!(list.rows_cache.entries_sizes[position].height, px(height));
+                        } else {
+                            assert_eq!(list.rows_cache.items_count(), 0);
+                            assert!(list.rows_cache.entries_sizes.is_empty());
+                        }
+                        assert_eq!(list.item_to_measure_index, requested);
+                    }
+                });
+                div()
+            },
+        );
+    }
+
+    #[gpui::test]
+    fn list_state_has_list_role(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.draw(
+            gpui::point(px(0.), px(0.)),
+            size(px(300.), px(300.)),
+            |window, cx| {
+                let list = cx.new(|cx| ListState::new(Delegate { counts: vec![2] }, window, cx));
+                list.update(cx, |list, cx| {
+                    let element = list.render(window, cx).into_element();
+                    assert_eq!(element.a11y_role(), Some(Role::List));
+                });
+                div()
+            },
+        );
     }
 }
 

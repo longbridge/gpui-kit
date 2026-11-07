@@ -130,7 +130,8 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
             .unwrap_or_else(|| Icon::new(IconName::Check));
 
         let content = div()
-            .whitespace_nowrap()
+            .min_w_0()
+            .truncate()
             .child(item.render(window, cx).into_any_element());
 
         Some(
@@ -149,6 +150,15 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
     }
 
     fn confirm(&mut self, secondary: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        let Some(ix) = self.selected_index else {
+            return;
+        };
+        let Some(item) = self.delegate.item(ix) else {
+            return;
+        };
+        if !self.delegate.is_item_enabled(ix, item, cx) {
+            return;
+        }
         (self.on_confirm)(self.selected_index, secondary, window, cx);
     }
 

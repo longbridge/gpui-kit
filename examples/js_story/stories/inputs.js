@@ -2,6 +2,26 @@ import { pendingStory } from "./story.js";
 
 export const stories = [
   pendingStory({
+    id: "questionnaire",
+    title: "Questionnaire",
+    group: "Inputs",
+    rustStory: "QuestionnaireStory",
+    description: "Multi-step questions with answers, validation, and navigation.",
+    states: ["single", "multiple", "freeform", "skip", "validation"],
+    availability: "pending",
+    api: "Questionnaire",
+  }),
+  pendingStory({
+    id: "input-group",
+    title: "Input Group",
+    group: "Inputs",
+    rustStory: "InputGroupStory",
+    description: "Inputs and textareas with shared frames, addons, and native actions.",
+    states: ["focused", "disabled", "readonly", "validation", "textarea"],
+    availability: "pending",
+    api: "InputGroup",
+  }),
+  pendingStory({
     id: "input",
     title: "Input",
     group: "Inputs",
@@ -30,6 +50,16 @@ export const stories = [
     states: ["normal", "min/max", "disabled"],
     availability: "pending",
     api: "NumberInput",
+  }),
+  pendingStory({
+    id: "time-field",
+    title: "TimeField",
+    group: "Inputs",
+    rustStory: "TimeFieldStory",
+    description: "Segmented time-of-day input.",
+    states: ["default", "disabled"],
+    availability: "pending",
+    api: "TimeField",
   }),
   pendingStory({
     id: "otp-input",
@@ -80,6 +110,16 @@ export const stories = [
     states: ["single value", "range", "disabled"],
     availability: "pending",
     api: "Slider",
+  }),
+  pendingStory({
+    id: "speech",
+    title: "Speech",
+    group: "Inputs",
+    rustStory: "SpeechStory",
+    description: "Dictation through a Rust speech recognizer.",
+    states: ["idle", "recording", "unsupported"],
+    availability: "infrastructure",
+    api: "SpeechButton",
   }),
   pendingStory({
     id: "color-picker",

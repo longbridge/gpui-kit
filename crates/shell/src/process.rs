@@ -51,6 +51,14 @@ impl Default for Limits {
     }
 }
 
+impl Limits {
+    /// The same output bounds with a different deadline, for a caller that
+    /// asked for one.
+    pub(crate) fn with_timeout(self, timeout: Duration) -> Self {
+        Self { timeout, ..self }
+    }
+}
+
 #[cfg(test)]
 impl Limits {
     fn for_test(timeout: Duration, output: usize) -> Self {
@@ -72,11 +80,15 @@ pub(crate) struct Output {
 pub(crate) fn run_bounded(
     command: &str,
     args: &[String],
+    cwd: Option<&Path>,
     limits: Limits,
     cancellation: Cancellation,
 ) -> Result<Output, String> {
     let executable = resolve_executable(command, std::env::var_os("PATH").as_deref())?;
     let mut command_builder = Command::new(&executable);
+    if let Some(cwd) = cwd {
+        command_builder.current_dir(cwd);
+    }
     command_builder
         // A process grant authorizes one executable, not the host's ambient
         // credentials. Keep the child environment empty until the public API
@@ -284,23 +296,30 @@ impl ProcessTree {
     }
 
     fn terminate(&mut self, child: &mut std::process::Child) {
+        self.terminate_group(child.id());
+    }
+
+    fn terminate_group(&mut self, pid: u32) {
         // The child is the leader of the process group configured above. A
         // negative pid targets the whole group, including descendants that
         // inherited stdout/stderr and would otherwise keep the readers alive.
         unsafe {
-            libc::kill(-(child.id() as i32), libc::SIGKILL);
+            libc::kill(-(pid as i32), libc::SIGKILL);
         }
     }
+
+    fn close_after_exit(&mut self) {}
 }
 
 #[cfg(windows)]
 struct ProcessTree {
-    job: Option<windows::Win32::Foundation::HANDLE>,
+    job: Option<std::os::windows::io::OwnedHandle>,
 }
 
 #[cfg(windows)]
 impl ProcessTree {
     fn new() -> Result<Self, String> {
+        use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
         use windows::{
             Win32::System::JobObjects::{
                 CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -312,19 +331,18 @@ impl ProcessTree {
 
         let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
             .map_err(|error| format!("creating Windows Job Object failed: {error}"))?;
+        // SAFETY: CreateJobObjectW returned a valid, uniquely owned handle.
+        let job = unsafe { OwnedHandle::from_raw_handle(job.0) };
         let mut information = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         if let Err(error) = unsafe {
             SetInformationJobObject(
-                job,
+                windows::Win32::Foundation::HANDLE(job.as_raw_handle()),
                 JobObjectExtendedLimitInformation,
                 std::ptr::from_ref(&information).cast(),
                 std::mem::size_of_val(&information) as u32,
             )
         } {
-            unsafe {
-                let _ = windows::Win32::Foundation::CloseHandle(job);
-            }
             return Err(format!("configuring Windows Job Object failed: {error}"));
         }
         Ok(Self { job: Some(job) })
@@ -334,9 +352,9 @@ impl ProcessTree {
         use std::os::windows::io::AsRawHandle as _;
         use windows::Win32::{Foundation::HANDLE, System::JobObjects::AssignProcessToJobObject};
 
-        let job = self.job.expect("a live process tree owns its job");
+        let job = self.job.as_ref().expect("a live process tree owns its job");
         let process = HANDLE(child.as_raw_handle());
-        unsafe { AssignProcessToJobObject(job, process) }
+        unsafe { AssignProcessToJobObject(HANDLE(job.as_raw_handle()), process) }
             .map_err(|error| format!("assigning child to Windows Job Object failed: {error}"))?;
         resume_suspended_process(child.id())
     }
@@ -345,12 +363,16 @@ impl ProcessTree {
         self.close();
     }
 
+    fn terminate_group(&mut self, _: u32) {
+        self.close();
+    }
+
+    fn close_after_exit(&mut self) {
+        self.close();
+    }
+
     fn close(&mut self) {
-        if let Some(job) = self.job.take() {
-            unsafe {
-                let _ = windows::Win32::Foundation::CloseHandle(job);
-            }
-        }
+        self.job.take();
     }
 }
 
@@ -427,11 +449,464 @@ impl ProcessTree {
     }
 
     fn terminate(&mut self, _: &mut std::process::Child) {}
+
+    fn terminate_group(&mut self, _: u32) {}
+
+    fn close_after_exit(&mut self) {}
 }
 
 fn kill_process_tree(tree: &mut ProcessTree, child: &mut std::process::Child) {
     tree.terminate(child);
     let _ = child.kill();
+}
+
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+/// The longest line a line-mode process may write before it is stopped.
+///
+/// There is no bound on a process's total output — a long-running agent
+/// streams for as long as it runs — but a line is held whole until its newline
+/// arrives, so an endless one would grow without limit.
+pub(crate) const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
+
+/// How the waiting thread polls for the child, the deadline and a kill.
+const WAIT_SLICE: Duration = Duration::from_millis(20);
+
+/// How a streaming child was asked to run.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SpawnOptions {
+    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) stdin: bool,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) lines: bool,
+}
+
+/// Something a streaming child did, in the order it happened.
+///
+/// `Exit` is always the last event, and comes only after both streams have
+/// delivered everything they had.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ProcessEvent {
+    Stdout(String),
+    Stderr(String),
+    Exit {
+        code: Option<i32>,
+        signal: Option<String>,
+        error: Option<String>,
+    },
+}
+
+impl ProcessEvent {
+    pub(crate) fn is_exit(&self) -> bool {
+        matches!(self, Self::Exit { .. })
+    }
+}
+
+/// A running child: its events, its stdin, and the means to stop it.
+pub(crate) struct SpawnedProcess {
+    pub(crate) pid: u32,
+    pub(crate) events: async_channel::Receiver<ProcessEvent>,
+    pub(crate) stdin: Option<StdinWriter>,
+    pub(crate) killer: Killer,
+}
+
+enum StdinMessage {
+    Write(String),
+    End,
+}
+
+/// Feeds a child's stdin from its own thread, so a child that is slow to read
+/// never blocks the caller.
+pub(crate) struct StdinWriter {
+    sender: Option<mpsc::Sender<StdinMessage>>,
+}
+
+impl StdinWriter {
+    pub(crate) fn write(&mut self, text: String) -> Result<(), String> {
+        let sender = self
+            .sender
+            .as_ref()
+            .ok_or("stdin has already been closed")?;
+        sender
+            .send(StdinMessage::Write(text))
+            .map_err(|_| "stdin is closed: the process is no longer reading it".to_owned())
+    }
+
+    pub(crate) fn end(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            let _ = sender.send(StdinMessage::End);
+        }
+    }
+}
+
+/// Stops a streaming child and everything it started.
+#[derive(Clone)]
+pub(crate) struct Killer {
+    pid: u32,
+    tree: Arc<std::sync::Mutex<Option<ProcessTree>>>,
+    /// Set by an explicit kill, so the exit says nothing went wrong.
+    killed: Arc<AtomicBool>,
+    /// Why the runtime stopped the child, when it was the runtime.
+    reason: Arc<std::sync::Mutex<Option<String>>>,
+    /// Set once the child has been reaped and its group stopped for the last
+    /// time; its pid may then belong to something else and is not signalled
+    /// again.
+    reaped: Arc<AtomicBool>,
+}
+
+impl Killer {
+    /// `ChildProcess.kill()`, and the cancellation the runtime uses when the
+    /// view or application that started the child goes away.
+    pub(crate) fn kill(&self) {
+        self.killed.store(true, Ordering::Release);
+        self.terminate();
+    }
+
+    fn stop(&self, reason: String) {
+        self.reason
+            .lock()
+            .expect("kill reason lock")
+            .get_or_insert(reason);
+        self.terminate();
+    }
+
+    fn terminate(&self) {
+        if self.reaped.load(Ordering::Acquire) {
+            return;
+        }
+        let mut tree = self.tree.lock().expect("process tree lock");
+        if let Some(tree) = tree.as_mut() {
+            tree.terminate_group(self.pid);
+        }
+    }
+}
+
+/// Starts `command` and streams what it does.
+///
+/// The same rules as [`run_bounded`] for what runs: the executable is resolved
+/// on the host PATH, the environment is empty, and the child leads a process
+/// group (a Job Object on Windows) so stopping it stops its descendants too.
+/// What differs is time: output is delivered as it arrives, there is no
+/// deadline unless one is asked for, and stdin can be written.
+pub(crate) fn spawn_streaming(
+    command: &str,
+    args: &[String],
+    options: SpawnOptions,
+) -> Result<SpawnedProcess, String> {
+    let executable = resolve_executable(command, std::env::var_os("PATH").as_deref())?;
+    let mut builder = Command::new(&executable);
+    if let Some(cwd) = &options.cwd {
+        builder.current_dir(cwd);
+    }
+    builder
+        // As for `run_bounded`: a grant authorizes one executable, not the
+        // host's ambient credentials.
+        .env_clear()
+        .args(args)
+        .stdin(if options.stdin {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_process_tree(&mut builder);
+    let mut tree = ProcessTree::new()?;
+    let mut child = builder
+        .spawn()
+        .map_err(|error| format!("running `{command}` failed: {error}"))?;
+    if let Err(error) = tree.attach(&child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!(
+            "isolating `{command}` process tree failed: {error}"
+        ));
+    }
+
+    let pid = child.id();
+    let killer = Killer {
+        pid,
+        tree: Arc::new(std::sync::Mutex::new(Some(tree))),
+        killed: Arc::new(AtomicBool::new(false)),
+        reason: Arc::new(std::sync::Mutex::new(None)),
+        reaped: Arc::new(AtomicBool::new(false)),
+    };
+    let (sender, events) = async_channel::unbounded();
+
+    let stdin = child.stdin.take().map(|mut pipe| {
+        let (writer, messages) = mpsc::channel::<StdinMessage>();
+        thread::spawn(move || {
+            use std::io::Write as _;
+            for message in messages {
+                match message {
+                    StdinMessage::Write(text) => {
+                        if pipe
+                            .write_all(text.as_bytes())
+                            .and_then(|()| pipe.flush())
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    StdinMessage::End => break,
+                }
+            }
+            // Dropping the pipe is what closes it.
+        });
+        StdinWriter {
+            sender: Some(writer),
+        }
+    });
+
+    let readers = [
+        stream_reader(
+            child.stdout.take().expect("piped stdout"),
+            ProcessEvent::Stdout,
+            options.lines,
+            sender.clone(),
+            killer.clone(),
+        ),
+        stream_reader(
+            child.stderr.take().expect("piped stderr"),
+            ProcessEvent::Stderr,
+            options.lines,
+            sender.clone(),
+            killer.clone(),
+        ),
+    ];
+
+    let waiter = killer.clone();
+    let command = command.to_owned();
+    thread::spawn(move || {
+        use wait_timeout::ChildExt as _;
+
+        let deadline = options
+            .timeout
+            .map(|timeout| (Instant::now() + timeout, timeout));
+        let status = loop {
+            match child.wait_timeout(WAIT_SLICE) {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => {}
+                Err(error) => break Err(format!("waiting for `{command}` failed: {error}")),
+            }
+            if let Some((deadline, timeout)) = deadline
+                && Instant::now() >= deadline
+            {
+                waiter.stop(format!(
+                    "`{command}` timed out after {} ms",
+                    timeout.as_millis()
+                ));
+            }
+        };
+
+        // The leader is gone, but a descendant still holding the pipes would
+        // keep the readers — and so the exit — waiting forever. Nothing the
+        // child started outlives it.
+        waiter.terminate();
+        if status.is_err() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        waiter.reaped.store(true, Ordering::Release);
+        for reader in readers {
+            let _ = reader.join();
+        }
+        if let Some(mut tree) = waiter.tree.lock().expect("process tree lock").take() {
+            tree.close_after_exit();
+        }
+
+        let reason = waiter.reason.lock().expect("kill reason lock").take();
+        let event = match status {
+            Ok(status) => ProcessEvent::Exit {
+                code: status.code(),
+                signal: exit_signal(&status),
+                error: reason,
+            },
+            Err(error) => ProcessEvent::Exit {
+                code: None,
+                signal: None,
+                error: Some(reason.unwrap_or(error)),
+            },
+        };
+        let _ = sender.send_blocking(event);
+    });
+
+    Ok(SpawnedProcess {
+        pid,
+        events,
+        stdin,
+        killer,
+    })
+}
+
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt as _;
+    status.signal().map(|signal| {
+        match signal {
+            libc::SIGKILL => "SIGKILL",
+            libc::SIGTERM => "SIGTERM",
+            libc::SIGINT => "SIGINT",
+            libc::SIGHUP => "SIGHUP",
+            libc::SIGQUIT => "SIGQUIT",
+            libc::SIGABRT => "SIGABRT",
+            libc::SIGSEGV => "SIGSEGV",
+            libc::SIGPIPE => "SIGPIPE",
+            _ => return format!("signal {signal}"),
+        }
+        .to_owned()
+    })
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_: &std::process::ExitStatus) -> Option<String> {
+    None
+}
+
+/// Reads one stream to its end and sends what it said.
+fn stream_reader(
+    mut stream: impl Read + Send + 'static,
+    event: fn(String) -> ProcessEvent,
+    lines: bool,
+    sender: async_channel::Sender<ProcessEvent>,
+    killer: Killer,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut decoder = Utf8Decoder::default();
+        let mut splitter = lines.then(LineSplitter::default);
+        let mut chunk = vec![0_u8; 64 * 1024];
+        let deliver = |text: String| sender.send_blocking(event(text)).is_ok();
+
+        loop {
+            let count = match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => count,
+            };
+            let text = decoder.decode(&chunk[..count]);
+            let open = match splitter.as_mut() {
+                None => text.is_empty() || deliver(text),
+                Some(splitter) => match splitter.push(&text) {
+                    Ok(lines) => lines.into_iter().all(deliver),
+                    Err(error) => {
+                        killer.stop(error);
+                        break;
+                    }
+                },
+            };
+            if !open {
+                // Nobody is listening any more; the child is being stopped.
+                break;
+            }
+        }
+
+        let rest = decoder.finish();
+        match splitter.as_mut() {
+            None => {
+                if !rest.is_empty() {
+                    deliver(rest);
+                }
+            }
+            Some(splitter) => {
+                if let Ok(lines) = splitter.push(&rest) {
+                    lines.into_iter().for_each(|line| {
+                        deliver(line);
+                    });
+                }
+                if let Some(line) = splitter.finish() {
+                    deliver(line);
+                }
+            }
+        }
+    })
+}
+
+/// UTF-8 decoding that survives a character split across two reads.
+///
+/// A read ends wherever the pipe's buffer did, which is often inside a
+/// multi-byte character. The incomplete tail is held for the next read;
+/// bytes that can never be valid become U+FFFD, as `TextDecoder` makes them.
+#[derive(Default)]
+struct Utf8Decoder {
+    pending: Vec<u8>,
+}
+
+impl Utf8Decoder {
+    fn decode(&mut self, bytes: &[u8]) -> String {
+        self.pending.extend_from_slice(bytes);
+        let mut text = String::new();
+        let mut rest: &[u8] = &self.pending;
+        loop {
+            match std::str::from_utf8(rest) {
+                Ok(valid) => {
+                    text.push_str(valid);
+                    rest = &[];
+                    break;
+                }
+                Err(error) => {
+                    let (valid, after) = rest.split_at(error.valid_up_to());
+                    text.push_str(std::str::from_utf8(valid).expect("validated prefix"));
+                    match error.error_len() {
+                        Some(invalid) => {
+                            text.push(char::REPLACEMENT_CHARACTER);
+                            rest = &after[invalid..];
+                        }
+                        // An incomplete character at the end: wait for more.
+                        None => {
+                            rest = after;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        self.pending = rest.to_vec();
+        text
+    }
+
+    /// Whatever is left once the stream has ended can never be completed.
+    fn finish(&mut self) -> String {
+        let rest = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending.clear();
+        rest
+    }
+}
+
+/// Splits decoded text into lines, joining a line that spans several reads.
+#[derive(Default)]
+struct LineSplitter {
+    partial: String,
+}
+
+impl LineSplitter {
+    /// The lines `text` completed, without their line endings.
+    fn push(&mut self, text: &str) -> Result<Vec<String>, String> {
+        let mut lines = Vec::new();
+        let mut rest = text;
+        while let Some(newline) = rest.find('\n') {
+            self.partial.push_str(&rest[..newline]);
+            let mut line = std::mem::take(&mut self.partial);
+            if line.ends_with('\r') {
+                line.pop();
+            }
+            lines.push(line);
+            rest = &rest[newline + 1..];
+        }
+        self.partial.push_str(rest);
+        if self.partial.len() > MAX_LINE_BYTES {
+            return Err(format!(
+                "a line of output exceeded {} MiB without a newline",
+                MAX_LINE_BYTES >> 20
+            ));
+        }
+        Ok(lines)
+    }
+
+    /// The last line, when the stream ended without a newline.
+    fn finish(&mut self) -> Option<String> {
+        (!self.partial.is_empty()).then(|| std::mem::take(&mut self.partial))
+    }
 }
 
 #[cfg(test)]
@@ -470,6 +945,7 @@ mod tests {
         let result = run_bounded(
             "/bin/sh",
             &["-c".into(), "printf out; printf err >&2".into()],
+            None,
             Limits::for_test(Duration::from_secs(2), 1024),
             Cancellation::new(),
         )
@@ -485,6 +961,7 @@ mod tests {
         let result = run_bounded(
             "/usr/bin/env",
             &[],
+            None,
             Limits::for_test(Duration::from_secs(2), 1024),
             Cancellation::new(),
         )
@@ -500,6 +977,7 @@ mod tests {
         let error = run_bounded(
             "/bin/sh",
             &["-c".into(), "sleep 5".into()],
+            None,
             Limits::for_test(Duration::from_millis(30), 1024),
             Cancellation::new(),
         )
@@ -514,6 +992,7 @@ mod tests {
         let error = run_bounded(
             "/bin/sh",
             &["-c".into(), "(sleep 5) & exit 0".into()],
+            None,
             Limits::for_test(Duration::from_millis(50), 1024),
             Cancellation::new(),
         )
@@ -528,6 +1007,7 @@ mod tests {
         let error = run_bounded(
             "/bin/sh",
             &["-c".into(), "yes x | head -c 4096".into()],
+            None,
             Limits::for_test(Duration::from_secs(2), 128),
             Cancellation::new(),
         )
@@ -541,6 +1021,7 @@ mod tests {
         let error = run_bounded(
             "/bin/sh",
             &["-c".into(), "yes x | head -c 4096 >&2".into()],
+            None,
             Limits::for_test(Duration::from_secs(2), 128),
             Cancellation::new(),
         )
@@ -557,6 +1038,7 @@ mod tests {
         let error = run_bounded(
             "/bin/sh",
             &["-c".into(), "sleep 5".into()],
+            None,
             Limits::for_test(Duration::from_secs(2), 1024),
             cancellation,
         )
@@ -571,6 +1053,7 @@ mod tests {
         let result = run_bounded(
             "cmd.exe",
             &["/D".into(), "/C".into(), "echo out & echo err 1>&2".into()],
+            None,
             Limits::for_test(Duration::from_secs(2), 1024),
             Cancellation::new(),
         )
@@ -592,6 +1075,7 @@ mod tests {
                 "/C".into(),
                 "ping.exe -n 20 127.0.0.1 >NUL".into(),
             ],
+            None,
             Limits::for_test(Duration::from_millis(100), 1024),
             Cancellation::new(),
         )
@@ -614,6 +1098,7 @@ mod tests {
                 "/C".into(),
                 "ping.exe -n 20 127.0.0.1 >NUL".into(),
             ],
+            None,
             Limits::for_test(Duration::from_secs(2), 1024),
             cancellation,
         )
@@ -662,6 +1147,7 @@ mod tests {
                 "/C".into(),
                 parent_script.into_os_string().into_string().unwrap(),
             ],
+            None,
             Limits::for_test(Duration::from_millis(100), 1024),
             Cancellation::new(),
         )
@@ -674,5 +1160,223 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[cfg(unix)]
+    /// Every event until the exit, failing the test instead of hanging.
+    fn collect(spawned: &SpawnedProcess) -> Vec<ProcessEvent> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut events = Vec::new();
+        loop {
+            match spawned.events.try_recv() {
+                Ok(event) => {
+                    let last = event.is_exit();
+                    events.push(event);
+                    if last {
+                        // Nothing may follow the exit.
+                        thread::sleep(Duration::from_millis(50));
+                        assert!(
+                            spawned.events.try_recv().is_err(),
+                            "an event after the exit"
+                        );
+                        return events;
+                    }
+                }
+                Err(_) => {
+                    assert!(Instant::now() < deadline, "no exit within 10 s: {events:?}");
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn stdout(events: &[ProcessEvent]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ProcessEvent::Stdout(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[cfg(unix)]
+    fn exit(events: &[ProcessEvent]) -> (Option<i32>, Option<String>, Option<String>) {
+        match events.last() {
+            Some(ProcessEvent::Exit {
+                code,
+                signal,
+                error,
+            }) => (*code, signal.clone(), error.clone()),
+            other => panic!("the last event must be the exit, found {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn shell(script: &str, options: SpawnOptions) -> SpawnedProcess {
+        spawn_streaming("/bin/sh", &["-c".into(), script.into()], options).expect("spawn")
+    }
+
+    #[cfg(unix)]
+    fn lines() -> SpawnOptions {
+        SpawnOptions {
+            lines: true,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lines_are_joined_across_writes_and_the_last_partial_line_is_delivered() {
+        let spawned = shell(
+            "printf 'a'; sleep 0.05; printf 'b\\nc'; sleep 0.05; printf '\\r\\nd'",
+            lines(),
+        );
+        let events = collect(&spawned);
+        assert_eq!(stdout(&events), ["ab", "c", "d"]);
+        assert_eq!(exit(&events).0, Some(0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_character_split_between_writes_decodes_whole() {
+        // 中 is E4 B8 AD and 😀 is F0 9F 98 80; each write stops inside one.
+        let spawned = shell(
+            "printf '\\344\\270'; sleep 0.05; printf '\\255\\360\\237\\230'; sleep 0.05; printf '\\200\\n'",
+            lines(),
+        );
+        assert_eq!(stdout(&collect(&spawned)), ["中😀"]);
+
+        let mut decoder = Utf8Decoder::default();
+        let text = "中😀";
+        let decoded: String = text
+            .as_bytes()
+            .iter()
+            .map(|byte| decoder.decode(std::slice::from_ref(byte)))
+            .collect();
+        assert_eq!(decoded + &decoder.finish(), text);
+        assert_eq!(Utf8Decoder::default().decode(b"a\xffb"), "a\u{FFFD}b");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stdin_round_trips_through_cat() {
+        let mut spawned = spawn_streaming(
+            "cat",
+            &[],
+            SpawnOptions {
+                stdin: true,
+                lines: true,
+                ..Default::default()
+            },
+        )
+        .expect("spawn cat");
+        let stdin = spawned.stdin.as_mut().expect("piped stdin");
+        stdin.write("first\n".into()).unwrap();
+        stdin.write("second\n".into()).unwrap();
+        stdin.end();
+        assert!(
+            stdin.write("late\n".into()).is_err(),
+            "writing after end is refused"
+        );
+
+        let events = collect(&spawned);
+        assert_eq!(stdout(&events), ["first", "second"]);
+        assert_eq!(exit(&events).0, Some(0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_stops_the_child_and_its_descendants_with_one_exit() {
+        let spawned = shell("sleep 30 & echo $!; sleep 30", lines());
+        let descendant = loop {
+            match spawned
+                .events
+                .recv_blocking()
+                .expect("the descendant's pid")
+            {
+                ProcessEvent::Stdout(pid) => break pid.parse::<i32>().unwrap(),
+                _ => continue,
+            }
+        };
+
+        spawned.killer.kill();
+        spawned.killer.kill();
+        let events = collect(&spawned);
+        let (code, signal, error) = exit(&events);
+        assert_eq!(code, None);
+        assert_eq!(signal.as_deref(), Some("SIGKILL"));
+        assert_eq!(error, None, "an asked-for kill is not an error");
+        assert_eq!(events.iter().filter(|event| event.is_exit()).count(), 1);
+
+        // The descendant was in the group; it is gone, not orphaned.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while unsafe { libc::kill(descendant, 0) } == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the descendant {descendant} survived"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_timeout_stops_the_child_and_says_so() {
+        let spawned = shell(
+            "sleep 5",
+            SpawnOptions {
+                timeout: Some(Duration::from_millis(100)),
+                ..Default::default()
+            },
+        );
+        let (_, signal, error) = exit(&collect(&spawned));
+        assert_eq!(signal.as_deref(), Some("SIGKILL"));
+        assert!(error.is_some_and(|error| error.contains("timed out after 100 ms")));
+    }
+
+    /// `process.run`'s 30 seconds are not `spawn`'s: with no `timeoutMs` there
+    /// is no deadline at all, which the waiting loop only ever checks against
+    /// `options.timeout`.
+    #[cfg(unix)]
+    #[test]
+    fn a_spawn_without_a_timeout_has_no_deadline() {
+        assert_eq!(SpawnOptions::default().timeout, None);
+        let spawned = shell("sleep 0.3; echo done", lines());
+        let events = collect(&spawned);
+        assert_eq!(stdout(&events), ["done"]);
+        assert_eq!(exit(&events), (Some(0), None, None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_endless_line_stops_the_child() {
+        let mut splitter = LineSplitter::default();
+        assert!(splitter.push(&"x".repeat(MAX_LINE_BYTES)).is_ok());
+        assert!(splitter.push("x").is_err(), "one byte past the limit");
+        assert_eq!(
+            LineSplitter::default().push("a\nb").unwrap(),
+            ["a"],
+            "an unfinished line waits"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_honours_a_working_directory_and_a_longer_timeout() {
+        let directory = std::env::temp_dir();
+        let result = run_bounded(
+            "/bin/sh",
+            &["-c".into(), "pwd".into()],
+            Some(&directory),
+            Limits::default().with_timeout(Duration::from_secs(5)),
+            Cancellation::new(),
+        )
+        .expect("pwd");
+        assert_eq!(
+            std::fs::canonicalize(result.stdout.trim()).unwrap(),
+            std::fs::canonicalize(&directory).unwrap()
+        );
     }
 }

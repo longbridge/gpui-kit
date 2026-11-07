@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
 use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
@@ -280,7 +281,7 @@ impl<I: Clone + Eq, T> ToastManager<I, T> {
 #[derive(IntoElement)]
 pub struct ToastStack {
     id: ElementId,
-    base: Stateful<Div>,
+    base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     state: ToastStackState,
     motion: ToastMotion,
@@ -294,7 +295,7 @@ impl ToastStack {
     pub fn new(id: impl Into<ElementId>, state: ToastStackState) -> Self {
         let id = id.into();
         Self {
-            base: div().id(id.clone()),
+            base: div().id(id.clone()).test_support(),
             id,
             style: StyleRefinement::default(),
             state,
@@ -351,6 +352,11 @@ impl ParentElement for ToastStack {
 impl InteractiveElement for ToastStack {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
+    }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
     }
 }
 
@@ -590,7 +596,7 @@ pub enum ToastTransitionStatus {
 /// An unstyled semantic toast root. Applications own all presentation and motion.
 #[derive(IntoElement)]
 pub struct Toast {
-    base: Stateful<Div>,
+    base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     transition_status: ToastTransitionStatus,
     children: Vec<AnyElement>,
@@ -600,7 +606,7 @@ impl Toast {
     /// Create an unstyled semantic toast in the starting transition phase.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             transition_status: ToastTransitionStatus::Starting,
             children: Vec::new(),
@@ -634,6 +640,11 @@ impl ParentElement for Toast {
 impl InteractiveElement for Toast {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
+    }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
     }
 }
 

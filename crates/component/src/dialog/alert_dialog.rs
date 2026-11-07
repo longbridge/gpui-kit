@@ -1,12 +1,14 @@
 use gpui::{
-    AnyElement, App, ClickEvent, IntoElement, ParentElement, Pixels, RenderOnce, StyleRefinement,
-    Styled, Window, prelude::FluentBuilder as _,
+    AnyElement, App, ClickEvent, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, prelude::FluentBuilder as _,
 };
 
 use crate::{
     StyledExt as _, WindowExt as _,
+    button::ButtonVariant,
     dialog::{
-        Dialog, DialogButtonProps, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+        Dialog, DialogButtonProps, DialogDescription, DialogEntrance, DialogFooter, DialogHeader,
+        DialogTitle,
     },
     h_flex, v_flex,
 };
@@ -67,7 +69,6 @@ pub struct AlertDialog {
     icon: Option<AnyElement>,
     title: Option<AnyElement>,
     description: Option<AnyElement>,
-    button_props: DialogButtonProps,
     children: Vec<AnyElement>,
 }
 
@@ -85,7 +86,6 @@ impl AlertDialog {
             icon: None,
             title: None,
             description: None,
-            button_props: DialogButtonProps::default(),
             children: Vec::new(),
         }
     }
@@ -94,7 +94,7 @@ impl AlertDialog {
     ///
     /// The default of [`AlertDialog`] has OK button.
     pub fn confirm(mut self) -> Self {
-        self.button_props.show_cancel = true;
+        self.base.button_props.show_cancel = Some(true);
         self
     }
 
@@ -182,23 +182,51 @@ impl AlertDialog {
 
     /// Set the button props of the alert dialog.
     ///
-    /// Use this to configure button text, variants, and visibility.
+    /// Use this to configure button text, variants, and visibility in one
+    /// value. It overrides only the fields `button_props` sets, so the Cancel
+    /// button [`Self::confirm`] asked for and callbacks set earlier survive,
+    /// whatever the call order. For a single property, prefer the direct
+    /// builders — [`Self::ok_text`], [`Self::ok_variant`],
+    /// [`Self::cancel_text`], [`Self::cancel_variant`].
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// alert.button_props(
+    /// alert.confirm().button_props(
     ///     DialogButtonProps::default()
     ///         .ok_text("Delete")
     ///         .ok_variant(ButtonVariant::Danger)
     ///         .cancel_text("Keep")
-    ///         .show_cancel(true)
     /// )
     /// ```
     #[track_caller]
     pub fn button_props(mut self, button_props: DialogButtonProps) -> Self {
         self.debug_assert_no_trigger();
-        self.button_props = button_props;
+        self.base = self.base.button_props(button_props);
+        self
+    }
+
+    /// Sets the text of the OK button. Default is `OK`.
+    pub fn ok_text(mut self, ok_text: impl Into<SharedString>) -> Self {
+        self.base.button_props.ok_text = Some(ok_text.into());
+        self
+    }
+
+    /// Sets the variant of the OK button. Default is `ButtonVariant::Primary`.
+    pub fn ok_variant(mut self, ok_variant: ButtonVariant) -> Self {
+        self.base.button_props.ok_variant = Some(ok_variant);
+        self
+    }
+
+    /// Sets the text of the Cancel button. Default is `Cancel`.
+    pub fn cancel_text(mut self, cancel_text: impl Into<SharedString>) -> Self {
+        self.base.button_props.cancel_text = Some(cancel_text.into());
+        self
+    }
+
+    /// Sets the variant of the Cancel button. Default is `ButtonVariant::default()`.
+    pub fn cancel_variant(mut self, cancel_variant: ButtonVariant) -> Self {
+        self.base.button_props.cancel_variant = Some(cancel_variant);
         self
     }
 
@@ -210,7 +238,7 @@ impl AlertDialog {
 
     /// Show cancel button. Default is false.
     pub fn show_cancel(mut self, show_cancel: bool) -> Self {
-        self.button_props = self.button_props.show_cancel(show_cancel);
+        self.base.button_props.show_cancel = Some(show_cancel);
         self
     }
 
@@ -232,6 +260,32 @@ impl AlertDialog {
         self
     }
 
+    /// Sets the top offset of the alert dialog.
+    ///
+    /// Without this, the surface keeps the [`Dialog`] default: a tenth of the
+    /// viewport height below the top edge, which pins short alerts near the
+    /// top of a tall window. Pass a larger offset to seat an alert further
+    /// down, e.g. in the vertical middle of the window.
+    pub fn margin_top(mut self, margin_top: impl Into<Pixels>) -> Self {
+        self.base = self.base.margin_top(margin_top);
+        self
+    }
+
+    /// Centers the alert dialog vertically in the window, whatever its
+    /// height, in place of the [`Self::margin_top`] offset.
+    pub fn centered(mut self) -> Self {
+        self.base = self.base.centered();
+        self
+    }
+
+    /// Sets how the alert dialog enters, defaulting to [`DialogEntrance::SlideDown`].
+    ///
+    /// Shares the surface, backdrop, and reduced-motion policy of [`Dialog::entrance`].
+    pub fn entrance(mut self, entrance: DialogEntrance) -> Self {
+        self.base = self.base.entrance(entrance);
+        self
+    }
+
     /// Sets the callback for when the alert dialog is closed.
     ///
     /// Called after [`Self::on_action`] or [`Self::on_cancel`] callback.
@@ -250,7 +304,7 @@ impl AlertDialog {
         mut self,
         on_ok: impl Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static,
     ) -> Self {
-        self.button_props = self.button_props.on_ok(on_ok);
+        self.base = self.base.on_ok(on_ok);
         self
     }
 
@@ -261,19 +315,18 @@ impl AlertDialog {
         mut self,
         on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static,
     ) -> Self {
-        self.button_props = self.button_props.on_cancel(on_cancel);
+        self.base = self.base.on_cancel(on_cancel);
         self
     }
 
     /// Build the styled dialog surface around the Base alert-dialog host.
     pub(crate) fn build_surface(self, window: &mut Window, cx: &mut App) -> Dialog {
-        let button_props = self.button_props.clone();
+        let button_props = self.base.button_props.clone();
         let has_title = self.icon.is_some() || self.title.is_some();
         let has_header = has_title || self.description.is_some();
         let has_footer = self.base.footer.is_some();
 
         self.base
-            .button_props(button_props.clone())
             .when(has_header, |this| {
                 this.header(
                     DialogHeader::new().child(
@@ -301,7 +354,7 @@ impl AlertDialog {
                 // Default footer for AlertDialog if user doesn't provide one, with OK and optional Cancel button
                 this.footer(
                     DialogFooter::new()
-                        .when(button_props.show_cancel, |this| {
+                        .when(button_props.is_cancel_shown(), |this| {
                             this.child(button_props.render_cancel(window, cx))
                         })
                         .child(button_props.render_ok(window, cx)),
@@ -327,8 +380,7 @@ impl AlertDialog {
         let content_builder = self.base.content_builder.clone();
         let style = self.base.style.clone();
         let props = self.base.props.clone();
-        let mut button_props = self.button_props.clone();
-        button_props.on_close = self.base.button_props.on_close.clone();
+        let button_props = self.base.button_props.clone();
 
         gpui_base::AlertDialogTrigger::new(trigger)
             .on_open(move |window, cx| {
@@ -362,5 +414,158 @@ impl RenderOnce for AlertDialog {
             // Otherwise, render the dialog content directly
             self.build_surface(window, cx).into_any_element()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use gpui::{ClickEvent, TestAppContext, px, size};
+
+    use super::*;
+    use crate::dialog::dialog::tests::window;
+
+    /// `button_props` overrides only the fields it sets, so the Cancel button
+    /// `confirm` asked for survives a later props value that never mentions it.
+    #[gpui::test]
+    fn button_props_after_confirm_keeps_the_cancel_button(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        cx.update(|_, cx| {
+            let alert = AlertDialog::new(cx)
+                .confirm()
+                .button_props(DialogButtonProps::default().ok_text("Delete"));
+
+            assert!(alert.base.button_props.is_cancel_shown());
+            assert_eq!(alert.base.button_props.ok_text.as_deref(), Some("Delete"));
+        });
+    }
+
+    /// The call order does not matter either way round.
+    #[gpui::test]
+    fn confirm_after_button_props_keeps_the_ok_text(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        cx.update(|_, cx| {
+            let alert = AlertDialog::new(cx)
+                .button_props(DialogButtonProps::default().ok_text("Delete"))
+                .confirm();
+
+            assert!(alert.base.button_props.is_cancel_shown());
+            assert_eq!(alert.base.button_props.ok_text.as_deref(), Some("Delete"));
+        });
+    }
+
+    /// A callback installed with `on_ok` survives a later props value that
+    /// carries no callback of its own.
+    #[gpui::test]
+    fn button_props_after_on_ok_keeps_the_callback(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        let confirmed = Rc::new(Cell::new(0));
+        let counter = confirmed.clone();
+        cx.update(|window, cx| {
+            let alert = AlertDialog::new(cx)
+                .on_ok(move |_, _, _| {
+                    counter.set(counter.get() + 1);
+                    true
+                })
+                .button_props(DialogButtonProps::default().ok_text("Delete"));
+
+            assert!(alert.base.button_props.ok_handler()(
+                &ClickEvent::default(),
+                window,
+                cx
+            ));
+        });
+
+        assert_eq!(confirmed.get(), 1);
+    }
+
+    /// The direct builders resolve to the same buttons as a props value.
+    #[gpui::test]
+    fn the_direct_builders_match_button_props(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        cx.update(|_, cx| {
+            let direct = AlertDialog::new(cx)
+                .confirm()
+                .ok_text("Delete")
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text("Keep")
+                .cancel_variant(ButtonVariant::Ghost);
+            let bundled = AlertDialog::new(cx).button_props(
+                DialogButtonProps::default()
+                    .show_cancel(true)
+                    .ok_text("Delete")
+                    .ok_variant(ButtonVariant::Danger)
+                    .cancel_text("Keep")
+                    .cancel_variant(ButtonVariant::Ghost),
+            );
+
+            for props in [&direct.base.button_props, &bundled.base.button_props] {
+                assert!(props.is_cancel_shown());
+                assert_eq!(props.ok_text.as_deref(), Some("Delete"));
+                assert_eq!(props.ok_variant, Some(ButtonVariant::Danger));
+                assert_eq!(props.cancel_text.as_deref(), Some("Keep"));
+                assert_eq!(props.cancel_variant, Some(ButtonVariant::Ghost));
+            }
+        });
+    }
+
+    /// `margin_top` overrides the tenth-of-the-viewport default offset, which
+    /// seats a short alert near the top of a tall window.
+    #[gpui::test]
+    fn margin_top_moves_the_alert_surface_off_the_default_offset(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        cx.update(|window, cx| {
+            window.open_alert_dialog(cx, |alert, _, _| {
+                alert
+                    .title("Unsaved changes")
+                    .description("Discard the draft?")
+                    .confirm()
+                    .margin_top(px(100.))
+            })
+        });
+        cx.run_until_parked();
+        // One frame mounts the layer, the next paints it at rest.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let bounds = cx
+            .debug_bounds("dialog-0")
+            .expect("the alert dialog surface was not painted");
+        // The alert chrome carries fractional text metrics (this surface is
+        // 128.5px tall), so the painted origin lands within a subpixel of the
+        // requested offset. The default offset would be a tenth of the
+        // viewport: 60px.
+        assert!(
+            (bounds.origin.y - px(100.)).abs() <= px(0.5),
+            "expected the surface within 0.5px of y=100, got {bounds:?}"
+        );
+    }
+
+    /// `centered` seats the surface in the vertical middle of the window,
+    /// whatever its height.
+    #[gpui::test]
+    fn centered_seats_the_alert_surface_in_the_middle(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        cx.update(|window, cx| {
+            window.open_alert_dialog(cx, |alert, _, _| {
+                alert
+                    .title("Unsaved changes")
+                    .description("Discard the draft?")
+                    .confirm()
+                    .centered()
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let bounds = cx
+            .debug_bounds("dialog-0")
+            .expect("the alert dialog surface was not painted");
+        assert!(
+            (bounds.center().y - px(300.)).abs() <= px(0.5),
+            "expected the surface centered on y=300, got {bounds:?}"
+        );
     }
 }

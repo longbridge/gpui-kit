@@ -110,6 +110,7 @@ impl Render for GroupBoxStory {
                         .id("activity")
                         .fill()
                         .title("Contributions & activity")
+                        .footer("Private contributions never reveal repository names.")
                         .child(
                             h_flex()
                                 .justify_between()

@@ -1,10 +1,10 @@
 ---
-title: 原语
+title: Primitives
 description: gpui-base 面向用户的完整原语目录。
 order: 4
 ---
 
-# 原语
+# Primitives
 
 GPUI Base 原语只提供行为，不规定视觉表现。每个页面都会说明公开导入路径和最小可用组合。页面上方的在线示例由 `crates/base/examples` 构建，也可以作为原生 GPUI 应用运行。
 
@@ -21,6 +21,7 @@ GPUI Base 原语只提供行为，不规定视觉表现。每个页面都会说�
 - [Combobox](./combobox.md) — 结合文本输入、键盘导航建议和选择行为的组合框。
 - [Date Picker](./date-picker.md) — 将日历与弹出层组合起来、可感知焦点的日期输入。
 - [Dialog](./dialog.md) — 带焦点管理、遮罩、标题和关闭部件的可组合模态层。
+- [Grid Layout](./grid-layout.md) — 可由用户拖动和调整大小的网格，包含布局模型及其计算。
 - [Hover Card](./hover-card.md) — 与指针或键盘触发器关联的延迟浮动卡片。
 - [Input](./input.md) — 支持选择、掩码、验证和数值步进的单行输入。
 - [Textarea](./textarea.md) — 支持固定行数、换行和自动增高的多行文本框。
@@ -43,6 +44,7 @@ GPUI Base 原语只提供行为，不规定视觉表现。每个页面都会说�
 - [Switch](./switch.md) — 轨道与滑块可分别设置样式的受控开关。
 - [Table](./table.md) — 用于组合表头、表体、行和单元格的语义化表格原语。
 - [Tabs](./tabs.md) — 带受控选择的标签列表和可访问标签控件。
+- [Time Field](./time-field.md) — 分段编辑一天中的时间，支持 24 或 12 小时制。
 - [Toast](./toast.md) — 受管理、带动画的临时状态消息栈。
 - [Toggle](./toggle.md) — 用于格式等持久选择的受控双态按钮。
 - [Toggle Group](./toggle-group.md) — 将多个 Toggle 协调为单选或多选组。

@@ -5,8 +5,8 @@
 //! The number of curves is adjustable, which makes it a load knob for watching
 //! the frame time trace react.
 //!
-//! The example deliberately depends only on `gpui` and `gpui-fps`, not on
-//! `gpui-component`, to show that the HUD stands on its own.
+//! The example uses `gpui-kit` without its component feature and `gpui-fps`,
+//! so the HUD stands on its own without the styled component layer.
 
 use std::time::Instant;
 
@@ -395,6 +395,7 @@ actions!(fps_monitor, [Quit]);
 
 fn main() {
     gpui_kit::application().run(move |cx: &mut App| {
+        gpui_kit::init(cx);
         cx.bind_keys([
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-q", Quit, None),
@@ -414,14 +415,11 @@ fn main() {
 
         cx.activate(true);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                window.activate_window();
-                window.set_window_title("FPS Monitor");
-                cx.new(|cx| Example::new(window, cx))
-            })
-            .expect("failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            window.activate_window();
+            window.set_window_title("FPS Monitor");
+            cx.new(|cx| Example::new(window, cx))
         })
-        .detach();
+        .expect("failed to open window");
     });
 }
