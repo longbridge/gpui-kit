@@ -125,6 +125,16 @@ NumberInput::new(&input)
 NumberInput::new(&input).small()
 ```
 
+### 隐藏步进按钮
+
+默认显示递增和递减按钮。调用 `.hide_stepper(true)` 可隐藏按钮；仍可使用 `↑` 和 `↓` 键调整数值：
+
+```rust
+NumberInput::new(&input).hide_stepper(true)
+```
+
+传入 `.hide_stepper(false)` 可显式保持按钮显示。
+
 ### 前缀与后缀
 
 ```rust
@@ -226,6 +236,7 @@ NumberInput::decrement(&number_input, window, cx);
 | `size(size)` | 设置尺寸 |
 | `prefix(el)` | 添加前缀元素 |
 | `suffix(el)` | 添加后缀元素 |
+| `hide_stepper(bool)` | 隐藏或显示递增/递减按钮 |
 | `appearance(bool)` | 开启或关闭默认样式 |
 | `accessibility_label(str)` | 屏幕阅读器朗读的名称 |
 | `disabled(bool)` | 设置禁用状态 |
