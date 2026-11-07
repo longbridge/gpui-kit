@@ -433,6 +433,47 @@ impl Piece {
     }
 }
 
+/// Which side of a soft wrap a caret sits on.
+///
+/// At a soft wrap one byte offset names two caret positions: the end of the
+/// upper visual line and the start of the lower one. Same terms as AppKit's
+/// `NSSelectionAffinity` and Flutter's `TextAffinity`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CaretAffinity {
+    /// The end of the visual line before the offset.
+    Upstream,
+    /// The start of the visual line after the offset.
+    #[default]
+    Downstream,
+}
+
+/// A caret position: a byte offset plus the side of a soft wrap it is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Caret {
+    /// The byte offset into the leaf's text.
+    pub index: usize,
+    /// The visual line the caret is on when `index` is at a soft wrap.
+    pub affinity: CaretAffinity,
+}
+
+impl Caret {
+    /// A caret at `index`, at the start of a line at a soft wrap.
+    pub fn new(index: usize) -> Self {
+        Self {
+            index,
+            affinity: CaretAffinity::Downstream,
+        }
+    }
+
+    /// A caret at `index`, at the end of a line at a soft wrap.
+    pub fn upstream(index: usize) -> Self {
+        Self {
+            index,
+            affinity: CaretAffinity::Upstream,
+        }
+    }
+}
+
 /// Where one keyed text leaf was laid out in the last frame.
 ///
 /// Indices are byte offsets into the leaf's text, where each inline atom
@@ -522,28 +563,9 @@ impl LeafGeometry {
             .find(|p| p.range().contains(&index))
             .or_else(|| self.pieces.iter().rev().find(|p| p.range().end == index))
             .or(self.pieces.last());
-        let Some(piece) = piece else {
-            return self.bounds().origin;
-        };
         match piece {
-            Piece::Whole(layout) | Piece::Text { layout, .. } => {
-                let local = index.saturating_sub(piece.range().start).min(layout.len());
-                layout
-                    .position_for_index(local)
-                    .unwrap_or_else(|| layout.bounds().origin)
-            }
-            Piece::Empty { bounds, .. } => bounds.origin,
-            Piece::Atom { range, bounds } => {
-                let x = if index >= range.end {
-                    bounds.right()
-                } else {
-                    bounds.left()
-                };
-                // Align with the text line: an atom taller than the line
-                // keeps the caret at its bottom line.
-                let y = (bounds.bottom() - self.line_height()).max(bounds.top());
-                point(x, y)
-            }
+            Some(piece) => self.position_in_piece(piece, index),
+            None => self.bounds().origin,
         }
     }
 
@@ -553,33 +575,7 @@ impl LeafGeometry {
         if let Some(layout) = self.whole() {
             return whole_index_at(layout, at);
         }
-        // The visual line under the point (pieces whose vertical extent
-        // holds it, else the nearest), then the horizontally nearest piece.
-        let dy = |p: &Piece| {
-            let b = p.bounds();
-            if at.y < b.top() {
-                b.top() - at.y
-            } else if at.y > b.bottom() {
-                at.y - b.bottom()
-            } else {
-                px(0.)
-            }
-        };
-        let dx = |p: &Piece| {
-            let b = p.bounds();
-            if at.x < b.left() {
-                b.left() - at.x
-            } else if at.x > b.right() {
-                at.x - b.right()
-            } else {
-                px(0.)
-            }
-        };
-        let Some(piece) = self.pieces.iter().min_by(|a, b| {
-            (dy(a), dx(a))
-                .partial_cmp(&(dy(b), dx(b)))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        }) else {
+        let Some(piece) = self.hit_piece(at) else {
             return 0;
         };
         let index = match piece {
@@ -617,6 +613,112 @@ impl LeafGeometry {
         index.min(self.len())
     }
 
+    /// The caret closest to `at`, keeping the visual line that was hit: at a
+    /// soft wrap the end of the upper line is [`CaretAffinity::Upstream`].
+    /// Pass it to [`Self::position_for_caret`] to round-trip a click.
+    pub fn caret_for_position(&self, at: Point<Pixels>) -> Caret {
+        if let Some(layout) = self.whole() {
+            return whole_caret_at(layout, at);
+        }
+        let index = self.index_for_position(at);
+        // The hit ends a piece (the right end of a line in the flow): stay on
+        // the line that was hit, not the next piece's.
+        let ends_hit_line = self.hit_piece(at).is_some_and(|piece| {
+            let range = piece.range();
+            range.start < range.end && range.end == index
+        });
+        if ends_hit_line {
+            Caret::upstream(index)
+        } else {
+            Caret::new(index)
+        }
+    }
+
+    /// The top of `caret` in window coordinates. Unlike
+    /// [`Self::position_for_index`], a caret at a soft wrap lands on the
+    /// visual line its affinity names.
+    pub fn position_for_caret(&self, caret: Caret) -> Point<Pixels> {
+        let index = caret.index;
+        if let Some(layout) = self.whole() {
+            return whole_position_for_caret(layout, caret).unwrap_or_else(|| self.bounds().origin);
+        }
+        match caret.affinity {
+            CaretAffinity::Downstream => {
+                // A caret at the start of a piece belongs to that piece.
+                let starts = self
+                    .pieces
+                    .iter()
+                    .find(|p| p.range().start == index && p.range().end > index);
+                match starts {
+                    Some(piece) => self.position_in_piece(piece, index),
+                    None => self.position_for_index(index),
+                }
+            }
+            CaretAffinity::Upstream => {
+                let ends = self
+                    .pieces
+                    .iter()
+                    .find(|p| p.range().start < index && p.range().end == index);
+                match ends {
+                    Some(piece) => self.position_in_piece(piece, index),
+                    None => self.position_for_index(index),
+                }
+            }
+        }
+    }
+
+    fn position_in_piece(&self, piece: &Piece, index: usize) -> Point<Pixels> {
+        match piece {
+            Piece::Whole(layout) | Piece::Text { layout, .. } => {
+                let local = index.saturating_sub(piece.range().start).min(layout.len());
+                layout
+                    .position_for_index(local)
+                    .unwrap_or_else(|| layout.bounds().origin)
+            }
+            Piece::Empty { bounds, .. } => bounds.origin,
+            Piece::Atom { range, bounds } => {
+                let x = if index >= range.end {
+                    bounds.right()
+                } else {
+                    bounds.left()
+                };
+                let y = (bounds.bottom() - self.line_height()).max(bounds.top());
+                point(x, y)
+            }
+        }
+    }
+
+    /// The piece under `at`: the visual line under the point (pieces whose
+    /// vertical extent holds it, else the nearest), then the horizontally
+    /// nearest piece.
+    fn hit_piece(&self, at: Point<Pixels>) -> Option<&Piece> {
+        let dy = |p: &Piece| {
+            let b = p.bounds();
+            if at.y < b.top() {
+                b.top() - at.y
+            } else if at.y > b.bottom() {
+                at.y - b.bottom()
+            } else {
+                px(0.)
+            }
+        };
+        let dx = |p: &Piece| {
+            let b = p.bounds();
+            if at.x < b.left() {
+                b.left() - at.x
+            } else if at.x > b.right() {
+                at.x - b.right()
+            } else {
+                px(0.)
+            }
+        };
+        self.pieces.iter().min_by(|a, b| {
+            (dy(a), dx(a))
+                .partial_cmp(&(dy(b), dx(b)))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    }
+
     /// The byte range of the inline atom drawn under `at`, if any.
     pub fn atom_at(&self, at: Point<Pixels>) -> Option<Range<usize>> {
         self.pieces.iter().find_map(|piece| match piece {
@@ -650,6 +752,71 @@ fn whole_index_at(layout: &LayoutSnapshot, at: Point<Pixels>) -> usize {
         start += line.len() + 1;
     }
     0
+}
+
+/// The byte offsets where each soft-wrapped row after the first starts.
+fn wrap_starts(line: &WrappedLineLayout) -> impl Iterator<Item = usize> + '_ {
+    line.wrap_boundaries
+        .iter()
+        .map(|b| line.unwrapped_layout.runs[b.run_ix].glyphs[b.glyph_ix].index)
+}
+
+/// [`whole_index_at`] plus the affinity of the visual row that was hit.
+fn whole_caret_at(layout: &LayoutSnapshot, at: Point<Pixels>) -> Caret {
+    let index = whole_index_at(layout, at);
+    let bounds = layout.bounds();
+    let line_height = layout.line_height();
+    let mut top = bounds.top();
+    let mut start = 0;
+    let lines = layout.line_layouts();
+    for (ix, line) in lines.iter().enumerate() {
+        let height = line.size(line_height).height.max(line_height);
+        if at.y < top + height || ix + 1 == lines.len() {
+            let row = ((at.y - top).max(px(0.)) / line_height) as usize;
+            // The hit row ends where the next row starts: an index there is
+            // the end of the hit row.
+            let row_end = wrap_starts(line).nth(row).map(|i| start + i);
+            return if row_end == Some(index) {
+                Caret::upstream(index)
+            } else {
+                Caret::new(index)
+            };
+        }
+        top += height;
+        start += line.len() + 1;
+    }
+    Caret::new(index)
+}
+
+/// The top of `caret` in a whole-leaf layout, on the row its affinity names.
+fn whole_position_for_caret(layout: &LayoutSnapshot, caret: Caret) -> Option<Point<Pixels>> {
+    let index = caret.index.min(layout.len());
+    let line_height = layout.line_height();
+    let mut origin = layout.bounds().origin;
+    let mut start = 0;
+    for line in layout.line_layouts() {
+        if index <= start + line.len() {
+            let local = index - start;
+            let unwrapped = &line.unwrapped_layout;
+            // Row starts: 0, then each wrap. Pick the last row starting at or
+            // before `local`; upstream steps back off a row that starts there.
+            let mut row = 0;
+            let mut row_start = 0;
+            for (ix, wrap) in wrap_starts(line).enumerate() {
+                if wrap < local || (wrap == local && caret.affinity == CaretAffinity::Downstream) {
+                    row = ix + 1;
+                    row_start = wrap;
+                } else {
+                    break;
+                }
+            }
+            let x = unwrapped.x_for_index(local) - unwrapped.x_for_index(row_start);
+            return Some(origin + point(x, line_height * row as f32));
+        }
+        start += line.len() + 1;
+        origin.y += line.size(line_height).height;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -987,6 +1154,63 @@ mod tests {
             leaf.index_for_position(point(px(5000.), px(5000.))),
             text.len()
         );
+    }
+
+    /// Clicks the left and right edge of every visual line and checks the
+    /// caret maps back to the clicked line (issue #3832).
+    fn assert_carets_keep_their_line(leaf: &LeafGeometry) {
+        let bounds = leaf.bounds();
+        let line = leaf.line_height();
+        let rows = (bounds.size.height / line).round() as usize;
+        assert!(rows >= 3, "the text wraps onto several lines");
+        let mut wraps = 0;
+        for row in 0..rows {
+            let row_top = bounds.top() + line * row as f32;
+            let y = row_top + line / 2.;
+            for x in [bounds.left() + px(1.), bounds.right() - px(1.)] {
+                let caret = leaf.caret_for_position(point(x, y));
+                assert_eq!(caret.index, leaf.index_for_position(point(x, y)));
+                let pos = leaf.position_for_caret(caret);
+                assert!(
+                    (pos.y - row_top).abs() <= line / 2.,
+                    "row {row} x {x:?}: {caret:?} at {pos:?}, row top {row_top:?}"
+                );
+                if leaf.position_for_index(caret.index).y != pos.y {
+                    wraps += 1;
+                }
+            }
+        }
+        assert!(wraps > 0, "some clicks land on a soft wrap");
+    }
+
+    #[gpui::test]
+    fn wrapped_whole_leaf_carets_keep_their_line(cx: &mut TestAppContext) {
+        let text = "the quick brown fox jumps over the lazy dog and keeps running far away";
+        let blocks = vec![BlockNode::Paragraph(plain(text).with_leaf_key(1))];
+        let geometries = draw(cx, blocks, HashMap::new(), Default::default(), px(120.));
+        let leaf = &geometries[&1];
+        assert!(leaf.whole().is_some());
+        assert_carets_keep_their_line(leaf);
+        // Away from wraps both affinities agree with `position_for_index`.
+        for index in [0, 1, text.len()] {
+            let at = leaf.position_for_index(index);
+            assert_eq!(leaf.position_for_caret(Caret::new(index)), at);
+            assert_eq!(leaf.position_for_caret(Caret::upstream(index)), at);
+        }
+    }
+
+    #[gpui::test]
+    fn wrapped_mixed_leaf_carets_keep_their_line(cx: &mut TestAppContext) {
+        let words = "the quick brown fox jumps over the lazy dog and ";
+        let mut paragraph = Paragraph::default();
+        paragraph.push(InlineNode::new(words));
+        paragraph.push(atom());
+        paragraph.push(InlineNode::new(words));
+        let blocks = vec![BlockNode::Paragraph(paragraph.with_leaf_key(1))];
+        let geometries = draw(cx, blocks, HashMap::new(), atom_plugin(), px(120.));
+        let leaf = &geometries[&1];
+        assert!(leaf.whole().is_none());
+        assert_carets_keep_their_line(leaf);
     }
 
     #[gpui::test]
