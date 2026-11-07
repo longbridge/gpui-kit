@@ -990,15 +990,116 @@ fn ast_to_document(source: &str, root: mdast::Node, cx: &mut NodeContext) -> Par
         _ => panic!("expected root node"),
     };
 
+    let has_surfaces = cx.markdown_extensions.has_block_surfaces();
     let blocks = root
         .children
         .into_iter()
-        .map(|c| ast_to_node(source, c, cx))
+        .map(|node| match node {
+            Node::Blockquote(quote) if has_surfaces => blockquote_to_node(source, quote, cx),
+            node => ast_to_node(source, node, cx),
+        })
         .collect();
     ParsedDocument {
         source: source.to_string().into(),
         blocks: Arc::new(blocks),
     }
+}
+
+/// A top-level blockquote, which is a block surface when it opens with the
+/// marker of a registered one.
+fn blockquote_to_node(
+    source: &str,
+    mut quote: mdast::Blockquote,
+    cx: &mut NodeContext,
+) -> BlockNode {
+    let Some(name) = take_surface_marker(source, &mut quote, cx) else {
+        return ast_to_node(source, Node::Blockquote(quote), cx);
+    };
+    let children = quote
+        .children
+        .into_iter()
+        .map(|child| ast_to_node(source, child, cx))
+        .collect();
+    BlockNode::Surface {
+        name,
+        children,
+        span: new_span(quote.position, cx),
+    }
+}
+
+/// Removes the marker line that names a registered block surface from the
+/// start of `quote`, and returns that name.
+///
+/// As in a GitHub alert, the marker `[!name]` is alone on the first line of
+/// the first paragraph, and the lines after it are that paragraph's text. The
+/// name matches ASCII-case-insensitively.
+fn take_surface_marker(
+    source: &str,
+    quote: &mut mdast::Blockquote,
+    cx: &NodeContext,
+) -> Option<SharedString> {
+    let Some(Node::Paragraph(paragraph)) = quote.children.first_mut() else {
+        return None;
+    };
+    let Some(Node::Text(text)) = paragraph.children.first_mut() else {
+        return None;
+    };
+    let (line, rest) = match text.value.split_once('\n') {
+        Some((line, rest)) => (line.strip_suffix('\r').unwrap_or(line), Some(rest)),
+        None => (text.value.as_str(), None),
+    };
+    // An escaped `\[` or a character reference reads as the same text, but
+    // writes a literal, so the marker must appear as is in the source. The
+    // text of an escape starts after its backslash.
+    let start = text.position.as_ref()?.start.offset;
+    if source.get(..start)?.ends_with('\\') || !source.get(start..)?.starts_with(line) {
+        return None;
+    }
+    let name = line.strip_prefix("[!")?.strip_suffix(']')?;
+    let name = cx.markdown_extensions.block_surface_name(name)?;
+    match rest {
+        // The next line goes on in this text, which starts after the line's
+        // blockquote marker in the source.
+        Some(rest) => {
+            let rest = rest.to_string();
+            let position = text.position.as_mut()?;
+            let line_start =
+                source[position.start.offset..].find('\n')? + position.start.offset + 1;
+            let content = source[line_start..].trim_start_matches([' ', '\t']);
+            let content = content.strip_prefix('>').unwrap_or(content);
+            let content = content.trim_start_matches([' ', '\t']);
+            let offset = source.len() - content.len();
+            position.start = Point::new(position.start.line + 1, offset - line_start + 1, offset);
+            text.value = rest;
+            if text.value.is_empty() {
+                paragraph.children.remove(0);
+            }
+        }
+        // The marker ends the paragraph or a hard break ends its line.
+        None => match paragraph.children.get(1) {
+            None => {
+                paragraph.children.clear();
+            }
+            Some(Node::Break(_)) => {
+                paragraph.children.drain(..2);
+            }
+            Some(_) => return None,
+        },
+    }
+    // The paragraph starts where its first remaining child does.
+    match paragraph.children.first() {
+        Some(first) => {
+            if let Some(start) = first.position().map(|first| first.start.clone())
+                && let Some(position) = paragraph.position.as_mut()
+            {
+                position.start = start;
+            }
+        }
+        None => {
+            quote.children.remove(0);
+        }
+    }
+    Some(name)
 }
 
 fn new_span(pos: Option<markdown::unist::Position>, cx: &NodeContext) -> Option<Span> {

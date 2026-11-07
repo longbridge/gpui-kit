@@ -206,6 +206,34 @@ TextView 测量元素的固有尺寸，将整个元素作为一个原子对象�
 
 默认解析 inline math 语法，通过 Plugin 自定义渲染，无需额外开关。行内代码里的美元符号仍保留为代码。没有 Plugin 认领某个 math 节点时，TextView 按原始 `$...$` 源码渲染为普通文本，因此正文中单纯出现美元符号的句子（`spent $5 and $10`）显示和复制都保持原样。块级公式同样会被解析：`$$` 围栏产生块级节点，由 Block plugin（`is_block() == true`）渲染；无人认领时降级为代码块。
 
+## Block surface
+
+block surface 把一个引用块中的块绘制在你自己的容器中（例如提示框或带底色的摘要面板），这些块仍属于同一篇文档。按名称注册后，在顶层引用块的第一行单独写出标记 `[!name]`，写法与 [GitHub alert](https://docs.github.com/zh/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts) 相同：
+
+```rust
+use gpui::{ParentElement as _, Styled as _, div, px};
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().block_surface("summary", |_, cx| {
+    div()
+        // 在这里读取主题颜色，切换主题时无需重新解析。
+        .bg(summary_background(cx))
+        .rounded(px(12.))
+        .p(px(16.))
+        .child("Summary")
+});
+
+TextView::markdown(
+    "note",
+    "Intro\n\n> [!summary]\n> - First point\n> - Second point\n\nOutro",
+)
+.markdown_extensions(extensions)
+```
+
+名称匹配不区分 ASCII 大小写，因此 `> [!NOTE]` 会使用注册为 `note` 的 surface。不认识该名称的渲染器会显示普通引用块。这些块会追加到回调返回的容器中，排在容器自身内容之后；容器自身内容和标记行都不属于文档文本。选区、查找、范围高亮和 reveal 都可以跨越并进入 surface。全选复制原样返回源码；部分源码复制会放在标记行下并加上引用前缀，与引用块的复制方式一致。
+
+只有顶层、且名称已注册的引用块才会成为 surface。嵌套的引用块仍是引用块；标记后同一行还有文字的也是如此，例如 Obsidian 的 `> [!note] Title`：标题由容器自己显示。surface 不能嵌套。surface 是可滚动视图中的一行，内容应控制在几屏之内。流式追加内容到 surface 时，每次追加都会重新解析并测量整个 surface，因此流式输出长 surface 的耗时与其长度成平方关系；标记行写完之前，它显示为普通引用块。
+
 ## 保留状态与动态更新
 
 内容需要持续更新时使用 `TextViewState`：

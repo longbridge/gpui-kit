@@ -66,6 +66,19 @@ pub enum BlockNode {
         children: Vec<BlockNode>,
         span: Option<Span>,
     },
+    /// A blockquote opening with the marker of a
+    /// [block surface](super::MarkdownExtensions::block_surface), drawn inside
+    /// the container registered for `name`.
+    ///
+    /// Its text, selection, highlights and reveals are its children's, which
+    /// leave out the marker line.
+    Surface {
+        /// The name it is registered under, in ASCII lowercase.
+        name: SharedString,
+        children: Vec<BlockNode>,
+        /// The source of the whole blockquote, marker included.
+        span: Option<Span>,
+    },
     List {
         /// Only contains ListItem, others will be ignored
         children: Vec<BlockNode>,
@@ -264,6 +277,9 @@ impl Element for TableCellElement {
 struct CustomBlockElement {
     content: AnyElement,
     state: BlockState,
+    /// A pending reveal of this block, when it is inside a block surface and
+    /// so has no row of its own to scroll to.
+    reveal: Option<RevealAt>,
 }
 
 impl IntoElement for CustomBlockElement {
@@ -300,12 +316,29 @@ impl Element for CustomBlockElement {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
         self.content.prepaint(window, cx);
+        if let Some(reveal) = &self.reveal {
+            // A list scrolls to its edge, which layout may miss by a fraction of
+            // a pixel.
+            let slack = px(0.5);
+            let view = window.content_mask().bounds;
+            let inside =
+                bounds.top() >= view.top() - slack && bounds.bottom() <= view.bottom() + slack;
+            // A block taller than the view has no place to scroll to where it
+            // fits, and asking from each edge in turn would never settle.
+            let fills =
+                bounds.top() <= view.top() + slack && bounds.bottom() >= view.bottom() - slack;
+            let visible = inside || fills;
+            if !visible {
+                window.request_autoscroll(bounds);
+            }
+            reveal.report(bounds, visible);
+        }
     }
 
     fn paint(
@@ -423,6 +456,20 @@ impl BlockNode {
         matches!(self, Self::ListItem { .. })
     }
 
+    /// Whether this block shows nothing: a link definition, a comment, a `<br>`.
+    fn draws_nothing(&self) -> bool {
+        match self {
+            Self::Definition { .. } | Self::Break { .. } | Self::Unknown => true,
+            Self::Root { children, .. } => children.iter().all(Self::draws_nothing),
+            Self::Paragraph(paragraph) => paragraph.children().iter().all(|inline| {
+                inline.as_image().is_none()
+                    && inline.as_custom().is_none()
+                    && inline.text().trim().is_empty()
+            }),
+            _ => false,
+        }
+    }
+
     /// Combine all children, omitting the empt parent nodes.
     pub(super) fn compact(self) -> BlockNode {
         match self {
@@ -438,6 +485,7 @@ impl BlockNode {
             BlockNode::Paragraph(paragraph) => paragraph.span,
             BlockNode::Heading { span, .. } => *span,
             BlockNode::Blockquote { span, .. } => *span,
+            BlockNode::Surface { span, .. } => *span,
             BlockNode::List { span, .. } => *span,
             BlockNode::ListItem { span, .. } => *span,
             BlockNode::CodeBlock(code_block) => code_block.span,
@@ -473,6 +521,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 for child in children {
@@ -512,6 +561,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 for child in children {
@@ -605,25 +655,24 @@ impl BlockNode {
 
                 if !block_text.is_empty() {
                     if matches!(kind, BlockTextKind::SelectedSource) {
-                        // Prefix every line with `> ` so a selected blockquote
-                        // round-trips as Markdown.
-                        let quoted = block_text
-                            .trim_end_matches('\n')
-                            .lines()
-                            .map(|line| {
-                                if line.is_empty() {
-                                    ">".to_string()
-                                } else {
-                                    format!("> {}", line)
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        text.push_str(&quoted);
+                        text.push_str(&quoted_source(None, &block_text));
                     } else {
                         text.push_str(&block_text);
                     }
                     text.push('\n');
+                }
+            }
+            BlockNode::Surface { name, children, .. } => {
+                let block_text = Self::children_text(children, kind);
+                if matches!(kind, BlockTextKind::SelectedSource) {
+                    // Quoted under its marker, as a blockquote's selection is
+                    // quoted, so that it round-trips as the same surface.
+                    if !block_text.is_empty() {
+                        text.push_str(&quoted_source(Some(name), &block_text));
+                        text.push('\n');
+                    }
+                } else {
+                    text.push_str(&block_text);
                 }
             }
             BlockNode::Table(table) => {
@@ -718,6 +767,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 children.iter().any(|child| child.has_selection())
@@ -745,6 +795,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 for child in children.iter() {
@@ -1374,6 +1425,25 @@ fn table_selected_source(table: &Table) -> String {
     }
 
     lines.join("\n")
+}
+
+/// `text` as the source of a blockquote, each line prefixed with `> ` so it
+/// round-trips as Markdown, under a block surface's `[!marker]` line when it has
+/// one.
+fn quoted_source(marker: Option<&SharedString>, text: &str) -> String {
+    marker
+        .map(|name| format!("[!{name}]"))
+        .into_iter()
+        .chain(text.trim_end_matches('\n').lines().map(str::to_string))
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Reconstruct the Markdown source of the selected items of a list.
@@ -3667,6 +3737,14 @@ impl BlockNode {
                     .collect::<Vec<_>>()
                     .join("\n")
             }
+            BlockNode::Surface { name, children, .. } => {
+                let content = children
+                    .iter()
+                    .map(|child| child.to_markdown())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                quoted_source(Some(name), &content)
+            }
             BlockNode::List {
                 children,
                 ordered,
@@ -3955,6 +4033,7 @@ impl BlockNode {
                                 BlockNode::Root { .. }
                                 | BlockNode::Heading { .. }
                                 | BlockNode::Blockquote { .. }
+                                | BlockNode::Surface { .. }
                                 | BlockNode::CodeBlock(_)
                                 | BlockNode::Custom { .. }
                                 | BlockNode::Table(_)
@@ -4471,6 +4550,50 @@ impl BlockNode {
                     .into_any_element(),
                 mb,
             ),
+            BlockNode::Surface { name, children, .. } => {
+                if children.iter().all(Self::draws_nothing) {
+                    // Nothing to hold, as when a stream has only sent the marker.
+                    return div().into_any_element();
+                }
+                // Unless the container sets its own width, it takes the row's,
+                // as a blockquote does, so lists and tables in it wrap to the
+                // view instead of measuring at their unwrapped width.
+                let mut container = node_cx
+                    .markdown_extensions
+                    .render_block_surface(name, window, cx)
+                    .unwrap_or_else(div)
+                    .map(|mut this| {
+                        let style = this.style();
+                        let unset_width = style.size.width.is_none();
+                        let unset_min_width = style.min_size.width.is_none();
+                        this.when(unset_width, |this| this.w_full())
+                            .when(unset_min_width, |this| this.min_w_0())
+                    });
+                // Nested tables measure while rendering, before the container
+                // applies its text style.
+                let text_style = container.style().text.clone();
+                let blocks = window.with_text_style(Some(text_style), |window| {
+                    children
+                        .iter()
+                        .enumerate()
+                        .map(|(ix, child)| {
+                            let (is_first, prev) = flow_position(children, ix);
+                            child.render_block(
+                                NodeRenderOptions {
+                                    is_first,
+                                    prev,
+                                    ..options
+                                        .is_last(children[ix + 1..].iter().all(Self::draws_nothing))
+                                },
+                                node_cx,
+                                window,
+                                cx,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
+                gapped(container.children(blocks).into_any_element(), mb)
+            }
             BlockNode::List {
                 children,
                 ordered,
@@ -4519,6 +4642,11 @@ impl BlockNode {
                     .child(CustomBlockElement {
                         content: inner,
                         state: state.clone(),
+                        reveal: node_cx.reveal_at(
+                            node.span.map(|span| TextLeafKey::block(span.start)),
+                            0,
+                            1,
+                        ),
                     })
                     .into_any_element()
             }
@@ -5134,6 +5262,59 @@ mod tests {
                         // Ten glyphs at the table's 14px size, plus 24px cell padding.
                         assert_eq!(cached_column_widths(table).widths, vec![expected_width]);
                     }
+                },
+            );
+        });
+    }
+
+    #[test]
+    fn block_surface_typography_reaches_nested_table_measurement() {
+        use crate::text::MarkdownExtensions;
+        use crate::text::inline::test_draw::in_prepaint;
+        use crate::text::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::TestApp;
+
+        let surface = BlockNode::Surface {
+            name: "large".into(),
+            children: vec![BlockNode::Table(table_of(
+                vec![vec![plain_cell("0123456789")]],
+                vec![],
+            ))],
+            span: None,
+        };
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            cx.set_global(crate::Theme::default());
+            window.with_text_style(
+                Some(
+                    StyleRefinement::default()
+                        .font_family(BODY)
+                        .text_size(px(15.))
+                        .text,
+                ),
+                |window| {
+                    let node_cx = NodeContext {
+                        body_font_size: px(15.),
+                        markdown_extensions: Arc::new(MarkdownExtensions::default().block_surface(
+                            "large",
+                            |_, _| {
+                                div()
+                                    .font_family(MONO)
+                                    .text_size(px(30.))
+                                    .font_weight(FontWeight::BOLD)
+                            },
+                        )),
+                        ..Default::default()
+                    };
+                    surface.render_block(NodeRenderOptions::default(), &node_cx, window, cx);
+                    let BlockNode::Surface { children, .. } = &surface else {
+                        unreachable!()
+                    };
+                    let BlockNode::Table(table) = &children[0] else {
+                        unreachable!()
+                    };
+                    // The same as a blockquote with this text style.
+                    assert_eq!(cached_column_widths(table).widths, vec![199.]);
                 },
             );
         });
