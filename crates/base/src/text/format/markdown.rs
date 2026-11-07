@@ -1048,6 +1048,13 @@ fn take_surface_marker(
         Some((line, rest)) => (line.strip_suffix('\r').unwrap_or(line), Some(rest)),
         None => (text.value.as_str(), None),
     };
+    // An escaped `\[` or a character reference reads as the same text, but
+    // writes a literal, so the marker must appear as is in the source. The
+    // text of an escape starts after its backslash.
+    let start = text.position.as_ref()?.start.offset;
+    if source.get(..start)?.ends_with('\\') || !source.get(start..)?.starts_with(line) {
+        return None;
+    }
     let name = line.strip_prefix("[!")?.strip_suffix(']')?;
     let name = cx.markdown_extensions.block_surface_name(name)?;
     match rest {

@@ -1427,15 +1427,6 @@ fn table_selected_source(table: &Table) -> String {
     lines.join("\n")
 }
 
-/// Reconstruct the Markdown source of the selected items of a list.
-///
-/// Restores the list marker (`- ` / `N. `) and task-list checkbox (`[x] ` /
-/// `[ ] `) of each item, and recurses into nested lists with a deeper `indent`
-/// so nesting is preserved. `indent` is the leading whitespace for this level;
-/// nested levels are indented by the width of the parent marker so continuation
-/// and sub-list lines align under the item text. Items with no selected content
-/// are skipped but still consume an ordered number, so the remaining items keep
-/// their original numbering.
 /// `text` as the source of a blockquote, each line prefixed with `> ` so it
 /// round-trips as Markdown, under a block surface's `[!marker]` line when it has
 /// one.
@@ -1455,6 +1446,15 @@ fn quoted_source(marker: Option<&SharedString>, text: &str) -> String {
         .join("\n")
 }
 
+/// Reconstruct the Markdown source of the selected items of a list.
+///
+/// Restores the list marker (`- ` / `N. `) and task-list checkbox (`[x] ` /
+/// `[ ] `) of each item, and recurses into nested lists with a deeper `indent`
+/// so nesting is preserved. `indent` is the leading whitespace for this level;
+/// nested levels are indented by the width of the parent marker so continuation
+/// and sub-list lines align under the item text. Items with no selected content
+/// are skipped but still consume an ordered number, so the remaining items keep
+/// their original numbering.
 fn list_selected_source(
     children: &[BlockNode],
     ordered: bool,

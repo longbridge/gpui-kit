@@ -89,6 +89,8 @@ fn anything_else_parses_as_it_does_without_a_registration() {
         "> [!summary] Title\n> one",
         "> [!summary]*one*",
         "> [!summary\n> one",
+        "> \\[!summary]\n> one",
+        "> &#91;!summary]\n> one",
         "> one\n> [!summary]",
         "> > [!summary]\n> > one",
         "- > [!summary]\n  > one",
