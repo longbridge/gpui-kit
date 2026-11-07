@@ -65,6 +65,7 @@ impl Gallery {
             vec![
                 StoryContainer::panel::<WelcomeStory>(window, cx),
                 StoryContainer::panel::<AccordionStory>(window, cx),
+                StoryContainer::panel::<AiElementsStory>(window, cx),
                 StoryContainer::panel::<AlertStory>(window, cx),
                 StoryContainer::panel::<AlertDialogStory>(window, cx),
                 StoryContainer::panel::<AttachmentStory>(window, cx),

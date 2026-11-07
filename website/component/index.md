@@ -10,6 +10,7 @@ collapsed: false
 ### Basic Components
 
 - [Accordion](accordion) - Collapsible content panels
+- [AI Elements](ai-elements) - Reasoning, tool calls, plans, sources and the prompt composer for agents
 - [Alert](alert) - Alert messages with different variants
 - [Attachment](attachment) - File and media attachment surfaces
 - [Avatar](avatar) - User avatars with fallback text
