@@ -161,6 +161,38 @@ fn clear_button_is_named(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+struct Prompted {
+    name: Entity<InputState>,
+}
+impl Render for Prompted {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            Input::new(&self.name)
+                .id("name")
+                .aria_label("Project name")
+                .w(px(240.)),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn placeholder_is_read_from_the_editor_and_is_not_a_value(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let (handle, _) = common::open_window(cx, None, |window, cx| {
+        cx.new(|cx| Prompted {
+            name: cx.new(|cx| InputState::new(window, cx).placeholder("Untitled")),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        let name = window.find("name");
+        assert_eq!(name.label(), Some("Project name"));
+        assert_eq!(name.placeholder(), Some("Untitled"));
+        assert_eq!(name.value(), Some(""));
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn masked_input_is_a_password_field(cx: &mut TestAppContext) {
     let (handle, _) = inputs(cx);

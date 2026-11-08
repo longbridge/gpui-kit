@@ -127,9 +127,14 @@ impl PopoverState {
                 );
         } else {
             self.dismiss_subscription = None;
-            if let Some(previous) = self.previous_focus_handle.take() {
-                if self.focus_handle.contains_focused(window, cx) {
-                    previous.focus(window, cx);
+            let previous = self.previous_focus_handle.take();
+            if self.focus_handle.contains_focused(window, cx) {
+                match previous {
+                    Some(previous) => previous.focus(window, cx),
+                    // Nothing had focus when the popover opened, so nothing has it now. Left
+                    // alone, focus would stay on the closed popover's own handle, which is no
+                    // longer in the tree.
+                    None => window.blur(cx),
                 }
             }
         }
@@ -478,15 +483,26 @@ mod tests {
             }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| assert!(window.focused(cx).is_none(), "nothing has focus yet"));
 
         cx.simulate_click(point(px(20.), px(10.)), Default::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_some());
+        cx.update(|window, cx| assert!(window.focused(cx).is_some(), "the popover takes focus"));
 
         cx.simulate_click(point(px(300.), px(300.)), Default::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_none());
         assert_eq!(&*changes.borrow(), &[true, false]);
+        // Nothing had focus when the popover opened, so nothing has it now, not the closed
+        // popover's own handle.
+        cx.update(|window, cx| {
+            assert!(
+                window.focused(cx).is_none(),
+                "focus stays on {:?}",
+                window.focused(cx)
+            )
+        });
     }
 
     #[gpui::test]

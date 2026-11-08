@@ -405,6 +405,7 @@ window.open_alert_dialog(cx, |alert, _, _| {
 | `close_button(bool)`     | Show/hide close button, default `false`                       |
 | `keyboard(bool)`         | Support ESC key to close, default `true`                      |
 | `entrance(DialogEntrance)` | Set entrance animation, default `SlideDown` |
+| `centered()` | Center vertically in the window instead of near its top |
 | `on_ok(callback)`        | Set OK button callback, return `true` to close dialog         |
 | `on_cancel(callback)`    | Set cancel button callback, return `true` to close dialog     |
 | `on_close(callback)`     | Set callback after dialog closes                              |

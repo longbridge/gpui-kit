@@ -296,6 +296,6 @@ Base 还提供以下选择：
 
 GPUI 把偏好保存在 `App` 中；`cx.reduce_motion()` 读取，`cx.set_reduce_motion(...)` 可设置。`gpui_kit::init(cx)` 会初始化 Base 的系统偏好处理。Base 在初始化时读取 macOS 和 Windows 的设置；Linux 桌面 portal 的设置到达后会继续跟踪变化；其他目标不修改该标志。应用显式设置后，Base 会尊重应用的选择。若要在初始化后重新读取 macOS 或 Windows，调用 `gpui_kit::base::apply_system_reduce_motion(cx)`。
 
-GPUI 元素动画采用前述静态端点。Base 的有限 transition、spring、keyframes、presence 和 sequence 会立即到达相应目标或最终状态，并停止请求运动帧。`MotionReveal` 只消费进度：直接使用时，应在减弱动态效果下传入端点值，或由遵守该偏好的采样器驱动。子元素测量高度发生变化时，它仍可能请求一帧。无限循环的活动状态也必须有可理解的静态表示。自定义元素若自行持有时钟，应检查 `cx.reduce_motion()`，并且只在仍有必要运动时请求帧；不要在 render 中无条件调用 `cx.notify()`、`window.refresh()` 或 `window.request_animation_frame()`。
+GPUI 元素动画采用前述静态端点。Base 的有限 transition、spring、keyframes、presence 和 sequence 会立即到达相应目标或最终状态，并停止请求运动帧。以 `.reduced_motion(ReducedMotion::Continue)` 构建的值 `Transition` 则保留其时序；只应将它用于淡入淡出等非空间效果。`MotionReveal` 只消费进度：直接使用时，应在减弱动态效果下传入端点值，或由遵守该偏好的采样器驱动。子元素测量高度发生变化时，它仍可能请求一帧。无限循环的活动状态也必须有可理解的静态表示。自定义元素若自行持有时钟，应检查 `cx.reduce_motion()`，并且只在仍有必要运动时请求帧；不要在 render 中无条件调用 `cx.notify()`、`window.refresh()` 或 `window.request_animation_frame()`。
 
 动效应用于解释出现、关闭、展开和空间连续性。当透明度或 transform 已足以说明关系时，避免大范围 layout 动画。过渡过程中也要协调键盘焦点、命中区域和语义状态；绘制位置改变本身不会向辅助技术播报新状态。界面变化的语义处理见[无障碍指南](./accessibility)。

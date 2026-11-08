@@ -183,7 +183,7 @@ impl DeferredMenu {
                 div()
                     .w(window.bounds().size.width)
                     .h(window.bounds().size.height)
-                    .on_scroll_wheel(|_, _, cx| {
+                    .on_scroll(|_, _, cx| {
                         cx.stop_propagation();
                     })
                     .child(

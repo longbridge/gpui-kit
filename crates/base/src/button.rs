@@ -367,7 +367,8 @@ mod tests {
         });
 
         for key in ["enter", "space"] {
-            let keystroke = Keystroke::parse(key).unwrap();
+            let keystroke =
+                cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
             cx.simulate_event(KeyDownEvent {
                 keystroke: keystroke.clone(),
                 is_held: false,
@@ -429,7 +430,8 @@ mod tests {
     }
 
     fn press_transition_key(cx: &mut VisualTestContext, key: &str) {
-        let keystroke = Keystroke::parse(key).unwrap();
+        let keystroke =
+            cx.update(|_, cx| Keystroke::parse_with_os(key, cx.platform_info().os).unwrap());
         cx.simulate_event(KeyDownEvent {
             keystroke: keystroke.clone(),
             is_held: false,

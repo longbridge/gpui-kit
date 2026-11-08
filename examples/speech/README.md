@@ -42,8 +42,11 @@ microphone and speech recognition access without an app bundle. The first
 session asks for both. Recognition stays on the Mac, so a language the Mac can't
 recognize offline shows **Unavailable**.
 
-When you run from a terminal, macOS attributes the microphone to the terminal
-app. To ask again after denying access:
+When you run from a terminal, macOS attributes privacy access to the terminal
+app and checks the terminal's usage descriptions, so a terminal that does not
+declare speech recognition would get the app killed. Speech therefore relaunches
+itself at startup as its own responsible process, and the system asks on behalf
+of Speech rather than the terminal. To ask again after denying access:
 
 ```sh
 tccutil reset Microphone

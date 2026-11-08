@@ -529,7 +529,8 @@ impl RenderOnce for TimeFieldSegment {
 /// Base owns focus, the keyboard model and pointer segment selection; the
 /// presentation lays out and decorates the field with `Styled` and each
 /// segment through [`TimeField::render_segment`]. A `:` separates the numeric
-/// segments; the AM/PM segment follows without one.
+/// segments unless [`TimeField::separator`] says otherwise; the AM/PM segment
+/// follows without one.
 #[derive(IntoElement)]
 pub struct TimeField {
     id: ElementId,
@@ -537,6 +538,7 @@ pub struct TimeField {
     disabled: bool,
     style: StyleRefinement,
     segment: SegmentRenderer,
+    separator: SharedString,
 }
 
 impl TimeField {
@@ -547,7 +549,15 @@ impl TimeField {
             disabled: false,
             style: StyleRefinement::default(),
             segment: Rc::new(|segment, _, _, _| segment.into_any_element()),
+            separator: SharedString::new_static(":"),
         }
+    }
+
+    /// What stands between the field's segments (`:` by default), as a caller
+    /// showing a time in its own locale may need.
+    pub fn separator(mut self, separator: impl Into<SharedString>) -> Self {
+        self.separator = separator.into();
+        self
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -598,11 +608,24 @@ impl RenderOnce for TimeField {
                     .on_action(window.listener_for(&self.state, TimeFieldState::on_next_column))
                     .on_action(window.listener_for(&self.state, TimeFieldState::on_prev_column))
                     .on_key_down(window.listener_for(&self.state, TimeFieldState::on_key_down))
+                    // A press on the field outside any segment focuses it and selects the
+                    // first segment; a press on a segment stops here and selects that one.
+                    .on_mouse_down(MouseButton::Left, {
+                        let state = self.state.clone();
+                        let focus_handle = focus_handle.clone();
+                        move |_: &MouseDownEvent, window, cx| {
+                            focus_handle.focus(window, cx);
+                            state.update(cx, |state, cx| {
+                                let first = state.editor.segments()[0];
+                                state.select_segment(first, cx);
+                            });
+                        }
+                    })
             });
 
         for (ix, segment) in editor.segments().iter().copied().enumerate() {
             if ix > 0 && segment != TimeSegment::Period {
-                root = root.child(div().child(":"));
+                root = root.child(div().child(self.separator.clone()));
             }
             let segment_state = TimeFieldSegmentState {
                 segment,
@@ -621,6 +644,7 @@ impl RenderOnce for TimeField {
                 let focus_handle = focus_handle.clone();
                 item =
                     item.on_mouse_down(MouseButton::Left, move |_: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
                         focus_handle.focus(window, cx);
                         state.update(cx, |state, cx| state.select_segment(segment, cx));
                     });
@@ -772,5 +796,21 @@ mod tests {
         editor.step(1);
         assert_eq!(editor.time, hms(0, 0, 0));
         assert!(!editor.input_digit(1), "digits do not edit the period");
+    }
+
+    #[gpui::test]
+    fn the_separator_is_a_colon_unless_set(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+
+        let cx = cx.add_empty_window();
+        let state = cx.update(|window, cx| cx.new(|cx| TimeFieldState::new(window, cx)));
+        assert_eq!(TimeField::new("time", &state).separator.as_ref(), ":");
+        assert_eq!(
+            TimeField::new("time", &state)
+                .separator(".")
+                .separator
+                .as_ref(),
+            "."
+        );
     }
 }

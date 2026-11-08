@@ -22,6 +22,7 @@ struct IdPayload(String);
 enum ButtonOp {
     Size(gpui_component::Size),
     Label(String),
+    AccessibilityLabel(String),
     Tooltip(String),
     Loading(bool),
     Outline,
@@ -82,6 +83,7 @@ impl ComponentMaterializer for ButtonMaterializer {
             component = match operation {
                 ButtonOp::Size(size) => component.with_size(size),
                 ButtonOp::Label(label) => component.label(label),
+                ButtonOp::AccessibilityLabel(label) => component.accessibility_label(label),
                 ButtonOp::Tooltip(tooltip) => component.tooltip(tooltip),
                 ButtonOp::Loading(loading) => component.loading(loading),
                 ButtonOp::Outline => component.outline(),
@@ -319,6 +321,11 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             support::on_click_method("Button"),
             support::disabled_method("Button"),
             button_string("label", "Sets the visible button label.", ButtonOp::Label),
+            button_string(
+                "accessibility_label",
+                "Sets the accessible name independently of the visible button label.",
+                ButtonOp::AccessibilityLabel,
+            ),
             button_string("tooltip", "Sets concise hover help.", ButtonOp::Tooltip),
             button_loading(),
             button_size(),

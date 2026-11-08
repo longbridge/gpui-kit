@@ -1,23 +1,33 @@
+mod selection_paint;
+
+#[cfg(target_family = "wasm")]
+use async_channel::bounded;
 use gpui::Corners;
+#[cfg(not(target_family = "wasm"))]
+use smol::channel::bounded;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     mem,
     ops::Range,
     rc::Rc,
-    sync::{Arc, Mutex, Weak},
+    sync::{
+        Arc, Mutex, Weak,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use gpui::{
-    App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId, GlobalElementId,
-    Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    SharedString, StyledText, TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, quad,
-    size,
+    App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId,
+    ForegroundExecutor, Global, GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior,
+    Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, StyledText, Task,
+    TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, size,
 };
 
 use crate::{
     GlobalState, TextSelection,
+    async_util::Sender,
     input::Selection,
     text::TextViewMultiClickKind,
     text::node::LinkMark,
@@ -38,9 +48,63 @@ pub(super) struct InlineHighlight {
     pub(super) style: HighlightStyle,
     pub(super) font_family: Option<SharedString>,
     pub(super) font_size_scale: Option<f32>,
+    /// Typography and box refinements for an inline code span.
+    pub(super) code_style: Option<StyleRefinement>,
 }
 
 impl InlineHighlight {
+    pub(super) fn font_size(&self, body: Pixels, rem_size: Pixels) -> Pixels {
+        self.code_style
+            .as_ref()
+            .and_then(|style| style.text.font_size)
+            .map(|size| size.to_pixels(rem_size))
+            .filter(|size| size.as_f32().is_finite() && *size > Pixels::ZERO)
+            .unwrap_or(body * self.font_size_scale.unwrap_or(1.))
+    }
+
+    /// Insets used by shaping, wrapping, painting, and table measurement alike.
+    pub(super) fn code_insets(&self, font_size: Pixels, rem_size: Pixels) -> Edges<Pixels> {
+        if self.font_size_scale.is_none() {
+            return Edges::default();
+        }
+        let mut insets = Edges {
+            top: Pixels::ZERO,
+            bottom: Pixels::ZERO,
+            left: px(super::inline_flow::INLINE_CODE_PADDING),
+            right: px(super::inline_flow::INLINE_CODE_PADDING),
+        };
+        if let Some(style) = &self.code_style {
+            for (inset, padding, border) in [
+                (&mut insets.top, style.padding.top, style.border_widths.top),
+                (
+                    &mut insets.right,
+                    style.padding.right,
+                    style.border_widths.right,
+                ),
+                (
+                    &mut insets.bottom,
+                    style.padding.bottom,
+                    style.border_widths.bottom,
+                ),
+                (
+                    &mut insets.left,
+                    style.padding.left,
+                    style.border_widths.left,
+                ),
+            ] {
+                if let Some(padding) = padding {
+                    *inset = padding
+                        .to_pixels(font_size.into(), rem_size)
+                        .max(Pixels::ZERO);
+                }
+                if let Some(border) = border {
+                    *inset += border.to_pixels(rem_size).max(Pixels::ZERO);
+                }
+            }
+        }
+        insets
+    }
+
     /// Layers `other` over `self`, the way [`HighlightStyle::highlight`] does.
     fn highlight(mut self, other: &InlineHighlight) -> Self {
         self.style = self.style.highlight(other.style);
@@ -49,6 +113,9 @@ impl InlineHighlight {
         }
         if other.font_size_scale.is_some() {
             self.font_size_scale = other.font_size_scale;
+        }
+        if other.code_style.is_some() {
+            self.code_style = other.code_style.clone();
         }
         self
     }
@@ -60,6 +127,7 @@ impl From<HighlightStyle> for InlineHighlight {
             style,
             font_family: None,
             font_size_scale: None,
+            code_style: None,
         }
     }
 }
@@ -103,6 +171,48 @@ pub(super) fn combine_highlights(
     combined
 }
 
+/// Layers host foregrounds after mark/link styling, independent of where a
+/// mark starts. `combine_highlights` folds active spans in start order, so a
+/// mark beginning inside an already active foreground must not win its color.
+pub(super) fn foreground_highlights(
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    text: &str,
+    offset: usize,
+    foregrounds: &[(Range<usize>, Hsla)],
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    let ranges: Vec<_> = foregrounds
+        .iter()
+        .filter_map(|(range, color)| {
+            let start = range.start.saturating_sub(offset).min(text.len());
+            let end = range.end.saturating_sub(offset).min(text.len());
+            (start < end && text.is_char_boundary(start) && text.is_char_boundary(end))
+                .then_some((start..end, *color))
+        })
+        .collect();
+    if ranges.is_empty() {
+        return highlights;
+    }
+    let mut highlights = combine_highlights(
+        highlights,
+        ranges.iter().map(|(range, color)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(*color),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        }),
+    );
+    for (range, highlight) in &mut highlights {
+        if let Some((_, color)) = ranges.iter().rev().find(|(r, _)| r.contains(&range.start)) {
+            highlight.style.color = Some(*color);
+        }
+    }
+    highlights
+}
+
 /// Layers a streamed fade-in over `highlights`: text inside each fade range
 /// loses that share of its color, and a highlight background or decoration
 /// color fades with it so an inline code chip or a link underline does not
@@ -130,6 +240,14 @@ pub(super) fn fade_highlights(
         let Some(fade_out) = highlight.style.fade_out else {
             continue;
         };
+        if let Some(code) = &mut highlight.code_style {
+            if let Some(background) = code.background.as_ref().and_then(gpui::Fill::color) {
+                code.background = Some(background.opacity(1. - fade_out).into());
+            }
+            if let Some(border) = &mut code.border_color {
+                border.fade_out(fade_out);
+            }
+        }
         let style = &mut highlight.style;
         for color in [
             style.background_color.as_mut(),
@@ -159,10 +277,17 @@ pub(super) fn text_runs(
         if ix < range.start {
             runs.push(default_style.clone().to_run(range.start - ix));
         }
-        let mut run = default_style
-            .clone()
-            .highlight(highlight.style)
-            .to_run(range.len());
+        let mut style = default_style.clone().highlight(highlight.style);
+        if let Some(code) = &highlight.code_style {
+            // Font size is handled by the shaped fragment, not by a TextRun.
+            style.font_features = code
+                .text
+                .font_features
+                .clone()
+                .unwrap_or(style.font_features);
+            style.font_fallbacks = code.text.font_fallbacks.clone().or(style.font_fallbacks);
+        }
+        let mut run = style.to_run(range.len());
         if let Some(family) = &highlight.font_family {
             run.font.family = family.clone();
         }
@@ -175,34 +300,56 @@ pub(super) fn text_runs(
     runs
 }
 
+pub(super) fn code_insets(
+    highlights: &[(Range<usize>, InlineHighlight)],
+    font_size: Pixels,
+    rem_size: Pixels,
+) -> Edges<Pixels> {
+    highlights
+        .iter()
+        .find(|(_, highlight)| highlight.font_size_scale.is_some())
+        .map(|(_, highlight)| highlight.code_insets(font_size, rem_size))
+        .unwrap_or_default()
+}
+
 /// Splits text into contiguous ranges sharing one font size. GPUI runs can
 /// vary the font but not its size, so each range needs its own shaped line.
 pub(super) fn text_size_ranges(
     text_len: usize,
     highlights: &[(Range<usize>, InlineHighlight)],
+    font_size: Pixels,
+    rem_size: Pixels,
 ) -> Vec<(Range<usize>, f32)> {
-    let mut ranges: Vec<(Range<usize>, f32)> = Vec::new();
-    let mut push = |range: Range<usize>, scale: f32| {
+    let mut ranges: Vec<(Range<usize>, f32, bool)> = Vec::new();
+    let mut push = |range: Range<usize>, scale: f32, code: bool| {
         if range.is_empty() {
             return;
         }
-        if let Some((last, last_scale)) = ranges.last_mut()
+        if let Some((last, last_scale, last_code)) = ranges.last_mut()
             && *last_scale == scale
+            && *last_code == code
             && last.end == range.start
         {
             last.end = range.end;
         } else {
-            ranges.push((range, scale));
+            ranges.push((range, scale, code));
         }
     };
     let mut cursor = 0;
     for (range, highlight) in highlights {
-        push(cursor..range.start, 1.);
-        push(range.clone(), highlight.font_size_scale.unwrap_or(1.));
+        push(cursor..range.start, 1., false);
+        push(
+            range.clone(),
+            highlight.font_size(font_size, rem_size) / font_size,
+            highlight.font_size_scale.is_some(),
+        );
         cursor = range.end;
     }
-    push(cursor..text_len, 1.);
+    push(cursor..text_len, 1., false);
     ranges
+        .into_iter()
+        .map(|(range, scale, _)| (range, scale))
+        .collect()
 }
 
 /// A inline element used to render a inline text and support selectable.
@@ -237,15 +384,26 @@ pub(super) struct Inline {
 }
 
 /// The inline text state, used RefCell to keep the selection state.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub(crate) struct InlineState {
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
+    pub(super) selection_rows: Option<Box<selection_paint::Rows>>,
     /// Set only through the editor host API (`Paragraph::with_leaf_key`):
     /// the leaf reports its geometry to the collector installed by
     /// `editor_host::collect_leaf_geometry`. `None` for every plain `TextView`.
     pub(crate) editor_key: Option<u64>,
+    /// UI owners of retained layouts; cleanup metadata is not document state.
+    pub(super) cleanup_senders: Vec<Sender<()>>,
+}
+
+impl PartialEq for InlineState {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+            && self.selection == other.selection
+            && self.editor_key == other.editor_key
+    }
 }
 
 /// One frame's [`StyledText`], kept for the next frame's [`Inline`] of the
@@ -276,11 +434,63 @@ struct RetainedLayout {
 
 thread_local! {
     static RETAINED_LAYOUTS: RefCell<HashMap<usize, RetainedLayout>> = RefCell::new(HashMap::new());
+    /// [`DROPPED_STATES`] when this thread's table was last swept.
+    static SWEPT_AT_DROPS: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Dead entries (states that were dropped without a final paint, e.g. a
-/// replaced document) are swept once the table grows past this many.
+/// replaced document) are swept once the table grows past this many, or by
+/// the UI cleanup task after an [`InlineState`] was dropped.
 const RETAINED_SWEEP_AT: usize = 4096;
+
+/// How many [`InlineState`]s have been dropped. States drop on whichever
+/// thread lets go of them last (the background parse included), so this is a
+/// global count; each thread's table remembers the count it last swept at
+/// ([`SWEPT_AT_DROPS`]), so that one thread's sweep does not use up another's.
+static DROPPED_STATES: AtomicUsize = AtomicUsize::new(0);
+
+/// Owns the App's retained-layout notifications and foreground sweep task.
+struct RetainedLayoutCleanup {
+    /// Closed before teardown so late state drops cannot wake the task.
+    sender: Sender<()>,
+    /// Cancelled while its executor is still alive.
+    _task: Task<()>,
+    // App drops its executors before globals. Closing the channel can wake
+    // the task, so keep its scheduler alive until after channel/task teardown;
+    // otherwise the wake drops the receiver under the channel's event lock.
+    _executor: ForegroundExecutor,
+}
+
+impl Global for RetainedLayoutCleanup {}
+
+impl Drop for RetainedLayoutCleanup {
+    fn drop(&mut self) {
+        // Release the local task's channel waker on its owning thread before
+        // cancelling it. Another app's drops must not wake a retired executor.
+        self.sender.close();
+    }
+}
+
+pub(super) fn init(cx: &mut App) {
+    if cx.has_global::<RetainedLayoutCleanup>() {
+        return;
+    }
+    sweep_retained_layouts();
+
+    // One pending notification is enough to sweep every dead entry. In
+    // particular, closing a document must not require another Inline to draw.
+    let (sender, receiver) = bounded(1);
+    let task = cx.foreground_executor().spawn(async move {
+        while receiver.recv().await.is_ok() {
+            sweep_retained_layouts();
+        }
+    });
+    cx.set_global(RetainedLayoutCleanup {
+        sender,
+        _task: task,
+        _executor: cx.foreground_executor().clone(),
+    });
+}
 
 fn state_key(state: &Arc<Mutex<InlineState>>) -> usize {
     Arc::as_ptr(state) as usize
@@ -306,14 +516,51 @@ fn has_retained_layout(state: &Arc<Mutex<InlineState>>) -> bool {
     RETAINED_LAYOUTS.with(|layouts| layouts.borrow().contains_key(&state_key(state)))
 }
 
-fn retain_layout(state: &Arc<Mutex<InlineState>>, retained: RetainedLayout) {
+fn sweep_retained_layouts() {
     RETAINED_LAYOUTS.with(|layouts| {
         let mut layouts = layouts.borrow_mut();
-        if layouts.len() >= RETAINED_SWEEP_AT {
+        // Read before sweeping: a state dropped during the sweep wakes another
+        // cleanup and must not be acknowledged by this pass.
+        let dropped = DROPPED_STATES.load(Ordering::Acquire);
+        if dropped != SWEPT_AT_DROPS.get() || layouts.len() >= RETAINED_SWEEP_AT {
             layouts.retain(|_, retained| retained.state.strong_count() > 0);
+            SWEPT_AT_DROPS.set(dropped);
         }
-        layouts.insert(state_key(state), retained);
     });
+}
+
+fn retain_layout(
+    state: &Arc<Mutex<InlineState>>,
+    retained: RetainedLayout,
+    cleanup: Option<&Sender<()>>,
+) {
+    if let Some(cleanup) = cleanup
+        && let Ok(mut state) = state.lock()
+    {
+        state.cleanup_senders.retain(|sender| !sender.is_closed());
+        if !state
+            .cleanup_senders
+            .iter()
+            .any(|sender| sender.same_channel(cleanup))
+        {
+            state.cleanup_senders.push(cleanup.clone());
+        }
+    }
+    sweep_retained_layouts();
+    RETAINED_LAYOUTS.with(|layouts| {
+        layouts.borrow_mut().insert(state_key(state), retained);
+    });
+}
+
+impl Drop for InlineState {
+    fn drop(&mut self) {
+        // A state can drop on the parser thread after its last frame. Wake
+        // the UI owners even when there will be no further layout hand-over.
+        DROPPED_STATES.fetch_add(1, Ordering::Release);
+        for sender in &self.cleanup_senders {
+            _ = sender.try_send(());
+        }
+    }
 }
 
 impl InlineState {
@@ -450,7 +697,7 @@ impl Inline {
     /// frame (the same document shown twice), this one keeps its own: the
     /// table holds one layout per state, and an element must never be left
     /// to paint without its shaped text.
-    fn retain_styled_text(&mut self) {
+    fn retain_styled_text(&mut self, cx: &App) {
         if self.handed_over || self.retained_key.is_none() || has_retained_layout(&self.state) {
             return;
         }
@@ -466,6 +713,8 @@ impl Inline {
                 runs,
                 text_style,
             },
+            cx.try_global::<RetainedLayoutCleanup>()
+                .map(|cleanup| &cleanup.sender),
         );
         self.handed_over = true;
     }
@@ -715,7 +964,8 @@ impl Inline {
             );
         }
 
-        let Some((selection_start, selection_end)) = text_view_state.selection_points(cx) else {
+        let Some((selection_start, selection_end)) = text_view_state.painted_selection_points(cx)
+        else {
             return (is_selectable, false, None);
         };
         (
@@ -805,80 +1055,6 @@ impl Inline {
                 line_height,
             ),
         ))
-    }
-
-    /// Paint the selection background.
-    fn paint_selection(
-        selection: &Selection,
-        text_layout: &TextLayout,
-        bounds: &Bounds<Pixels>,
-        window: &mut Window,
-        color: gpui::Hsla,
-    ) {
-        let mut start = selection.start;
-        let mut end = selection.end;
-        if end < start {
-            std::mem::swap(&mut start, &mut end);
-        }
-        let Some(start_position) = text_layout.position_for_index(start) else {
-            return;
-        };
-        let Some(end_position) = text_layout.position_for_index(end) else {
-            return;
-        };
-
-        let line_height = text_layout.line_height();
-        if start_position.y == end_position.y {
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    start_position,
-                    point(end_position.x, end_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-        } else {
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    start_position,
-                    point(bounds.right(), start_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-
-            if end_position.y > start_position.y + line_height {
-                window.paint_quad(quad(
-                    Bounds::from_corners(
-                        point(bounds.left(), start_position.y + line_height),
-                        point(bounds.right(), end_position.y),
-                    ),
-                    px(0.),
-                    color,
-                    Edges::default(),
-                    gpui::transparent_black(),
-                    BorderStyle::default(),
-                ));
-            }
-
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    point(bounds.left(), end_position.y),
-                    point(end_position.x, end_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-        }
     }
 
     /// Paint each range highlight behind the text of its range.
@@ -989,7 +1165,7 @@ impl Element for Inline {
         self.request_reveal(window);
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        self.retain_styled_text();
+        self.retain_styled_text(cx);
         hitbox
     }
 
@@ -1004,6 +1180,8 @@ impl Element for Inline {
         cx: &mut App,
     ) {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
+        #[cfg(feature = "test-support")]
+        crate::test_support::record_text(self.text.clone(), false, bounds, window);
         let current_view = window.current_view();
         let hitbox = prepaint;
         if !self.reclaim_styled_text() {
@@ -1058,13 +1236,20 @@ impl Element for Inline {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
         }
 
-        if let Some(selection) = &state.selection {
+        if let Some(selection) = state.selection {
             let color = GlobalState::global(cx)
                 .text_view_state()
                 .map(|state| state.read(cx).text_view_style.selection())
                 .unwrap_or_else(|| crate::Theme::global(cx).tokens.colors.selection);
-            Self::paint_selection(selection, &text_layout, &bounds, window, color);
-            if let Some((start, end)) = Self::selection_edges(selection, &text_layout)
+            selection_paint::visit(
+                &text_layout,
+                window.text_style().text_align,
+                selection.start.min(selection.end)..selection.start.max(selection.end),
+                window.content_mask().bounds,
+                &mut state.selection_rows,
+                |rect| window.paint_quad(gpui::fill(rect, color)),
+            );
+            if let Some((start, end)) = Self::selection_edges(&selection, &text_layout)
                 && let Some(text_view_state) = GlobalState::global(cx).text_view_state()
             {
                 text_view_state
@@ -1072,6 +1257,8 @@ impl Element for Inline {
                     .selection_adapter
                     .register_selection_edges(start, end);
             }
+        } else {
+            state.selection_rows = None;
         }
 
         _ = text_layout.paint_foreground(window, cx);
@@ -1086,25 +1273,29 @@ impl Element for Inline {
                 );
                 let adapter = &text_view_state.read(cx).selection_adapter;
                 adapter.register_inline(text_bounds);
-                adapter.register_text_run(crate::TextSelectionRun::new(
-                    self.text.clone(),
-                    text_layout.clone(),
-                    hitbox.bounds,
-                ));
+                adapter.register_text_run(
+                    crate::TextSelectionRun::new(
+                        self.text.clone(),
+                        text_layout.clone(),
+                        hitbox.bounds,
+                    )
+                    .with_paragraph(self.selection_bounds),
+                );
                 let (source, range) = self
                     .selection_source
                     .as_ref()
                     .map(|(source, range)| (source, range.clone()))
                     .unwrap_or((&self.state, 0..self.text.len()));
-                adapter.register_copy_projection(super::selection_adapter::CopyProjection::Text(
-                    InlineSelectionProjection {
+                adapter.register_copy_projection(
+                    super::selection_adapter::CopyProjection::Text(InlineSelectionProjection {
                         source: Arc::downgrade(source),
                         range,
                         text: self.text.clone(),
                         layout: copy_layout,
                         selection_bounds: self.selection_bounds,
-                    },
-                ));
+                    }),
+                    cx,
+                );
             }
 
             window.on_mouse_event({
@@ -1159,6 +1350,9 @@ impl Element for Inline {
                     ) else {
                         return;
                     };
+                    let Some(carets) = range_carets(&text_layout, &range, line_bounds) else {
+                        return;
+                    };
 
                     let selected_text = text[range.clone()].to_string();
 
@@ -1175,6 +1369,7 @@ impl Element for Inline {
                                 event.position,
                                 kind,
                                 selected_text,
+                                carets,
                                 cx,
                             );
                         });
@@ -1250,7 +1445,7 @@ impl Element for Inline {
         }
 
         drop(state);
-        self.retain_styled_text();
+        self.retain_styled_text(cx);
     }
 }
 
@@ -1404,6 +1599,26 @@ fn selection_for_multi_click(
     }
 }
 
+/// The carets at the two ends of `range` in `text_layout`, spanning the
+/// laid-out `row` when the text is one piece of a row.
+fn range_carets(
+    text_layout: &TextLayout,
+    range: &Range<usize>,
+    row: Option<Bounds<Pixels>>,
+) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+    let caret = |index| {
+        let position = text_layout.position_for_index(index)?;
+        Some(match row {
+            Some(row) => crate::touch_selection::caret_line_box(
+                point(position.x, row.top()),
+                row.size.height,
+            ),
+            None => crate::touch_selection::caret_line_box(position, text_layout.line_height()),
+        })
+    };
+    Some((caret(range.start)?, caret(range.end)?))
+}
+
 trait SelectionGeometry {
     fn len(&self) -> usize;
     fn line_height(&self) -> Pixels;
@@ -1542,6 +1757,7 @@ pub(super) fn point_in_text_selection(
 #[cfg(test)]
 mod fade_highlights_tests {
     use super::*;
+    use gpui::Styled as _;
 
     #[test]
     fn fades_text_and_background_only_inside_the_range() {
@@ -1585,6 +1801,44 @@ mod fade_highlights_tests {
         let (_, faded) = &combined[0];
         assert_eq!(faded.style.underline.unwrap().color.unwrap().a, 0.25);
         assert_eq!(faded.style.strikethrough.unwrap().color.unwrap().a, 0.25);
+    }
+
+    #[test]
+    fn fades_inline_code_style_background_and_border() {
+        let code = InlineHighlight {
+            code_style: Some(
+                StyleRefinement::default()
+                    .bg(gpui::red())
+                    .border_color(gpui::blue()),
+            ),
+            ..InlineHighlight::from(HighlightStyle {
+                background_color: Some(gpui::red()),
+                ..Default::default()
+            })
+        };
+        let combined = fade_highlights(vec![(0..4, code)], &[(0..4, 0.75)]);
+
+        let (_, faded) = &combined[0];
+        assert_eq!(faded.style.background_color.unwrap().a, 0.25);
+        assert_eq!(
+            faded
+                .code_style
+                .as_ref()
+                .unwrap()
+                .background
+                .as_ref()
+                .unwrap()
+                .color()
+                .unwrap()
+                .as_solid()
+                .unwrap()
+                .a,
+            0.25
+        );
+        assert_eq!(
+            faded.code_style.as_ref().unwrap().border_color.unwrap().a,
+            0.25
+        );
     }
 
     #[test]
@@ -1782,7 +2036,14 @@ mod range_highlight_tests {
             let origin = point(px(7.), px(11.));
             element.prepaint_at(origin, window, cx);
             let glyphs = glyph_boxes(&layout, align, layout.bounds().size.width);
-            range_boxes(&glyphs, range)
+            let expected = range_boxes(&glyphs, range.clone());
+            let mut selection_boxes = Vec::new();
+            selection_paint::visit(&layout, align, range, layout.bounds(), &mut None, |rect| {
+                let row = ((rect.top() - origin.y) / layout.line_height()).round() as usize;
+                selection_boxes.push((row, rect.left() - origin.x, rect.right() - origin.x));
+            });
+            assert_eq!(selection_boxes, expected);
+            expected
                 .into_iter()
                 .map(|(row, left, right)| (left, right, row))
                 .collect()
@@ -1863,6 +2124,17 @@ mod range_highlight_tests {
         assert_eq!(across.len(), 2, "{across:?}");
         assert_eq!(across[0].1, rows[0].1);
         assert_eq!((across[1].0, across[1].2), (px(0.), 1));
+    }
+
+    #[test]
+    fn selection_preserves_spaces_and_skips_empty_rows() {
+        let text = "aa  \n\nbbbbb";
+        let rows = boxes(text, 200., TextAlign::Left, 0..text.len());
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].2, 2);
+        let letters = boxes(text, 200., TextAlign::Left, 0..2);
+        assert_eq!(rows[0].1, letters[0].1 * 2.);
+        assert!(boxes(text, 200., TextAlign::Left, 4..6).is_empty());
     }
 
     #[test]
@@ -2157,6 +2429,7 @@ mod tests {
             style,
             font_family: Some(SharedString::from("Mono")),
             font_size_scale: None,
+            code_style: None,
         }
     }
 
@@ -2509,10 +2782,13 @@ mod tests {
 
 #[cfg(test)]
 mod retained_layout_tests {
+    use gpui::Styled as _;
     use gpui::{
-        AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-        TestAppContext, Window, div, px,
+        AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, TestAppContext,
+        Window, div, px,
     };
+
+    use std::sync::{Arc, Mutex};
 
     use super::RETAINED_LAYOUTS;
     use crate::text::{TextView, TextViewState};
@@ -2555,6 +2831,74 @@ mod retained_layout_tests {
 
         let retained = RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len());
         assert_eq!(retained, 2, "one layout per paragraph state");
+    }
+
+    fn hand_over(
+        text: &'static str,
+        cleanup: Option<&crate::async_util::Sender<()>>,
+    ) -> Arc<Mutex<super::InlineState>> {
+        let state = Arc::new(Mutex::new(super::InlineState::default()));
+        super::retain_layout(
+            &state,
+            super::RetainedLayout {
+                state: Arc::downgrade(&state),
+                styled_text: gpui::StyledText::new(text),
+                text: text.into(),
+                runs: Vec::new(),
+                text_style: gpui::TextStyle::default(),
+            },
+            cleanup,
+        );
+        state
+    }
+
+    /// Tables are per thread and the drop count is global: a hand-over on
+    /// another thread (tests run side by side) must not use up the drops
+    /// that this thread's table still has to sweep.
+    #[test]
+    fn a_sweep_on_another_thread_leaves_this_threads_dead_layouts_to_it() {
+        let dropped = hand_over("dropped", None);
+        drop(dropped);
+        // The other thread's state outlives this thread's next hand-over, so
+        // its drop does not count as a new one here.
+        let other = std::thread::spawn(|| hand_over("other thread", None))
+            .join()
+            .unwrap();
+        let _kept = hand_over("kept", None);
+        drop(other);
+
+        let (retained, alive) = RETAINED_LAYOUTS.with(|layouts| {
+            let layouts = layouts.borrow();
+            let alive = layouts
+                .values()
+                .filter(|retained| retained.state.strong_count() > 0)
+                .count();
+            (layouts.len(), alive)
+        });
+        assert_eq!(
+            (retained, alive),
+            (1, 1),
+            "only the live state's layout is left"
+        );
+    }
+
+    #[gpui::test]
+    fn a_background_drop_releases_layouts_without_another_hand_over(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| {
+            hand_over(
+                "last paragraph",
+                Some(&cx.global::<super::RetainedLayoutCleanup>().sender),
+            )
+        });
+        assert_eq!(RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len()), 1);
+
+        cx.background_executor
+            .spawn(async move { drop(state) })
+            .detach();
+        cx.run_until_parked();
+
+        assert!(RETAINED_LAYOUTS.with(|layouts| layouts.borrow().is_empty()));
     }
 
     struct Once {
@@ -2631,5 +2975,97 @@ mod retained_layout_tests {
                 .count()
         });
         assert_eq!(alive, 3, "one live layout per remaining fragment");
+    }
+
+    /// A text view that is dropped (a closed document, a list row that is
+    /// gone) gives its shaped text back at the next frame, rather than once
+    /// the table has filled up with thousands of paragraphs.
+    #[gpui::test]
+    fn dropping_a_text_view_releases_its_layouts(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let paragraphs = (0..40)
+            .map(|index| format!("Paragraph {index} of the old document."))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (view, cx) = cx.add_window_view(|_, cx| Once {
+            state: cx.new(|cx| TextViewState::markdown(&paragraphs, cx)),
+        });
+        cx.run_until_parked();
+        for _ in 0..2 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        view.update(cx, |view, cx| {
+            view.state = cx.new(|cx| TextViewState::markdown("A new document.", cx));
+            cx.notify();
+        });
+        cx.run_until_parked();
+
+        // The old state drops once nothing holds it (its background parse,
+        // the last frame's elements); the first hand-over after that sweeps
+        // it. Each frame draws the new paragraph, so it hands one over.
+        let count = || {
+            RETAINED_LAYOUTS.with(|layouts| {
+                let layouts = layouts.borrow();
+                let alive = layouts
+                    .values()
+                    .filter(|retained| retained.state.strong_count() > 0)
+                    .count();
+                (layouts.len(), alive)
+            })
+        };
+        let mut frames = 0;
+        while frames < 3 && count() != (1, 1) {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            frames += 1;
+        }
+        assert_eq!(
+            count(),
+            (1, 1),
+            "within {frames} frames only the new document's paragraph is left"
+        );
+    }
+
+    struct Removable {
+        state: Option<Entity<TextViewState>>,
+    }
+
+    impl Render for Removable {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(300.))
+                .children(self.state.as_ref().map(TextView::new))
+        }
+    }
+
+    #[gpui::test]
+    fn closing_the_last_text_view_releases_its_layouts(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let paragraphs = (0..40)
+            .map(|index| format!("Paragraph {index} of the closed document."))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (view, cx) = cx.add_window_view(|_, cx| Removable {
+            state: Some(cx.new(|cx| TextViewState::markdown(&paragraphs, cx))),
+        });
+        cx.run_until_parked();
+        for _ in 0..2 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        assert_eq!(RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len()), 40);
+
+        view.update(cx, |view, cx| {
+            view.state = None;
+            cx.notify();
+        });
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.run_until_parked();
+        }
+
+        assert!(
+            RETAINED_LAYOUTS.with(|layouts| layouts.borrow().is_empty()),
+            "closing the last document must not need another text layout to release it"
+        );
     }
 }

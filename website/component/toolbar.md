@@ -54,7 +54,7 @@ Toolbar::new("toolbar")
 
 ### Sizes
 
-Use `Sizable` to change the container height, spacing, text size, and hosted controls together: `xsmall` (28px), `small` (32px, default), and `medium` (48px). Builder order does not matter.
+Use `Sizable` to change the container height, spacing, text size, and hosted controls together: `xsmall` (28px), `small` (32px, default), and `medium` (48px). These heights are minimums: content taller than the bar, such as a two-line title, makes the bar grow instead of being clipped. Builder order does not matter.
 
 ```rust
 Toolbar::new("toolbar")

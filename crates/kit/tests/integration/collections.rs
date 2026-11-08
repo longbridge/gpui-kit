@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use gpui_kit::component::{
     IndexPath,
+    button::Button,
     list::{List, ListDelegate, ListItem, ListState},
     table::{Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableSelection, TableState},
     tree::{Tree, TreeItem, TreeState},
@@ -163,6 +164,399 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
             }
             assert_eq!(selection(table), (TableSelection::None, None, None, None));
         });
+    })
+    .unwrap();
+}
+
+/// `Rows`, with each cell's text also given to assistive technology.
+struct LabelledRows;
+impl TableDelegate for LabelledRows {
+    fn columns_count(&self, cx: &App) -> usize {
+        Rows.columns_count(cx)
+    }
+    fn rows_count(&self, cx: &App) -> usize {
+        Rows.rows_count(cx)
+    }
+    fn column(&self, ix: usize, cx: &App) -> Column {
+        Rows.column(ix, cx)
+    }
+    fn render_td(
+        &mut self,
+        row: usize,
+        col: usize,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div().child(format!("{row}:{col}"))
+    }
+    fn cell_label(&self, row: usize, col: usize, _: &App) -> Option<gpui_kit::SharedString> {
+        Some(format!("{row}:{col}").into())
+    }
+}
+struct LabelledRecords {
+    table: Entity<TableState<LabelledRows>>,
+}
+impl Render for LabelledRecords {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(DataTable::new(&self.table))
+    }
+}
+
+/// Plain text in a cell is invisible to a screen reader, so the table exposes
+/// its own structure: a grid, column headers named after their columns, and
+/// cells named by the delegate.
+#[gpui_kit::test]
+fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| LabelledRecords {
+            table: cx.new(|cx| TableState::new(LabelledRows, window, cx)),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("table").role(), Some(gpui_kit::Role::Grid));
+        for (ix, name) in ["Name", "Status"].into_iter().enumerate() {
+            let header = window.find(("col-header", ix));
+            assert_eq!(header.role(), Some(gpui_kit::Role::ColumnHeader));
+            assert_eq!(header.label(), Some(name));
+        }
+        let cell = window.find("table-cell-3:1");
+        assert_eq!(cell.role(), Some(gpui_kit::Role::Cell));
+        assert_eq!(cell.label(), Some("3:1"));
+    })
+    .unwrap();
+}
+
+/// A row's text is in its cells, so each row is named after them, and a screen
+/// reader moving through the rows reads more than "row". A table whose cells
+/// have no labels leaves its rows unnamed.
+#[gpui_kit::test]
+fn table_rows_are_named_after_their_cells(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (labelled, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| LabelledRecords {
+            table: cx.new(|cx| TableState::new(LabelledRows, window, cx)),
+        })
+    });
+    let (plain, _) = common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+        cx.new(|cx| Records {
+            table: cx.new(|cx| TableState::new(Rows, window, cx)),
+        })
+    });
+    cx.update_window(labelled.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let row = window.find(("row", 3usize));
+        assert_eq!(row.role(), Some(gpui_kit::Role::Row));
+        assert_eq!(row.label(), Some("3:0, 3:1"));
+    })
+    .unwrap();
+    cx.update_window(plain.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let row = window.find(("row", 3usize));
+        assert_eq!(row.role(), Some(gpui_kit::Role::Row));
+        assert_eq!(row.label(), None);
+    })
+    .unwrap();
+}
+
+/// The grid is the element that holds the keyboard focus, so a screen reader
+/// is told the grid has the focus, not the window, and follows the arrows.
+#[gpui_kit::test]
+fn a_focused_table_is_its_named_grid(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| NamedRecords {
+                table: cx.new(|cx| TableState::new(LabelledRows, window, cx)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        let focus = content.read(cx).table.focus_handle(cx);
+        window.focus(&focus, cx);
+        window.render_frame(cx);
+        let table = window.find("table");
+        assert_eq!(table.role(), Some(gpui_kit::Role::Grid));
+        assert_eq!(table.label(), Some("Records"));
+        assert_eq!(table.focused(), Some(true));
+        assert_eq!(window.find("table-inner").role(), None);
+    })
+    .unwrap();
+}
+
+struct TableBetweenButtons {
+    table: Entity<TableState<Rows>>,
+}
+impl Render for TableBetweenButtons {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(Button::new("before").label("Before"))
+            .child(div().h(px(200.)).child(DataTable::new(&self.table)))
+            .child(Button::new("after").label("After"))
+    }
+}
+
+/// The table is one tab stop: Tab and Shift+Tab leave it, and the arrow keys
+/// keep moving inside it, in both row and cell selection.
+#[gpui_kit::test]
+fn tab_moves_focus_through_a_table_as_one_stop(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    for cell_selectable in [false, true] {
+        let (handle, content) =
+            common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+                cx.new(|cx| TableBetweenButtons {
+                    table: cx.new(|cx| {
+                        TableState::new(Rows, window, cx).cell_selectable(cell_selectable)
+                    }),
+                })
+            });
+        let table = cx
+            .update_window(handle.into(), |_, _, cx| content.read(cx).table.clone())
+            .unwrap();
+        let press_and_expect =
+            |key: &'static str, expected: &'static str, cx: &mut TestAppContext| {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.press(key, cx);
+                    window.render_frame(cx);
+                    assert_eq!(
+                        window.find(expected).focused(),
+                        Some(true),
+                        "{key} should focus {expected} (cell_selectable: {cell_selectable})",
+                    );
+                })
+                .unwrap();
+                cx.run_until_parked();
+            };
+
+        cx.update_window(handle.into(), |_, window, cx| {
+            let focus = table.focus_handle(cx);
+            window.focus(&focus, cx);
+            if cell_selectable {
+                table.update(cx, |table, cx| table.set_selected_cell(0, 0, cx));
+            }
+            window.render_frame(cx);
+        })
+        .unwrap();
+        press_and_expect("shift-tab", "before", cx);
+        press_and_expect("tab", "table", cx);
+        press_and_expect("right", "table", cx);
+        let selection = cx
+            .update_window(handle.into(), |_, _, cx| {
+                let table = table.read(cx);
+                (table.selected_cell(), table.selected_col())
+            })
+            .unwrap();
+        if cell_selectable {
+            assert_eq!(selection.0, Some((0, 1)));
+        } else {
+            assert_eq!(selection.1, Some(1));
+        }
+        press_and_expect("tab", "after", cx);
+        press_and_expect("shift-tab", "table", cx);
+    }
+}
+
+struct NamedRecords {
+    table: Entity<TableState<LabelledRows>>,
+}
+impl Render for NamedRecords {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(DataTable::new(&self.table).accessibility_label("Records"))
+    }
+}
+
+/// Four 300 px columns, wider together than the table that shows them.
+struct WideRows;
+impl TableDelegate for WideRows {
+    fn columns_count(&self, _: &App) -> usize {
+        4
+    }
+    fn rows_count(&self, _: &App) -> usize {
+        3
+    }
+    fn column(&self, ix: usize, _: &App) -> Column {
+        Column::new(format!("column-{ix}"), format!("Column {ix}")).width(px(300.))
+    }
+    fn render_td(
+        &mut self,
+        row: usize,
+        col: usize,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div().child(format!("{row}:{col}"))
+    }
+}
+struct WideRecords {
+    table: Entity<TableState<WideRows>>,
+}
+impl Render for WideRecords {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(DataTable::new(&self.table))
+    }
+}
+
+/// A column narrowed while the table is scrolled to its right end loses as
+/// much width as the pointer moves, though the scroll clamps as the columns
+/// narrow and moves the column's left edge.
+#[gpui_kit::test]
+fn resizing_a_column_in_a_scrolled_table_follows_the_pointer(cx: &mut TestAppContext) {
+    use gpui_kit::InputEvent as _;
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| WideRecords {
+                table: cx.new(|cx| TableState::new(WideRows, window, cx)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let table = content.read(cx).table.clone();
+        let scroll = table.read(cx).horizontal_scroll_handle.clone();
+        scroll.set_offset(point(-scroll.max_offset().x, px(0.)));
+        window.render_frame(cx);
+
+        let edge = window.find(("col-header", 2usize)).bounds();
+        let start = point(edge.right() - px(1.), edge.center().y);
+        let mouse_move = |position, pressed_button| gpui_kit::MouseMoveEvent {
+            position,
+            pressed_button,
+            modifiers: Default::default(),
+        };
+        window.dispatch_event(mouse_move(start, None).to_platform_input(), cx);
+        window.render_frame(cx);
+        window.dispatch_event(
+            gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: start,
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        for step in 1..=10 {
+            let position = start - point(px(10. * step as f32), px(0.));
+            window.dispatch_event(
+                mouse_move(position, Some(gpui_kit::MouseButton::Left)).to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+        window.dispatch_event(
+            gpui_kit::MouseUpEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: start - point(px(100.), px(0.)),
+                modifiers: Default::default(),
+                click_count: 1,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+
+        assert_eq!(table.read(cx).col_width(2), Some(px(200.)));
+    })
+    .unwrap();
+}
+
+/// A second press can begin a resize when the delegate cannot fit the column.
+#[gpui_kit::test]
+fn dragging_after_an_unavailable_column_fit_resizes(cx: &mut TestAppContext) {
+    use gpui_kit::InputEvent as _;
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| WideRecords {
+                table: cx.new(|cx| TableState::new(WideRows, window, cx)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let table = content.read(cx).table.clone();
+        let header = window.find(("col-header", 0usize)).bounds();
+        let start = point(header.right() - px(1.), header.center().y);
+        let mouse_move = |position, pressed_button| gpui_kit::MouseMoveEvent {
+            position,
+            pressed_button,
+            modifiers: Default::default(),
+        };
+        window.dispatch_event(mouse_move(start, None).to_platform_input(), cx);
+        window.render_frame(cx);
+        for click_count in 1..=2 {
+            window.dispatch_event(
+                gpui_kit::MouseDownEvent {
+                    button: gpui_kit::MouseButton::Left,
+                    position: start,
+                    modifiers: Default::default(),
+                    click_count,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            if click_count == 1 {
+                window.dispatch_event(
+                    gpui_kit::MouseUpEvent {
+                        button: gpui_kit::MouseButton::Left,
+                        position: start,
+                        modifiers: Default::default(),
+                        click_count,
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            }
+        }
+        let end = start + point(px(40.), px(0.));
+        for step in 1..=4 {
+            let position = start + point(px(10. * step as f32), px(0.));
+            window.dispatch_event(
+                mouse_move(position, Some(gpui_kit::MouseButton::Left)).to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+        window.dispatch_event(
+            gpui_kit::MouseUpEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: end,
+                modifiers: Default::default(),
+                click_count: 2,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        assert_eq!(table.read(cx).col_width(0), Some(px(340.)));
+    })
+    .unwrap();
+}
+
+/// In cell selection mode each cell is a grid cell that reports whether it is
+/// selected, which is how a screen reader learns the selection.
+#[gpui_kit::test]
+fn selectable_cells_report_their_selection(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| LabelledRecords {
+                table: cx.new(|cx| TableState::new(LabelledRows, window, cx).cell_selectable(true)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        let table = content.read(cx).table.clone();
+        table.update(cx, |table, cx| table.set_selected_cell(2, 1, cx));
+        window.render_frame(cx);
+        let selected = window.find("table-cell-2:1");
+        assert_eq!(selected.role(), Some(gpui_kit::Role::GridCell));
+        assert_eq!(selected.selected(), Some(true));
+        assert_eq!(window.find("table-cell-2:0").selected(), Some(false));
     })
     .unwrap();
 }
@@ -494,6 +888,7 @@ struct TableProbe {
     rows_count: usize,
     columns_count: usize,
     left_columns_count: usize,
+    right_columns_count: usize,
     visible_row_ranges: Vec<Range<usize>>,
     visible_column_ranges: Vec<Range<usize>>,
 }
@@ -503,6 +898,7 @@ impl TableProbe {
             rows_count,
             columns_count: 2,
             left_columns_count: 0,
+            right_columns_count: 0,
             visible_row_ranges: Vec::new(),
             visible_column_ranges: Vec::new(),
         }
@@ -521,6 +917,10 @@ impl TableDelegate for TableProbe {
             .when(col_ix < self.left_columns_count, |column| {
                 column.fixed_left()
             })
+            .when(
+                col_ix + self.right_columns_count >= self.columns_count,
+                |column| column.fixed_right(),
+            )
     }
     fn render_td(
         &mut self,
@@ -649,10 +1049,59 @@ fn table_reports_one_scrollable_column_with_and_without_fixed_columns(cx: &mut T
     }
 }
 
+/// Right-fixed columns stay at the right edge while the columns between the
+/// fixed ones scroll, and are left out of the scrollable column ranges.
+#[gpui_kit::test]
+fn table_pins_right_fixed_columns_while_scrolling(cx: &mut TestAppContext) {
+    let delegate = TableProbe {
+        columns_count: 8,
+        left_columns_count: 1,
+        right_columns_count: 1,
+        ..TableProbe::new(3)
+    };
+    let (handle, table) = open_table_probe_with_delegate(cx, delegate, false);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let left_cell = window.find("table-cell:0:0").bounds();
+        let right_cell = window.find("table-cell:0:7").bounds();
+        let right_header = window.find(("col-header", 7usize)).bounds();
+        assert_eq!(right_header.left(), right_cell.left());
+        assert!(
+            right_cell.right() > px(600.) && right_cell.right() <= px(640.),
+            "the right-fixed column is not at the right edge: {right_cell:?}"
+        );
+
+        // A right-fixed column is always in view, so scrolling to it keeps
+        // the offset.
+        table.update(cx, |table, cx| table.scroll_to_col(7, cx));
+        assert_eq!(table.read(cx).horizontal_scroll_handle.offset().x, px(0.));
+
+        table.update(cx, |table, cx| table.scroll_to_col(6, cx));
+        window.render_frame(cx);
+        assert!(table.read(cx).horizontal_scroll_handle.offset().x < px(0.));
+        assert_eq!(window.find("table-cell:0:0").bounds(), left_cell);
+        assert_eq!(window.find("table-cell:0:7").bounds(), right_cell);
+        assert_eq!(
+            window.find(("col-header", 7usize)).bounds().left(),
+            right_cell.left()
+        );
+
+        // Ranges count only the six columns between the fixed ones.
+        let ranges = table.read(cx).delegate().visible_column_ranges.clone();
+        assert!(!ranges.is_empty());
+        assert!(
+            ranges.iter().all(|range| range.end <= 6),
+            "reported a fixed column: {ranges:?}"
+        );
+        assert_eq!(ranges.last().map(|range| range.end), Some(6));
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn table_modifier_clicks_select_rows_unless_turned_off(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let secondary = Modifiers::secondary_key();
+    let secondary = cx.update(|cx| Modifiers::secondary_key(cx));
     let shift = Modifiers::shift();
     // The row header, shown in cell selection, is the narrow column before
     // the cells.
@@ -721,7 +1170,7 @@ fn table_modifier_clicks_on_the_selected_cell_escalate_unless_turned_off(cx: &mu
             assert_eq!(table.read(cx).selection(), TableSelection::Cell(1, 0));
             window.click_with_options(
                 ("row", 1usize),
-                first_cell.with_modifiers(Modifiers::secondary_key()),
+                first_cell.with_modifiers(Modifiers::secondary_key(cx)),
                 cx,
             );
             assert_eq!(table.read(cx).selection(), expected);
@@ -780,7 +1229,7 @@ fn list_click_confirms_as_secondary_with_the_secondary_modifier(cx: &mut TestApp
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         window.click(("choice", 0usize), cx);
-        window.click_with_modifiers(("choice", 1usize), Modifiers::secondary_key(), cx);
+        window.click_with_modifiers(("choice", 1usize), Modifiers::secondary_key(cx), cx);
         let list = picker.read(cx).list.clone();
         assert_eq!(list.read(cx).delegate().confirmed, [false, true]);
     })

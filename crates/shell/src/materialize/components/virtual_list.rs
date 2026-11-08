@@ -101,7 +101,7 @@ pub(in crate::materialize) fn warn_lazy_list_misuse(
              returns"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles are ignored on a {name}: it has no interactive state of its own. \
              Put them on the rows the item renderer returns, or on an element around the list"

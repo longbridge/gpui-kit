@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
-    TableData, TextViewMotion, TextViewState, TextViewStyle,
+    TableData, TaskToggleEvent, TextViewMotion, TextViewState, TextViewStyle,
 };
 use gpui_base::{Easing, text::CodeBlock};
 
@@ -86,6 +86,18 @@ impl TextView {
             stream_fade: None,
         }
     }
+    /// Overrides the source of every document image, including embedded data URLs.
+    ///
+    /// Used for both rendering and intrinsic-size measurement. The returned source
+    /// is authoritative: pending or failed loads never fall back to the document URL.
+    /// Without this override, images use Base's default URI and data URL handling.
+    pub fn image_source<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync + 'static,
+    {
+        self.inner = self.inner.image_source(resolver);
+        self
+    }
     /// Sets the style, folded onto the one derived from the active theme.
     pub fn style(mut self, style: TextViewStyle) -> Self {
         self.text_style = Some(style);
@@ -94,6 +106,26 @@ impl TextView {
     /// Sets whether the text can be selected with the mouse.
     pub fn selectable(mut self, value: bool) -> Self {
         self.inner = self.inner.selectable(value);
+        self
+    }
+    /// Refines inline code typography, background, border, radius, and padding
+    /// over the resolved theme or explicit style. Other layout properties are
+    /// ignored. Unspecified properties are inherited.
+    pub fn inline_code_style(mut self, style: StyleRefinement) -> Self {
+        self.inner = self.inner.inline_code_style(style);
+        self
+    }
+    /// Refines bullet and number list markers over the resolved theme or
+    /// explicit style. The text color also outlines unchecked task-list
+    /// checkboxes. Unspecified properties are inherited.
+    pub fn list_style(mut self, style: StyleRefinement) -> Self {
+        self.inner = self.inner.list_style(style);
+        self
+    }
+    /// Refines the blockquote container, including its left border, over the
+    /// resolved theme or explicit style. Unspecified properties are inherited.
+    pub fn blockquote_style(mut self, style: StyleRefinement) -> Self {
+        self.inner = self.inner.blockquote_style(style);
         self
     }
     /// Sets whether a copied selection carries Markdown source or plain text.
@@ -151,6 +183,15 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.inner = self.inner.on_link_click(f);
+        self
+    }
+    /// Makes Markdown task list checkboxes clickable, reporting the clicked
+    /// item's new checked state and where it and its marker are in the source.
+    pub fn on_task_toggle<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.inner = self.inner.on_task_toggle(f);
         self
     }
     /// Scrolls a container that ignores scroll requests to the line of

@@ -1342,7 +1342,7 @@ impl RenderOnce for AttachmentGroup {
             .track_scroll(&handle)
             // Scrolling only moves the offset; the fades need a render to follow.
             .when(fades.is_some(), |this| {
-                this.on_scroll_wheel(move |_, _, cx| cx.notify(view_id))
+                this.on_scroll(move |_, _, cx| cx.notify(view_id))
             })
             .refine_style(&self.style)
             .children(self.children);

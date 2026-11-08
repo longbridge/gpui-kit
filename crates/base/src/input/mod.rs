@@ -63,13 +63,17 @@ mod movement;
 mod native;
 #[path = "base/rope_ext.rs"]
 mod rope_ext;
+mod scrollbar_presentation;
 #[path = "editor/search.rs"]
 mod search;
 #[path = "base/selection.rs"]
 mod selection;
 #[path = "base/state.rs"]
 mod state;
+#[path = "base/tab_stops.rs"]
+mod tab_stops;
 mod textarea;
+pub use scrollbar_presentation::{EditorScrollbarContext, EditorScrollbarRenderer};
 #[path = "base/touch.rs"]
 mod touch;
 #[path = "base/undo_manager.rs"]
@@ -81,10 +85,12 @@ pub(crate) fn init(cx: &mut App) {
 
 pub use crate::number_input::{NumberInputEvent, NumberStep};
 pub use base::{InputBase, InputContextMenuCapabilities, InputStyles};
+pub use blink_cursor::CursorBlink;
 pub use cursor::Selection;
 pub use decorations::{
-    RangeDecoration, RangeDecorationCollection, RangeDecorationStyle, TextDecoration,
-    TextDecorationCollection,
+    GutterDecoration, GutterDecorationCollection, OverviewRulerDecoration,
+    OverviewRulerDecorationCollection, OverviewRulerLane, RangeDecoration,
+    RangeDecorationCollection, RangeDecorationStyle, TextDecoration, TextDecorationCollection,
 };
 pub use diagnostics::{
     Diagnostic, DiagnosticEntry, DiagnosticRelatedInformation, DiagnosticSet, DiagnosticSeverity,
@@ -93,8 +99,9 @@ pub use diagnostics::{
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
 pub use editor::{Editor, EditorState};
 pub use highlighting::{
-    DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,
-    InputHighlighterFactory, SharedHighlightStyleResolver, SyntaxContext, SyntaxContextProvider,
+    DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, HighlightStyleResolver,
+    InputEditorStyle, InputHighlighter, InputHighlighterFactory, SharedHighlightStyleResolver,
+    SyntaxContext, SyntaxContextProvider,
 };
 pub use indent::TabSize;
 pub use input::{Input, InputState};

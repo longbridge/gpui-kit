@@ -78,6 +78,50 @@ state and compose the control inside your own frame. If you want the ready-made
 theme, sizing, borders, prefix/suffix slots, and clear button, use the styled
 [`gpui-component` Input](../../component/input.md).
 
+## Cursor blinking
+
+A focused input blinks its cursor every 500 ms and keeps it shown while the
+user types or moves it. Set `Theme::cursor_blink` to choose the policy for
+every Input, Textarea, Editor and OTP input in the application:
+
+```rust
+use std::time::Duration;
+use gpui_kit::base::{Theme, input::CursorBlink};
+
+Theme::global_mut(cx).cursor_blink = CursorBlink::blinking(Duration::from_millis(530))
+    .with_idle_timeout(Duration::from_secs(5));
+```
+
+`blinking(interval)` sets the duration of each visible or hidden phase; a zero
+interval behaves as `CursorBlink::steady()`. Without `with_idle_timeout` the
+cursor blinks for as long as the input is focused. A timeout, including zero,
+stops blinking with the cursor visible and no pending timer. It measures
+elapsed time since the last focus, edit or cursor movement, including the
+300 ms pause after typing. Every blink repaints the input's view; an idle
+cursor with a timeout stops causing these repaints until the next activity or
+policy change.
+
+Changing the policy updates existing cursors:
+
+```rust
+Theme::global_mut(cx).cursor_blink = CursorBlink::steady();
+Theme::global_mut(cx).cursor_blink = CursorBlink::default();
+```
+
+`steady()` immediately shows a focused cursor and cancels pending blink and
+pause tasks. Unfocused cursors remain hidden and do not start timers. Setting
+an unchanged policy does nothing. A changed blinking policy starts from a
+visible phase, preserves any remaining typing pause and measures its idle
+timeout from the last user activity. A shorter timeout can stop blinking
+immediately; extending or removing the timeout can resume an idle cursor
+without refocusing.
+
+`CursorBlink::default()` restores 500 ms blinking without an idle timeout.
+Applications that use `gpui-component` set the policy on the Component theme
+with `Theme::update` instead, which projects it onto Base; a value written
+directly to the Base theme is replaced by the next Component theme update. See
+[Component Input](../../component/input.md#cursor-blinking).
+
 ## Runnable example
 
 ```bash

@@ -25,10 +25,19 @@ pub struct TextViewStyle {
     table_head: StyleRefinement,
     table_cell: StyleRefinement,
     inline_code: HighlightStyle,
+    /// Explicit inline code refinements, applied after theme and surface colors.
+    inline_code_style: StyleRefinement,
+    /// Explicit list marker refinements, applied after theme and surface colors.
+    list_style: StyleRefinement,
+    /// Explicit blockquote refinements, applied after theme and surface colors.
+    blockquote_style: StyleRefinement,
     /// The table body background, or the theme surface when `None`. Only
     /// [`Self::on_text_color`] sets it, to let a table on an inverted surface
     /// show that surface.
     table_background: Option<Hsla>,
+    /// The background of a hovered table body row, or no hover highlight
+    /// when `None`.
+    table_row_hover: Option<Hsla>,
     is_dark: bool,
 }
 
@@ -48,7 +57,11 @@ impl PartialEq for TextViewStyle {
             && self.table_head == other.table_head
             && self.table_cell == other.table_cell
             && self.inline_code == other.inline_code
+            && self.inline_code_style == other.inline_code_style
+            && self.list_style == other.list_style
+            && self.blockquote_style == other.blockquote_style
             && self.table_background == other.table_background
+            && self.table_row_hover == other.table_row_hover
             && self.is_dark == other.is_dark
     }
 }
@@ -91,7 +104,11 @@ impl TextViewStyle {
                 background_color: Some(colors.accent),
                 ..Default::default()
             },
+            inline_code_style: StyleRefinement::default(),
+            list_style: StyleRefinement::default(),
+            blockquote_style: StyleRefinement::default(),
             table_background: None,
+            table_row_hover: None,
             is_dark,
         }
     }
@@ -170,6 +187,49 @@ impl TextViewStyle {
         self
     }
 
+    /// Overrides inline code typography and its box presentation.
+    ///
+    /// Supports font family, size, features, fallbacks, weight, style, color, underline and
+    /// strikethrough, background, border widths/color/style, corner radii, and
+    /// padding. Sizes and padding resolve pixels/rem against the window.
+    /// Unspecified properties keep the existing defaults. Box layout, margin,
+    /// positioning, overflow, and interaction properties are not used.
+    /// Line height remains owned by the paragraph. Non-finite or non-positive
+    /// font sizes are ignored. Explicit refinements also take precedence on
+    /// inverted surfaces.
+    pub fn with_inline_code_style(mut self, style: StyleRefinement) -> Self {
+        self.inline_code_style = normalize_inline_code_style(style);
+        self
+    }
+
+    /// Refines the marker of a bullet or numbered list item.
+    ///
+    /// Applied to the marker column after its defaults: the muted text color,
+    /// a minimum width of the list indent, right-aligned text, and a right
+    /// padding of 0.3 times that indent. Text properties such as color, font
+    /// family, size, and weight style the bullet or number. The text color
+    /// also outlines an unchecked task-list checkbox; a checked one keeps the
+    /// link color. Unspecified properties keep the existing defaults, and
+    /// explicit refinements also take precedence on inverted surfaces.
+    pub fn with_list_style(mut self, style: StyleRefinement) -> Self {
+        self.list_style = style;
+        self
+    }
+
+    /// Refines the blockquote container.
+    ///
+    /// Applied after its defaults: the muted text color, a 2px left border in
+    /// the border color, and a left padding of 0.9 times the body font size.
+    /// Border widths and color style the quote bar; text properties,
+    /// background, padding, and corner radii style the quote and its
+    /// contents. Child blocks keep properties they set explicitly, including
+    /// heading and table font sizes. Unspecified properties keep the existing
+    /// defaults, and explicit refinements also take precedence on inverted surfaces.
+    pub fn with_blockquote_style(mut self, style: StyleRefinement) -> Self {
+        self.blockquote_style = style;
+        self
+    }
+
     /// Sets the style refinement for the table container (the bordered wrapper
     /// in wrap mode, the scroll viewport in horizontal-scroll mode).
     ///
@@ -196,6 +256,15 @@ impl TextViewStyle {
     /// as the content is wider than the frame.
     pub fn with_table_cell(mut self, style: StyleRefinement) -> Self {
         self.table_cell = style;
+        self
+    }
+
+    /// Sets the background of a table body row while the pointer is over it.
+    ///
+    /// The header row does not highlight. Without this, table rows have no
+    /// hover highlight.
+    pub fn with_table_row_hover(mut self, color: Hsla) -> Self {
+        self.table_row_hover = Some(color);
         self
     }
 
@@ -265,10 +334,30 @@ impl TextViewStyle {
         &self.table_cell
     }
 
+    /// The background of a hovered table body row, if rows highlight on hover.
+    pub fn table_row_hover(&self) -> Option<Hsla> {
+        self.table_row_hover
+    }
+
     /// The highlight style for inline code, before the code-background
     /// fallback in [`Self::inline_code_highlight`] applies.
     pub fn inline_code(&self) -> HighlightStyle {
         self.inline_code
+    }
+
+    /// Explicit inline code typography and box refinements.
+    pub fn inline_code_style(&self) -> &StyleRefinement {
+        &self.inline_code_style
+    }
+
+    /// Explicit list marker refinements.
+    pub fn list_style(&self) -> &StyleRefinement {
+        &self.list_style
+    }
+
+    /// Explicit blockquote refinements.
+    pub fn blockquote_style(&self) -> &StyleRefinement {
+        &self.blockquote_style
     }
 
     /// Whether content-specific assets should use their dark variant.
@@ -297,8 +386,8 @@ impl TextViewStyle {
     /// The body text always takes `color`. When `color` is far from this
     /// style's foreground in lightness, the surface is inverted from the one
     /// this style was made for (a `primary` fill, say): the link, muted text,
-    /// code, border and selection colors would vanish on it, so they are all
-    /// derived from `color`, and [`Self::is_dark`] flips.
+    /// code, border, selection and table row hover colors would vanish on it,
+    /// so they are all derived from `color`, and [`Self::is_dark`] flips.
     pub(crate) fn on_text_color(&self, color: Hsla) -> Self {
         let style = self.clone().with_foreground(color);
         if !self.is_inverted_by(color) {
@@ -322,6 +411,7 @@ impl TextViewStyle {
             .with_table_head(table_head)
             .with_dark(!self.is_dark);
         style.table_background = Some(gpui::transparent_black());
+        style.table_row_hover = self.table_row_hover.map(|_| color.opacity(0.08));
         style
     }
 
@@ -353,6 +443,18 @@ fn oklab_lightness(color: Hsla) -> f32 {
     0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s
 }
 
+/// Drop an invalid font size before it can replace an inherited value or
+/// make retained style equality fail every frame (NaN is never equal).
+pub(super) fn normalize_inline_code_style(mut style: StyleRefinement) -> StyleRefinement {
+    if style.text.font_size.is_some_and(|size| {
+        let size = size.to_pixels(gpui::px(1.)).as_f32();
+        !size.is_finite() || size <= 0.
+    }) {
+        style.text.font_size = None;
+    }
+    style
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Styled as _, px};
@@ -381,8 +483,24 @@ mod tests {
         let mut table = StyleRefinement::default();
         table.text.white_space = Some(gpui::WhiteSpace::Nowrap);
         assert!(base != base.clone().with_table_cell(table));
+        assert!(base != base.clone().with_table_row_hover(gpui::red()));
 
         assert!(base != base.clone().with_dark(true));
+        assert!(
+            base != base
+                .clone()
+                .with_inline_code_style(StyleRefinement::default().border_color(gpui::red()))
+        );
+        assert!(
+            base != base
+                .clone()
+                .with_list_style(StyleRefinement::default().text_color(gpui::red()))
+        );
+        assert!(
+            base != base
+                .clone()
+                .with_blockquote_style(StyleRefinement::default().border_color(gpui::red()))
+        );
     }
 
     #[test]
@@ -426,6 +544,7 @@ mod tests {
         assert!(style.inline_code().background_color.is_some());
         assert!(style.code_background().a > 0.0);
         assert!(style.border().a > 0.0);
+        assert_eq!(style.table_row_hover(), None);
         assert_eq!(style.code_block().corner_radii.top_left, None);
         assert_eq!(style.code_block().corner_radii.top_right, None);
         assert_eq!(style.code_block().corner_radii.bottom_left, None);
@@ -463,8 +582,65 @@ mod tests {
     }
 
     #[test]
+    fn inline_code_refinements_remain_explicit_on_an_inverted_surface() {
+        let colors = ColorTokens::light();
+        let plain = TextViewStyle::from_colors(&colors, false);
+        assert_eq!(plain.inline_code_style(), &StyleRefinement::default());
+        for size in [f32::NAN, f32::INFINITY, 0., -1.] {
+            assert!(
+                plain
+                    .clone()
+                    .with_inline_code_style(StyleRefinement::default().text_size(px(size)))
+                    .inline_code_style()
+                    .text
+                    .font_size
+                    .is_none()
+            );
+        }
+        let refinement = StyleRefinement::default()
+            .text_size(gpui::rems(1.))
+            .bg(gpui::red())
+            .border_1()
+            .border_color(gpui::blue());
+        let style = plain.with_inline_code_style(refinement.clone());
+        assert_eq!(style.inline_code_style(), &refinement);
+        assert_eq!(
+            style
+                .on_text_color(colors.primary_foreground)
+                .inline_code_style(),
+            &refinement
+        );
+    }
+
+    #[test]
+    fn list_and_blockquote_refinements_remain_explicit_on_an_inverted_surface() {
+        let colors = ColorTokens::light();
+        let plain = TextViewStyle::from_colors(&colors, false);
+        assert_eq!(plain.list_style(), &StyleRefinement::default());
+        assert_eq!(plain.blockquote_style(), &StyleRefinement::default());
+
+        let marker = StyleRefinement::default()
+            .text_color(gpui::red())
+            .font_weight(gpui::FontWeight::BOLD);
+        let quote = StyleRefinement::default()
+            .border_l_4()
+            .border_color(gpui::blue())
+            .bg(gpui::green());
+        let style = plain
+            .with_list_style(marker.clone())
+            .with_blockquote_style(quote.clone());
+        assert_eq!(style.list_style(), &marker);
+        assert_eq!(style.blockquote_style(), &quote);
+
+        let inverted = style.on_text_color(colors.primary_foreground);
+        assert_eq!(inverted.list_style(), &marker);
+        assert_eq!(inverted.blockquote_style(), &quote);
+    }
+
+    #[test]
     fn text_color_of_a_matching_surface_only_replaces_the_body_text() {
-        let style = TextViewStyle::from_colors(&ColorTokens::light(), false);
+        let style = TextViewStyle::from_colors(&ColorTokens::light(), false)
+            .with_table_row_hover(ColorTokens::light().muted);
         let destructive = ColorTokens::light().destructive;
 
         let adapted = style.on_text_color(destructive);
@@ -473,6 +649,7 @@ mod tests {
         assert_eq!(adapted.muted_foreground(), style.muted_foreground());
         assert_eq!(adapted.code_background(), style.code_background());
         assert_eq!(adapted.table_background(), None);
+        assert_eq!(adapted.table_row_hover(), style.table_row_hover());
         assert!(!adapted.is_dark());
     }
 
@@ -481,7 +658,10 @@ mod tests {
         for (colors, is_dark) in [(ColorTokens::light(), false), (ColorTokens::dark(), true)] {
             let style = TextViewStyle::from_colors(&colors, is_dark);
             let text = colors.primary_foreground;
+            // Rows without a hover highlight stay without one.
+            assert_eq!(style.on_text_color(text).table_row_hover(), None);
 
+            let style = style.with_table_row_hover(colors.muted);
             let adapted = style.on_text_color(text);
             assert_eq!(adapted.foreground(), text);
             assert_eq!(adapted.link(), text);
@@ -494,6 +674,7 @@ mod tests {
             assert_eq!(adapted.border(), text.opacity(0.2));
             assert_eq!(adapted.selection(), text.opacity(0.25));
             assert_eq!(adapted.table_background(), Some(gpui::transparent_black()));
+            assert_eq!(adapted.table_row_hover(), Some(text.opacity(0.08)));
             assert_eq!(adapted.table_head().text.color, Some(text));
             assert_eq!(adapted.is_dark(), !is_dark);
         }

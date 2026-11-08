@@ -125,6 +125,9 @@ offset and a 16px bottom margin, so the title and footer stay visible while the
 body scrolls. `w`, `max_w`, `h`, and `margin_top` apply within those limits;
 a dialog that already fits keeps its requested size and default position.
 
+Call `.centered()` to center the dialog vertically instead of using `margin_top`.
+The same window margins still constrain the surface.
+
 ### Dialog Options
 
 ```rust
@@ -469,6 +472,7 @@ window.open_dialog(cx, |dialog, _, _| {
 | `w(px)` / `width(px)`    | Set dialog width                                      |
 | `max_w(px)`              | Set maximum width                                     |
 | `margin_top(px)`         | Set top margin                                        |
+| `centered()`             | Center vertically in the window, in place of `margin_top` |
 | `entrance(DialogEntrance)` | Set entrance animation (default: `SlideDown`)       |
 | `overlay(bool)`          | Show/hide overlay (default: true)                     |
 | `overlay_closable(bool)` | Allow closing by clicking overlay (default: true)     |

@@ -94,7 +94,12 @@ fn build_popup(
                     checked,
                     icon: None,
                     action: Some(action),
-                } => menu.menu_with_check_and_disabled(label, checked, action, disabled),
+                } => menu.item(
+                    PopupMenuItem::new(label)
+                        .action(action)
+                        .disabled(disabled)
+                        .checked(checked),
+                ),
                 NativeMenuItem::Item { action: None, .. } => menu,
                 NativeMenuItem::Submenu {
                     label,

@@ -99,7 +99,7 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 | 控件 | 除几何与可见性以外报告的状态 |
 | --- | --- |
 | Button | 无障碍名称、焦点作用域 |
-| Input | 非敏感无障碍值、名称、焦点作用域 |
+| Input | 非敏感无障碍值、名称、placeholder、焦点作用域 |
 | Checkbox | 勾选、半选、名称、焦点作用域 |
 | Switch / Toggle | 勾选、名称、焦点作用域 |
 | Radio | 勾选、选中、名称、焦点作用域 |
@@ -154,11 +154,14 @@ let target = div().id("details").test_support().child(content);
 `focused: <binding missed>`，格式化本身不会 panic。
 
 快照直接读取 `role`、`aria_toggled`、`aria_selected`、`aria_expanded`、
-`aria_label` 和 `aria_value`。没有 `TestProps` 或手填的备用值。Input 在测试中启用
+`aria_label`、`aria_description`、`aria_placeholder` 和 `aria_value`。
+没有 `TestProps` 或手填的备用值。Input 在测试中启用
 已有的无障碍值生成路径，沿用相同的遮蔽与敏感内容限制。Select 的 `value()` 是包含
 标题前缀的无障碍值，不是选中项 ID。
 
 `label()` 表示无障碍名称，不是屏幕文字；`value()` 表示无障碍值，不是像素。
+`description()` 在名称之后读出，不能代替名称；`placeholder()` 是元素没有值时显示的
+提示，不是值。
 组件仍然可能把这些属性写错。不要仅为让视觉断言通过而添加 `aria_label` 或
 `aria_value`。完整示例中的 Status 角色和名称服务于生产环境的无障碍播报。
 框架不自动发现任意子元素文字，也不提供用模型字符串冒充绘制文本的 `text()`。
@@ -242,9 +245,10 @@ dialog.hover("help", cx);
 每次作用域检查都读取已完成的帧。
 
 `ElementSnapshot` 是某次完成绘制的独立、不可变记录。它提供 `role()`、`path()`、`bounds()`、
-`visible()`、`focused()`、`disabled()`、`label()`、`value()`、`checked()`、
+`visible()`、`focused()`、`disabled()`、`label()`、`description()`、`placeholder()`、
+`value()`、`checked()`、
 `indeterminate()`、`selected()` 和 `expanded()`。焦点、禁用、勾选、半选、选中、展开状态返回 `Option<bool>`：
-`None` 表示无法取得，不等于 false。名称与值也可能无法取得。交互后重新查询：
+`None` 表示无法取得，不等于 false。名称、description、placeholder 与值也可能无法取得。交互后重新查询：
 
 ```rust
 let before = window.find("agree");
@@ -381,7 +385,7 @@ window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
 | `input_focus.rs` | 带静态前后缀的输入框反复 Tab/Shift-Tab 遍历、前后缀按钮的焦点与激活，以及点击 Textarea/Editor 正文后的焦点和编辑 |
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
-| `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
+| `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动、Tab 移出表格与滚轮滚动 |
 | `query_helpers.rs` | 精确无障碍标签和角色、作用域歧义、不可见注册元素与不可变快照 |
 | `event_helpers.rs` | 分步鼠标和按键事件、自动重复与保持修饰键 |
 | `control_steps.rs` | Button 移出释放取消、Checkbox 按键重复及 Switch 在按键释放前禁用 |

@@ -3,9 +3,15 @@
 # tokenizer reads as misspelled words; ignoring the exact handles keeps the
 # rest of the file checked.
 extend-ignore-re = [
+    # Expected alphabetic list marker for ordinal 53.
+    '\(53, "BA"\)',
     '\\u\{[0-9A-Fa-f]+\}',
     '@UncertaintyDeterminesYou4ndMe',
     '@alex-vas',
+    # Valid Portuguese translations; keep English spellings checked elsewhere.
+    'pt-BR: "Alteração atual"',
+    'pt-BR: "Aceitar a atual"',
+    'pt-BR: "Atual aceita"',
 ]
 
 [default.extend-words]
@@ -13,6 +19,8 @@ extend-ignore-re = [
 astroid = "astroid"
 # Correct Italian singular of "command".
 comando = "comando"
+# Correct Portuguese word for "current" in localized UI labels.
+atual = "atual"
 # A deliberately misspelled manifest key: `crates/shell/src/plugin.rs` refuses
 # it by name, and the test that proves it has to contain the misspelling.
 capabilites = "capabilites"

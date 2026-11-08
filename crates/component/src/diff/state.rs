@@ -102,6 +102,7 @@ pub(crate) struct LayoutKey {
     font_family: SharedString,
     mode: DiffMode,
     line_number: bool,
+    marker_lane: bool,
     soft_wrap: bool,
 }
 
@@ -112,6 +113,7 @@ impl LayoutKey {
         font_family: SharedString,
         mode: DiffMode,
         line_number: bool,
+        marker_lane: bool,
         soft_wrap: bool,
     ) -> Self {
         Self {
@@ -120,6 +122,7 @@ impl LayoutKey {
             font_family,
             mode,
             line_number,
+            marker_lane,
             soft_wrap,
         }
     }

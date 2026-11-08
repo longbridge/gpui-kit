@@ -169,6 +169,7 @@ impl WindowState {
 
     fn notification_layer(
         root: &Entity<WindowState>,
+        window: &Window,
         cx: &App,
     ) -> Option<impl IntoElement + use<>> {
         let active_sheet_placement = root.read(cx).active_sheet.clone().map(|d| d.placement);
@@ -182,15 +183,26 @@ impl WindowState {
             _ => (None, None, None, None),
         };
 
+        // Keep toasts out from under the system bars and the on-screen keyboard.
+        let safe_insets = window_border::window_safe_insets(window);
+
         Some(
             div()
                 .absolute()
-                .inset_0()
-                .when_some(mt, |this, offset| this.mt(offset))
-                .when_some(mr, |this, offset| this.mr(offset))
-                .when_some(mb, |this, offset| this.mb(offset))
-                .when_some(ml, |this, offset| this.ml(offset))
-                .child(root.read(cx).notification.clone()),
+                .top(safe_insets.top)
+                .right(safe_insets.right)
+                .bottom(safe_insets.bottom)
+                .left(safe_insets.left)
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .when_some(mt, |this, offset| this.mt(offset))
+                        .when_some(mr, |this, offset| this.mr(offset))
+                        .when_some(mb, |this, offset| this.mb(offset))
+                        .when_some(ml, |this, offset| this.ml(offset))
+                        .child(root.read(cx).notification.clone()),
+                ),
         )
     }
 
@@ -756,6 +768,6 @@ impl RenderOnce for WindowStateLayers {
             .debug_selector(|| "root-layers".to_string())
             .children(WindowState::sheet_layer(root.clone(), window, cx))
             .children(WindowState::dialog_layer(&root, window, cx))
-            .children(WindowState::notification_layer(&root, cx))
+            .children(WindowState::notification_layer(&root, window, cx))
     }
 }

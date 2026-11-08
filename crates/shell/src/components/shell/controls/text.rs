@@ -86,6 +86,18 @@ impl ComponentMaterializer for LabelMaterializer {
     }
 }
 
+fn record_link_href(arguments: &[ComponentArgument]) -> Result<ComponentPayload, String> {
+    match arguments {
+        [ComponentArgument::String(value)] if gpui_shell::is_openable_url(value) => {
+            Ok(ComponentPayload::new(LinkOp::Href(value.to_owned())))
+        }
+        [ComponentArgument::String(_)] => {
+            Err("Link.href(url) expects an absolute HTTP(S) URL with a host".into())
+        }
+        _ => Err("Link.href expects one URL string".into()),
+    }
+}
+
 struct LinkMaterializer;
 
 impl ComponentMaterializer for LinkMaterializer {
@@ -118,8 +130,13 @@ impl ComponentMaterializer for KbdMaterializer {
     fn materialize(&self, mut request: MaterializeRequest<'_>) -> anyhow::Result<gpui::AnyElement> {
         let stroke = request
             .payload()
-            .downcast_ref::<Keystroke>()
-            .ok_or_else(|| anyhow::anyhow!("Kbd received an incompatible payload"))?;
+            .downcast_ref::<StringPayload>()
+            .ok_or_else(|| anyhow::anyhow!("Kbd received an incompatible payload"))?
+            .0
+            .clone();
+        let stroke = request.with_window_app(|_, cx| {
+            Ok(Keystroke::parse_with_os(&stroke, cx.platform_info().os)?)
+        })?;
         let operations = request
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<KbdOp>().cloned())
@@ -179,14 +196,9 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             MethodDescriptor::new(
             "href",
             vec![ArgumentDescriptor::new("href", ArgumentSchema::String)],
-            |arguments| match arguments {
-                [ComponentArgument::String(value)] => {
-                    Ok(ComponentPayload::new(LinkOp::Href(value.to_owned())))
-                }
-                _ => Err("Link.href expects one URL string".into()),
-            },
+            record_link_href,
         )
-        .with_documentation("Sets the external URL opened when activated.")])
+        .with_documentation("Sets the absolute HTTP(S) URL opened when activated.")])
 .with_documentation(
             "An external-resource link. Ordinary children, shell style, disabled state, and on_click are honored.",
         ))?;
@@ -196,9 +208,11 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                 "Kbd",
                 vec![ArgumentDescriptor::new("keystroke", ArgumentSchema::String)],
                 |arguments| match arguments {
-                    [ComponentArgument::String(value)] => Keystroke::parse(value)
-                        .map(ComponentPayload::new)
-                        .map_err(|error| format!("invalid Kbd keystroke: {error}")),
+                    [ComponentArgument::String(value)] => {
+                        Keystroke::parse_with_os(value, gpui::OperatingSystem::Unknown)
+                            .map(|_| ComponentPayload::new(StringPayload(value.to_owned())))
+                            .map_err(|error| format!("invalid Kbd keystroke: {error}"))
+                    }
                     _ => Err("Kbd expects one keystroke string".into()),
                 },
             )])
@@ -225,4 +239,35 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             .with_documentation("A platform-formatted keyboard shortcut keycap."),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn href(url: &str) -> Result<ComponentPayload, String> {
+        record_link_href(&[ComponentArgument::String(url.to_owned())])
+    }
+
+    #[test]
+    fn link_href_accepts_only_http_urls_with_a_host() {
+        let payload = href("https://gpui-kit.com/docs").unwrap();
+        assert!(matches!(
+            payload.downcast_ref::<LinkOp>(),
+            Some(LinkOp::Href(url)) if url == "https://gpui-kit.com/docs"
+        ));
+
+        for refused in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "smb://server/share",
+            "docs/intro.html",
+            "https://",
+        ] {
+            let error = href(refused)
+                .err()
+                .unwrap_or_else(|| panic!("accepted {refused}"));
+            assert!(error.contains("absolute HTTP(S) URL"), "{refused}: {error}");
+        }
+    }
 }

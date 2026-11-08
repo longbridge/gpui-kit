@@ -206,6 +206,34 @@ fn observation_preserves_accessibility_role_and_properties() {
     assert_eq!(actual.description(), expected.description());
 }
 
+struct Described;
+impl Render for Described {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("theme")
+            .test_support()
+            .role(gpui_kit::Role::ComboBox)
+            .aria_label("Theme")
+            .aria_description("Applies to every window")
+            .aria_placeholder("Choose a theme")
+            .size(px(40.))
+    }
+}
+
+#[gpui_kit::test]
+fn snapshot_reads_description_and_placeholder(cx: &mut TestAppContext) {
+    let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| Described));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        let theme = window.find("theme");
+        assert_eq!(theme.label(), Some("Theme"));
+        assert_eq!(theme.description(), Some("Applies to every window"));
+        assert_eq!(theme.placeholder(), Some("Choose a theme"));
+        assert_eq!(theme.value(), None);
+    })
+    .unwrap();
+}
+
 #[test]
 #[should_panic(expected = "test_support requires an existing ElementId")]
 fn observation_rejects_anonymous_elements() {

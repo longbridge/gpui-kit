@@ -647,9 +647,20 @@ fn websocket_sends_ordinary_and_custom_protocol_headers(cx: &mut TestAppContext)
                 Err(error) => panic!("WebSocket accept failed: {error}"),
             })
             .expect("WebSocket connection");
-        let mut request = [0; 4096];
-        let count = stream.read(&mut request).expect("handshake request");
-        let request = String::from_utf8_lossy(&request[..count]).to_ascii_lowercase();
+        // Accepted sockets can inherit the listener's nonblocking mode on macOS.
+        stream.set_nonblocking(false).expect("blocking connection");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("handshake timeout");
+        // TCP may split the headers across reads.
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).expect("handshake request");
+            request.push(byte[0]);
+            assert!(request.len() <= 4096, "handshake request too large");
+        }
+        let request = String::from_utf8_lossy(&request).to_ascii_lowercase();
         assert!(request.contains("accept-language: zh-cn\r\n"), "{request}");
         assert!(
             request.contains("user-agent: protocol-client/1\r\n"),

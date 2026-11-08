@@ -107,7 +107,7 @@ pub(crate) mod watch;
 
 pub use anyhow;
 pub use assets::AppAssets;
-pub use capability::{Capabilities, ExecuteGrant, HttpRequestGrant};
+pub use capability::{Capabilities, ExecuteGrant, HttpRequestGrant, is_openable_url};
 pub use component::ComponentArgs;
 #[cfg(test)]
 pub(crate) use component_registry::ComponentState;
@@ -198,6 +198,15 @@ pub fn write_dependency_links(root: &std::path::Path) -> anyhow::Result<Vec<Path
 /// two grants at the same time.
 pub fn set_capabilities(capabilities: Capabilities) {
     capability::install(capabilities);
+}
+
+/// The grant of the script call now running, or the default outside one.
+///
+/// A component that reaches a resource for the script checks this grant, as
+/// the runtime's own `fetch` does. Native callbacks run outside any call, so
+/// a component reads the grant when the script asks and keeps it for them.
+pub fn current_capabilities() -> Capabilities {
+    scope::policy().capabilities().clone()
 }
 
 /// Names the application, and puts its data where that name says.

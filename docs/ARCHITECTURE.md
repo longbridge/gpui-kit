@@ -258,9 +258,30 @@ apply to value types whose fields _are_ the definition and cannot grow, such as
 mirror an external schema, such as the LSP `Diagnostic`.
 
 Design-token records (`ColorTokens`, `RadiusTokens`, and the rest of
-`theme_tokens`) still carry `pub` fields. They have the same growth problem, and
-converting them is tracked separately because every theme in `gpui-component`
-constructs them.
+`theme_tokens`) keep `pub` fields: themes read and write them field by field.
+They carry `#[non_exhaustive]` under the rule below.
+
+Where `pub` fields are deliberate — themes, settings records, design tokens,
+serialized schemas — the struct must carry `#[non_exhaustive]` and implement
+`Default` or a constructor. Adding a field is then not a breaking change.
+Outside the defining crate, callers build the value from `Default::default()`
+and assign fields; a struct literal, including `..Default::default()`, does not
+compile there, so other workspace crates use the same form:
+
+```rust
+let mut theme = gpui_base::Theme::default();
+theme.tokens = tokens;
+theme.cursor_blink = cursor_blink;
+```
+
+Apply this to every new type and to any existing type whose fields a change
+adds or alters. Every theme record already carries it: both `Theme` structs,
+the Base token records, the Component theme schema (`ThemeConfig`,
+`ThemeColor`, `ThemeConfigColors` and the `Semantic*Config` types), the
+highlight theme (`HighlightTheme`, `HighlightThemeStyle`, `SyntaxColors`),
+`MotionTokens` and the theme settings records (`ListSettings`,
+`NotificationSettings`, `SheetSettings`). Value types exempt above stay exempt, and remaining existing
+types migrate in their own changes. The Coding Guides state the same rule.
 
 ## Input, Textarea, and Editor Architecture
 
@@ -405,6 +426,16 @@ nothing. Decorations do not change layout.
 image resolution and link activation locally. Reference links need definitions
 from the entire document, including blocks outside the viewport. Register them
 through `with_link_reference`.
+
+Host foregrounds are render-local presentation, supplied through
+`RenderContext::with_foreground_ranges` for keyed paragraph leaves. They use
+the same UTF-8 byte space as geometry, with U+FFFC for each inline object.
+They override glyph colors from marks and links; later supplied ranges win
+overlaps. Other mark properties and link activation remain intact. Uncovered
+text keeps normal inheritance. The node tree and its cached base mark styles
+never retain these colors: a host can change its theme/surface or remove the
+ranges next frame without rebuilding the document. Custom objects inherit an
+override only when their entire placeholder is covered; images are unchanged.
 
 ### Evolution boundary
 

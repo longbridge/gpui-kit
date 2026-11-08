@@ -395,6 +395,7 @@ window.open_alert_dialog(cx, |alert, _, _| {
 | `close_button(bool)` | 是否显示关闭按钮，默认 `false` |
 | `keyboard(bool)` | 是否支持 ESC 关闭，默认 `true` |
 | `entrance(DialogEntrance)` | 设置入场动画，默认 `SlideDown` |
+| `centered()` | 在窗口中垂直居中，而不是靠近顶部 |
 | `on_ok(callback)` | 设置确认回调，返回 `true` 时关闭 |
 | `on_cancel(callback)` | 设置取消回调，返回 `true` 时关闭 |
 | `on_close(callback)` | 设置关闭后的回调 |

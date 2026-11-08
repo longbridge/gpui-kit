@@ -35,7 +35,7 @@ pub(in crate::materialize) fn pagination(
     children: Children,
 ) -> AnyElement {
     warn_unhonoured_a11y(&behavior, "Pagination", &["accessibility_label"]);
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a Pagination are ignored; put them on the page buttons inside it, \
              which are the interactive elements"

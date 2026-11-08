@@ -38,6 +38,10 @@ If the application already calls `gpui_kit::component::init`, Base initializatio
 
 TextView is selectable by default. While dragging a selection near a viewport edge, the shared selection layer scrolls the related `overflow_*_scroll` region automatically; no TextView scroll or selection parameter is required. Use `.selectable(false)` only to disable selection explicitly.
 
+Double-click selects a word and triple-click a paragraph. A drag that continues the click, or a Shift-click after it, extends the selection by whole words or paragraphs and keeps the first one selected.
+
+A drag that starts in a table cell selects only in that cell; when the pointer leaves the cell, the selection stops at its edge. A drag that starts outside the table selects through it. Use `table_actions` to offer a copy of the whole table.
+
 ## Markdown and HTML
 
 Use the helpers for call-site-derived IDs, or constructors when an explicit stable ID is useful:
@@ -86,6 +90,11 @@ let style = TextViewStyle::default().with_heading(|level| match level {
 ```
 
 `TextViewStyle::from_theme(&theme)` maps the semantic colors from a `gpui_kit::base::Theme`. Applications using the higher-level component theme can use `gpui_kit::component::text::text_view_style(cx.theme())`.
+
+Table body rows have no hover highlight by default. `with_table_row_hover(color)`
+fills the body row under the pointer with `color`; the header row keeps its own
+background. GPUI Component sets it to the theme's `table_hover`, the color the
+`Table` component highlights its rows with.
 
 A text view without an explicit `.style()` can follow the text color its
 container sets, so rich text stays readable on a filled surface such as a chat
@@ -220,6 +229,51 @@ For asynchronous resources, retain a `TextViewState`, update the application-own
 
 Inline math syntax is parsed by default. Register a plugin to customize its rendering; no separate syntax switch is needed. Inline code continues to protect dollar signs from math parsing. When no plugin claims a math node, TextView renders its original `$...$` source as literal text, so prose that merely contains dollar signs — `spent $5 and $10` — reads and copies back unchanged. Block math is parsed too: a `$$` fence becomes a block node, which a block plugin (`is_block() == true`) renders, and which falls back to a code block when no plugin claims it.
 
+## Block surfaces
+
+A block surface draws a blockquote's blocks inside a container of your own,
+such as a callout or a tinted summary panel, while they stay part of one
+document. Register it by name and open a top-level blockquote with the marker
+`[!name]` on a line of its own, as a [GitHub alert](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts)
+does:
+
+```rust
+use gpui::{ParentElement as _, Styled as _, div, px};
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().block_surface("summary", |_, cx| {
+    div()
+        // Read your theme here, so a theme change needs no new parse.
+        .bg(summary_background(cx))
+        .rounded(px(12.))
+        .p(px(16.))
+        .child("Summary")
+});
+
+TextView::markdown(
+    "note",
+    "Intro\n\n> [!summary]\n> - First point\n> - Second point\n\nOutro",
+)
+.markdown_extensions(extensions)
+```
+
+Names match ASCII-case-insensitively, so `> [!NOTE]` opens a surface registered
+as `note`. Renderers that don't know the name show an ordinary blockquote. The
+blocks are appended to the container the callback returns, after anything it
+shows itself; neither that nor the marker line is document text. Selection,
+find, range highlights and reveals work across and inside the surface. A
+select-all copies the source verbatim, and a partial source copy is quoted
+under the marker line, as a blockquote copy is quoted.
+
+Only a top-level blockquote with a registered name becomes a surface. A nested
+one stays a blockquote, and so does one with text after the marker on its line,
+such as Obsidian's `> [!note] Title`: the container shows its own title.
+Surfaces do not nest. A surface is one row of a scrollable view, so keep it to a
+few screens. While a streaming view appends to a surface, each append parses
+and measures the whole surface again, so streaming a long one costs time
+quadratic in its length; until its marker line is complete, it shows as a
+blockquote.
+
 ## Retained state and streaming updates
 
 Use `TextViewState` when content changes without replacing the view:
@@ -324,3 +378,73 @@ UTF-16 conversion for native input, accessibility integration and virtualization
 The current byte-index geometry does not represent bidirectional caret affinity
 or both sides of a soft-wrap boundary; do not treat it as a complete visual
 navigation API.
+
+## Inline code style
+
+`TextView::inline_code_style(StyleRefinement)` refines inline code after the
+resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The Base style also exposes `TextViewStyle::with_inline_code_style` and the
+`inline_code_style()` reader. Existing `with_inline_code(HighlightStyle)`
+continues to work; the new refinement takes precedence.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+
+let border = gpui_kit::base::Theme::global(cx).tokens.colors.border;
+
+TextView::markdown("notes", "Run `cargo build` first.")
+    .inline_code_style(
+        StyleRefinement::default()
+            .text_size(rems(1.))
+            .px(rems(0.25))
+            .border_1()
+            .border_color(border),
+    )
+```
+
+Supported properties are font family, size, features, fallbacks, weight,
+italic, color, underline, strikethrough, background, border widths/color/style,
+corner radii, and padding. Font sizes use pixels or window-relative rems;
+non-finite or non-positive sizes retain the default. Without a font-size override,
+code remains 0.875 times its surrounding text. Without a border override, code
+has no border. Padding and border widths participate in wrapping and table
+measurement. Margin, positioning, flex, explicit box size, overflow, and
+interaction properties are not used; line height remains owned by the paragraph.
+
+## List and blockquote style
+
+`TextView::list_style(StyleRefinement)` and
+`blockquote_style(StyleRefinement)` refine list markers and blockquotes after
+the resolved theme/style and surface-color adaptation. Unspecified properties
+keep their defaults, and explicit colors remain unchanged on inverted surfaces.
+The Base style also exposes `TextViewStyle::with_list_style` and
+`with_blockquote_style`, with `list_style()` and `blockquote_style()`
+readers.
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _};
+
+let primary = gpui_kit::base::Theme::global(cx).tokens.colors.primary;
+
+TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
+    .list_style(StyleRefinement::default().text_color(primary))
+    .blockquote_style(StyleRefinement::default().border_color(primary))
+```
+
+The list marker refinement applies to the bullet or number column of each
+item, over its defaults: muted text color, a minimum width of the list indent,
+right-aligned text, and a right padding of 0.3 times that indent. Text
+properties such as color, font family, size, and weight style the marker; box
+properties such as width and padding change the marker column. Its text color
+also outlines an unchecked task-list checkbox; a checked one keeps the link
+color.
+
+The blockquote refinement applies to the quote container, over its defaults:
+muted text color, a 2px left border in the border color, and a left padding of
+0.9 times the body font size. Border widths and color style the quote bar;
+text properties, background, padding, and corner radii style the quote and the
+blocks inside it. Child blocks keep their own explicit styles, including
+heading and table font sizes. Other element properties apply to the container
+as they do to any `div`. Code blocks, tables, rules, and done tasks keep the
+shared muted and border colors.

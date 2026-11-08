@@ -4316,7 +4316,7 @@ impl ShellRuntime {
     pub(crate) fn dispatch_scroll_wheel(
         self: &Rc<Self>,
         id: CallbackId,
-        event: &gpui::ScrollWheelEvent,
+        event: &gpui::ScrollEvent,
         line_height: gpui::Pixels,
         bounds: Option<gpui::Bounds<gpui::Pixels>>,
         window: &mut Window,
@@ -5256,6 +5256,31 @@ impl ShellRuntime {
         Ok(node)
     }
 
+    /// Opens the detached node of a `group_hover`, the one state style that
+    /// names something: the group whose hover it follows.
+    fn begin_group_hover(&self, ctx: &Ctx<'_>, id: SpecId, group: String) -> JsResult<SpecId> {
+        // An empty name would match no group GPUI registers, so the styles
+        // would never apply and nothing on screen would say why.
+        if group.is_empty() {
+            return Err(js_error::type_error(
+                ctx,
+                "group_hover(group, declare) expects the group's name first, as a non-empty \
+                 string",
+            ));
+        }
+
+        let node = self.arena.borrow_mut().push(Component::Div);
+        self.arena
+            .borrow_mut()
+            .claim(node)
+            .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
+        self.push_op_checked(
+            ctx,
+            self.push_op(id, SpecOp::GroupHover(group.into(), node)),
+        )?;
+        Ok(node)
+    }
+
     /// Fills a named element slot, detaching the element from the tree.
     ///
     /// The same `claim` a state style's declarations use: an element a
@@ -5286,11 +5311,8 @@ impl ShellRuntime {
             }
         };
 
-        self.arena
-            .borrow_mut()
-            .claim(element)
-            .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
-        self.push_op_checked(ctx, self.push_op(id, SpecOp::Slot(interned, element)))
+        let filled = self.arena.borrow_mut().fill_slot(id, interned, element);
+        self.push_op_checked(ctx, filled)
     }
 
     fn push_node(&self, component: Component) -> SpecId {
@@ -5871,6 +5893,25 @@ globalThis.__gpui = (() => {
   methods.hover = state("hover");
   methods.active = state("active");
   methods.focus = state("focus");
+  // The same detached element, applied while the pointer is over the nearest
+  // ancestor named with `group(name)` rather than over this element. Both
+  // arguments are checked before anything is recorded: with the two swapped,
+  // calling the name would fail as a type error naming neither.
+  methods.group_hover = function (group, declare) {
+    if (typeof group !== "string") {
+      throw new TypeError(
+        "group_hover(group, declare) expects the group's name first, as a non-empty string",
+      );
+    }
+    if (typeof declare !== "function") {
+      throw new TypeError(
+        "group_hover(group, declare) expects a function second; it receives the element to style",
+      );
+    }
+    const target = element(__group_hover(this.__id, group));
+    declare(target);
+    return this;
+  };
   // Not a state: the filled part of a slider, declared the same way because
   // it is the same thing — a detached element collecting styles. The shell
   // positions the box; this says what it looks like.
@@ -7313,6 +7354,7 @@ impl ShellRuntime {
                 "tab_stop",
                 "href",
                 "id",
+                "group",
                 "overflow_scroll",
                 "overflow_x_scroll",
                 "overflow_y_scroll",
@@ -7708,6 +7750,16 @@ impl ShellRuntime {
                 ),
             )?;
 
+            let group_hover_runtime = runtime.clone();
+            globals.set(
+                "__group_hover",
+                Func::from(
+                    move |ctx: Ctx<'_>, id: u32, group: String| -> JsResult<SpecId> {
+                        upgrade(&group_hover_runtime, &ctx)?.begin_group_hover(&ctx, id, group)
+                    },
+                ),
+            )?;
+
             globals.set(
                 "__unknown",
                 Func::from(|ctx: Ctx<'_>, name: String| -> JsResult<()> {
@@ -7905,8 +7957,9 @@ impl ShellRuntime {
                                     deprecation.message(),
                                 );
                             }
-                            let payload = runtime.component_payload_transaction(
+                            let (payload, elements) = runtime.component_payload_transaction(
                                 &ctx,
+                                None,
                                 constructor.export(),
                                 &constructor.arguments(),
                                 &arguments,
@@ -7917,7 +7970,9 @@ impl ShellRuntime {
                                 component_name,
                                 payload,
                             );
-                            Ok(runtime.push_node(Component::Registered(component)))
+                            let node = runtime.push_node(Component::Registered(component));
+                            runtime.arena.borrow_mut().hold(node, &elements);
+                            Ok(node)
                         }),
                     )?;
                 }
@@ -8059,6 +8114,7 @@ impl ShellRuntime {
             let mut callback = None;
             self.component_payload_transaction(
                 ctx,
+                Some(id),
                 descriptor.name(),
                 descriptor.arguments(),
                 &args,
@@ -8089,8 +8145,9 @@ impl ShellRuntime {
                 .borrow()
                 .check_live(id)
                 .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
-            let payload = self.component_payload_transaction(
+            let (payload, _) = self.component_payload_transaction(
                 ctx,
+                Some(id),
                 descriptor.name(),
                 descriptor.arguments(),
                 &args,
@@ -8320,6 +8377,7 @@ impl ShellRuntime {
             | "tab_stop"
             | "href"
             | "id"
+            | "group"
             | "overflow_scroll"
             | "overflow_x_scroll"
             | "overflow_y_scroll"
@@ -8374,6 +8432,7 @@ impl ShellRuntime {
                     "tab_index" => "tab_index",
                     "tab_stop" => "tab_stop",
                     "id" => "id",
+                    "group" => "group",
                     "overflow_scroll" => "overflow_scroll",
                     "overflow_x_scroll" => "overflow_x_scroll",
                     "overflow_y_scroll" => "overflow_y_scroll",
@@ -8418,6 +8477,20 @@ impl ShellRuntime {
                         ctx,
                         "id(name) expects a string; it is the element's stable identity, so it \
                          must not change between renders",
+                    ));
+                }
+                // The name is all a `group_hover` below can match, so one that
+                // is missing or empty would leave those styles never applying.
+                if name == "group"
+                    && bridged
+                        .first()
+                        .and_then(|value| value.as_str().ok())
+                        .is_none_or(|group| group.is_empty())
+                {
+                    return Err(js_error::type_error(
+                        ctx,
+                        "group(name) expects a non-empty string; `group_hover(name, declare)` \
+                         on an element inside it matches the same name",
                     ));
                 }
                 // Dropping a non-string here would leave an element that
@@ -8696,14 +8769,18 @@ impl ShellRuntime {
             .collect()
     }
 
+    /// Validates and records one registered component call, claiming the
+    /// elements among its arguments for `holder`. `None` is a constructor's
+    /// node, not pushed yet: the caller holds the returned elements under it.
     fn component_payload_transaction(
         &self,
         ctx: &Ctx<'_>,
+        holder: Option<SpecId>,
         api: &str,
         descriptors: &[ArgumentDescriptor],
         arguments: &Arguments,
         factory: impl FnOnce(&[ComponentArgument]) -> Result<ComponentPayload, String>,
-    ) -> JsResult<ComponentPayload> {
+    ) -> JsResult<(ComponentPayload, Vec<SpecId>)> {
         self.flush_component_state_releases();
         let callback_checkpoint = self.callbacks.borrow().checkpoint();
         let result = (|| {
@@ -8723,14 +8800,21 @@ impl ShellRuntime {
                     &format!("{api}(...) cannot consume element {duplicate} twice"),
                 ));
             }
+            self.arena
+                .borrow()
+                .check_hold(holder, &element_ids)
+                .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
             let payload = factory(&arguments).map_err(|error| js_error::type_error(ctx, &error))?;
-            for element in element_ids {
+            for element in &element_ids {
                 self.arena
                     .borrow_mut()
-                    .claim(element)
+                    .claim(*element)
                     .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
             }
-            Ok(payload)
+            if let Some(holder) = holder {
+                self.arena.borrow_mut().hold(holder, &element_ids);
+            }
+            Ok((payload, element_ids))
         })();
         if result.is_err() {
             self.callbacks.borrow_mut().rollback_to(callback_checkpoint);
@@ -9555,6 +9639,8 @@ impl ContextBinding {
     }
 }
 
+const MAX_PAGINATION_PAGE: usize = u32::MAX as usize;
+
 /// `pagination_items(current, total, visible)`.
 ///
 /// A plain calculation rather than a component: what it answers is which page
@@ -9566,19 +9652,27 @@ fn pagination_items<'js>(
     total_pages: f64,
     visible_pages: f64,
 ) -> JsResult<Array<'js>> {
-    let clamp = |value: f64| -> JsResult<usize> {
-        if !value.is_finite() || value < 0.0 {
+    // Pages go back to the script as `u32`, and base builds one item per
+    // visible page, so `visible_pages` bounds the allocation.
+    let clamp = |value: f64, max: usize| -> JsResult<usize> {
+        if !value.is_finite() || value < 0.0 || value > max as f64 {
             return Err(js_error::type_error(
                 &ctx,
-                "pagination_items(current_page, total_pages, visible_pages?) expects \
-                 non-negative numbers",
+                &format!(
+                    "pagination_items(current_page, total_pages, visible_pages?) expects \
+                     non-negative page numbers up to {MAX_PAGINATION_PAGE} and at most \
+                     {MAX_VIRTUAL_ITEMS_PER_RENDER} visible pages"
+                ),
             ));
         }
         Ok(value as usize)
     };
-    let items = gpui_base::PaginationState::new(clamp(current_page)?, clamp(total_pages)?)
-        .visible_pages(clamp(visible_pages)?)
-        .items();
+    let items = gpui_base::PaginationState::new(
+        clamp(current_page, MAX_PAGINATION_PAGE)?,
+        clamp(total_pages, MAX_PAGINATION_PAGE)?,
+    )
+    .visible_pages(clamp(visible_pages, MAX_VIRTUAL_ITEMS_PER_RENDER)?)
+    .items();
 
     let out = Array::new(ctx.clone())?;
     for (index, item) in items.into_iter().enumerate() {

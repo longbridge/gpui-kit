@@ -205,6 +205,7 @@ pub(crate) struct DialogProps {
     width: Pixels,
     max_width: Option<Pixels>,
     margin_top: Option<Pixels>,
+    centered: bool,
     close_button: bool,
 
     overlay: bool,
@@ -218,6 +219,7 @@ impl Default for DialogProps {
     fn default() -> Self {
         Self {
             margin_top: None,
+            centered: false,
             width: px(448.),
             max_width: None,
             overlay: true,
@@ -488,6 +490,13 @@ impl Dialog {
         self
     }
 
+    /// Centers the dialog vertically in the window, whatever its height, in
+    /// place of the [`Self::margin_top`] offset.
+    pub fn centered(mut self) -> Self {
+        self.props.centered = true;
+        self
+    }
+
     /// Sets the width of the dialog, defaults to 448px.
     ///
     /// The dialog is never wider than the viewport minus a margin on each side.
@@ -657,7 +666,13 @@ impl RenderOnce for Dialog {
         // margin so that the preferred offset does not waste usable height.
         let margin = cx.theme().spacing_tokens().lg;
         let layer_offset = px(layer_ix as f32 * 16.);
-        let y = self.props.margin_top.unwrap_or(view_size.height / 10.) + layer_offset;
+        let (anchor, y) = if self.props.centered {
+            (Anchor::LeftCenter, view_size.height / 2.)
+        } else {
+            let y = self.props.margin_top.unwrap_or(view_size.height / 10.);
+            (Anchor::TopLeft, y)
+        };
+        let y = y + layer_offset;
         let entrance = self.props.entrance;
         let motion = cx.theme().motion_tokens();
         let closing = self.motion.is_some_and(|motion| motion.closing);
@@ -752,7 +767,7 @@ impl RenderOnce for Dialog {
                             })
                             .popup(
                                 gpui_base::Positioner::corner(
-                                    Anchor::TopLeft,
+                                    anchor,
                                     point(window_paddings.left + x, window_paddings.top + y),
                                 )
                                 .margin(margin)
@@ -842,6 +857,7 @@ impl RenderOnce for Dialog {
                                                         .small()
                                                         .ghost()
                                                         .icon(IconName::Close)
+                                                        .accessibility_label("Close")
                                                 })
                                         }))
                                         .when(closing, |surface| {
@@ -867,7 +883,7 @@ impl RenderOnce for Dialog {
                                                         .on_any_mouse_down(|_, _, cx| {
                                                             cx.stop_propagation()
                                                         })
-                                                        .on_scroll_wheel(|_, _, cx| {
+                                                        .on_scroll(|_, _, cx| {
                                                             cx.stop_propagation()
                                                         }),
                                                 )
