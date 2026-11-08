@@ -99,8 +99,9 @@ pub use diagnostics::{
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
 pub use editor::{Editor, EditorLineNumberRenderer, EditorState};
 pub use highlighting::{
-    DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,
-    InputHighlighterFactory, SharedHighlightStyleResolver, SyntaxContext, SyntaxContextProvider,
+    DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, HighlightStyleResolver,
+    InputEditorStyle, InputHighlighter, InputHighlighterFactory, SharedHighlightStyleResolver,
+    SyntaxContext, SyntaxContextProvider,
 };
 pub use indent::TabSize;
 pub use input::{Input, InputState};

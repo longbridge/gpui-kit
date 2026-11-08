@@ -15,7 +15,10 @@ use cap_std::{ambient_authority, fs::Dir};
 /// any of them becomes a way to hand an arbitrary URI to whatever handler the
 /// desktop has registered for its scheme, which is a considerably larger thing
 /// than opening a page.
-pub(crate) fn is_openable_url(url: &str) -> bool {
+///
+/// A component that hands a script's URL to the system opener checks it here,
+/// when the script names it, so the script gets the error.
+pub fn is_openable_url(url: &str) -> bool {
     reqwest::Url::parse(url).is_ok_and(|parsed| {
         matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
     })
@@ -371,6 +374,19 @@ impl Capabilities {
                 .http_requests
                 .iter()
                 .any(|grant| grant.allows(scheme, host, port, method, path))
+    }
+
+    /// Whether a `GET` of an absolute `http` or `https` URL is permitted.
+    ///
+    /// The URL is parsed the way `fetch` parses it, so a resource that is not
+    /// a `fetch` gets the same answer for the same address.
+    pub fn may_get(&self, url: &str) -> bool {
+        reqwest::Url::parse(url).is_ok_and(|url| {
+            matches!(url.scheme(), "http" | "https")
+                && url.host_str().is_some_and(|host| {
+                    self.may_request(url.scheme(), host, url.port(), "GET", url.path())
+                })
+        })
     }
 
     /// Opens the granted directory a path belongs to, and the path within it.
@@ -735,6 +751,36 @@ mod tests {
     impl Drop for Root {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_get_needs_a_grant_for_its_scheme_host_port_and_path() {
+        let capabilities = Capabilities::new()
+            .network_hosts(["gpui-kit.com".to_owned()])
+            .http_requests([HttpRequestGrant::new(
+                "docs.example.com",
+                ["GET"],
+                Vec::<String>::new(),
+                ["/guide/"],
+            )]);
+        for allowed in [
+            "https://gpui-kit.com/",
+            "http://GPUI-Kit.com:8080/any",
+            "https://docs.example.com/guide/intro",
+        ] {
+            assert!(capabilities.may_get(allowed), "refused {allowed}");
+        }
+        for denied in [
+            "https://docs.example.com/admin",
+            "https://docs.example.com/guide/../admin",
+            "http://docs.example.com/guide/intro",
+            "https://docs.example.com:8443/guide/intro",
+            "http://127.0.0.1/",
+            "file:///etc/passwd",
+            "gpui-kit.com",
+        ] {
+            assert!(!capabilities.may_get(denied), "accepted {denied}");
         }
     }
 
@@ -1127,10 +1173,22 @@ mod symlink_tests {
     }
 
     #[test]
+    fn proxy_urls_are_not_shown_by_default() {
+        let capabilities = Capabilities::new();
+        for name in ["HTTP_PROXY", "https_proxy", "ALL_PROXY"] {
+            assert!(!capabilities.may_show_env_variable(name), "{name}");
+        }
+        assert!(capabilities.may_show_env_variable("no_proxy"));
+
+        let granted = Capabilities::new().env_variables(["HTTPS_PROXY".to_owned()]);
+        assert!(granted.may_show_env_variable("https_proxy"));
+    }
+
+    #[test]
     fn a_variable_is_shown_under_any_spelling_of_a_listed_name() {
         let capabilities = Capabilities::new().env_variables(["my_app_mode".to_owned()]);
-        assert!(capabilities.may_show_env_variable("HTTP_PROXY"));
-        assert!(capabilities.may_show_env_variable("http_proxy"));
+        assert!(capabilities.may_show_env_variable("PATH"));
+        assert!(capabilities.may_show_env_variable("Path"));
         assert!(capabilities.may_show_env_variable("MY_APP_MODE"));
         assert!(!capabilities.may_show_env_variable("GITHUB_TOKEN"));
     }

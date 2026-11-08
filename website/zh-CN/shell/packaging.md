@@ -45,7 +45,7 @@ gpui-shell bundle -d clock
 
 macOS 和 Linux 的包里没有 `gpui-shell` 二进制，所以在任何平台上都能打，也和 CPU 架构无关。Windows 的包带着 x86-64 的 `gpui-shell.exe`，所以 zip 约 20 MB；`bundle` 从哪里获取它见 [Windows](#windows)。
 
-这些名字都来自 manifest：`name` 用作 `.app` 的名字、Windows 可执行文件的名字和窗口标题，它的小写形式（`clock`）用作命令名和压缩包名；`version` 写进压缩包名和 `Info.plist`；`id` 用作 bundle identifier、Linux 的安装目录和 desktop entry 的文件名，以及窗口的 application id。所以打包必须有 `gpui-shell.json`。
+这些名字都来自 manifest：`name` 用作 `.app` 的名字、Windows 可执行文件的名字和窗口标题，它的小写形式（`clock`）用作命令名和压缩包名；`version` 写进压缩包名和 `Info.plist`；`id` 用作 bundle identifier、Linux 的安装目录和 desktop entry 的文件名，以及窗口的 application id。所以打包必须有 `gpui-shell.json`。macOS 和 Linux 的启动脚本与安装脚本会写入 `name` 和 `--download-url`，所以两者含有换行或其他控制字符时，打包直接报错。
 
 | 选项                    | 含义                                                                  |
 | ----------------------- | --------------------------------------------------------------------- |

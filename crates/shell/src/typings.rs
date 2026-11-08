@@ -1341,7 +1341,9 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     map<Self extends Element, T>(this: Self, transform: (element: Self) => T): T;
     /**
-     * Adds one child. The child is consumed; using it again throws.
+     * Adds one child. The child is consumed; using it again throws. A
+     * description nests at most 64 levels, counting filled slots; the call
+     * that would go deeper throws.
      *
      * A **string is an element**, exactly as `&str`, `String` and
      * `SharedString` implement `IntoElement` in GPUI: `.child("hello")` is how
@@ -1350,7 +1352,9 @@ const ELEMENT_METHODS: &str = r#"    /**
      * An `Entity` from `cx.new(...)` is a child too, the way an `Entity<V>` is
      * renderable in GPUI — that is how a retained nested view is mounted. One
      * entity may appear once per parent snapshot; a second mount in the same
-     * description is refused before any of it is published.
+     * description is refused before any of it is published. Views mounted
+     * inside one another may span 65 levels together, one more for each view;
+     * a mount past that, or inside the view itself, draws nothing.
      */
     child<Self extends Element>(this: Self, child: Element | Entity | string | number | boolean): Self;
     /** Adds several children, in order. */
@@ -1853,6 +1857,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * and ignores this.
      */
     id<Self extends Element>(this: Self, name: string): Self;
+    /**
+     * Names this element as a group, so that `group_hover(name, declare)` on
+     * an element inside it styles that element while the pointer is over this
+     * one. GPUI `InteractiveElement::group`.
+     *
+     * The name need not be unique: a group hover follows the nearest ancestor
+     * with its name, so every row of a list can be `group("row")`.
+     */
+    group<Self extends Element>(this: Self, name: string): Self;
     /** Owns wheel and touch scrolling on both axes for overflowing children. */
     overflow_scroll<Self extends Element>(this: Self): Self;
     /** Owns horizontal wheel and touch scrolling for overflowing children. */
@@ -2028,6 +2041,21 @@ const ELEMENT_METHODS: &str = r#"    /**
     active<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element has focus. */
     focus<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
+    /**
+     * Styles applied while the pointer is over the nearest ancestor named
+     * `name` with `group(name)`, rather than over this element: an action
+     * that appears when its row is hovered. `declare` receives a detached
+     * element that collects the styles, exactly as `hover` does; its return
+     * value is ignored. GPUI `InteractiveElement::group_hover`.
+     *
+     * It is a style, not a handler, so a virtual list's item renderer may use
+     * it. With no ancestor of that name the styles never apply. A second call
+     * replaces the first. A group hover that changes the element's size or
+     * position needs a stable identity, `.id(...)`, because GPUI lays the
+     * element out from its own state; one that only paints, such as an
+     * opacity or a color, does not.
+     */
+    group_hover<Self extends Element>(this: Self, name: string, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Displays the tab at `index` in `group` when this element is clicked.
      *
@@ -2768,6 +2796,8 @@ const BASE: &str = r#"  /** A row. */
    * collapsing each broken run into an ellipsis. `visible_pages` defaults to
    * seven and is clamped to a minimum of five; a total of one page or fewer
    * answers an empty list, because a control for a single page is not one.
+   * Throws for a page number above 4294967295 or `visible_pages` above
+   * 1000000.
    *
    * An ellipsis names the pages it stands for, inclusive on both ends, so it
    * can be a "jump to" control rather than inert text.
@@ -3778,7 +3808,10 @@ const FPS: &str = r#"  /**
   export interface FpsMonitorOptions {
     /** Corner or edge of the window. Default `top_right`. */
     anchor?: Anchor;
-    /** Frame budget in milliseconds, for the FRAME grading and the chart's scale. */
+    /**
+     * Frame budget in milliseconds, for the FRAME grading and the chart's
+     * scale. Positive, and no longer than a `Duration` holds.
+     */
     frame_budget?: number;
   }
 
@@ -3975,7 +4008,7 @@ declare module "process" {
     arch: string;
     /**
      * Common variables (`HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`,
-     * `EDITOR`, `DISPLAY`, `HTTP_PROXY`, the XDG directories…), plus those
+     * `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories…), plus those
      * `capabilities.process.env` names, when set; names match regardless of
      * case. Every other variable is absent. A fresh copy on each read; assigning to
      * it changes nothing.
@@ -4341,6 +4374,7 @@ mod tests {
         "tab_stop",
         "href",
         "id",
+        "group",
         "overflow_scroll",
         "overflow_x_scroll",
         "overflow_y_scroll",
@@ -4387,6 +4421,7 @@ mod tests {
         "hover",
         "active",
         "focus",
+        "group_hover",
     ];
 
     /// Every method name declared in the `Element` interface, in order.

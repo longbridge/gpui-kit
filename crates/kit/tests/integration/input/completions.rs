@@ -715,8 +715,12 @@ fn ordinary_input_schedules_no_followup_frame(cx: &mut TestAppContext) {
     })
     .unwrap();
 
+    // A moved caret is reported to the platform's IME on the next frame; run
+    // those reports, then draw a frame in which nothing moves.
     let callbacks = cx
         .update_window(fixture.handle.into(), |_, window, cx| {
+            window.simulate_next_frame(cx);
+            window.draw(cx).clear(cx);
             window.simulate_next_frame(cx)
         })
         .unwrap();
