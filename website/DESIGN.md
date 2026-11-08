@@ -217,8 +217,8 @@ through motion alone.
 
 ## Content rules
 
-- The crate is **not published**. Installation must show the git dependency,
-  never `cargo add`, and the UI must not display a version number.
+- `gpui-shell` is published to crates.io from 0.8.1. Installation should show
+  the released crate; Git dependencies are for unreleased development builds.
 - Code samples must be real API, verified against `crates/component` and
   `crates/base`.
 - The release notes page is rendered at build time from GitHub Releases
@@ -230,6 +230,17 @@ through motion alone.
 - Capability previews are **diagrams**, not product mocks: they share one
   padding box and one gap, and they may use `--data-*` to read as UI. A diagram
   that needs a scrollbar needs its track too, or it looks like a glitch.
+- The band right under the hero recommends Native Shell (NSH, nsh.dev) for
+  apps that must reach mobile, the web or the terminal as well, and states
+  that GPUI Kit is the desktop choice. It keeps that position. Its copy names
+  the platforms each project fits rather than ranking them, and does not call
+  NSH a "sibling" project. Its title is NSH's own slogan, in each locale
+  as nsh.dev writes it (`src/home/*.json` in the NSH repository). Its logo carries NSH's own citrus mark
+  (`public/nsh-logo.svg` and `nsh-logo-dark.svg`, copied from nsh.dev's
+  brand kit and shared with the nav's project switcher), the one
+  exception to the saturated-colour rule, as the GPUI Kit logo accent is. The
+  "Recommended" badge after the title is a `--brand` fill, like the primary
+  button, never a hue of its own.
 - Landing-page copy lives in one bilingual `copy` object in `HomeApp.vue`. Both
   locales must be updated together, matching the site-wide rule that
   `website/docs/` and `website/zh-CN/docs/` stay in sync.

@@ -54,7 +54,7 @@ Toolbar::new("toolbar")
 
 ### 尺寸
 
-通过 `Sizable` 一起改变工具栏高度、间距、文字和内部控件尺寸：`xsmall`（28px）、`small`（32px，默认）和 `medium`（48px）。调用顺序不影响尺寸传播。
+通过 `Sizable` 一起改变工具栏高度、间距、文字和内部控件尺寸：`xsmall`（28px）、`small`（32px，默认）和 `medium`（48px）。这些高度是最小高度：比工具栏更高的内容（例如两行标题）会让工具栏随之变高，而不会被裁切。调用顺序不影响尺寸传播。
 
 ```rust
 Toolbar::new("toolbar")

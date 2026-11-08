@@ -265,6 +265,35 @@ fn masking_blocks_clipboard_until_revealed_and_preserves_the_value(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn component_id_preserves_supported_content_type_roles(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| input.default_value("contact"));
+    for (kind, role) in [
+        (InputContentType::EmailAddress, gpui_kit::Role::EmailInput),
+        (
+            InputContentType::TelephoneNumber,
+            gpui_kit::Role::PhoneNumberInput,
+        ),
+        (InputContentType::Url, gpui_kit::Role::UrlInput),
+        (InputContentType::DateTime, gpui_kit::Role::DateTimeInput),
+        (InputContentType::Birthdate, gpui_kit::Role::DateInput),
+    ] {
+        common::update_content(handle, &view, cx, |view, _, cx| {
+            view.content_type = Some(kind);
+            cx.notify();
+        })
+        .unwrap();
+        ui(handle, cx, |window, cx| {
+            let input = window.find("constrained");
+            assert_eq!(input.role(), Some(role), "{kind:?}");
+            assert_eq!(input.value(), Some("contact"), "{kind:?}");
+            assert_eq!(input.label(), None, "{kind:?}");
+            window.click("constrained", cx);
+            assert_eq!(window.find("constrained").focused(), Some(true));
+        });
+    }
+}
+
+#[gpui_kit::test]
 fn password_content_types_hide_accessibility_values_even_when_revealed(cx: &mut TestAppContext) {
     let (handle, view) = fixture(cx, |input| input.default_value("secret").masked(true));
     for kind in [InputContentType::Password, InputContentType::NewPassword] {

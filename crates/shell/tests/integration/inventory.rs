@@ -19,6 +19,7 @@ fn every_public_component_and_story_is_accounted_for() {
                 .into_iter()
                 .map(|name| ("story".to_owned(), name.to_owned())),
         )
+        .chain(webview_source())
         .collect::<BTreeSet<_>>();
 
     assert_eq!(
@@ -298,6 +299,7 @@ impl Inventory {
                 }),
                 explanation: item["explanation"].as_str().map(ToOwned::to_owned),
             })
+            .filter(|entry| entry.source != WEBVIEW_SOURCE || cfg!(feature = "webview"))
             .collect::<Vec<_>>();
         let sources = entries
             .iter()
@@ -306,6 +308,14 @@ impl Inventory {
 
         Self { entries, sources }
     }
+}
+
+/// `gpui-webview` is a crate of its own rather than a `gpui-component` module,
+/// and its entry is registered only when the `webview` feature is.
+const WEBVIEW_SOURCE: &str = "webview";
+
+fn webview_source() -> Option<(String, String)> {
+    cfg!(feature = "webview").then(|| (WEBVIEW_SOURCE.to_owned(), WEBVIEW_SOURCE.to_owned()))
 }
 
 /// Public modules, plus private ones the crate root re-exports wholesale.

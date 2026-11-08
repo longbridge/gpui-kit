@@ -83,7 +83,10 @@ fn mount(
 
 fn draw(context: &mut VisualTestContext, view: Entity<gpui_shell::ScriptView>) {
     drop(view);
-    context.update(|window, cx| window.draw(cx).clear(cx));
+    context.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx)
+    });
 }
 
 fn distinct_rows(rows: Vec<(String, String, bool)>) -> Vec<(String, String, bool)> {

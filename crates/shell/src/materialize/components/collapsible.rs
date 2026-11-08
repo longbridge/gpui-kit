@@ -39,7 +39,7 @@ pub(in crate::materialize) fn collapsible(
     // it is a `RenderOnce` over a plain `div`, not an interactive element — so
     // hover, active and focus have nowhere to land. As with `Switch`, saying so
     // beats dropping them without a word.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a Collapsible are ignored; put them on the element around it"
         );

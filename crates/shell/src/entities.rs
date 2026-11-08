@@ -1057,6 +1057,16 @@ impl EntityStore {
             })
     }
 
+    #[cfg(test)]
+    pub(crate) fn first_textarea(&self) -> Option<Entity<TextareaState>> {
+        self.records
+            .values()
+            .find_map(|stored| match &stored.record {
+                Record::Textarea { state, .. } => Some(state.clone()),
+                _ => None,
+            })
+    }
+
     /// Splits a handle into its entity id, refusing one that names another store.
     ///
     /// A cross-store handle is a host bug rather than a script mistake — a
@@ -1114,7 +1124,7 @@ impl EntityStore {
 /// Generic over the mode marker rather than written once per state: the filter
 /// and the subscription are identical, and duplicating them would let the two
 /// drift into answering `change` differently.
-fn subscribe_to_events<M: InputModeKind>(
+pub(crate) fn subscribe_to_events<M: InputModeKind>(
     state: &Entity<InputBaseState<M>>,
     event: InputEventName,
     window: &mut Window,

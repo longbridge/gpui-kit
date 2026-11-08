@@ -217,14 +217,17 @@ The refusal names the phase it came from, because that is the only clue the auth
 
 ## Overlays need a `ShellRoot`
 
-Every one of these calls reaches the window's root View. A window whose first View is not a `ShellRoot` refuses them, and says which mistake it was — a host wiring problem, not a script one:
+Every one of these calls reaches the window's `ShellRoot`: its first View, or the View directly inside the `gpui-component` `Root` that the `gpui-shell` command opens its windows with. A window with neither refuses them:
 
 ```text
-window.open_dialog(content, options) needs a ShellRoot as the window's first View;
-this window was opened with another View
+window.open_dialog(content, options) found no ShellRoot in this window. A view's
+init() runs before its window has one, so open overlays from an event handler or
+a task; otherwise the host opened the window with another root view
 ```
 
-See [Getting started](./getting-started.md#add-the-runtime-to-a-rust-application).
+The first case is a script one: `init` runs while the window is still being built, before it has a root to hold an overlay, so open it from an event handler or from a task the View spawns. The second is a host wiring problem.
+
+See [Getting started](./getting-started.md#build-the-runtime-yourself).
 
 ## Not there yet
 

@@ -253,6 +253,10 @@ Check out [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
 
 See the [comparison with Iced, egui and Qt 6](https://gpui-kit.com/docs/comparison) on the site.
 
+## Related project: Native Shell
+
+[Native Shell](https://nsh.dev) ([source](https://github.com/longbridge/native-shell)) is a sibling project that lets AI generate UI and renders it natively on iOS, Android, Linux (GTK) and macOS (AppKit). Its GPUI desktop backend is in development and will be built on GPUI Kit.
+
 ## License
 
 Software source and documentation code examples: [Apache-2.0](LICENSE-APACHE).

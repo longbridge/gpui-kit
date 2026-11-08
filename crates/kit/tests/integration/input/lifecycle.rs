@@ -17,6 +17,7 @@ pub(super) struct Fields {
     textarea: Entity<TextareaState>,
     editor: Entity<EditorState>,
     mounted: bool,
+    custom_ids: bool,
     readonly: bool,
     disabled: bool,
     revision: usize,
@@ -47,7 +48,11 @@ impl Fields {
 
     fn ids(&self) -> [ElementId; 3] {
         [
-            ("input", self.input.entity_id()).into(),
+            if self.custom_ids {
+                "name".into()
+            } else {
+                ("input", self.input.entity_id()).into()
+            },
             ("input", self.textarea.entity_id()).into(),
             ("input", self.editor.entity_id()).into(),
         ]
@@ -73,6 +78,7 @@ impl Render for Fields {
             .when(self.mounted, |this| {
                 this.child(
                     Input::new(&self.input)
+                        .when(self.custom_ids, |input| input.id("name"))
                         .readonly(self.readonly)
                         .disabled(self.disabled),
                 )
@@ -104,6 +110,7 @@ pub(super) fn mount(
                 textarea: cx.new(|cx| TextareaState::new(window, cx)),
                 editor: cx.new(|cx| EditorState::new(window, cx)),
                 mounted: true,
+                custom_ids: false,
                 readonly: false,
                 disabled: false,
                 revision: 0,
@@ -137,6 +144,78 @@ fn select_all(window: &mut Window, cx: &mut App) {
         },
         cx,
     );
+}
+
+#[gpui_kit::test]
+fn component_ids_expose_live_text_semantics_without_labels(cx: &mut TestAppContext) {
+    for custom_ids in [false, true] {
+        let (handle, fields, _) = mount(cx);
+        fields.update(cx, |fields, cx| {
+            fields.custom_ids = custom_ids;
+            cx.notify();
+        });
+        let ids = fields.read_with(cx, |fields, _| fields.ids());
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            for (ix, id) in ids.into_iter().enumerate() {
+                // Only Input has a public custom ElementId builder.
+                if custom_ids && ix != 0 {
+                    continue;
+                }
+                let role = if ix == 0 {
+                    gpui_kit::Role::TextInput
+                } else {
+                    gpui_kit::Role::MultilineTextInput
+                };
+                let empty = window.find(id.clone());
+                assert_eq!(empty.value(), Some(""), "{id:?}");
+                assert_eq!(empty.role(), Some(role), "{id:?}");
+                assert_eq!(empty.label(), None, "{id:?}");
+                window.click(id.clone(), cx);
+                window.input("A🦀", cx);
+                let edited = window.find(id.clone());
+                assert_eq!(edited.value(), Some("A🦀"), "{id:?}");
+                assert_eq!(edited.role(), Some(role), "{id:?}");
+                assert_eq!(edited.focused(), Some(true), "{id:?}");
+                // A retained query remains a snapshot, not a copied text source.
+                assert_eq!(empty.value(), Some(""));
+                fields.update(cx, |fields, cx| {
+                    match ix {
+                        0 => fields.input.update(cx, |state, cx| {
+                            state.set_value("owner replacement", window, cx)
+                        }),
+                        1 => fields.textarea.update(cx, |state, cx| {
+                            state.set_value("owner replacement", window, cx)
+                        }),
+                        _ => fields.editor.update(cx, |state, cx| {
+                            state.set_value("owner replacement", window, cx)
+                        }),
+                    }
+                    fields.revision += 1;
+                    cx.notify();
+                });
+                window.render_frame(cx);
+                assert_eq!(window.find(id).value(), Some("owner replacement"));
+            }
+            if custom_ids {
+                let old_input = fields.update(cx, |fields, cx| {
+                    let old_input = fields.input.clone();
+                    fields.input =
+                        cx.new(|cx| InputState::new(window, cx).default_value("new editor"));
+                    cx.notify();
+                    old_input
+                });
+                window.render_frame(cx);
+                assert_eq!(window.find("name").value(), Some("new editor"));
+                window.click("name", cx);
+                select_all(window, cx);
+                window.input("replacement input", cx);
+                assert_eq!(window.find("name").value(), Some("replacement input"));
+                assert_eq!(old_input.read(cx).value(), "owner replacement");
+            }
+        })
+        .unwrap();
+    }
 }
 
 #[gpui_kit::test]

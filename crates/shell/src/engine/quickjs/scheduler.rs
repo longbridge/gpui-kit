@@ -48,6 +48,7 @@
 //! including for module-top-level work created before a view exists. Explicit
 //! `cancel()` stops work on demand. A cancelled promise is simply never settled.
 
+use crate::engine::quickjs::js_error;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -75,7 +76,7 @@ use crate::{
     view::ScriptView,
 };
 
-use super::{ContextBinding, ShellRuntime, context_object, describe};
+use super::{ContextBinding, ShellRuntime, context_object, describe, describe_value};
 
 /// Installs the scheduling surface.
 ///
@@ -771,7 +772,7 @@ fn host(ctx: &Ctx<'_>, api: &str) -> JsResult<Host> {
     };
 
     let runtime = scope::current_runtime()
-        .ok_or_else(|| Exception::throw_type(ctx, &format!("{api} has no owning shell runtime")))?;
+        .ok_or_else(|| js_error::type_error(ctx, &format!("{api} has no owning shell runtime")))?;
     scope::with_context(generation, |window, app| Host {
         window: window.window_handle(),
         app: app.to_async(),
@@ -779,7 +780,7 @@ fn host(ctx: &Ctx<'_>, api: &str) -> JsResult<Host> {
         background: app.background_executor().clone(),
         runtime: Rc::downgrade(&runtime),
     })
-    .map_err(|error| Exception::throw_type(ctx, &error.to_string()))
+    .map_err(|error| js_error::type_error(ctx, &error.to_string()))
 }
 
 /// Re-enters script code in a fresh [`ScopePhase::Task`] scope.
@@ -994,6 +995,123 @@ pub(super) fn detached_on(
         })
         .detach();
     true
+}
+
+/// How often a [`stream`] looks for events that have arrived.
+const STREAM_POLL: Duration = Duration::from_millis(10);
+
+/// One event a [`stream`] delivers to its script callback.
+pub(super) trait StreamEvent: Send + 'static {
+    /// The arguments the callback receives ahead of its `cx`.
+    fn into_args<'js>(self, ctx: &Ctx<'js>) -> JsResult<(&'static str, Value<'js>)>;
+    /// Whether nothing follows this event.
+    fn is_last(&self) -> bool;
+}
+
+/// Delivers events produced off the main thread to a script callback, for as
+/// long as they keep coming.
+///
+/// The callback is called as `dispatch(name, payload, cx)` on the UI thread,
+/// with the async `cx` a timer handler gets, so it can `cx.notify()` and keep
+/// the context across an `await`. Events that arrived together are delivered
+/// in one host call, in order.
+///
+/// The stream is a task like any other: owned by the view that started it,
+/// cancelled when that view is released, when its application is reloaded or
+/// with the window — and `cancel` is how the producer is told to stop.
+pub(super) fn stream<'js, E: StreamEvent>(
+    ctx: &Ctx<'js>,
+    api: &'static str,
+    dispatch: Function<'js>,
+    events: async_channel::Receiver<E>,
+    cancel: impl Fn() + 'static,
+) -> JsResult<()> {
+    let host = host(ctx, api)?;
+    let task = register(
+        ctx,
+        TaskState::new(
+            api,
+            scope::current_view().map(|view| view.downgrade()),
+            Some(Persistent::save(ctx, dispatch)),
+        )
+        .with_cancellation(cancel),
+    )?;
+
+    let running = task.clone();
+    let foreground = host.foreground.scheduler_executor();
+    host.foreground
+        .clone()
+        .spawn(async move {
+            let mut ended = false;
+            loop {
+                // Polled like an actor's completion rather than awaited: the
+                // producer is an OS thread, and a wake from one is not a
+                // foreground schedule GPUI's deterministic test executor
+                // accepts.
+                let mut batch = Vec::new();
+                loop {
+                    match events.try_recv() {
+                        Ok(event) => batch.push(event),
+                        Err(async_channel::TryRecvError::Empty) => break,
+                        Err(async_channel::TryRecvError::Closed) => {
+                            ended = true;
+                            break;
+                        }
+                    }
+                }
+                if batch.is_empty() {
+                    if ended {
+                        break;
+                    }
+                    foreground.timer(STREAM_POLL).await;
+                    continue;
+                }
+                ended = ended || batch.iter().any(StreamEvent::is_last);
+
+                let Readiness::Ready(owner) = running.readiness() else {
+                    break;
+                };
+                let Some(callback) = running.clone_callback() else {
+                    break;
+                };
+                resume(
+                    &host,
+                    &running.policy(),
+                    running.application.clone(),
+                    owner,
+                    move |ctx, _generation| {
+                        let dispatch = callback.restore(ctx)?;
+                        for event in batch {
+                            let (name, payload) = event.into_args(ctx)?;
+                            // One handler that throws is reported and does
+                            // not cost the events after it.
+                            if let Err(error) = dispatch.call::<_, ()>((
+                                name,
+                                payload,
+                                context_object(ctx, ContextBinding::Ambient)?,
+                            )) {
+                                tracing::error!(
+                                    "error in {api} {name} handler: {}",
+                                    describe(ctx, error)
+                                );
+                            }
+                        }
+                        Ok(())
+                    },
+                );
+                if ended {
+                    break;
+                }
+            }
+            // Stopped for any reason but the end — the owner went away, the
+            // task was cancelled — stops the producer too.
+            if !ended {
+                running.cancel_work();
+            }
+            finish(&running);
+        })
+        .detach();
+    Ok(())
 }
 
 /// A promise something else will settle later.
@@ -1400,7 +1518,7 @@ where
 const MAX_OUTSTANDING_TASKS_PER_RUNTIME: usize = 1024;
 
 fn register<'js>(ctx: &Ctx<'js>, task: TaskState) -> JsResult<Rc<TaskState>> {
-    try_register(task).map_err(|message| Exception::throw_range(ctx, &message))
+    try_register(task).map_err(|message| js_error::range_error(ctx, &message))
 }
 
 fn try_register(task: TaskState) -> std::result::Result<Rc<TaskState>, String> {
@@ -1494,7 +1612,7 @@ fn owner_from_options<'js>(
     }
 
     let Some(owner) = owner.as_object() else {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "opts.owner must be a view instance, or null for a task that outlives every view",
         ));
@@ -1509,7 +1627,7 @@ fn owner_from_options<'js>(
     if is_current {
         default()
     } else {
-        Err(Exception::throw_type(
+        Err(js_error::type_error(
             ctx,
             "opts.owner must be the view that is running, or null; a task cannot yet be owned \
              by another view",
@@ -1519,13 +1637,13 @@ fn owner_from_options<'js>(
 
 fn duration(ctx: &Ctx<'_>, api: &str, ms: f64) -> JsResult<Duration> {
     if !ms.is_finite() || ms < 0.0 {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("{api} expects a non-negative number of milliseconds, got {ms}"),
         ));
     }
     Duration::try_from_secs_f64(ms / 1000.0).map_err(|_| {
-        Exception::throw_range(
+        js_error::range_error(
             ctx,
             &format!("{api} milliseconds are outside the supported duration range"),
         )
@@ -1533,7 +1651,7 @@ fn duration(ctx: &Ctx<'_>, api: &str, ms: f64) -> JsResult<Duration> {
 }
 
 fn outside_host_call(ctx: &Ctx<'_>, api: &str) -> rquickjs::Error {
-    Exception::throw_type(
+    js_error::type_error(
         ctx,
         &format!(
             "{api} was called with no host call in progress. It needs the window and app of \
@@ -1541,27 +1659,6 @@ fn outside_host_call(ctx: &Ctx<'_>, api: &str) -> rquickjs::Error {
              scheduler resumed — not from a bare promise callback."
         ),
     )
-}
-
-/// Renders a thrown value the way its author would want to read it: message
-/// first, then the script stack that produced it.
-fn describe_value<'js>(ctx: &Ctx<'js>, value: &Value<'js>) -> String {
-    if let Some(exception) = value.as_exception() {
-        let message = exception.message().unwrap_or_else(|| "error".to_owned());
-        return match exception.stack() {
-            Some(stack) => format!("{message}\n{stack}"),
-            None => message,
-        };
-    }
-
-    if let Some(text) = value.as_string().and_then(|text| text.to_string().ok()) {
-        return text;
-    }
-
-    match ctx.json_stringify(value.clone()) {
-        Ok(Some(text)) => text.to_string().unwrap_or_else(|_| format!("{value:?}")),
-        _ => format!("{value:?}"),
-    }
 }
 
 #[cfg(test)]

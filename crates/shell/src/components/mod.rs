@@ -26,6 +26,32 @@ pub fn init(cx: &mut gpui_shell::gpui::App) {
 
 /// Builds and freezes the `gpui-component` catalog.
 pub fn components() -> Result<gpui_shell::FrozenComponentRegistry, gpui_shell::RegistryError> {
+    registry()?.freeze()
+}
+
+/// Builds the `gpui-component` catalog without freezing it, so an embedding
+/// host can register its own components and states beside it.
+///
+/// A runtime takes one frozen catalog, so a host that wants its own native
+/// components and this catalog in the same script registers both into this
+/// registry and then freezes it. They share the `"gpui-component"` module, and
+/// export names must not collide with the catalog's.
+///
+/// The registry carries [`gpui_component::init`] as its initializer. A host
+/// whose components need their own startup replaces it with a function that
+/// calls `gpui_component::init` first:
+///
+/// ```rust,ignore
+/// fn init(cx: &mut App) {
+///     gpui_component::init(cx);
+///     my_components::init(cx);
+/// }
+///
+/// let mut registry = gpui_shell::components::registry()?.with_initializer(init);
+/// my_components::register(&mut registry)?;
+/// gpui_shell::host::main_with_components(registry.freeze()?);
+/// ```
+pub fn registry() -> Result<gpui_shell::ComponentRegistry, gpui_shell::RegistryError> {
     let mut registry = gpui_shell::ComponentRegistry::new(
         gpui_shell::COMPONENT_REGISTRY_API_VERSION,
         gpui_shell::DEFAULT_COMPONENT_MODULE,
@@ -33,7 +59,7 @@ pub fn components() -> Result<gpui_shell::FrozenComponentRegistry, gpui_shell::R
     .with_initializer(gpui_component::init)
     .with_window_opener(open_window_with_root);
     register(&mut registry)?;
-    registry.freeze()
+    Ok(registry)
 }
 
 /// Creates an isolated shell runtime with this component catalog.
@@ -306,8 +332,12 @@ mod tests {
         let runtime = super::new_isolated_runtime().unwrap();
 
         let declarations = runtime.type_declarations();
-        assert!(declarations.contains("export const Spinner: { new(): SpinnerElement };"));
-        assert!(declarations.contains("export const Skeleton: { new(): SkeletonElement };"));
+        assert!(declarations.contains(
+            "export const Spinner: { new(): SpinnerElement; new: () => SpinnerElement };"
+        ));
+        assert!(declarations.contains(
+            "export const Skeleton: { new(): SkeletonElement; new: () => SkeletonElement };"
+        ));
     }
 
     #[test]
@@ -481,9 +511,9 @@ mod tests {
 
         let declarations = runtime.type_declarations();
         for expected in [
-            "export const Spinner: { new(): SpinnerElement };",
+            "export const Spinner: { new(): SpinnerElement; new: () => SpinnerElement };",
             "size(size: \"xsmall\" | \"small\" | \"medium\" | \"large\"): SpinnerElement;",
-            "export const VerticalDashedSeparator: { new(): SeparatorElement };",
+            "export const VerticalDashedSeparator: { new(): SeparatorElement; new: () => SeparatorElement };",
             "label(label: string): SeparatorElement;",
             "secondary(): SkeletonElement;",
         ] {

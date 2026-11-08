@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{ops::Range, sync::Arc, time::Duration};
 
 use gpui_component::{
     Sizable as _, Size,
@@ -10,10 +10,10 @@ use gpui_component::{
     shimmer::ShimmerText,
 };
 use gpui_shell::{
-    ArgumentDescriptor, ArgumentSchema, ComponentArgument, ComponentCallbackArgument,
-    ComponentDescriptor, ComponentElementCallback, ComponentMaterializer, ComponentPayload,
-    ComponentRegistry, ConstructorDescriptor, MaterializeRequest, MethodDescriptor, RegistryError,
-    StateDescriptor, anyhow,
+    ArgumentDescriptor, ArgumentSchema, ComponentArgument, ComponentDataValue, ComponentDescriptor,
+    ComponentElementCallback, ComponentMaterializer, ComponentPayload, ComponentRegistry,
+    ConstructorDescriptor, MaterializeRequest, MethodDescriptor, RegistryError, StateDescriptor,
+    StateMethodDescriptor, anyhow,
     gpui::{
         self, App, AppContext as _, Axis, Entity, IntoElement as _, ParentElement as _,
         Refineable as _, RenderOnce, Styled as _, Window,
@@ -192,9 +192,12 @@ impl RenderOnce for BoundMessageScroller {
     fn render(self, _: &mut Window, _: &mut App) -> impl gpui::IntoElement {
         let renderer = self.renderer;
         let mut scroller =
+            // Rows are rebuilt during layout on every frame, so they are built
+            // as frame-owned subtrees: a row's own handlers — a link in its
+            // text, a button — retire with the frame instead of piling up.
             MessageScroller::new(self.id, self.state, move |index, window, cx| match renderer
-                .build_with(
-                    &[ComponentCallbackArgument::Number(index as f64)],
+                .build_interactive_data_with(
+                    &[ComponentDataValue::Number(index as f64)],
                     window,
                     cx,
                 ) {
@@ -484,15 +487,18 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                     if value.is_finite()
                         && value.fract() == 0.0
                         && *value >= 0.0
-                        && *value <= usize::MAX as f64 =>
+                        && *value <= MAX_MESSAGE_ROWS as f64 =>
                 {
                     Ok(Box::new(
                         cx.new(|cx| MessageScrollerState::new(*value as usize, cx)),
                     ))
                 }
-                _ => Err("MessageScrollerState expects a non-negative integer item_count".into()),
+                _ => Err(format!(
+                    "MessageScrollerState expects an integer item_count from 0 to {MAX_MESSAGE_ROWS}"
+                )),
             },
         )
+        .with_methods(scroller_state_methods())
         .with_documentation(
             "Retained virtual-list and tail-following state for a message transcript.",
         ),
@@ -508,4 +514,201 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             .with_documentation("A virtualized message transcript with retained scroll and tail-following state."),
     )?;
     Ok(())
+}
+
+/// The rows one transcript may hold. The virtual list keeps native state for
+/// every row, so a count the script got wrong would otherwise be an allocation
+/// that aborts the host.
+const MAX_MESSAGE_ROWS: usize = 1_000_000;
+
+fn check_row_total(total: usize, context: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        total <= MAX_MESSAGE_ROWS,
+        "{context} would leave {total} rows; a transcript holds at most {MAX_MESSAGE_ROWS}"
+    );
+    Ok(())
+}
+
+/// A row index or count: finite, whole and non-negative.
+fn row_number(value: &ComponentDataValue) -> Option<usize> {
+    match value {
+        ComponentDataValue::Number(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && *value >= 0.0
+                && *value <= usize::MAX as f64 =>
+        {
+            Some(*value as usize)
+        }
+        _ => None,
+    }
+}
+
+/// An `ItemRange` (`{ start, end }`) of row indices.
+fn item_range(value: &ComponentDataValue) -> Option<Range<usize>> {
+    let ComponentDataValue::Object(fields) = value else {
+        return None;
+    };
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .and_then(|(_, value)| row_number(value))
+    };
+    Some(field("start")?..field("end")?)
+}
+
+fn row_argument(arguments: &[ComponentDataValue], context: &str) -> anyhow::Result<usize> {
+    match arguments {
+        [count] => row_number(count),
+        _ => None,
+    }
+    .ok_or_else(|| anyhow::anyhow!("{context} expects a non-negative integer"))
+}
+
+fn range_argument(arguments: &[ComponentDataValue], context: &str) -> anyhow::Result<Range<usize>> {
+    match arguments {
+        [range] => item_range(range),
+        _ => None,
+    }
+    .ok_or_else(|| {
+        anyhow::anyhow!("{context} expects an ItemRange of non-negative integer start and end")
+    })
+}
+
+/// A transcript grows, streams and is trimmed while it is on screen, so the
+/// retained state is edited in place: recreating it would drop the scroll
+/// position and tail following.
+fn scroller_state_methods() -> Vec<StateMethodDescriptor> {
+    type State = Entity<MessageScrollerState>;
+    vec![
+        StateMethodDescriptor::new::<State>("item_count", "(): number", |state, _, _, cx| {
+            Ok(ComponentDataValue::Number(
+                state.read(cx).item_count() as f64
+            ))
+        })
+        .with_readonly(true),
+        StateMethodDescriptor::new::<State>(
+            "is_following_tail",
+            "(): boolean",
+            |state, _, _, cx| {
+                Ok(ComponentDataValue::Boolean(
+                    state.read(cx).is_following_tail(),
+                ))
+            },
+        )
+        .with_readonly(true),
+        StateMethodDescriptor::new::<State>("is_scrolled_up", "(): boolean", |state, _, _, cx| {
+            Ok(ComponentDataValue::Boolean(state.read(cx).is_scrolled_up()))
+        })
+        .with_readonly(true),
+        StateMethodDescriptor::new::<State>(
+            "logical_scroll_top",
+            "(): { item_ix: number; offset_in_item: number }",
+            |state, _, _, cx| {
+                let top = state.read(cx).logical_scroll_top();
+                Ok(ComponentDataValue::Object(vec![
+                    (
+                        "item_ix".into(),
+                        ComponentDataValue::Number(top.item_ix as f64),
+                    ),
+                    (
+                        "offset_in_item".into(),
+                        ComponentDataValue::Number(f64::from(f32::from(top.offset_in_item))),
+                    ),
+                ]))
+            },
+        )
+        .with_readonly(true),
+        StateMethodDescriptor::new::<State>(
+            "reset",
+            "(item_count: number): void",
+            |state, arguments, _, cx| {
+                let count = row_argument(arguments, "MessageScrollerState.reset")?;
+                check_row_total(count, "MessageScrollerState.reset")?;
+                state.update(cx, |state, cx| state.reset(count, cx));
+                Ok(ComponentDataValue::Null)
+            },
+        ),
+        StateMethodDescriptor::new::<State>(
+            "splice",
+            "(range: import(\"gpui-kit\").ItemRange, count: number): boolean",
+            |state, arguments, _, cx| {
+                let (range, count) = match arguments {
+                    [range, count] => item_range(range).zip(row_number(count)),
+                    _ => None,
+                }
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "MessageScrollerState.splice expects an ItemRange and a non-negative integer count"
+                    )
+                })?;
+                let current = state.read(cx).item_count();
+                let removed = range.end.min(current).saturating_sub(range.start);
+                check_row_total(
+                    (current - removed).saturating_add(count),
+                    "MessageScrollerState.splice",
+                )?;
+                Ok(ComponentDataValue::Boolean(
+                    state.update(cx, |state, cx| state.splice(range, count, cx)),
+                ))
+            },
+        ),
+        StateMethodDescriptor::new::<State>(
+            "append",
+            "(count: number): boolean",
+            |state, arguments, _, cx| {
+                let count = row_argument(arguments, "MessageScrollerState.append")?;
+                check_row_total(
+                    state.read(cx).item_count().saturating_add(count),
+                    "MessageScrollerState.append",
+                )?;
+                Ok(ComponentDataValue::Boolean(
+                    state.update(cx, |state, cx| state.append(count, cx)),
+                ))
+            },
+        ),
+        StateMethodDescriptor::new::<State>(
+            "prepend",
+            "(count: number): boolean",
+            |state, arguments, _, cx| {
+                let count = row_argument(arguments, "MessageScrollerState.prepend")?;
+                check_row_total(
+                    state.read(cx).item_count().saturating_add(count),
+                    "MessageScrollerState.prepend",
+                )?;
+                Ok(ComponentDataValue::Boolean(
+                    state.update(cx, |state, cx| state.prepend(count, cx)),
+                ))
+            },
+        ),
+        StateMethodDescriptor::new::<State>("remeasure", "(): void", |state, _, _, cx| {
+            state.update(cx, |state, cx| state.remeasure(cx));
+            Ok(ComponentDataValue::Null)
+        }),
+        StateMethodDescriptor::new::<State>(
+            "remeasure_items",
+            "(range: import(\"gpui-kit\").ItemRange): boolean",
+            |state, arguments, _, cx| {
+                let range = range_argument(arguments, "MessageScrollerState.remeasure_items")?;
+                Ok(ComponentDataValue::Boolean(
+                    state.update(cx, |state, cx| state.remeasure_items(range, cx)),
+                ))
+            },
+        ),
+        StateMethodDescriptor::new::<State>(
+            "scroll_to_item",
+            "(index: number): boolean",
+            |state, arguments, _, cx| {
+                let index = row_argument(arguments, "MessageScrollerState.scroll_to_item")?;
+                Ok(ComponentDataValue::Boolean(
+                    state.update(cx, |state, cx| state.scroll_to_item(index, cx)),
+                ))
+            },
+        ),
+        StateMethodDescriptor::new::<State>("scroll_to_end", "(): void", |state, _, _, cx| {
+            state.update(cx, |state, cx| state.scroll_to_end(cx));
+            Ok(ComponentDataValue::Null)
+        }),
+    ]
 }

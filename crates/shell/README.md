@@ -12,8 +12,11 @@ redistribute, and no fork for a contributor who only wants to add a panel.
 also how a plugin is developed: get the script running standalone, then mount
 it in a host.
 
-**It is not an Electron or a Tauri.** There is no WebView, no DOM, no HTML or
-CSS, no browser engine, and no Node.js. A script never renders. It describes an
+**It is not an Electron or a Tauri.** The interface is not a web page: there is
+no DOM, no HTML or CSS, and no Node.js. A `WebView` component can show a web
+page as one element of a GPUI layout, the way an image does, but the
+application around it is never drawn by a browser engine. A script never
+renders. It describes an
 interface once, and Rust replays that description into real GPUI elements on
 every frame after it — the same element model a Rust application on `gpui-base`
 builds, through the same GPU renderer. JavaScript is the application layer here,
@@ -127,6 +130,19 @@ catalog) for macOS, Linux and Windows:
 
 ```bash
 curl -fsSL https://gpui-kit.com/shell/install.sh | sh
+```
+
+The same runtime is available from crates.io:
+
+```bash
+cargo install gpui-shell --version 0.9.0 --locked
+```
+
+To follow `main` ahead of a release, build it from Git instead (into
+`~/.cargo/bin`; run it again to update):
+
+```bash
+cargo install --git https://github.com/longbridge/gpui-kit gpui-shell --locked
 ```
 
 It runs one application per process and has no interface of its own:
@@ -302,6 +318,88 @@ state, sampling, interruption, reduced motion, and frame requests stay native.
 Disabled, selected and checked appearance is the caller's to draw; the base
 layer only reports the state.
 
+### WebView
+
+`"gpui-component"` exports `WebViewState` and `WebView` (the default `webview`
+feature). The state owns a native web page — WKWebView, WebView2 or WebKitGTK —
+so the document and its history survive renders; `WebView` places it in the
+layout and takes shell style for its size.
+
+```js
+import { WebView, WebViewState } from "gpui-component";
+
+// In init():
+this.page = WebViewState.new("https://gpui-kit.com");
+
+// In render():
+WebView.new(this.page)
+  .flex_1()
+  .on_load((url, cx) => this.page.evaluate_script("window.ipc.postMessage(document.title)"))
+  .on_message((title, cx) => { this.title = title; cx.notify(); });
+```
+
+| Method | On | Description |
+| --- | --- | --- |
+| `load_url(url)` / `url()` | `WebViewState` | Navigate, and read the current address |
+| `back()` / `forward()` / `reload()` | `WebViewState` | History and reload |
+| `evaluate_script(js)` | `WebViewState` | Run JavaScript in the page; the page answers through a message |
+| `set_zoom(zoom)` / `zoom()` | `WebViewState` | Page zoom, where `1` is the natural size; the engine scales the page and keeps it across navigations |
+| `set_theme(theme)` | `WebViewState` | The scheme the page sees in `prefers-color-scheme`. By default (`"auto"`) it follows the application theme's appearance; `"light"`, `"dark"` or `"system"` override it. On Linux it is GTK's process-wide preference, shared by every page |
+| `.on_load(handler)` | `WebView` | `handler(url, cx)` after each document finishes loading |
+| `.on_message(handler)` | `WebView` | `handler(text, cx)` for each `window.ipc.postMessage(text)` from the page |
+
+Only `http` and `https` documents load, whether the script or the page
+navigates, and each needs the network grant a `fetch` of it would: a `GET` in
+`capabilities.network.hosts` or `capabilities.network.http`. A navigation that
+is not granted is cancelled, and a message from a page that is not granted is
+dropped. The feature builds the runtime
+on GPUI Fast; on Linux the page needs an X11 or XWayland window (start with
+`WAYLAND_DISPLAY=` in a Wayland session), and on Windows it draws above GPUI
+content it overlaps. [`examples/js_webview`](../../examples/js_webview/main.js)
+is a small browser built on it.
+
+### MessageScroller
+
+`MessageScrollerState.new(count)` is a virtualized transcript's rows, scroll
+position and tail following; `MessageScroller` places it and asks the script
+for each visible row by index. A transcript changes while it is on screen, so
+the state is edited in place rather than recreated, which would drop the
+reader's position. A state holds at most 1,000,000 rows; a count or an edit
+that would exceed it throws.
+
+```js
+import { MessageScroller, MessageScrollerState } from "gpui-component";
+
+// In init():
+this.rows = [];
+this.scroller = MessageScrollerState.new(0);
+
+// When a message arrives:
+this.rows.push(message);
+this.scroller.append(1);
+
+// In render():
+MessageScroller.new("transcript", this.scroller, (index) => renderRow(this.rows[index]))
+  .flex_1()
+  .scrollbar(true);
+```
+
+| Method | Description |
+| --- | --- |
+| `append(count)` / `prepend(count)` | Add rows at the end, or at the start keeping the reader's position |
+| `splice(range, count)` | Replace the rows in `range` (`{ start, end }`) with `count` rows |
+| `reset(count)` | Start over with `count` rows and follow the tail |
+| `remeasure()` / `remeasure_items(range)` | Measure rows again after their content changed size |
+| `scroll_to_item(index)` / `scroll_to_end()` | Scroll to a row, or to the end and follow the tail |
+| `item_count()` | The number of rows |
+| `is_following_tail()` / `is_scrolled_up()` | Whether new rows keep the end in view, and whether the reader has scrolled away from it |
+| `logical_scroll_top()` | `{ item_ix, offset_in_item }`: the row at the top of the viewport and how far into it the list is scrolled |
+
+The edits that take a range or an index return `false`, and change nothing,
+when it is outside the current rows. The arguments are whole non-negative
+numbers; anything else throws. The reads may be called in `render`; the edits
+may not.
+
 ### Views
 
 ```js
@@ -323,7 +421,12 @@ script cost follows what your application does rather than the frame rate.
 
 Elements are single-use values. Build them in `render` and never store one on
 the instance — a stored element belongs to a render that has already ended, and
-reusing it throws rather than drawing something unexpected.
+reusing it throws rather than drawing something unexpected. A description
+nests at most 64 levels, counting children, filled slots and component element
+arguments; the call that would go deeper throws. Views mounted inside one another
+share that depth: together they may span 65 levels, one more for each view, and
+a mount past it, or a view mounted inside itself, draws nothing and logs an
+error.
 
 ## Capabilities and Asynchronous I/O
 
@@ -479,8 +582,8 @@ that.
 ## Host capabilities
 
 Present today: the element and style surface, state styles (`hover` / `active` /
-`focus`), `Button`, `Checkbox`, `Switch`, retained `InputState` with input
-events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
+`focus`, and `group_hover` under a `group`), `Button`, `Checkbox`, `Switch`,
+retained `InputState` with input events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
 timers, `fs` / `localStorage` / clipboard / `process` behind capabilities,
 capability-gated HTTP and text/binary WebSocket clients, native target-value
 transitions and springs, hot reload, `check`, and generated TypeScript
@@ -494,7 +597,7 @@ Deliberately absent:
   supplies collection, select, table, tree, chart, and editor bindings. Consult
   [the component inventory](component-inventory.json) and
   [the gallery](../../examples/js_story/README.md) for available and deferred
-  surfaces; do not assume every delegate, LSP, or WebView facility is exposed.
+  surfaces; do not assume every delegate or LSP facility is exposed.
 - Packaging tooling: `bundle` makes macOS and Linux packages that download the
   runtime, and portable Windows folders; a standalone macOS or Linux package
   carrying the binary is still assembled by hand.
@@ -628,6 +731,19 @@ let reading = runtime.read_metrics();
 // clears them. GPUI's leak check catches a host that forgets.
 gpui_shell::clear_exported_modules();
 ```
+
+A host with native components of its own registers them beside the
+`gpui-component` catalog. A runtime takes one frozen catalog, so the host
+takes the catalog before it is frozen, adds to it, and freezes it:
+
+```rust,ignore
+let mut registry = gpui_shell::components::registry()?;
+registry.register(my_component_descriptor())?;
+gpui_shell::host::main_with_components(registry.freeze()?);
+```
+
+Scripts import those components from `"gpui-component"` with the rest of the
+catalog, so their export names must not collide with the catalog's.
 
 ## How It Works
 

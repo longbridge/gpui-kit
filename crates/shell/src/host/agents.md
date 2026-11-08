@@ -104,7 +104,11 @@ source of truth over this guide.
 
 - **Host methods are snake_case** (`items_center`, `on_click`, `text_sm`,
   `Button.new("id")`), exactly as in Rust. Your own code is camelCase.
-- **Construct with `Type.new(...)`**, never `new Type(...)`.
+- **Construct with `Type.new(...)`** in every module — `Button.new("save")`
+  from `"gpui-base"` and from `"gpui-component"` alike — never `new Type(...)`.
+  The arguments differ by module: `gpui-base`'s `InputState.new({ placeholder })`
+  takes options, `gpui-component`'s `InputState.new(placeholder, value)` takes
+  them in order. `gpui-kit.d.ts` has each signature.
 - **Assign state in `init`, not as class fields.** `View`'s constructor calls
   `init` from inside `super()`; a class field declaration runs afterwards and
   overwrites it with `undefined`.
@@ -118,6 +122,19 @@ source of truth over this guide.
   `Button.new("save")`, `Checkbox.new(`todo-${item.id}`)`.
 - **Controls are controlled.** `Checkbox`/`Switch` take `.checked(value)` and
   report `.on_change((checked, cx) => …)`; store the new value and notify.
+- **Text state reports its own events.** Create an `InputState` in `init`,
+  pass it to `Input.new(state)` from the same module, and subscribe with
+  `state.on("change" | "submit" | "focus" | "blur", (event, cx) => …)`;
+  `submit` is Enter, and `event.shift` says whether Shift was held. A
+  `TextareaState` inserts the line break before it reports `submit`;
+  `gpui-base`'s has `set_submit_on_enter(true)` to make Enter only submit
+  (Shift+Enter still inserts a line break, and still reports `submit` with
+  `shift: true`). Both modules' `InputState` and `TextareaState` answer `on`
+  the same way, but each module's `Input` takes only its own module's state.
+- **Overlays are window calls made from an event handler or a task:**
+  `window.open_dialog(() => element)`, `window.open_sheet(...)`,
+  `window.push_toast({ title })`. `init` runs before the window can show one,
+  so they throw there.
 - **Base controls draw nothing by themselves.** `Button.new("x")` has no
   padding, colour or radius; every visual decision is written in the script.
 - **Use theme tokens for colour**: `cx.theme().colors.surface`,
@@ -125,6 +142,11 @@ source of truth over this guide.
   theme. `#rrggbb` literals bypass the theme and break dark mode.
 - A number length is pixels; a string length is `"auto"`, `"50%"`, `"12px"`
   or `"1rem"`, as far as the Rust signature allows.
+- `.bg(...)` takes a colour or a `Background` from `"gpui-kit"`:
+  `.bg(Background.linear_gradient(180, Background.stop(top, 0), Background.stop(bottom, 1)))`
+  — stop positions are fractions from 0 to 1. `.shadow([...])` takes CSS-like
+  records, `{ x, y, blur, spread, color, inset }`, with CSS blur and CSS
+  stacking (first on top); `[]` clears.
 - `svg(path)` and `image(path)` resolve against the **application root**, not
   the importing file. Keep assets in a directory named after the application.
 - Use `.when(condition, (el) => el.…)` to keep a builder chain in one piece.
@@ -136,6 +158,7 @@ source of truth over this guide.
   thread. There is no background thread for script.
 - `localStorage` / `sessionStorage` persist per application (needs
   `"storage": true`).
+- `TextEncoder` / `TextDecoder` (UTF-8) are globals and need no grant.
 - `fetch` (HTTP), `WebSocket` from `"websocket"`, `fs/promises`, clipboard and
   `process.run` exist but are **denied unless the manifest grants them**. Ask
   for the narrowest grant that works:
@@ -149,6 +172,45 @@ source of truth over this guide.
   "storage": true,
   "clipboard": { "write": true }
 }
+```
+
+- `fs` roots may name the user's files with `${homeDir}`, as in
+  `"read": ["${homeDir}/.config/my-app"]`, or be absolute paths.
+- `os.homedir()`, `process.dataDir` (the `${dataDir}` directory) and
+  `import.meta.url` (a `file:` URL) tell an application where things are.
+  `process.env` holds common variables (`HOME`, `USER`, `HOSTNAME`, `LANG`,
+  `TZ`, `PATH`, `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories…) by
+  default, matched regardless of case; any other variable
+  must be listed in `"process": { "env": ["MY_APP_MODE"] }`.
+- An application with a manifest keeps its data under its `id`, whether run
+  with `-d`, installed or packaged.
+- `process.run(command, args, { cwd, timeoutMs })` waits for a command to
+  finish (30 s unless `timeoutMs` says otherwise). For one that runs longer,
+  reads stdin, or should be read as it works — an AI command line in JSON-lines
+  mode — use `process.spawn`. Same grant (`capabilities.fs.execute`), same empty
+  environment; handlers run on the UI thread with a `cx`, `exit` fires once
+  after the last output, and the child is killed when the view goes away, the
+  application reloads or the window closes:
+
+```js
+import process from "process";
+
+const child = process.spawn("claude", ["-p", prompt, "--output-format", "stream-json"], {
+  cwd: projectDir, // inside capabilities.fs.read
+  lines: true,
+});
+child
+  .on("stdout", (line, cx) => {
+    if (!line.trim()) return;
+    this.events.push(JSON.parse(line));
+    cx.notify();
+  })
+  .on("exit", ({ code, signal, error }, cx) => {
+    this.running = false;
+    this.failure = error ?? (code === 0 ? null : `exited with ${code ?? signal}`);
+    cx.notify();
+  });
+// child.kill() to stop it; { stdin: "pipe" } and child.write(text) / child.end() to talk to it.
 ```
 
 - `console.log` / `console.error` go to the terminal running `{name}`.

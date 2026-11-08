@@ -90,6 +90,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             },
         )
         .with_methods(gpui_shell::textarea_token_state_methods())
+        .with_input_events::<gpui_component::input::TextareaMode>()
         .with_documentation("Retained multi-line editing state with an optional initial value."),
     )?;
     registry.register(ComponentDescriptor::new("Textarea", Arc::new(Materializer))

@@ -45,9 +45,13 @@ const records = familyFiles.flatMap((file) => {
 const inventoryStories = inventory.items.filter(
   (item) => item.source === "story",
 );
+// The gallery mirrors the Rust Story app, which shows `gpui-component` alone.
+// `gpui-webview` is a separate crate with its own example,
+// `examples/js_webview`, so its surfaces have no route to cover them here.
+const GALLERY_SOURCES = new Set(["ui", "story"]);
 const inventorySurfaces = new Map();
 for (const item of inventory.items) {
-  if (!item.registration) continue;
+  if (!item.registration || !GALLERY_SOURCES.has(item.source)) continue;
   const surface =
     item.registration.status === "registered"
       ? (item.registration.api ?? item.registration.descriptor)

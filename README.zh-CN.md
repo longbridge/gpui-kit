@@ -225,6 +225,10 @@ cargo run -p window_title
 
 请查看站点上的[与 Iced、egui、Qt 6 的对比](https://gpui-kit.com/zh-CN/docs/comparison)。
 
+## 相关项目:Native Shell
+
+[Native Shell](https://nsh.dev/zh-CN)([源码](https://github.com/longbridge/native-shell))是我们的兄弟项目,由 AI 生成 UI 并在 iOS、Android、Linux(GTK)和 macOS(AppKit)上原生渲染。它的 GPUI 桌面后端正在开发中,将基于 GPUI Kit 构建。
+
 ## 许可证
 
 软件源码与文档中的代码示例适用 [Apache-2.0](LICENSE-APACHE)。

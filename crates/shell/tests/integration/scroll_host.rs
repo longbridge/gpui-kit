@@ -5,7 +5,7 @@ extern crate gpui_fast as gpui;
 #[path = "../../src/components/shell/scroll/mod.rs"]
 mod scroll;
 
-use gpui::{Entity, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point, px};
+use gpui::{Entity, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point, px};
 use std::{
     fs,
     ops::Deref,
@@ -76,7 +76,10 @@ fn mount(
 
 fn draw(context: &mut VisualTestContext) {
     context.run_until_parked();
-    context.update(|window, cx| window.draw(cx).clear(cx));
+    context.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx)
+    });
 }
 
 #[test]
@@ -127,7 +130,7 @@ export default class App extends View {
     let handle = scroll::test_probe::latest_handle();
     assert_eq!(handle.offset().y, px(0.));
 
-    context.simulate_event(ScrollWheelEvent {
+    context.simulate_event(ScrollEvent {
         position: point(px(40.), px(40.)),
         delta: ScrollDelta::Pixels(point(px(0.), px(-60.))),
         ..Default::default()

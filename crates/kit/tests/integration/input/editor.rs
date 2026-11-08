@@ -2,9 +2,9 @@
 
 use gpui_kit::{
     AppContext, ClipboardItem, Context, Entity, InputEvent, Modifiers, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, TestAppContext, Window, WindowHandle,
+    MouseMoveEvent, MouseUpEvent, ScrollDelta, TestAppContext, Window, WindowHandle,
     component::input::{Editor, EditorState, FoldRange},
-    div,
+    div, point,
     prelude::*,
     px, size,
     test::TestWindowExt,
@@ -492,6 +492,143 @@ fn replace_overlay_tabs_to_replacement_and_replace_all_is_one_undo(cx: &mut Test
         );
         window.press("secondary-z", cx);
         assert_eq!(state.read(cx).value(), "cat dog cat");
+    })
+    .unwrap();
+}
+
+fn custom_search_editor(
+    cx: &mut TestAppContext,
+) -> (
+    WindowHandle<gpui_kit::base::Root>,
+    Entity<EditorState>,
+    String,
+) {
+    let value = (0..180)
+        .map(|row| match row {
+            20 | 90 => format!("Needle on row {row}"),
+            140 => format!("needle on row {row}"),
+            _ => format!("line {row}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    cx.update(gpui_kit::init);
+    let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |window, cx| {
+        cx.new(|cx| EditorFixture {
+            readonly: false,
+            state: cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .searchable(false)
+                    .default_value(value.clone())
+            }),
+        })
+    });
+    let state = cx.update(|cx| view.read(cx).state.clone());
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(("input", state.entity_id()), cx);
+    })
+    .unwrap();
+    (handle, state, value)
+}
+
+fn scroll_custom_search_to_later_match(
+    window: &mut Window,
+    state: &Entity<EditorState>,
+    cx: &mut gpui_kit::App,
+) {
+    let line_height = state.read(cx).cursor_layout().unwrap().1;
+    let cursor = state.read(cx).cursor();
+    window.scroll(
+        ("input", state.entity_id()),
+        ScrollDelta::Pixels(point(px(0.), -line_height * 80.)),
+        cx,
+    );
+    let visible = state.read(cx).visible_row_range().unwrap();
+    assert!(visible.start > 20, "the first match must be offscreen");
+    assert!(visible.contains(&90), "the later match must be visible");
+    assert_eq!(
+        state.read(cx).cursor(),
+        cursor,
+        "scroll must not move the caret"
+    );
+}
+
+#[gpui_kit::test]
+fn custom_search_fresh_query_replaces_viewport_match_and_undoes(cx: &mut TestAppContext) {
+    let (handle, state, value) = custom_search_editor(cx);
+    let start = value.find("Needle on row 90").unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        scroll_custom_search_to_later_match(window, &state, cx);
+        state.update(cx, |state, cx| {
+            state.set_search_query("needle", true, cx);
+            assert!(state.search_session().is_active());
+            assert!(!state.search_session().open);
+            // Replace immediately, without navigation or another rendered frame.
+            assert!(state.replace_current_search_match("found", window, cx));
+        });
+        let mut expected = value.clone();
+        expected.replace_range(start..start + "Needle".len(), "found");
+        assert_eq!(state.read(cx).value(), expected);
+        window.render_frame(cx);
+        assert!(window.try_find("search-panel").is_none());
+        window.press("secondary-z", cx);
+        assert_eq!(state.read(cx).value(), value);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn custom_search_retained_query_resumes_navigation_after_manual_scroll(cx: &mut TestAppContext) {
+    let (handle, state, value) = custom_search_editor(cx);
+    let middle = value.find("Needle on row 90").unwrap();
+    let last = value.find("needle on row 140").unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        state.update(cx, |state, cx| {
+            state.set_search_query("needle", true, cx);
+            assert_eq!(state.next_search_match(cx), Some(middle..middle + 6));
+            assert_eq!(state.next_search_match(cx), Some(last..last + 6));
+            assert_eq!(state.previous_search_match(cx), Some(middle..middle + 6));
+            state.close_search(cx);
+        });
+        window.render_frame(cx);
+        window.scroll(
+            ("input", state.entity_id()),
+            ScrollDelta::Pixels(point(px(0.), px(10000.))),
+            cx,
+        );
+        assert_eq!(state.read(cx).scroll_offset().y, px(0.));
+        state.update(cx, |state, cx| {
+            state.set_search_query("needle", true, cx);
+            assert_eq!(state.search_session().matcher.current(), Some(1));
+            assert!(!state.search_session().open);
+            assert!(state.replace_current_search_match("found", window, cx));
+        });
+        let mut expected = value.clone();
+        expected.replace_range(middle..middle + 6, "found");
+        assert_eq!(state.read(cx).value(), expected);
+        window.render_frame(cx);
+        assert!(window.try_find("search-panel").is_none());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn custom_search_case_change_reanchors_replacement_to_viewport(cx: &mut TestAppContext) {
+    let (handle, state, value) = custom_search_editor(cx);
+    let start = value.find("Needle on row 90").unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        state.update(cx, |state, cx| state.set_search_query("Needle", true, cx));
+        scroll_custom_search_to_later_match(window, &state, cx);
+        state.update(cx, |state, cx| {
+            state.set_search_query("Needle", false, cx);
+            assert_eq!(state.search_session().matcher.len(), 2);
+            assert!(!state.search_session().open);
+            assert!(state.replace_current_search_match("found", window, cx));
+        });
+        let mut expected = value.clone();
+        expected.replace_range(start..start + "Needle".len(), "found");
+        assert_eq!(state.read(cx).value(), expected);
+        window.render_frame(cx);
+        assert!(window.try_find("search-panel").is_none());
     })
     .unwrap();
 }
@@ -1190,6 +1327,44 @@ fn shift_end_then_down_preserves_editor_visual_row_end_affinity(cx: &mut TestApp
             };
             assert_eq!(state.read(cx).selected_range(), expected, "{down}");
         }
+        assert_eq!(state.read(cx).value(), value);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn visual_end_does_not_scroll_a_fully_visible_wrapped_editor_row(cx: &mut TestAppContext) {
+    let value = "x".repeat(600);
+    let (handle, state) = editor(cx, "plaintext", "");
+    let height = cx
+        .update_window(handle.into(), |_, window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_soft_wrap(true, window, cx);
+                state.set_cursor_surrounding_lines(Some(0), window, cx);
+                state.set_value(value.clone(), window, cx);
+            });
+            window.render_frame(cx);
+            let (_, line_height) = state.read(cx).cursor_layout().unwrap();
+            px(480.) - state.read(cx).input_bounds().size.height + line_height * 2.
+        })
+        .unwrap();
+    cx.simulate_window_resize(handle.into(), size(px(800.), height));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("input", state.entity_id()), cx);
+        window.press(platform_shortcut("cmd-up", "ctrl-home"), cx);
+        window.press("down", cx);
+        let before = state.read(cx).scroll_offset();
+        let row_start = state.read(cx).cursor();
+        let top = state.read(cx).cursor_layout().unwrap().0.top();
+        window.press(platform_shortcut("cmd-right", "end"), cx);
+        assert!(state.read(cx).cursor() > row_start && state.read(cx).cursor() < value.len());
+        assert_eq!(state.read(cx).scroll_offset(), before);
+        let caret = state.read(cx).cursor_layout().unwrap().0;
+        let viewport = state.read(cx).input_bounds();
+        assert_eq!(caret.top(), top);
+        assert!(caret.top() + before.y >= viewport.top());
+        assert!(caret.bottom() + before.y <= viewport.bottom());
         assert_eq!(state.read(cx).value(), value);
     })
     .unwrap();

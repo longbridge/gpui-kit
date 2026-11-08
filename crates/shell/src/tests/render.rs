@@ -797,7 +797,7 @@ fn descriptor_drives_runtime_and_typescript(cx: &mut TestAppContext) {
         declarations
             .contains("import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";")
     );
-    assert!(declarations.contains("export const TestBox: { new(id: string): TestBoxElement }"));
+    assert!(declarations.contains("export const TestBox: { new(id: string): TestBoxElement; new: (id: string) => TestBoxElement }"));
     assert!(declarations.contains("tone(value: string): TestBoxElement;"));
     assert!(declarations.contains("A test component."));
     assert!(declarations.contains("Sets the visual tone."));
@@ -4060,6 +4060,343 @@ export default class Styled extends View {
     );
 }
 
+/// A group hover follows the pointer over the group, not over the element
+/// that declares it.
+///
+/// The spacer widens only while the row is hovered, which pushes the button
+/// along under a pointer that would otherwise miss it. A click landing on the
+/// button is therefore the group hover having been applied natively, between
+/// frames, with no script render in between. The spacer is named because GPUI
+/// resolves a group hover during layout from the element's own state; one that
+/// only paints, such as an opacity, needs no name. The second spacer names a
+/// group no ancestor declares: it renders, and nothing happens to it.
+#[gpui::test]
+fn group_hover_restyles_an_element_while_the_pointer_is_over_its_group(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { h_flex, v_flex, Button } from "gpui-base";
+
+export default class Row extends View {
+  init() { this.clicks = 0; this.renders = 0; }
+  render() {
+    this.renders += 1;
+    return v_flex()
+      .w(400)
+      .h(100)
+      .child(
+        h_flex()
+          .group("row")
+          .w(400)
+          .h(40)
+          .child(div().id("spacer").w(10).h(40).group_hover("row", (el) => el.w(200)))
+          .child(
+            Button.new("after")
+              .w(40)
+              .h(40)
+              .on_click((_event, cx) => { this.clicks += 1; cx.notify(); })
+              .child(`Clicks: ${this.clicks}`),
+          ),
+      )
+      .child(div().w(10).h(10).group_hover("nowhere", (el) => el.w(300)))
+      .child(`Renders: ${this.renders}`);
+  }
+}
+"#;
+    let view_type = runtime.load_source("group-hover.js", source).expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let object = runtime_for_view
+            .instantiate(&view_type, window, cx)
+            .expect("instantiate");
+        ScriptView::new(runtime_for_view, object)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let tree = |context: &mut VisualTestContext| {
+        let view = window.root(context).expect("view");
+        context.update(|_, cx| {
+            view.read(cx)
+                .snapshot()
+                .map(crate::RenderSnapshot::debug_tree)
+                .unwrap_or_default()
+        })
+    };
+
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let described = tree(&mut context);
+    assert!(
+        described.contains(r#":group[Str("row")]"#),
+        "the group has to survive into the description: {described}"
+    );
+    assert!(
+        described.contains(r#":group_hover["row"](.w"#),
+        "the group hover has to survive into the description: {described}"
+    );
+    assert!(
+        described.contains(r#":group_hover["nowhere"](.w"#),
+        "a group hover naming no group still renders: {described}"
+    );
+
+    assert!(
+        described.contains("Renders: 1"),
+        "one script render before the pointer arrives: {described}"
+    );
+
+    // Unhovered, the button spans 10..50, so x = 220 is empty row.
+    let over_the_widened_button = point(px(220.), px(20.));
+    context.simulate_mouse_move(over_the_widened_button, None, Modifiers::default());
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(
+        tree(&mut context).contains("Renders: 1"),
+        "the group hover must apply natively, without a script render"
+    );
+    context.simulate_click(over_the_widened_button, Modifiers::default());
+    context.run_until_parked();
+    assert!(
+        tree(&mut context).contains("Clicks: 1"),
+        "hovering the row must widen the spacer and move the button under the pointer"
+    );
+}
+
+/// A group and a group hover are styles, not handlers, so a virtual list's
+/// item renderer may declare them: that renderer runs during layout, where a
+/// handler would be refused, and it is where a list's rows are built.
+#[gpui::test]
+fn a_virtual_list_row_may_declare_a_group_and_a_group_hover(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { h_flex, v_flex, v_virtual_list, Button } from "gpui-base";
+export default class Rows extends View {
+  init() { this.errors = []; this.built = 0; }
+  render() {
+    return v_flex()
+      .w(300)
+      .h(120)
+      .child(
+        Button.new("refresh")
+          .h(40)
+          .on_click((_event, cx) => cx.notify())
+          .child(`Built: ${this.built}; Errors: ${this.errors.join(" | ") || "none"}`),
+      )
+      .child(v_virtual_list("rows", 3, 20, (index) => String(index), (range) => {
+        this.errors = [];
+        const rows = [];
+        for (let index = range.start; index < range.end; index++) {
+          try {
+            rows.push(
+              h_flex()
+                .group("row")
+                .h(20)
+                .child(String(index))
+                .child(div().w(10).h(10).opacity(0).group_hover("row", (el) => el.opacity(1))),
+            );
+            this.built += 1;
+          } catch (error) {
+            this.errors.push(String(error));
+          }
+        }
+        return rows;
+      }));
+  }
+}
+"#;
+    let view_type = runtime
+        .load_source("group-hover-rows.js", source)
+        .expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime_for_view
+            .instantiate_view(&view_type, window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("view")
+        .read_with(&context, |root, _| root.0.clone());
+    context.simulate_click(point(px(20.), px(20.)), Modifiers::default());
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    assert!(
+        tree.contains("Errors: none"),
+        "a row refused the group hover: {tree}"
+    );
+    assert!(
+        !tree.contains("Built: 0"),
+        "the renderer built no rows: {tree}"
+    );
+}
+
+/// A group name is all a group hover can match, so one that could never match
+/// is refused where it was written, and so is a call with the two arguments
+/// swapped or the function missing. Each would otherwise leave styles that
+/// never apply, with nothing on screen to say why.
+#[gpui::test]
+fn group_and_group_hover_refuse_a_name_they_could_never_match(cx: &mut TestAppContext) {
+    for (call, expected) in [
+        (
+            r#"div().group("")"#,
+            "group(name) expects a non-empty string",
+        ),
+        ("div().group(7)", "group(name) expects a non-empty string"),
+        (
+            r#"div().group_hover("", (el) => el.w(10))"#,
+            "expects the group's name first",
+        ),
+        (
+            "div().group_hover(7, (el) => el.w(10))",
+            "expects the group's name first",
+        ),
+        (
+            r#"div().group_hover((el) => el.w(10), "row")"#,
+            "expects the group's name first",
+        ),
+        (r#"div().group_hover("row")"#, "expects a function second"),
+    ] {
+        let source = format!(
+            r#"
+import {{ div, View }} from "gpui-kit";
+
+export default class Misused extends View {{
+  render() {{
+    return {call};
+  }}
+}}
+"#
+        );
+        let message = render_error(cx, "group-misuse.js", &source);
+        assert!(
+            message.contains(expected),
+            "`{call}` must fail naming what it wanted: {message}"
+        );
+    }
+}
+
+#[gpui::test]
+fn bg_takes_a_background_and_shadow_takes_css_records(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+
+    let source = r##"
+import { View, div, Background } from "gpui-kit";
+
+const gold = Background.linear_gradient(180, Background.stop("#f7da74", 0), Background.stop("#fdcd12", 1));
+
+export default class Surface extends View {
+  render() {
+    return div()
+      .rounded(10)
+      .bg(gold)
+      .shadow([
+        { spread: 1, color: "#0d0d0f" },
+        { y: 1, color: "#ffffff10", inset: true },
+        { y: 1, blur: 2, color: "#00000066" },
+      ])
+      .hover((el) => el.bg(gold.opacity(0.8)).shadow([]));
+  }
+}
+"##;
+
+    let view_type = runtime.load_source("surface", source).expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let object = context
+        .update(|window, cx| runtime.instantiate(&view_type, window, cx))
+        .expect("instantiate");
+
+    let tree = context.update(|window, cx| {
+        runtime
+            .render_to_spec(&object, None, window, cx)
+            .expect("render")
+    });
+
+    assert!(
+        tree.contains(r##".bg[Background(BackgroundSpec { kind: LinearGradient { angle: 180.0, from: ("#f7da74", 0.0), to: ("#fdcd12", 1.0)"##),
+        "gradient not recorded: {tree}"
+    );
+    assert!(
+        tree.contains(r##"ShadowSpec { x: 0.0, y: 1.0, blur: 0.0, spread: 0.0, color: "#ffffff10", inset: true }"##),
+        "inset shadow not recorded: {tree}"
+    );
+    assert!(tree.contains(r##"color: "#00000066""##), "{tree}");
+    assert!(
+        tree.contains(":hover(.bg[Background("),
+        "hover bg not recorded: {tree}"
+    );
+    assert!(
+        tree.contains(".shadow[Shadows([])]"),
+        "hover shadow not recorded: {tree}"
+    );
+}
+
+#[gpui::test]
+fn structured_paint_arguments_fail_where_they_were_written(cx: &mut TestAppContext) {
+    for (body, expected) in [
+        (
+            r##"div().shadow({ y: 1, color: "#000" })"##,
+            "wrap a single one in [ ]",
+        ),
+        (
+            r##"div().shadow([{ offsetY: 1, color: "#000" }])"##,
+            "shadow 0: unknown field `offsetY`",
+        ),
+        (
+            r##"div().shadow([{ y: 1 }])"##,
+            "shadow 0: `color` is required",
+        ),
+        (
+            r##"div().shadow([{ blur: -2, color: "#000" }])"##,
+            "shadow 0: `blur` must be a finite, non-negative number",
+        ),
+        (
+            r##"div().shadow([{ color: "#000", inset: "yes" }])"##,
+            "`inset` must be a boolean",
+        ),
+        (
+            r##"div().shadow([{ color: "#000" }, { color: "black" }])"##,
+            "shadow 1: `black` is not a color value",
+        ),
+        (
+            r##"div().bg(Background.linear_gradient(90, "gold", "#000"))"##,
+            "`gold` is not a color value",
+        ),
+        (r##"div().p([4])"##, "`p` does not take an array"),
+        (
+            r##"div().border_color(Background.solid("#000"))"##,
+            "got a Background",
+        ),
+    ] {
+        let source = format!(
+            r#"
+import {{ View, div, Background }} from "gpui-kit";
+export default class Broken extends View {{
+  render() {{ return {body}; }}
+}}
+"#,
+        );
+        let message = render_error(cx, "broken.js", &source);
+        assert!(message.contains(expected), "`{body}`: {message}");
+    }
+}
+
 #[gpui::test]
 fn transition_declarations_survive_the_script_render(cx: &mut TestAppContext) {
     cx.update(|cx| crate::init(cx));
@@ -5761,6 +6098,95 @@ export default class Bad extends View {
     assert!(
         error.to_string().contains("submit"),
         "the error should list the valid events, got: {error}"
+    );
+}
+
+/// A textarea set to submit on Enter keeps the line break out of the text,
+/// and Shift+Enter still starts a new line.
+///
+/// Without the setting base inserts the break first and then reports
+/// `submit`, so the first handler call would read `send` followed by a break.
+/// The handler records the text it reads with each break shown as `|`.
+///
+/// The test sends base's `Enter` action rather than the key. When nothing
+/// handles a key, the test window types its character, and it gives Enter the
+/// character `\n`; the macOS, Windows and Linux windows type nothing for it.
+/// Base hands a submitting Enter on to the parent, so the key would put the
+/// break back in here and only here.
+#[gpui::test]
+fn a_textarea_that_submits_on_enter_keeps_the_line_break_for_shift_enter(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { Textarea, TextareaState } from "gpui-base";
+
+export default class Composer extends View {
+  init() {
+    this.draft = TextareaState.new({ rows: 4 });
+    this.draft.set_submit_on_enter(true);
+    this.submits = [];
+    this.draft.on("submit", (event, cx) => {
+      const text = this.draft.value().replace(/\n/g, "|");
+      this.submits.push(`${event.shift ? "shift" : "enter"}=${text}`);
+      cx.notify();
+    });
+  }
+  render(cx) {
+    return div()
+      .child(Textarea.new(this.draft).w(300).h(100))
+      .child(`submits:${this.submits.join(",")};`);
+  }
+}
+"#;
+    let view_type = runtime.load_source("composer.js", source).expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime_for_view
+            .instantiate_view(&view_type, window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("view")
+        .read_with(&context, |root, _| root.0.clone());
+    let state = runtime
+        .entities()
+        .first_textarea()
+        .expect("the script's textarea state");
+    context.update(|window, cx| state.update(cx, |state, cx| state.focus(window, cx)));
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let enter = |shift| gpui_base::input::Enter {
+        secondary: false,
+        shift,
+    };
+
+    context.simulate_input("send");
+    context.dispatch_action(enter(false));
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let entered = described(&mut context, &view);
+    assert!(
+        entered.contains("submits:enter=send;"),
+        "Enter must submit the text without a line break: {entered}"
+    );
+
+    context.dispatch_action(enter(true));
+    context.simulate_input("two");
+    context.dispatch_action(enter(false));
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let after = described(&mut context, &view);
+    assert!(
+        after.contains("submits:enter=send,shift=send|,enter=send|two;"),
+        "Shift+Enter must insert the break and report `submit` with `shift`: {after}"
+    );
+    assert_eq!(
+        context.update(|_, cx| state.read(cx).value().to_string()),
+        "send\ntwo"
     );
 }
 
@@ -7986,6 +8412,139 @@ export default class Pager extends View {
     );
 }
 
+/// A page count is bounded before base builds one item per visible page, so a
+/// huge count is a script error rather than an allocation that aborts the host.
+#[gpui::test]
+fn pagination_items_refuse_counts_beyond_their_bounds(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import { pagination_items } from "gpui-base";
+
+const outcome = (call) => {
+  try {
+    return `${call().length} items`;
+  } catch (error) {
+    return String(error.message);
+  }
+};
+
+export default class Pager extends View {
+  render(_cx) {
+    return v_flex()
+      .child(div().child(`window=${outcome(() => pagination_items(1, 1e9, 1e17))}`))
+      .child(div().child(`total=${outcome(() => pagination_items(1, 1e17, 7))}`))
+      .child(div().child(`largest=${outcome(() => pagination_items(1, 4294967295, 7))}`));
+  }
+}
+"#;
+    let view_type = runtime
+        .load_source("pagination-bounds", source)
+        .expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let view = context
+        .update(|window, cx| runtime.instantiate_view(&view_type, window, cx))
+        .expect("instantiate");
+    draw(&mut context, &view);
+
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    assert!(
+        tree.contains("window=pagination_items(current_page, total_pages, visible_pages?) expects"),
+        "a visible-page count beyond the bound must be refused: {tree}"
+    );
+    assert!(
+        tree.contains("total=pagination_items(current_page, total_pages, visible_pages?) expects"),
+        "a page number beyond what a script receives must be refused: {tree}"
+    );
+    assert!(
+        tree.contains("largest=6 items"),
+        "the largest representable total still lays out: {tree}"
+    );
+}
+
+/// Every edit that changes a transcript's row count is bounded, because the
+/// virtual list keeps native state for each row.
+#[cfg(feature = "components")]
+#[gpui::test]
+fn message_scroller_state_refuses_row_counts_beyond_its_bound(cx: &mut TestAppContext) {
+    cx.update(crate::components::init);
+
+    let runtime = crate::components::new_isolated_runtime().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { v_flex } from "gpui-base";
+import { MessageScrollerState } from "gpui-component";
+
+const outcome = (call) => {
+  try {
+    call();
+    return "accepted";
+  } catch (error) {
+    return String(error.message);
+  }
+};
+
+export default class Transcript extends View {
+  init() {
+    this.outcomes = [
+      `new=${outcome(() => MessageScrollerState.new(1e17))}`,
+    ];
+    this.rows = MessageScrollerState.new(2);
+    this.outcomes.push(
+      `reset=${outcome(() => this.rows.reset(1e17))}`,
+      `append=${outcome(() => this.rows.append(1e17))}`,
+      `prepend=${outcome(() => this.rows.prepend(999999))}`,
+      `splice=${outcome(() => this.rows.splice({ start: 0, end: 1 }, 1e17))}`,
+      `fill=${outcome(() => this.rows.splice({ start: 0, end: 2 }, 1000000))}`,
+    );
+  }
+
+  render(_cx) {
+    return v_flex()
+      .children(this.outcomes.map((line) => div().child(line)))
+      .child(div().child(`count=${this.rows.item_count()}`));
+  }
+}
+"#;
+    let view_type = runtime
+        .load_source("message-scroller-bounds", source)
+        .expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let object = context
+        .update(|window, cx| runtime.instantiate(&view_type, window, cx))
+        .expect("instantiate");
+    let tree = context.update(|window, cx| {
+        runtime
+            .render_to_spec(&object, None, window, cx)
+            .expect("render")
+    });
+
+    assert!(
+        tree.contains("new=MessageScrollerState expects an integer item_count from 0 to 1000000"),
+        "{tree}"
+    );
+    for edit in ["reset", "append", "prepend", "splice"] {
+        assert!(
+            tree.contains(&format!("{edit}=MessageScrollerState.{edit} would leave")),
+            "{edit} beyond the bound must be refused: {tree}"
+        );
+    }
+    assert!(tree.contains("fill=accepted"), "{tree}");
+    assert!(tree.contains("count=1000000"), "{tree}");
+}
+
 /// An `Avatar` renders its image slot, and falls back to the other when there
 /// is none.
 ///
@@ -8314,6 +8873,73 @@ export default class Surface extends View {
         tree.contains("log=down:left:1 up:left outside"),
         "a press and release inside, then a press outside, and no right-button \
          handler firing for a left press: {tree}"
+    );
+}
+
+/// A pinch reaches the element under it with GPUI's zoom delta and phase, so a
+/// script can zoom a viewport the way it would with the wheel.
+#[gpui::test]
+fn a_script_hears_a_pinch_over_its_element(cx: &mut TestAppContext) {
+    cx.update(|cx| crate::init(cx));
+
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+
+export default class Map extends View {
+  init(_props, _cx) {
+    this.zoom = 1;
+    this.phase = "none";
+  }
+
+  render(_cx) {
+    return div()
+      .id("map")
+      .w(300)
+      .h(200)
+      .on_pinch((event, cx) => {
+        this.zoom *= 1 + event.delta;
+        this.phase = `${event.phase}@${event.local_position.x}`;
+        cx.notify();
+      })
+      .child(`zoom=${this.zoom.toFixed(2)} ${this.phase}`);
+  }
+}
+"#;
+    let view_type = runtime.load_source("pinch", source).expect("load");
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime_for_view
+            .instantiate_view(&view_type, window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("root view")
+        .read_with(&context, |root, _| root.0.clone());
+
+    context.simulate_event(gpui::PinchEvent {
+        position: point(px(40.), px(30.)),
+        delta: 0.5,
+        phase: gpui::TouchPhase::Moved,
+        ..Default::default()
+    });
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    assert!(
+        tree.contains("zoom=1.50 moved@40"),
+        "a pinch must reach the handler with its delta, phase and local position: {tree}"
     );
 }
 
@@ -9693,6 +10319,32 @@ export default class Toolbar extends View {
     );
 }
 
+/// A thrown value that is not an Error has no message or stack of its own, so
+/// the report has to say what was thrown rather than dump the engine's value.
+#[gpui::test]
+fn a_thrown_non_error_value_is_reported_in_words(cx: &mut TestAppContext) {
+    for (thrown, expected) in [
+        ("null", "A script threw null instead of an Error."),
+        ("undefined", "A script threw undefined instead of an Error."),
+        (
+            "{ code: 7 }",
+            r#"A script threw {"code":7} instead of an Error."#,
+        ),
+        ("\"plain text\"", "plain text"),
+    ] {
+        let source = format!(
+            r#"
+import {{ View }} from "gpui-kit";
+export default class Thrower extends View {{
+  render() {{ throw {thrown}; }}
+}}
+"#,
+        );
+        let message = render_error(cx, "thrower.js", &source);
+        assert_eq!(message.lines().next(), Some(expected), "{message}");
+    }
+}
+
 /// Renders `source` once and returns the message it failed with.
 fn render_error(cx: &mut TestAppContext, name: &str, source: &str) -> String {
     cx.update(|cx| crate::init(cx));
@@ -10080,7 +10732,7 @@ fn mount_virtual_list(
 }
 
 fn scroll_by(context: &mut VisualTestContext, dy: f32) {
-    context.simulate_event(gpui::ScrollWheelEvent {
+    context.simulate_event(gpui::ScrollEvent {
         position: point(px(150.), px(100.)),
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(dy))),
         ..Default::default()
@@ -10134,25 +10786,39 @@ fn a_virtual_lists_handlers_do_not_accumulate_while_it_is_scrolled(cx: &mut Test
     );
 }
 
+/// `row.on_click(...)` is the way anyone writes a clickable row, so a row may
+/// register its own handler. It lives in a callback generation of the batch
+/// that described it, released when the frame that drew the row is replaced —
+/// so scrolling, which describes new rows on every frame, holds the count to
+/// one screenful rather than letting it grow with every frame drawn.
 #[gpui::test]
-fn a_row_cannot_register_a_handler_of_its_own(cx: &mut TestAppContext) {
-    let (_runtime, _window, view, mut context) = mount_virtual_list(
+fn a_row_registers_its_own_handler_without_accumulating(cx: &mut TestAppContext) {
+    let (runtime, _window, view, mut context) = mount_virtual_list(
         cx,
-        "try { row.on_click(() => {}); } catch (error) { this.refused = String(error.message); }",
+        "const at = index; row.on_click((_event, cx) => { this.refused = `row${at}`; cx.notify(); });",
     );
 
+    context.simulate_click(point(px(150.), px(50.)), Modifiers::default());
+    context.update(|window, cx| window.draw(cx).clear(cx));
     let tree = redraw_and_read(&mut context, &view);
     assert!(
-        tree.contains("refused"),
-        "the view reports what the row was told: {tree}"
+        tree.contains("refused row2"),
+        "the click must reach the handler the third row registered: {tree}"
     );
-    let refused = tree
-        .split("refused ")
-        .nth(1)
-        .unwrap_or_else(|| panic!("no refusal in: {tree}"));
     assert!(
-        refused.contains("on_item_click"),
-        "the refusal must name what to use instead: {refused}"
+        tree.contains("clicked 2"),
+        "and the list's own on_item_click still fires: {tree}"
+    );
+
+    let settled = runtime.live_callbacks();
+    for step in 0..20 {
+        scroll_by(&mut context, if step % 2 == 0 { -60. } else { 40. });
+    }
+    let scrolled = runtime.live_callbacks();
+    assert!(
+        scrolled <= settled + 2,
+        "row handlers must be released with the frame that drew them: {settled} before \
+         scrolling, {scrolled} after"
     );
 }
 
@@ -10866,4 +11532,420 @@ fn a_list_reports_which_item_was_clicked(cx: &mut TestAppContext) {
     // Alternating heights: row 0 covers 0..20, row 1 covers 20..60, row 2
     // covers 60..80.
     assert_a_click_reports_the_row_key(cx, measured_list_source(), 70.);
+}
+
+/// A transcript in a `list`: a hundred twenty-pixel rows in a 200px box, and
+/// under it four controls that change the collection the way a chat does —
+/// a page of older items above, one newer item below, one item taken out, and
+/// the last item grown to 60px, as a message being streamed grows.
+/// `builders` is appended to the list's own chain.
+///
+/// The key under a click is written into the tree, which is how a test reads
+/// which item is where.
+fn transcript_source(builders: &str) -> String {
+    format!(
+        r#"
+import {{ div, View, list }} from "gpui-kit";
+import {{ v_flex }} from "gpui-base";
+
+export default class Transcript extends View {{
+  init() {{
+    this.items = [];
+    for (let index = 0; index < 100; index++) this.items.push(`m${{index}}`);
+    this.pages = 0;
+    this.tall = "";
+    this.clicked = "none";
+  }}
+
+  control(label, change) {{
+    return div()
+      .h(40)
+      .on_click((_event, cx) => {{
+        change();
+        cx.notify();
+      }})
+      .child(label);
+  }}
+
+  render(cx) {{
+    return v_flex()
+      .w(300)
+      .h(400)
+      .child(
+        v_flex()
+          .h(200)
+          .child(
+            list("rows", this.items.length, (index) => this.items[index], (index) =>
+              div().h(this.items[index] === this.tall ? 60 : 20).child(this.items[index]),
+            )
+              .on_item_click((key, cx) => {{
+                this.clicked = key;
+                cx.notify();
+              }}){builders},
+          ),
+      )
+      .child(this.control("older", () => {{
+        const page = [];
+        for (let index = 0; index < 10; index++) page.push(`p${{this.pages}}-${{index}}`);
+        this.pages += 1;
+        this.items = page.concat(this.items);
+      }}))
+      .child(this.control("newer", () => {{
+        this.items = this.items.concat([`m${{this.items.length + 1000}}`]);
+      }}))
+      .child(this.control("take out m7", () => {{
+        this.items = this.items.filter((key) => key !== "m7");
+      }}))
+      .child(this.control("grow the last", () => {{
+        this.tall = this.items[this.items.length - 1];
+      }}))
+      .child(`clicked ${{this.clicked}}`);
+  }}
+}}
+"#
+    )
+}
+
+/// Clicks at `y` and draws the frame the click produced.
+fn click_at(context: &mut VisualTestContext, y: f32) {
+    context.simulate_click(point(px(150.), px(y)), Modifiers::default());
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+/// The key of the transcript item under `y`, as `on_item_click` reports it.
+fn transcript_key_at(
+    context: &mut VisualTestContext,
+    view: &gpui::Entity<ScriptView>,
+    y: f32,
+) -> String {
+    click_at(context, y);
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    tree.split("clicked ")
+        .nth(1)
+        .and_then(|rest| {
+            rest.split(|character: char| character.is_whitespace() || character == '"')
+                .next()
+        })
+        .unwrap_or_else(|| panic!("no clicked key in: {tree}"))
+        .to_owned()
+}
+
+#[gpui::test]
+fn a_list_keeps_the_reader_on_their_item_when_the_count_changes(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &transcript_source(""));
+
+    // 150px down: `m7` is at the top, ten pixels of it scrolled past, so the
+    // boundary with `m8` is ten pixels into the box.
+    scroll_by(&mut context, -150.);
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m7");
+    assert_eq!(transcript_key_at(&mut context, &view, 15.), "m8");
+
+    // Ten older items above: GPUI's splice alone would show `p0-0` at the top.
+    click_at(&mut context, 220.);
+    assert_eq!(
+        transcript_key_at(&mut context, &view, 5.),
+        "m7",
+        "a page put above the reader must not move what they are reading"
+    );
+    assert_eq!(
+        transcript_key_at(&mut context, &view, 15.),
+        "m8",
+        "and the position inside the item must survive with it"
+    );
+
+    // One newer item below.
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m7");
+    assert_eq!(transcript_key_at(&mut context, &view, 15.), "m8");
+
+    // The item at the top itself taken out: there is nothing to follow, so the
+    // position stays at its index, where the next item now is.
+    click_at(&mut context, 300.);
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m8");
+}
+
+#[gpui::test]
+fn a_list_following_its_tail_stays_at_the_end_until_the_reader_scrolls_up(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) =
+        mount_list_source(cx, &transcript_source(r#".with_follow_mode("tail")"#));
+
+    // It opens at the end: `m99` is flush with the bottom of the box.
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m99");
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m90");
+
+    // An item added below is followed, and so is the last item growing.
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m1100");
+    click_at(&mut context, 340.);
+    assert_eq!(
+        transcript_key_at(&mut context, &view, 145.),
+        "m1100",
+        "the grown last item must fill the bottom 60px of the box"
+    );
+
+    // Scrolling up stops it: the next item lands below the fold and the item
+    // being read stays where it is.
+    scroll_by(&mut context, 60.);
+    let reading = transcript_key_at(&mut context, &view, 5.);
+    click_at(&mut context, 260.);
+    assert_eq!(
+        transcript_key_at(&mut context, &view, 5.),
+        reading,
+        "a reader who scrolled up must not be pulled back down"
+    );
+
+    // Back at the end, it follows again.
+    scroll_by(&mut context, -1000.);
+    click_at(&mut context, 260.);
+    assert_eq!(transcript_key_at(&mut context, &view, 195.), "m1102");
+}
+
+/// A follow mode GPUI does not have is refused where it was written, rather
+/// than leaving the list in whichever mode it was in.
+#[gpui::test]
+fn a_follow_mode_other_than_normal_or_tail_is_refused(cx: &mut TestAppContext) {
+    let message = render_error(
+        cx,
+        "follow.js",
+        r#"
+import { div, View, list } from "gpui-kit";
+
+export default class Transcript extends View {
+  render() {
+    return list("rows", 1, () => "only", () => div()).with_follow_mode("bottom");
+  }
+}
+"#,
+    );
+    assert!(
+        message.contains(r#"with_follow_mode(mode) expects "normal" or "tail""#),
+        "the message has to name the method and the modes it takes: {message}"
+    );
+}
+
+/// A `list` of a hundred twenty-pixel rows in a 200px box, a `Scrollbar` paired
+/// with it by name, and a control under it that adds one row. What the list
+/// last reported through `on_visible_range_change` is written into the tree.
+fn reporting_list_source() -> &'static str {
+    r#"
+import { div, View, list } from "gpui-kit";
+import { Scrollbar, v_flex } from "gpui-base";
+
+export default class Rows extends View {
+  init() {
+    this.count = 100;
+    this.reported = "none";
+  }
+
+  render(cx) {
+    return v_flex()
+      .w(300)
+      .h(400)
+      .child(
+        v_flex()
+          .relative()
+          .h(200)
+          .child(
+            list("rows", this.count, (index) => `r${index}`, (index) =>
+              div().h(20).child(`row ${index}`),
+            ).on_visible_range_change((range, count, cx) => {
+              this.reported = `${range.start}..${range.end} of ${count}`;
+              cx.notify();
+            }),
+          )
+          .child(Scrollbar.vertical("rows").mode("always").absolute().inset_0()),
+      )
+      .child(
+        div()
+          .h(40)
+          .on_click((_event, cx) => {
+            this.count += 1;
+            cx.notify();
+          })
+          .child("one more"),
+      )
+      .child(`reported ${this.reported}`);
+  }
+}
+"#
+}
+
+/// Draws until a report made after one frame has been rendered by the next,
+/// and reads `start..end of count` out of the tree.
+fn reported_visible_range(
+    context: &mut VisualTestContext,
+    view: &gpui::Entity<ScriptView>,
+) -> (usize, usize, usize) {
+    for _ in 0..3 {
+        context.run_until_parked();
+        context.update(|window, cx| window.draw(cx).clear(cx));
+    }
+    let tree = context.update(|_, cx| {
+        view.read(cx)
+            .snapshot()
+            .map(crate::RenderSnapshot::debug_tree)
+            .unwrap_or_default()
+    });
+    let text = tree
+        .split("reported ")
+        .nth(1)
+        .unwrap_or_else(|| panic!("no report in: {tree}"));
+    let numbers: Vec<usize> = text
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .take(3)
+        .map(|part| part.parse().expect("a number"))
+        .collect();
+    assert_eq!(numbers.len(), 3, "no `start..end of count` in: {tree}");
+    (numbers[0], numbers[1], numbers[2])
+}
+
+#[gpui::test]
+fn a_list_reports_its_visible_range_however_it_changed(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, reporting_list_source());
+
+    // The first frame is reported, and the handler's `cx.notify()` is
+    // honoured, which it would not be from inside layout.
+    assert_eq!(reported_visible_range(&mut context, &view), (0, 10, 100));
+
+    // A wheel scroll, which is the one case GPUI's own scroll handler sees.
+    scroll_by(&mut context, -100.);
+    assert_eq!(reported_visible_range(&mut context, &view), (5, 15, 100));
+
+    // A new item count with the same items in view.
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (5, 15, 101));
+
+    // A press on the scrollbar's track below the thumb, which moves the list
+    // without a scroll event.
+    context.simulate_click(point(px(295.), px(190.)), Modifiers::default());
+    let (start, end, count) = reported_visible_range(&mut context, &view);
+    assert!(
+        start > 5 && end - start == 10 && count == 101,
+        "a jump on the scrollbar must be reported: {start}..{end} of {count}"
+    );
+}
+
+/// Tail following and after-frame reports share the same retained list state.
+#[gpui::test]
+fn a_list_reports_its_visible_range_while_following_its_tail(cx: &mut TestAppContext) {
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").with_follow_mode(\"tail\").on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+    assert_eq!(reported_visible_range(&mut context, &view), (90, 100, 100));
+
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (91, 101, 101));
+
+    scroll_by(&mut context, 60.);
+    let reading = reported_visible_range(&mut context, &view);
+    assert!(reading.1 < reading.2, "scrolling up pauses following");
+    click_at(&mut context, 220.);
+    assert_eq!(
+        reported_visible_range(&mut context, &view),
+        (reading.0, reading.1, 102),
+    );
+
+    scroll_by(&mut context, -1000.);
+    click_at(&mut context, 220.);
+    assert_eq!(reported_visible_range(&mut context, &view), (93, 103, 103));
+}
+
+#[gpui::test]
+fn a_list_reports_only_items_visible_after_its_padding(cx: &mut TestAppContext) {
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").pt(20).on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+
+    // The tenth row starts exactly at the bottom, below the top padding.
+    assert_eq!(reported_visible_range(&mut context, &view), (0, 9, 100));
+    scroll_by(&mut context, -100.);
+    assert_eq!(reported_visible_range(&mut context, &view), (5, 14, 100));
+
+    // A row that intersects the bottom edge must still be reported.
+    scroll_by(&mut context, -10.);
+    assert_eq!(reported_visible_range(&mut context, &view), (5, 15, 100));
+
+    // GPUI paints no items when padding consumes the whole viewport.
+    let source = reporting_list_source().replace(
+        ").on_visible_range_change",
+        ").pt(100).pb(100).on_visible_range_change",
+    );
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, &source);
+    assert_eq!(reported_visible_range(&mut context, &view), (0, 0, 100));
+}
+
+/// The case the report exists for: a chat that loads a page of older items
+/// when the reader reaches the top, and must not then be thrown to the top of
+/// the page it loaded, which would load the next one, and the next.
+#[gpui::test]
+fn a_list_can_load_older_items_when_the_reader_reaches_the_top(cx: &mut TestAppContext) {
+    let source = r#"
+import { div, View, list } from "gpui-kit";
+import { v_flex } from "gpui-base";
+
+export default class History extends View {
+  init() {
+    this.items = [];
+    for (let index = 0; index < 100; index++) this.items.push(`m${index}`);
+    this.pages = 0;
+    this.reported = "none";
+    this.clicked = "none";
+  }
+
+  render(cx) {
+    return v_flex()
+      .w(300)
+      .h(400)
+      .child(
+        v_flex()
+          .h(200)
+          .child(
+            list("rows", this.items.length, (index) => this.items[index], (index) =>
+              div().h(20).child(this.items[index]),
+            )
+              .on_item_click((key, cx) => {
+                this.clicked = key;
+                cx.notify();
+              })
+              .on_visible_range_change((range, count, cx) => {
+                this.reported = `${range.start}..${range.end} of ${count}`;
+                if (range.start === 0) {
+                  const page = [];
+                  for (let index = 0; index < 10; index++) page.push(`p${this.pages}-${index}`);
+                  this.pages += 1;
+                  this.items = page.concat(this.items);
+                }
+                cx.notify();
+              }),
+          ),
+      )
+      .child(`reported ${this.reported} clicked ${this.clicked}`);
+  }
+}
+"#;
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, source);
+
+    // The list opens at the top, so the first report loads a page, and the
+    // reader stays on `m0` with the page above the fold.
+    assert_eq!(reported_visible_range(&mut context, &view), (10, 20, 110));
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "m0");
+
+    // Scrolling up to the page's first item loads one more page, once. Two
+    // turns of the wheel, because a list scrolls only as far as it has
+    // measured, and it measures 160px above the top as it goes.
+    scroll_by(&mut context, 100.);
+    scroll_by(&mut context, 100.);
+    assert_eq!(reported_visible_range(&mut context, &view), (10, 20, 120));
+    assert_eq!(transcript_key_at(&mut context, &view, 5.), "p0-0");
 }

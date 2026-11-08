@@ -13,6 +13,7 @@ use rquickjs::{Ctx, Result, loader::BuiltinResolver, loader::ModuleLoader};
 
 mod connect;
 mod console;
+mod encoding;
 mod fetch;
 mod fs;
 mod net;
@@ -25,6 +26,10 @@ pub(super) fn direct_test_http_client()
 -> std::result::Result<reqwest::blocking::Client, reqwest::Error> {
     fetch::direct_test_client()
 }
+
+/// What `fetch` and the WebSocket handshake send when the script names no
+/// `User-Agent`. Some APIs — GitHub's among them — refuse a request without one.
+const USER_AGENT: &str = concat!("gpui-shell/", env!("CARGO_PKG_VERSION"));
 
 pub(super) const NAMES: &[&str] = &[
     "buffer",
@@ -68,6 +73,7 @@ pub(super) fn install(ctx: &Ctx<'_>) -> Result<()> {
     // classes installed by the first initializer.
     quickjs_jit_stdlib::init(ctx)?;
     console::install(ctx)?;
+    encoding::install(ctx)?;
     super::sandbox::install_process(ctx)?;
     fetch::install(ctx)?;
     Ok(())

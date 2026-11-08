@@ -2,6 +2,8 @@
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 
+use gpui_shell::gpui as shell_gpui;
+
 use std::{
     fs,
     ops::Deref,
@@ -45,24 +47,24 @@ impl Drop for TempApp {
 
 struct Empty;
 
-impl gpui_shell::gpui::Render for Empty {
+impl shell_gpui::Render for Empty {
     fn render(
         &mut self,
-        _: &mut gpui_shell::gpui::Window,
-        _: &mut gpui_shell::gpui::Context<Self>,
-    ) -> impl gpui_shell::gpui::IntoElement {
-        gpui_shell::gpui::div()
+        _: &mut shell_gpui::Window,
+        _: &mut shell_gpui::Context<Self>,
+    ) -> impl shell_gpui::IntoElement {
+        shell_gpui::div()
     }
 }
 
 struct ScriptRoot(Entity<gpui_shell::ScriptView>);
 
-impl gpui_shell::gpui::Render for ScriptRoot {
+impl shell_gpui::Render for ScriptRoot {
     fn render(
         &mut self,
-        _: &mut gpui_shell::gpui::Window,
-        _: &mut gpui_shell::gpui::Context<Self>,
-    ) -> impl gpui_shell::gpui::IntoElement {
+        _: &mut shell_gpui::Window,
+        _: &mut shell_gpui::Context<Self>,
+    ) -> impl shell_gpui::IntoElement {
         self.0.clone()
     }
 }
@@ -89,13 +91,13 @@ fn mount(
 
 fn draw(context: &mut VisualTestContext, view: Entity<gpui_shell::ScriptView>) {
     context.draw(
-        gpui_shell::gpui::Point::default(),
-        gpui_shell::gpui::size(gpui_shell::gpui::px(800.), gpui_shell::gpui::px(600.)),
+        shell_gpui::Point::default(),
+        shell_gpui::size(shell_gpui::px(800.), shell_gpui::px(600.)),
         move |_, _| view.into_any_element(),
     );
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn icon_accepts_an_application_relative_asset_and_rejects_traversal(cx: &mut TestAppContext) {
     let valid = r#"
 import { View } from "gpui-kit";
@@ -128,7 +130,7 @@ export default class App extends View {
     });
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn sidebar_materializes_typed_items_menu_header_and_wrapper_style_in_order(
     cx: &mut TestAppContext,
 ) {
@@ -181,7 +183,7 @@ export default class App extends View {
     assert!(first < disabled && disabled < second, "{tree}");
 }
 
-#[gpui_shell::gpui::test]
+#[shell_gpui::test]
 fn sidebar_toggle_invokes_the_registered_common_click_callback(cx: &mut TestAppContext) {
     let source = r#"
 import { View, div } from "gpui-kit";

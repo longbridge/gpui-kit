@@ -246,6 +246,14 @@ state.update(cx, |state, cx| {
 });
 ```
 
+### 滚动回弹
+
+```rust
+Select::new(&state).scroll_bounce(true)
+```
+
+开启 `scroll_bounce(true)` 后，下拉列表在精细像素滚动（例如 macOS 上的触控板或 Magic Mouse）到达两端时越过边缘并弹回，行为与 [List](./list.md#滚动回弹) 一致。iOS、Android 和 macOS 默认开启（与系统自带的滚动视图一致），其他平台默认关闭。
+
 ## 示例
 
 ### 语言选择器

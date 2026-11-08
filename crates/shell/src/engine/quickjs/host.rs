@@ -32,6 +32,7 @@
 //! so `get` and `set` answer from memory; §17.1's requirement that `store.flush`
 //! become awaitable is still open, and is the only synchronous write left.
 
+use crate::engine::quickjs::js_error;
 use std::{
     path::{Path, PathBuf},
     rc::Rc,
@@ -39,8 +40,7 @@ use std::{
 
 use gpui::{App, ClipboardItem};
 use rquickjs::{
-    Ctx, Error as JsError, Exception, FromJs, IntoJs, Object, Promise, Result as JsResult,
-    TypedArray, Value,
+    Ctx, Error as JsError, FromJs, IntoJs, Object, Promise, Result as JsResult, TypedArray, Value,
     function::{Func, Opt, Rest},
 };
 use serde_json::Value as Json;
@@ -92,6 +92,7 @@ pub fn install(_ctx: &Ctx<'_>, module: &Object<'_>) -> JsResult<()> {
     globals.set("__clipboard_read_text", Func::from(read_from_clipboard))?;
     globals.set("__clipboard_write_text", Func::from(write_to_clipboard))?;
     globals.set("__open_url", Func::from(open_url))?;
+    globals.set("__open_path", Func::from(open_path))?;
 
     // `localStorage` and `sessionStorage` go on `window`, where a browser puts
     // them. The prelude assembles them from these.
@@ -112,12 +113,35 @@ pub fn install(_ctx: &Ctx<'_>, module: &Object<'_>) -> JsResult<()> {
 /// `TextView` default link handler.
 fn open_url(ctx: Ctx<'_>, url: String) -> JsResult<()> {
     if !is_openable_url(&url) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             &ctx,
             "cx.open_url(url) expects an absolute HTTP(S) URL with a host",
         ));
     }
     with_app(&ctx, "cx.open_url(url)", move |app| app.open_url(&url))
+}
+
+/// Opens a file or directory with whatever the system opens it with.
+/// `App::open_with_system`.
+///
+/// Unlike a URL, a path names something on this machine, so it carries the
+/// authority reading it would: the path has to be inside a granted
+/// `capabilities.fs.read` directory and exist. GPUI hands it to the platform —
+/// `xdg-open` with the desktop session's environment on Linux, Launch Services
+/// on macOS, the shell on Windows — which is what a script running a process
+/// of its own cannot do: `process.run` starts commands without the session's
+/// environment, so the opener cannot find the user's default application.
+fn open_path(ctx: Ctx<'_>, path: String) -> JsResult<()> {
+    let grant = grant(&ctx, &path, Access::Read)?;
+    let target = grant.system_path().map_err(|error| {
+        js_error::type_error(
+            &ctx,
+            &format!("cx.open_path(path) cannot open `{path}`: {error}"),
+        )
+    })?;
+    with_app(&ctx, "cx.open_path(path)", move |app| {
+        app.open_with_system(&target)
+    })
 }
 
 // -- Filesystem ------------------------------------------------------------
@@ -189,25 +213,23 @@ pub(super) fn write_file<'js>(
         String::from_js(&ctx, contents)?.into_bytes()
     } else {
         let bytes = TypedArray::<u8>::from_js(&ctx, contents).map_err(|_| {
-            Exception::throw_type(
+            js_error::type_error(
                 &ctx,
                 "fs.writeFile(path, contents) expects a string or Uint8Array",
             )
         })?;
-        bytes
-            .as_bytes()
-            .ok_or_else(|| {
-                Exception::throw_type(
-                    &ctx,
-                    "fs.writeFile(path, contents) received a detached Uint8Array",
-                )
-            })?
-            .to_vec()
+        // SAFETY: copy the bytes before any JavaScript can run again.
+        unsafe { bytes.as_bytes().map(<[u8]>::to_vec) }.ok_or_else(|| {
+            js_error::type_error(
+                &ctx,
+                "fs.writeFile(path, contents) received a detached Uint8Array",
+            )
+        })?
     };
     let grant = grant(&ctx, &path, Access::Write)?;
     let name = grant.describe();
     if contents.len() > MAX_WRITE_BYTES {
-        return Err(Exception::throw_range(
+        return Err(js_error::range_error(
             &ctx,
             &format!(
                 "`{name}` write is {} bytes, over the {MAX_WRITE_BYTES}-byte fs.writeFile limit",
@@ -262,7 +284,7 @@ impl ReadEncoding {
             for key in options.keys::<String>() {
                 let key = key?;
                 if key != "encoding" {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         ctx,
                         &format!("unknown fs.readFile option `{key}`; expected encoding"),
                     ));
@@ -270,14 +292,14 @@ impl ReadEncoding {
             }
             options.get::<_, String>("encoding")?
         } else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "fs.readFile encoding must be \"utf8\" or { encoding: \"utf8\" }",
             ));
         };
         match encoding.to_ascii_lowercase().as_str() {
             "utf8" | "utf-8" => Ok(Self::Utf8),
-            _ => Err(Exception::throw_type(
+            _ => Err(js_error::type_error(
                 ctx,
                 "fs.readFile only supports UTF-8 text decoding",
             )),
@@ -304,7 +326,7 @@ fn readdir_with_file_types<'js>(ctx: &Ctx<'js>, value: Option<Value<'js>>) -> Js
         return Ok(false);
     };
     let Some(options) = value.into_object() else {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "fs.readdir options must be { withFileTypes: boolean }",
         ));
@@ -312,7 +334,7 @@ fn readdir_with_file_types<'js>(ctx: &Ctx<'js>, value: Option<Value<'js>>) -> Js
     for key in options.keys::<String>() {
         let key = key?;
         if key != "withFileTypes" {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!("unknown fs.readdir option `{key}`; expected withFileTypes"),
             ));
@@ -343,7 +365,7 @@ pub(super) fn exists<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>>
 /// remove would turn one mistyped path into the loss of an application's whole
 /// data directory; a script that means it walks the tree itself.
 pub(super) fn remove_file<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
-    let grant = grant(&ctx, &path, Access::Write)?;
+    let grant = grant_link(&ctx, &path, Access::Write)?;
     let name = grant.describe();
     let (dir, relative) = grant.into_parts();
 
@@ -355,7 +377,7 @@ pub(super) fn remove_file<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<
 
 /// Removes an **empty** directory. A non-empty one is an error, not a tree walk.
 pub(super) fn remove_dir<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
-    let grant = grant(&ctx, &path, Access::Write)?;
+    let grant = grant_link(&ctx, &path, Access::Write)?;
     let name = grant.describe();
     let (dir, relative) = grant.into_parts();
 
@@ -392,6 +414,129 @@ pub(super) fn mkdir<'js>(
     })
 }
 
+/// Describes a file, following a symlink to what it names. A link that leads
+/// out of the granted root is refused like any other path that does.
+pub(super) fn stat<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
+    let grant = grant(&ctx, &path, Access::Read)?;
+    let name = grant.describe();
+    let (dir, relative) = grant.into_parts();
+
+    scheduler::blocking(&ctx, "fs.stat(path)", move || {
+        dir.metadata(&relative)
+            .map(|metadata| Stats::new(&metadata))
+            .map_err(|error| message("stat", &name, &error))
+    })
+}
+
+/// Describes the symlink itself rather than what it names.
+pub(super) fn lstat<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
+    let grant = grant_link(&ctx, &path, Access::Read)?;
+    let name = grant.describe();
+    let (dir, relative) = grant.into_parts();
+
+    scheduler::blocking(&ctx, "fs.lstat(path)", move || {
+        dir.symlink_metadata(&relative)
+            .map(|metadata| Stats::new(&metadata))
+            .map_err(|error| message("stat", &name, &error))
+    })
+}
+
+/// Moves a file or directory, replacing a file already at the destination. A
+/// symlink at either end is the thing moved or replaced, not what it names.
+///
+/// Both ends need write access: taking a file out of a directory changes that
+/// directory as much as putting one in does.
+pub(super) fn rename<'js>(ctx: Ctx<'js>, from: String, to: String) -> JsResult<Promise<'js>> {
+    let source = grant_link(&ctx, &from, Access::Write)?;
+    let destination = grant_link(&ctx, &to, Access::Write)?;
+    let name = source.describe();
+    let (source_dir, source_path) = source.into_parts();
+    let (destination_dir, destination_path) = destination.into_parts();
+
+    scheduler::blocking(&ctx, "fs.rename(from, to)", move || {
+        source_dir
+            .rename(&source_path, &destination_dir, &destination_path)
+            .map_err(|error| message("rename", &name, &error))
+    })
+}
+
+/// The target a symlink stores, as written — which may name a place outside
+/// every root. Reading the text is not following it; `stat` and `readFile`
+/// still refuse to go there.
+pub(super) fn readlink<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Promise<'js>> {
+    let grant = grant_link(&ctx, &path, Access::Read)?;
+    let name = grant.describe();
+    let (dir, relative) = grant.into_parts();
+
+    scheduler::blocking(&ctx, "fs.readlink(path)", move || {
+        dir.read_link_contents(&relative)
+            .map(|target| target.to_string_lossy().into_owned())
+            .map_err(|error| message("read link", &name, &error))
+    })
+}
+
+/// What `fs.stat` answers: Node's `Stats` shape, cut to the fields every
+/// platform can fill. A time the filesystem does not record reads as the epoch,
+/// as it does in Node.
+pub(super) struct Stats {
+    file_type: cap_std::fs::FileType,
+    size: u64,
+    mode: u32,
+    modified: f64,
+    accessed: f64,
+    created: f64,
+}
+
+impl Stats {
+    fn new(metadata: &cap_std::fs::Metadata) -> Self {
+        fn millis(time: std::io::Result<cap_std::time::SystemTime>) -> f64 {
+            time.ok()
+                .and_then(|time| time.into_std().duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0.0, |since| since.as_secs_f64() * 1000.0)
+        }
+
+        #[cfg(unix)]
+        let mode = cap_std::fs::MetadataExt::mode(metadata);
+        #[cfg(not(unix))]
+        let mode = if metadata.permissions().readonly() {
+            0o444
+        } else {
+            0o666
+        };
+
+        Self {
+            file_type: metadata.file_type(),
+            size: metadata.len(),
+            mode,
+            modified: millis(metadata.modified()),
+            accessed: millis(metadata.accessed()),
+            created: millis(metadata.created()),
+        }
+    }
+}
+
+impl<'js> IntoJs<'js> for Stats {
+    fn into_js(self, ctx: &Ctx<'js>) -> JsResult<Value<'js>> {
+        let date: rquickjs::function::Constructor = ctx.globals().get("Date")?;
+        let object = Object::new(ctx.clone())?;
+        let file_type = self.file_type;
+        object.set("isFile", Func::from(move || file_type.is_file()))?;
+        object.set("isDirectory", Func::from(move || file_type.is_dir()))?;
+        object.set("isSymbolicLink", Func::from(move || file_type.is_symlink()))?;
+        object.set("size", self.size)?;
+        object.set("mode", self.mode)?;
+        for (name, millis) in [
+            ("mtime", self.modified),
+            ("atime", self.accessed),
+            ("birthtime", self.created),
+        ] {
+            object.set(format!("{name}Ms"), millis)?;
+            object.set(name, date.construct::<_, Value>((millis,))?)?;
+        }
+        Ok(object.into_value())
+    }
+}
+
 /// `{ recursive }`, and nothing else.
 #[derive(Default)]
 pub(super) struct MakeDirectory {
@@ -405,7 +550,7 @@ impl<'js> FromJs<'js> for MakeDirectory {
         }
 
         let Some(object) = value.into_object() else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "fs.mkdir(path, options) expects an object, such as { recursive: true }",
             ));
@@ -416,7 +561,7 @@ impl<'js> FromJs<'js> for MakeDirectory {
         for key in object.keys::<String>() {
             let key = key?;
             if key != "recursive" {
-                return Err(Exception::throw_type(
+                return Err(js_error::type_error(
                     ctx,
                     &format!(
                         "unknown option `{key}` for fs.mkdir(path, options); \
@@ -460,8 +605,8 @@ fn too_large(name: &str, size: u64) -> String {
 
 /// One entry of `fs.readdir(..., { withFileTypes: true })`.
 ///
-/// `is_dir` rides along because there is no `stat` in this surface, and without
-/// it every caller would have to guess from the name.
+/// `is_dir` rides along so that telling directories apart does not cost an
+/// `fs.stat` per entry.
 struct Dirent {
     name: String,
     is_dir: bool,
@@ -521,11 +666,19 @@ fn check_readdir_budget(entries: usize, name_bytes: usize) -> std::io::Result<()
 }
 
 /// The single path gate. Nothing in this module touches the filesystem except
-/// through a [`Grant`] it got back from here.
-fn grant(ctx: &Ctx<'_>, path: &str, access: Access) -> JsResult<Grant> {
+/// through a [`Grant`] it got back from here, or from [`grant_link`].
+pub(super) fn grant(ctx: &Ctx<'_>, path: &str, access: Access) -> JsResult<Grant> {
     capabilities()
         .open(Path::new(path), access)
-        .map_err(|error| Exception::throw_type(ctx, &denial(&error)))
+        .map_err(|error| js_error::type_error(ctx, &denial(&error)))
+}
+
+/// [`grant`] for an operation on the path's final component itself, which does
+/// not follow it when it is a symlink. See [`Capabilities::open_link`].
+pub(super) fn grant_link(ctx: &Ctx<'_>, path: &str, access: Access) -> JsResult<Grant> {
+    capabilities()
+        .open_link(Path::new(path), access)
+        .map_err(|error| js_error::type_error(ctx, &denial(&error)))
 }
 
 /// Turns a [`CapabilityError`] into a message that always ends in the manifest
@@ -786,7 +939,7 @@ fn with_local_storage<R>(
     body: impl FnOnce(&mut Storage) -> JsResult<R>,
 ) -> JsResult<R> {
     if !capabilities().has_storage() {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &CapabilityError::StorageDenied.to_string(),
         ));
@@ -796,7 +949,7 @@ fn with_local_storage<R>(
         Some(result) => result,
         // Not a manifest problem, so it does not name a capability key: the
         // embedder skipped `set_storage_path`.
-        None => Err(Exception::throw_message(
+        None => Err(js_error::error(
             ctx,
             "localStorage has no backing file; the host must call \
              set_storage_path before the application runs",
@@ -805,7 +958,7 @@ fn with_local_storage<R>(
 }
 
 fn fail(ctx: &Ctx<'_>, message: &str) -> JsError {
-    Exception::throw_message(ctx, message)
+    js_error::error(ctx, message)
 }
 
 /// A cycle in a JS object graph would recurse forever, so depth is capped.
@@ -824,7 +977,7 @@ const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
 /// script: a layout is plain data under exactly these rules.
 pub(super) fn to_json(ctx: &Ctx<'_>, value: &Value<'_>, depth: usize) -> JsResult<Json> {
     if depth > MAX_JSON_DEPTH {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "value nests more than 64 levels deep; the store holds plain data and \
              cannot hold a reference cycle",
@@ -853,7 +1006,7 @@ pub(super) fn to_json(ctx: &Ctx<'_>, value: &Value<'_>, depth: usize) -> JsResul
         return serde_json::Number::from_f64(number)
             .map(Json::Number)
             .ok_or_else(|| {
-                Exception::throw_type(
+                js_error::type_error(
                     ctx,
                     "NaN and Infinity have no JSON form and cannot be stored",
                 )
@@ -866,7 +1019,7 @@ pub(super) fn to_json(ctx: &Ctx<'_>, value: &Value<'_>, depth: usize) -> JsResul
         let length = bridge_array_len(ctx, &array)?;
         let mut items = Vec::new();
         items.try_reserve_exact(length).map_err(|_| {
-            Exception::throw_range(
+            js_error::range_error(
                 ctx,
                 &format!(
                     "array could not be reserved within the {MAX_BRIDGE_ARRAY_ITEMS}-item bridge limit"
@@ -879,7 +1032,7 @@ pub(super) fn to_json(ctx: &Ctx<'_>, value: &Value<'_>, depth: usize) -> JsResul
         return Ok(Json::Array(items));
     }
     if value.is_function() {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "a function cannot be stored; the store holds data, not behaviour",
         ));
@@ -896,7 +1049,7 @@ pub(super) fn to_json(ctx: &Ctx<'_>, value: &Value<'_>, depth: usize) -> JsResul
         return Ok(Json::Object(map));
     }
 
-    Err(Exception::throw_type(
+    Err(js_error::type_error(
         ctx,
         "unsupported value; the store holds null, booleans, numbers, strings, \
          arrays and plain objects",
@@ -907,7 +1060,7 @@ pub(super) fn to_json(ctx: &Ctx<'_>, value: &Value<'_>, depth: usize) -> JsResul
 
 fn read_from_clipboard(ctx: Ctx<'_>) -> JsResult<Option<String>> {
     if !capabilities().is_clipboard_readable() {
-        return Err(Exception::throw_type(&ctx, CLIPBOARD_READ_DENIED));
+        return Err(js_error::type_error(&ctx, CLIPBOARD_READ_DENIED));
     }
     with_app(&ctx, "cx.read_from_clipboard()", |app| {
         app.read_from_clipboard().and_then(|item| item.text())
@@ -916,7 +1069,7 @@ fn read_from_clipboard(ctx: Ctx<'_>) -> JsResult<Option<String>> {
 
 fn write_to_clipboard(ctx: Ctx<'_>, text: String) -> JsResult<()> {
     if !capabilities().is_clipboard_writable() {
-        return Err(Exception::throw_type(&ctx, CLIPBOARD_WRITE_DENIED));
+        return Err(js_error::type_error(&ctx, CLIPBOARD_WRITE_DENIED));
     }
     with_app(&ctx, "cx.write_to_clipboard(text)", move |app| {
         app.write_to_clipboard(ClipboardItem::new_string(text))
@@ -938,7 +1091,7 @@ const CLIPBOARD_WRITE_DENIED: &str =
 /// call is an application bug, not a host bug (§5.8).
 fn with_app<R>(ctx: &Ctx<'_>, what: &str, body: impl FnOnce(&mut App) -> R) -> JsResult<R> {
     scope::with_current_app(body).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "{what} needs a live host call; call it from render, an event handler or a task"
@@ -1293,6 +1446,7 @@ mod tests {
             "log",
             "clipboard",
             "open_url",
+            "open_path",
             "read_from_clipboard",
             "write_to_clipboard",
             "localStorage",
@@ -1304,6 +1458,36 @@ mod tests {
                 "`{name}` no longer lives on a module; an export of it resolves to nothing"
             );
         }
+    }
+
+    /// A path is opened only where it could be read: inside a granted
+    /// directory, and present. Past those checks the call needs a live host
+    /// call, which this harness does not have — so that message is the proof
+    /// both checks passed.
+    #[test]
+    fn open_path_is_confined_to_the_read_grant() {
+        let directory = TempDir::new();
+        std::fs::write(directory.path().join("notes.txt"), "x").unwrap();
+        crate::capability::install(
+            Capabilities::new().read_roots([directory.path().to_path_buf()]),
+        );
+
+        let inside = directory.path().join("notes.txt");
+        let message = with_host(|ctx| error_of(ctx, &format!("__open_path({inside:?})")));
+        assert!(message.contains("needs a live host call"), "{message}");
+        let message =
+            with_host(|ctx| error_of(ctx, &format!("__open_path({:?})", directory.path())));
+        assert!(
+            message.contains("needs a live host call"),
+            "the granted directory itself opens too: {message}"
+        );
+
+        let missing = directory.path().join("missing.txt");
+        let message = with_host(|ctx| error_of(ctx, &format!("__open_path({missing:?})")));
+        assert!(message.contains("cannot open"), "{message}");
+
+        let message = with_host(|ctx| error_of(ctx, "__open_path('/etc/hosts')"));
+        assert!(message.contains("capabilities.fs.read"), "{message}");
     }
 
     #[test]

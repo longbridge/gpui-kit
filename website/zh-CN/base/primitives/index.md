@@ -21,6 +21,7 @@ GPUI Base 原语只提供行为，不规定视觉表现。每个页面都会说�
 - [Combobox](./combobox.md) — 结合文本输入、键盘导航建议和选择行为的组合框。
 - [Date Picker](./date-picker.md) — 将日历与弹出层组合起来、可感知焦点的日期输入。
 - [Dialog](./dialog.md) — 带焦点管理、遮罩、标题和关闭部件的可组合模态层。
+- [Grid Layout](./grid-layout.md) — 可由用户拖动和调整大小的网格，包含布局模型及其计算。
 - [Hover Card](./hover-card.md) — 与指针或键盘触发器关联的延迟浮动卡片。
 - [Input](./input.md) — 支持选择、掩码、验证和数值步进的单行输入。
 - [Textarea](./textarea.md) — 支持固定行数、换行和自动增高的多行文本框。

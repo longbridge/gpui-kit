@@ -11,13 +11,15 @@ pub use frontmatter::FrontmatterPlugin;
 pub use gpui_base::text::{
     InlineElement, InlineRenderContext, MarkdownBlockParserFn, MarkdownBlockRenderFn,
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, RangeHighlight,
-    RangeHighlightError, RenderedText, SelectionFormat, TableData, TextViewMotion, TextViewState,
-    markdown_ast,
+    RangeHighlightError, RenderedText, SelectionFormat, TableData, TaskToggleEvent, TextViewMotion,
+    TextViewState, markdown_ast,
 };
 pub use style::TextViewStyle;
 
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
+use std::cell::RefCell;
 #[cfg(feature = "tree-sitter")]
-use std::{cell::RefCell, collections::HashMap};
+use std::collections::HashMap;
 
 use gpui::Styled as _;
 #[cfg(feature = "tree-sitter")]
@@ -55,6 +57,7 @@ pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewS
         .with_code_block(code_block)
         .with_table(table)
         .with_table_head(table_head)
+        .with_table_row_hover(theme.table_hover)
         .with_inline_code(gpui::HighlightStyle {
             background_color: Some(theme.accent),
             ..Default::default()
@@ -69,7 +72,7 @@ pub(crate) fn install_text_view_defaults(theme: &crate::Theme, cx: &mut gpui::Ap
         .with_style(base_text_view_style(theme))
         .with_inherit_text_color(true);
 
-    #[cfg(feature = "tree-sitter")]
+    #[cfg(any(feature = "tree-sitter", feature = "syntect"))]
     let defaults = defaults.with_code_block_highlighter(component_code_block_highlighter(
         theme.highlight_theme.clone(),
     ));
@@ -122,8 +125,27 @@ pub(crate) fn component_code_block_highlighter(
     }
 }
 
+/// The syntect counterpart: syntect keeps no state between calls, and the
+/// highlights of an unchanged block are cached by the text view itself.
+#[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
+pub(crate) fn component_code_block_highlighter(
+    highlight_theme: std::sync::Arc<crate::highlighter::HighlightTheme>,
+) -> impl Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
++ Send
++ Sync
++ 'static {
+    move |block| match block.lang() {
+        Some(lang) => crate::highlighter::highlight_code(
+            lang.as_ref(),
+            block.code().as_ref(),
+            highlight_theme.as_ref(),
+        ),
+        None => Vec::new(),
+    }
+}
+
 /// The type [`shared_code_block_highlighter`] returns.
-#[cfg(feature = "tree-sitter")]
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
 pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
     + Send
     + Sync;
@@ -140,15 +162,20 @@ pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock)
 /// Entries are also keyed on the [`LanguageRegistry`] generation: registering
 /// a language drops them, so the next frame gets a new highlighter and code
 /// blocks painted before the language existed are highlighted again.
-#[cfg(feature = "tree-sitter")]
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
 pub(crate) fn shared_code_block_highlighter(
     highlight_theme: &std::sync::Arc<crate::highlighter::HighlightTheme>,
 ) -> std::sync::Arc<SharedCodeBlockHighlighter> {
-    shared_code_block_highlighter_at(highlight_theme, LanguageRegistry::singleton().generation())
+    // Syntect's languages are fixed at build time, so its entries never go stale.
+    #[cfg(feature = "tree-sitter")]
+    let generation = LanguageRegistry::singleton().generation();
+    #[cfg(not(feature = "tree-sitter"))]
+    let generation = 0;
+    shared_code_block_highlighter_at(highlight_theme, generation)
 }
 
 /// [`shared_code_block_highlighter`] at an explicit registry `generation`.
-#[cfg(feature = "tree-sitter")]
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
 fn shared_code_block_highlighter_at(
     highlight_theme: &std::sync::Arc<crate::highlighter::HighlightTheme>,
     generation: u64,
@@ -202,6 +229,33 @@ mod tests {
     /// The component highlighter is the only place that still knows about
     /// `LanguageRegistry` and `HighlightTheme`, so these two cases follow it
     /// here from the code block it used to live in.
+    /// A Markdown code fence in a language tree-sitter is not built with —
+    /// TOML here — is highlighted by syntect in a build that chose it.
+    #[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
+    #[test]
+    fn syntect_highlights_a_code_fence() {
+        use gpui_base::text::CodeBlock;
+
+        use crate::highlighter::HighlightTheme;
+
+        let code = "[package]\nname = \"demo\"\n";
+        let highlighter = super::component_code_block_highlighter(HighlightTheme::default_light());
+        let styles = highlighter(&CodeBlock::from_code(code, Some("toml")));
+        let string = code.find("\"demo\"").unwrap();
+        assert!(
+            styles
+                .iter()
+                .any(|(range, style)| range.contains(&string) && style.color.is_some()),
+            "the string must be colored: {styles:?}"
+        );
+        assert_eq!(
+            styles.last().map(|(range, _)| range.end),
+            Some(code.len()),
+            "the runs cover the whole block"
+        );
+        assert!(highlighter(&CodeBlock::from_code(code, Some("no-such-language"))).is_empty());
+    }
+
     #[cfg(feature = "tree-sitter")]
     mod code_block_highlighter {
         use std::ops::Range;
@@ -326,6 +380,7 @@ mod tests {
         assert_eq!(style.link(), theme.link);
         assert_eq!(style.selection(), theme.selection);
         assert_eq!(style.inline_code().background_color, Some(theme.accent));
+        assert_eq!(style.table_row_hover(), Some(theme.table_hover));
         let radius = theme.semantic_tokens().radius.md;
         assert_eq!(style.table().corner_radii.top_left, Some(radius.into()));
         assert_eq!(style.table().corner_radii.top_right, Some(radius.into()));
@@ -357,14 +412,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_text_paths_reexport_base_implementation() {
+    fn test_text_view_builder() {
         let mut style = super::TextViewStyle::default();
         style.highlight_theme = crate::highlighter::HighlightTheme::default_dark();
 
         let _: super::TextView = super::markdown("# compatible")
             .style(style)
             .selectable(true)
-            .scrollable(true);
+            .scrollable(true)
+            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())))
+            .on_task_toggle(|_event, _, _| {});
     }
 
     #[test]

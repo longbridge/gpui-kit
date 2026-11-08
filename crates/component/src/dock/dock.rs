@@ -19,7 +19,8 @@ use gpui_base::{
 use crate::{
     ActiveTheme as _,
     dock::{
-        DockSkin, SkinShared, invalid_panel::InvalidPanel, panel_handle, tab_panel::TabGroupSkin,
+        DockSkin, SkinShared, invalid_panel::InvalidPanel, panel_handle, report_user_toggle,
+        tab_panel::TabGroupSkin,
     },
     resizable::render_resize_handle,
     resize_handle,
@@ -100,9 +101,7 @@ impl DockAreaRenderer for DockSkin {
         cx: &mut App,
     ) -> Option<Arc<dyn PanelView>> {
         let state = state.clone();
-        Some(panel_handle(cx.new(|cx| {
-            InvalidPanel::new(state.panel_name.clone(), state, cx)
-        })))
+        Some(panel_handle(cx.new(|cx| InvalidPanel::new(state, cx))))
     }
 
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
@@ -118,6 +117,7 @@ impl DockSkin {
         _: &mut App,
     ) -> impl IntoElement {
         let placement = dock.placement();
+        let open = dock.is_open();
         let shared = self.shared().clone();
 
         // One id per placement: the docks all render under the same stateful
@@ -144,6 +144,7 @@ impl DockSkin {
             move |info, _, _, cx| {
                 cx.stop_propagation();
                 shared.resizing_dock().set(Some(placement));
+                shared.resize_started_open().set(open);
                 cx.new(|_| info.clone())
             },
         )
@@ -238,11 +239,13 @@ impl Element for DockResizeTracker {
                 }
                 shared.resizing_dock().set(None);
                 dock.end_resize(window, cx);
+                let was_open = shared.resize_started_open().get();
                 // The size lives on the dock, not in the layout tree, so
                 // nothing else tells a subscriber to persist it.
-                _ = shared
-                    .area()
-                    .update(cx, |_, cx| cx.emit(DockEvent::LayoutChanged));
+                _ = shared.area().update(cx, |area, cx| {
+                    cx.emit(DockEvent::LayoutChanged);
+                    report_user_toggle(area, placement, was_open, cx);
+                });
             }
         });
     }
@@ -451,6 +454,78 @@ mod tests {
         );
         assert_eq!(left, Some(px(240.)), "the left dock follows the pointer");
     }
+    #[gpui::test]
+    fn dragging_the_bottom_dock_closed_and_open_reports_each_toggle(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("test", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(size(px(800.), px(600.)));
+        let events = Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.set_center(
+                    DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                    window,
+                    cx,
+                );
+                area.set_dock(
+                    DockPlacement::Bottom,
+                    DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                    window,
+                    cx,
+                );
+                area.set_dock_size(DockPlacement::Bottom, px(200.), window, cx);
+            });
+            let events = events.clone();
+            cx.subscribe(&area, move |_, event: &crate::dock::DockToggleEvent, _| {
+                events
+                    .borrow_mut()
+                    .push((event.placement(), event.is_open()));
+            })
+            .detach();
+        });
+        cx.run_until_parked();
+
+        let drag = |cx: &mut VisualTestContext, ys: &[f32]| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let (first, rest) = ys.split_first().unwrap();
+            cx.simulate_mouse_down(
+                point(px(400.), px(*first)),
+                MouseButton::Left,
+                Modifiers::none(),
+            );
+            for y in rest {
+                cx.simulate_mouse_move(
+                    point(px(400.), px(*y)),
+                    MouseButton::Left,
+                    Modifiers::none(),
+                );
+            }
+            cx.simulate_mouse_up(
+                point(px(400.), px(*ys.last().unwrap())),
+                MouseButton::Left,
+                Modifiers::none(),
+            );
+            cx.run_until_parked();
+        };
+
+        // A resize that keeps the dock open is not a toggle.
+        drag(cx, &[400.5, 380., 350.]);
+        assert!(events.borrow().is_empty(), "a plain resize is not reported");
+
+        // Same handle, same strip geometry as the snapping test below.
+        drag(cx, &[350.5, 356., 580., 540.]);
+        drag(cx, &[571.5, 565., 520.]);
+        assert_eq!(
+            *events.borrow(),
+            vec![
+                (DockPlacement::Bottom, false),
+                (DockPlacement::Bottom, true)
+            ]
+        );
+    }
+
     #[gpui::test]
     fn dragging_the_bottom_handle_below_the_minimum_snaps_to_the_nearer_end(
         cx: &mut TestAppContext,

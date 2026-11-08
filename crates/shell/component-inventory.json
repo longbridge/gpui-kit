@@ -157,6 +157,41 @@
     },
     {
       "source": "ui",
+      "name": "grid_layout",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "GridLayout",
+        "exports": [
+          "GridLayout"
+        ],
+        "states": [
+          {
+            "export": "GridLayoutState",
+            "kind": "GridLayoutState",
+            "role": "retained-placement-and-gesture-state"
+          }
+        ],
+        "related": [
+          {
+            "descriptor": "GridItem",
+            "exports": [
+              "GridItem"
+            ],
+            "role": "typed-item"
+          },
+          {
+            "descriptor": "GridDragHandle",
+            "exports": [
+              "GridDragHandle"
+            ],
+            "role": "drag-handle-part"
+          }
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "chart",
       "classification": "component",
       "registration": {
@@ -1369,6 +1404,41 @@
               "CarouselPaginationItem"
             ],
             "role": "typed-pagination-control"
+          }
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "grid_layout",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "GridLayout",
+        "exports": [
+          "GridLayout"
+        ],
+        "states": [
+          {
+            "export": "GridLayoutState",
+            "kind": "GridLayoutState",
+            "role": "retained-placement-and-gesture-state"
+          }
+        ],
+        "related": [
+          {
+            "descriptor": "GridItem",
+            "exports": [
+              "GridItem"
+            ],
+            "role": "typed-item"
+          },
+          {
+            "descriptor": "GridDragHandle",
+            "exports": [
+              "GridDragHandle"
+            ],
+            "role": "drag-handle-part"
           }
         ]
       }
@@ -2691,6 +2761,23 @@
       "name": "title_bar",
       "classification": "component",
       "registration": { "status": "registered", "descriptor": "TitleBar", "exports": ["TitleBar"] }
+    },
+    {
+      "source": "webview",
+      "name": "webview",
+      "classification": "platform",
+      "registration": {
+        "status": "registered",
+        "descriptor": "WebView",
+        "exports": ["WebView"],
+        "states": [
+          {
+            "export": "WebViewState",
+            "kind": "WebViewState",
+            "role": "retained-native-page"
+          }
+        ]
+      }
     }
   ]
 }

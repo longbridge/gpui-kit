@@ -128,7 +128,7 @@ export default class App extends View {{
       .size_full()
       .bg(cx.theme().colors.background)
       .child(
-        new TitleBar().child(
+        TitleBar.new().child(
           div().text_size(13).font_medium().text_color(cx.theme().colors.foreground).child({title}),
         ),
       )
@@ -140,7 +140,7 @@ export default class App extends View {{
           .gap(12)
           .child(div().text_color(cx.theme().colors.foreground).child(`Clicked ${{this.count}} times`))
           .child(
-            new Button("increment").primary().label("Click me").on_click((_event, cx) => {{
+            Button.new("increment").primary().label("Click me").on_click((_event, cx) => {{
               this.count += 1;
               cx.notify();
             }}),

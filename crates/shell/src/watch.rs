@@ -47,7 +47,7 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, bail};
-use gpui::{AnyWindowHandle, App, Entity, Task, Window};
+use gpui::{App, Entity, Task, Window};
 
 use crate::{
     engine::ShellRuntime,
@@ -303,8 +303,8 @@ impl Watcher {
     /// This method has no hidden build-mode policy. A command-line host can
     /// call it after parsing `--watch`; an embedded host can place the call in
     /// a `#[cfg(debug_assertions)]` block. A failed reload leaves the last good
-    /// view running and reports the error through tracing and, when available,
-    /// the window's [`ShellRoot`] toast stack.
+    /// view running and reports the error through tracing and on the view's
+    /// own failure banner.
     ///
     /// The watcher holds the runtime and view weakly, so it cannot keep an
     /// unmounted application alive.
@@ -350,10 +350,10 @@ impl Watcher {
                 let changed = match changed {
                     Ok(changed) => changed,
                     Err(error) => {
-                        let message = format!("source watch stopped: {error:#}");
-                        tracing::error!("{message}");
+                        let message = format!("{error:#}");
+                        tracing::error!("source watch stopped: {message}");
                         let _ = handle.update(cx, |_, window, cx| {
-                            report_failure(handle, &message, window, cx);
+                            report_failure(&message, window, cx);
                         });
                         break;
                     }
@@ -364,19 +364,19 @@ impl Watcher {
                 }
 
                 let reached = handle.update(cx, |_, window, cx| {
-                    match reload(&runtime, &view, &directory, &entry, window, cx) {
+                    let failure = match reload(&runtime, &view, &directory, &entry, window, cx) {
                         Ok(()) => {
                             tracing::info!("reloaded {}", directory.display());
-                            retract_failure(handle, window, cx);
+                            None
                         }
                         // `{error:#}` keeps the `anyhow` context chain, which is what
                         // names the file and the stage that failed.
                         Err(error) => {
-                            let message = format!("{error:#}");
-                            tracing::error!("reload failed: {message}");
-                            report_failure(handle, &message, window, cx);
+                            tracing::error!("reload failed: {error:#}");
+                            Some(reload_failure_message(&error))
                         }
-                    }
+                    };
+                    view.update(cx, |view, cx| view.set_reload_error(failure, cx));
                 });
 
                 if reached.is_err() {
@@ -449,40 +449,46 @@ impl ShellRuntime {
 
 /// The toast id, fixed so a repeated failure replaces the standing message
 /// rather than stacking a column of them.
-const RELOAD_TOAST: &str = "shell-reload";
+const WATCH_TOAST: &str = "shell-watch";
 
-/// Reports a failed reload in the window, when the host mounted a [`ShellRoot`].
+/// Reports that the watcher itself stopped, when the host mounted a
+/// [`ShellRoot`].
 ///
-/// The log is the one channel that always works, and it is written either way.
-/// But a developer with the window in front of them is looking at the window,
-/// and this used to be something only the `gpui-shell` binary did — so an
-/// embedded panel silently kept rendering its old view and the reason was in a
-/// terminal nobody had open.
-fn report_failure(handle: AnyWindowHandle, message: &str, window: &mut Window, cx: &mut App) {
-    let Some(root) = handle.downcast::<ShellRoot>() else {
-        return;
-    };
-    let _ = root.update(cx, |root, _, cx| {
+/// A failed *reload* is the view's own failure and is shown on the view; this
+/// is the one failure that belongs to no view — after it, edits stop reaching
+/// the window at all, and nothing on the view would say so.
+fn report_failure(message: &str, window: &mut Window, cx: &mut App) {
+    ShellRoot::update(window, cx, |root, window, cx| {
         root.push_toast(
-            ToastRequest::new("Reload failed")
+            ToastRequest::new("Stopped watching for changes")
                 .with_description(message.to_owned())
                 .with_level(ToastLevel::Error)
                 .with_timeout(None)
-                .with_id(RELOAD_TOAST),
+                .with_id(WATCH_TOAST),
             window,
             cx,
         );
     });
 }
 
-fn retract_failure(handle: AnyWindowHandle, window: &mut Window, cx: &mut App) {
-    let Some(root) = handle.downcast::<ShellRoot>() else {
-        return;
-    };
-    let _ = root.update(cx, |root, _, cx| {
-        root.remove_toast(RELOAD_TOAST, cx);
-    });
-    let _ = window;
+/// Puts the cause first, because a failure surface shows one line collapsed.
+///
+/// `anyhow`'s `{:#}` leads with the outermost context — `reloading
+/// /home/…/app:` — which fills that line with the one part the reader already
+/// knows. The stages follow the cause's own detail, innermost last.
+fn reload_failure_message(error: &anyhow::Error) -> String {
+    let cause = error.root_cause().to_string();
+    let stages = error
+        .chain()
+        .take(error.chain().count().saturating_sub(1))
+        .map(|context| format!("while {context}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if stages.is_empty() {
+        cause
+    } else {
+        format!("{cause}\n\n{stages}")
+    }
 }
 
 pub(crate) fn reload(

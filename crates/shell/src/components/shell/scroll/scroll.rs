@@ -241,6 +241,8 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
 pub(crate) mod test_probe {
     use std::cell::RefCell;
 
+    use gpui_shell::gpui;
+
     thread_local! {
         static HANDLE: RefCell<Option<gpui::ScrollHandle>> = const { RefCell::new(None) };
         static ERRORS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };

@@ -26,7 +26,10 @@ pub struct Column {
     pub paddings: Option<Edges<Pixels>>,
     /// The width of the column.
     pub width: Pixels,
-    /// Whether the column is fixed, the fixed column will pin at the left side when scrolling horizontally.
+    /// Whether the column is fixed, the fixed column stays pinned to its side
+    /// when scrolling horizontally.
+    ///
+    /// Left-fixed columns must come first and right-fixed columns last.
     pub fixed: Option<ColumnFixed>,
     /// Whether the column is resizable.
     pub resizable: bool,
@@ -121,15 +124,20 @@ impl Column {
         self
     }
 
-    /// Set the text alignment of the column to center.
+    /// Center the column's text, in its header and in its cells.
+    ///
+    /// The table aligns text; a cell that renders its own layout, such as a
+    /// flex row, aligns that layout itself.
     pub fn text_center(mut self) -> Self {
         self.align = TextAlign::Center;
         self
     }
 
-    /// Set the alignment of the column text, default is left.
+    /// Right-align the column's text, in its header and in its cells. The
+    /// default is left.
     ///
-    /// Only `text_left`, `text_right` is supported.
+    /// The table aligns text; a cell that renders its own layout, such as a
+    /// flex row, aligns that layout itself.
     pub fn text_right(mut self) -> Self {
         self.align = TextAlign::Right;
         self
@@ -162,6 +170,14 @@ impl Column {
     /// Set whether the column is fixed on left side, default is false.
     pub fn fixed_left(mut self) -> Self {
         self.fixed = Some(ColumnFixed::Left);
+        self
+    }
+
+    /// Set whether the column is fixed on right side, default is false.
+    ///
+    /// Right-fixed columns must be the last columns of the table.
+    pub fn fixed_right(mut self) -> Self {
+        self.fixed = Some(ColumnFixed::Right);
         self
     }
 
@@ -231,9 +247,13 @@ impl Column {
 
 impl FluentBuilder for Column {}
 
+/// The side a fixed column is pinned to when the table scrolls horizontally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnFixed {
+    /// Pin to the left side, the column must be one of the first columns.
     Left,
+    /// Pin to the right side, the column must be one of the last columns.
+    Right,
 }
 
 /// Used to sort the column runtime info in Table internal.

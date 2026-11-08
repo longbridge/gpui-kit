@@ -121,6 +121,20 @@ pub(crate) fn window_content_insets(window: &Window) -> Edges<Pixels> {
     }
 }
 
+/// Per-side inset from the window bounds to the part of the window that is
+/// fully visible: not under the system bars, a display cutout or the on-screen
+/// keyboard ([`Window::fully_visible_bounds`]). Zero on desktop.
+pub(crate) fn window_safe_insets(window: &Window) -> Edges<Pixels> {
+    let viewport = window.viewport_size();
+    let visible = window.fully_visible_bounds();
+    Edges {
+        top: visible.top(),
+        right: viewport.width - visible.right(),
+        bottom: viewport.height - visible.bottom(),
+        left: visible.left(),
+    }
+}
+
 impl ParentElement for WindowBorder {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
@@ -130,12 +144,17 @@ impl ParentElement for WindowBorder {
 impl RenderOnce for WindowBorder {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let decorations = window.window_decorations();
-        let mut children = self.children;
+        let children = self.children;
         if !uses_client_border(decorations) {
-            return match children.len() {
-                1 => children.pop().unwrap(),
-                _ => div().size_full().children(children).into_any_element(),
-            };
+            // Keep the same `window-backdrop` id as the client-decorated frame below. The
+            // decorations can change at runtime (an app switching to server-side decorations,
+            // or a compositor granting a different mode), and without the shared id every
+            // element id path in the window would change, dropping all keyed element state.
+            return div()
+                .id("window-backdrop")
+                .size_full()
+                .children(children)
+                .into_any_element();
         }
         let Decorations::Client { tiling } = decorations else {
             unreachable!("client border requires client decorations");
@@ -191,6 +210,9 @@ impl RenderOnce for WindowBorder {
                 let Decorations::Client { tiling } = window.window_decorations() else {
                     return;
                 };
+                if !window.is_resizable() {
+                    return;
+                }
                 if tiling.top && tiling.bottom && tiling.left && tiling.right {
                     return;
                 }
@@ -264,12 +286,14 @@ impl RenderOnce for WindowBorder {
                     .bg(gpui::transparent_black())
                     .children(children),
             )
-            .child(div().absolute().size_full().children(resize_hit_zones(
-                window_size,
-                platform_inset,
-                resize_hit_size,
-                &tiling,
-            )))
+            .when(window.is_resizable(), |parent| {
+                parent.child(div().absolute().size_full().children(resize_hit_zones(
+                    window_size,
+                    platform_inset,
+                    resize_hit_size,
+                    &tiling,
+                )))
+            })
             .into_any_element()
     }
 }

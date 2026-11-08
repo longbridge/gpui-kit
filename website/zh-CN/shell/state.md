@@ -195,7 +195,20 @@ this.draft.on("submit", (event, cx) => this.add(cx));
 | `focus` | 获得焦点 |
 | `blur` | 失去焦点 |
 
+在 `TextareaState` 里，回车会先换行，再同样报告 `submit`，所以处理函数读到的文本末尾带着这个换行。回车即发送的消息框调用 `set_submit_on_enter(true)`：此后回车不改动文本，Shift+回车照样换行。Shift+回车仍然报告为 `submit`，`event.shift` 为真，所以处理函数遇到它要提前返回：
+
+```js
+this.draft = TextareaState.new({ rows: 3 });
+this.draft.set_submit_on_enter(true);
+this.draft.on("submit", (event, cx) => {
+  if (event.shift) return;
+  this.send(this.draft.value(), cx);
+});
+```
+
 与渲染期注册的 `on_click` 不同，这个订阅**活得比创建它的那次渲染更久**。订阅由运行时的句柄存储持有而不是由脚本持有，因为脚本没有地方放它，而“因为某个值被回收所以处理函数不再触发”是那种没人找得到的 bug。它随句柄一起释放。
+
+`"gpui-component"` 的 `InputState` 与 `TextareaState` 也以同样的事件、同样的 payload 响应 `on`，所以一个输入框从一个模块换到另一个模块时，订阅不用改。每个模块的 `Input` 只接受本模块的状态；把 `gpui-base` 的 `InputState` 交给 `gpui-component` 的 `Input` 会被拒绝，并写明需要哪个模块的状态。
 
 事件名拼错会列出合法值：
 

@@ -499,6 +499,7 @@ pub fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
             },
         )
         .with_methods(gpui_shell::input_token_state_methods())
+        .with_input_events::<gpui_component::input::InputMode>()
         .with_documentation(
             "Retained editable text state shared by Input and NumberInput, with optional placeholder and initial value.",
         ),

@@ -142,7 +142,9 @@ pub(super) fn list(brand: HostBrand) -> ! {
                     manifest.id()
                 );
                 let data = crate::runtime::app_data_dir(manifest.id()).unwrap_or_default();
-                let grants = manifest.capabilities(&root, &data).summary();
+                // What `run` will actually grant: the manifest's request plus the
+                // application's own directory and storage.
+                let grants = super::local_capabilities(&root, &data, Some(&manifest)).summary();
                 if grants.is_empty() {
                     println!("    no capabilities");
                 }

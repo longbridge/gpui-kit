@@ -10,6 +10,7 @@
 //! `Object<'js>` cannot unify the two elided lifetimes, so the handle object
 //! itself is assembled in the JS prelude, exactly as element objects are.
 
+use crate::engine::quickjs::js_error;
 use std::rc::Weak;
 
 use gpui::ScrollStrategy;
@@ -18,7 +19,7 @@ use gpui_base::VirtualListScrollHandle;
 use gpui_base::input::{InputBaseState, InputModeKind};
 use gpui_base::slider::{SliderScale, SliderValue};
 use rquickjs::{
-    Ctx, Exception, FromJs, Function, Object, Persistent, Result as JsResult, Value, function::Func,
+    Ctx, FromJs, Function, Object, Persistent, Result as JsResult, Value, function::Func,
 };
 
 use crate::{
@@ -43,7 +44,7 @@ impl<'js> FromJs<'js> for Handler {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
         let function = value
             .as_function()
-            .ok_or_else(|| Exception::throw_type(ctx, "expected a function"))?;
+            .ok_or_else(|| js_error::type_error(ctx, "expected a function"))?;
         Ok(Self(Persistent::save(ctx, function.clone())))
     }
 }
@@ -92,7 +93,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         }
                     })
                     .ok_or_else(|| {
-                        Exception::throw_type(&ctx, "input operation requires a live host call")
+                        js_error::type_error(&ctx, "input operation requires a live host call")
                     })?
                     .map(super::DataResult)
                     .map_err(|e| super::state_operation_error(&ctx, e))
@@ -129,7 +130,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         .map_err(|_| entity_limit_reached(&ctx))
                 })
                 .ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "InputState.new(...) needs a live host call; call it from init() \
                          or an event handler",
@@ -279,7 +280,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         .map_err(|_| entity_limit_reached(&ctx))
                 })
                 .ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "TextareaState.new(...) needs a live host call; call it from init() \
                          or an event handler",
@@ -378,6 +379,20 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
         ),
     )?;
 
+    let submit_runtime = runtime.clone();
+    globals.set(
+        "__textarea_set_submit_on_enter",
+        Func::from(
+            move |ctx: Ctx<'_>, handle: EntityHandle, submit: bool| -> JsResult<()> {
+                let state = live_textarea(&ctx, &submit_runtime, handle)?;
+                scope::with_current_app(|cx| {
+                    state.update(cx, |state, cx| state.set_submit_on_enter(submit, cx));
+                })
+                .ok_or_else(|| needs_call(&ctx, "set_submit_on_enter()"))
+            },
+        ),
+    )?;
+
     let discard_textarea = runtime.clone();
     globals.set(
         "__textarea_release",
@@ -395,7 +410,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             move |ctx: Ctx<'_>, handle: EntityHandle| -> JsResult<SpecId> {
                 let store = alive(&ctx, &textarea_element)?;
                 if store.entities().textarea(handle).is_none() {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "this textarea state has been released and can no longer be rendered",
                     ));
@@ -425,7 +440,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     "linear" => SliderScale::Linear,
                     "logarithmic" => SliderScale::Logarithmic,
                     _ => {
-                        return Err(Exception::throw_type(
+                        return Err(js_error::type_error(
                             &ctx,
                             "SliderState.new scale must be \"linear\" or \"logarithmic\"",
                         ));
@@ -433,7 +448,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                 };
                 let value =
                     slider_value(&ctx, &value, "SliderState.new value")?.ok_or_else(|| {
-                        Exception::throw_type(
+                        js_error::type_error(
                             &ctx,
                             "SliderState.new value must be a number, or a pair [start, end]",
                         )
@@ -452,7 +467,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     && step > 0.0
                     && (scale.is_linear() || min > 0.0);
                 if !sane {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "SliderState.new needs a finite min below its max and a positive step, \
                          and a logarithmic scale needs a min above zero",
@@ -475,7 +490,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         .map_err(|_| entity_limit_reached(&ctx))
                 })
                 .ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "SliderState.new(...) needs a live host call; call it from init() \
                          or an event handler",
@@ -507,7 +522,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             move |ctx: Ctx<'_>, handle: EntityHandle, value: Vec<f64>| -> JsResult<()> {
                 let state = live_slider(&ctx, &write_slider, handle)?;
                 let value = slider_value(&ctx, &value, "set_value(value)")?.ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "set_value(value) expects a number, or a pair [start, end]",
                     )
@@ -577,7 +592,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     .map_err(|_| entity_limit_reached(&ctx))
             })
             .ok_or_else(|| {
-                Exception::throw_type(
+                js_error::type_error(
                     &ctx,
                     "CalendarState.new() needs a live host call; call it from init() or an \
                      event handler",
@@ -797,7 +812,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                 // thousand cells.
                 if !(length.is_finite() && length.fract() == 0.0 && (1.0..=64.0).contains(&length))
                 {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "OtpState.new(length) expects a whole number between 1 and 64",
                     ));
@@ -818,7 +833,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         .map_err(|_| entity_limit_reached(&ctx))
                 })
                 .ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         &ctx,
                         "OtpState.new(...) needs a live host call; call it from init() \
                          or an event handler",
@@ -939,7 +954,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             move |ctx: Ctx<'_>, handle: EntityHandle| -> JsResult<SpecId> {
                 let store = alive(&ctx, &otp_element)?;
                 if store.entities().otp(handle).is_none() {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "this OTP state has been released and can no longer be rendered",
                     ));
@@ -958,7 +973,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
         Func::from(move |ctx: Ctx<'_>| -> JsResult<EntityHandle> {
             let phase = scope::current_phase();
             if matches!(phase, Some(ScopePhase::Render) | Some(ScopePhase::Layout)) {
-                return Err(Exception::throw_type(
+                return Err(js_error::type_error(
                     &ctx,
                     "cx.focus_handle() cannot run during render; a handle created there would \
                      be a new one every frame, so the focus it tracks would be dropped by the \
@@ -975,7 +990,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     .map_err(|_| entity_limit_reached(&ctx))
             })
             .ok_or_else(|| {
-                Exception::throw_type(
+                js_error::type_error(
                     &ctx,
                     "cx.focus_handle() needs a live host call; call it from init() or an \
                      event handler",
@@ -1047,7 +1062,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     "center" => ScrollStrategy::Center,
                     "top" => ScrollStrategy::Top,
                     other => {
-                        return Err(Exception::throw_type(
+                        return Err(js_error::type_error(
                             &ctx,
                             &format!("unknown scroll strategy `{other}`; expected top or center"),
                         ));
@@ -1099,7 +1114,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             move |ctx: Ctx<'_>, handle: EntityHandle| -> JsResult<SpecId> {
                 let store = alive(&ctx, &number_input_element)?;
                 if store.entities().input(handle).is_none() {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "this input state has been released and can no longer be rendered",
                     ));
@@ -1115,7 +1130,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             move |ctx: Ctx<'_>, handle: EntityHandle| -> JsResult<SpecId> {
                 let store = alive(&ctx, &runtime)?;
                 if store.entities().input(handle).is_none() {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "this input state has been released and can no longer be rendered",
                     ));
@@ -1136,7 +1151,7 @@ fn live(
     alive(ctx, runtime)?
         .entities()
         .input(handle)
-        .ok_or_else(|| Exception::throw_type(ctx, "this input state has been released"))
+        .ok_or_else(|| js_error::type_error(ctx, "this input state has been released"))
 }
 
 fn live_textarea(
@@ -1147,7 +1162,7 @@ fn live_textarea(
     alive(ctx, runtime)?
         .entities()
         .textarea(handle)
-        .ok_or_else(|| Exception::throw_type(ctx, "this textarea state has been released"))
+        .ok_or_else(|| js_error::type_error(ctx, "this textarea state has been released"))
 }
 
 /// Reads the text out of either state.
@@ -1188,7 +1203,7 @@ fn subscribe(
     what: &str,
 ) -> JsResult<bool> {
     let event = InputEventName::from_name(name).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "unknown input event `{name}`; expected one of: {}",
@@ -1221,19 +1236,112 @@ fn subscribe(
             })
     })
     .ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             "on(...) needs a live host call; subscribe from init() or an event handler",
         )
     })?;
 
     if !subscribed {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!("this {what} state has been released"),
         ));
     }
     Ok(true)
+}
+
+/// Installs `state.on(event, handler)` for a registered state that declares
+/// [`StateDescriptor::with_input_events`](crate::StateDescriptor::with_input_events).
+///
+/// The events, their payloads and the call scope a handler runs in are those of
+/// [`subscribe`] — a `gpui-component` `InputState` is the same Rust entity as a
+/// `gpui-base` one — so only where the entity is found differs: the registry's
+/// retained-state table rather than the entity store, and the subscription
+/// ends with that slot.
+pub(super) fn install_component_state_events(
+    module: &Object<'_>,
+    runtime: Weak<ShellRuntime>,
+    descriptor: crate::StateDescriptor,
+) -> JsResult<()> {
+    if !descriptor.has_input_events() {
+        return Ok(());
+    }
+    module.set(
+        format!("{}.on", descriptor.export()),
+        Func::from(
+            move |ctx: Ctx<'_>,
+                  proof: String,
+                  handle: u64,
+                  name: String,
+                  handler: Handler|
+                  -> JsResult<bool> {
+                let shell = alive(&ctx, &runtime)?;
+                if proof != shell.component_state_proof {
+                    return Err(js_error::type_error(&ctx, "state belongs to another runtime"));
+                }
+                if matches!(
+                    scope::current_phase(),
+                    Some(ScopePhase::Render | ScopePhase::Layout)
+                ) {
+                    return Err(js_error::type_error(
+                        &ctx,
+                        "on(...) cannot run during render; subscribe from init() or an event handler",
+                    ));
+                }
+                let event = InputEventName::from_name(&name).ok_or_else(|| {
+                    js_error::type_error(
+                        &ctx,
+                        &format!(
+                            "unknown input event `{name}`; expected one of: {}",
+                            InputEventName::NAMES.join(", ")
+                        ),
+                    )
+                })?;
+
+                let saved = handler.0;
+                let dispatch = runtime.clone();
+                let owner = shell.callback_owner();
+                shell.flush_component_state_releases();
+                let subscribed = scope::with_current(|window, cx| {
+                    let states = shell.component_states.try_borrow().map_err(|_| {
+                        anyhow::anyhow!("retained component state is already mutably borrowed")
+                    })?;
+                    states.subscribe(
+                        handle,
+                        &descriptor,
+                        event,
+                        Box::new(move |emitted, window, cx| {
+                            let Some(runtime) = dispatch.upgrade() else {
+                                return;
+                            };
+                            runtime.dispatch_input_event(&saved, &owner, emitted, window, cx);
+                        }),
+                        window,
+                        cx,
+                    )
+                })
+                .ok_or_else(|| {
+                    js_error::type_error(
+                        &ctx,
+                        "on(...) needs a live host call; subscribe from init() or an event handler",
+                    )
+                })?
+                .and_then(|subscription| {
+                    shell
+                        .component_states
+                        .try_borrow_mut()
+                        .map_err(|_| {
+                            anyhow::anyhow!("retained component state is already borrowed")
+                        })?
+                        .attach(handle, subscription)
+                });
+                subscribed
+                    .map(|()| true)
+                    .map_err(|error| js_error::type_error(&ctx, &error.to_string()))
+            },
+        ),
+    )
 }
 
 fn live_slider(
@@ -1244,7 +1352,7 @@ fn live_slider(
     alive(ctx, runtime)?
         .entities()
         .slider(handle)
-        .ok_or_else(|| Exception::throw_type(ctx, "this slider state has been released"))
+        .ok_or_else(|| js_error::type_error(ctx, "this slider state has been released"))
 }
 
 /// One number is one thumb; two are the ends of a range.
@@ -1268,7 +1376,7 @@ fn slider_value(ctx: &Ctx<'_>, values: &[f64], api: &str) -> JsResult<Option<Sli
 fn native_slider_number(ctx: &Ctx<'_>, value: f64, name: &str) -> JsResult<f32> {
     let narrowed = value as f32;
     if !narrowed.is_finite() {
-        return Err(Exception::throw_range(
+        return Err(js_error::range_error(
             ctx,
             &format!("{name} does not fit the native slider number range"),
         ));
@@ -1290,7 +1398,7 @@ fn subscribe_slider(
     handler: Handler,
 ) -> JsResult<bool> {
     let event = SliderEventName::from_name(name).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "unknown slider event `{name}`; expected one of: {}",
@@ -1319,14 +1427,14 @@ fn subscribe_slider(
             })
     })
     .ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             "on(...) needs a live host call; subscribe from init() or an event handler",
         )
     })?;
 
     if !subscribed {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "this slider state has been released",
         ));
@@ -1353,7 +1461,7 @@ fn slider_constructor(
             move |ctx: Ctx<'_>, handle: EntityHandle| -> JsResult<SpecId> {
                 let store = alive(&ctx, &runtime)?;
                 if store.entities().slider(handle).is_none() {
-                    return Err(Exception::throw_type(
+                    return Err(js_error::type_error(
                         &ctx,
                         "this slider state has been released and can no longer be rendered",
                     ));
@@ -1372,7 +1480,7 @@ fn live_otp(
     alive(ctx, runtime)?
         .entities()
         .otp(handle)
-        .ok_or_else(|| Exception::throw_type(ctx, "this OTP state has been released"))
+        .ok_or_else(|| js_error::type_error(ctx, "this OTP state has been released"))
 }
 
 /// Refreshes script-derived presentation after a controlled retained-state
@@ -1400,7 +1508,7 @@ fn subscribe_otp(
     handler: Handler,
 ) -> JsResult<bool> {
     let event = OtpEventName::from_name(name).ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             &format!(
                 "unknown OTP event `{name}`; expected one of: {}",
@@ -1429,14 +1537,14 @@ fn subscribe_otp(
             })
     })
     .ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             "on(...) needs a live host call; subscribe from init() or an event handler",
         )
     })?;
 
     if !subscribed {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "this OTP state has been released",
         ));
@@ -1454,7 +1562,7 @@ fn refuse_creation_in_render(ctx: &Ctx<'_>, constructor: &str) -> JsResult<()> {
         scope::current_phase(),
         Some(ScopePhase::Render) | Some(ScopePhase::Layout)
     ) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "{constructor} cannot run during render; create state in init() or in an \
@@ -1473,7 +1581,7 @@ fn refuse_creation_in_render(ctx: &Ctx<'_>, constructor: &str) -> JsResult<()> {
 ///
 /// [`MAX_LIVE_ENTITIES`]: crate::entities::MAX_LIVE_ENTITIES
 pub(super) fn entity_limit_reached(ctx: &Ctx<'_>) -> rquickjs::Error {
-    Exception::throw_range(
+    js_error::range_error(
         ctx,
         "the application reached gpui-shell's retained entity limit; release unused handles",
     )
@@ -1484,7 +1592,7 @@ fn refuse_mutation_in_render(ctx: &Ctx<'_>, api: &str) -> JsResult<()> {
         scope::current_phase(),
         Some(ScopePhase::Render) | Some(ScopePhase::Layout)
     ) {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "{api} cannot run during render or layout; mutate state from an event handler or task"
@@ -1502,7 +1610,7 @@ fn live_virtual_scroll(
     alive(ctx, runtime)?
         .entities()
         .virtual_scroll(handle)
-        .ok_or_else(|| Exception::throw_type(ctx, "this scroll handle has been released"))
+        .ok_or_else(|| js_error::type_error(ctx, "this scroll handle has been released"))
 }
 
 fn live_focus(
@@ -1513,7 +1621,7 @@ fn live_focus(
     alive(ctx, runtime)?
         .entities()
         .focus(handle)
-        .ok_or_else(|| Exception::throw_type(ctx, "this focus handle has been released"))
+        .ok_or_else(|| js_error::type_error(ctx, "this focus handle has been released"))
 }
 
 /// The runtime this handle's store belongs to, or a clear failure.
@@ -1531,7 +1639,7 @@ fn calendar_state(
         .entities()
         .calendar(handle)
         .ok_or_else(|| {
-            Exception::throw_type(
+            js_error::type_error(
                 ctx,
                 "this calendar state has been released; a handle cannot be used after release()",
             )
@@ -1568,7 +1676,7 @@ fn date_from_parts(ctx: &Ctx<'_>, parts: &[Option<String>]) -> JsResult<gpui_bas
         chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
             .map(Some)
             .map_err(|error| {
-                Exception::throw_type(
+                js_error::type_error(
                     ctx,
                     &format!("`{text}` is not a date in the form \"YYYY-MM-DD\": {error}"),
                 )
@@ -1580,7 +1688,7 @@ fn date_from_parts(ctx: &Ctx<'_>, parts: &[Option<String>]) -> JsResult<gpui_bas
             day(start.as_ref())?,
             day(end.as_ref())?,
         )),
-        _ => Err(Exception::throw_type(
+        _ => Err(js_error::type_error(
             ctx,
             "a calendar date is null, \"YYYY-MM-DD\", or a two-element array of those",
         )),
@@ -1596,7 +1704,7 @@ fn subscribe_calendar(
     handler: Handler,
 ) -> JsResult<bool> {
     if name != "change" {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             &format!(
                 "unknown calendar event `{name}`; the only one is \"change\", which reports \
@@ -1626,14 +1734,14 @@ fn subscribe_calendar(
             })
     })
     .ok_or_else(|| {
-        Exception::throw_type(
+        js_error::type_error(
             ctx,
             "on(...) needs a live host call; subscribe from init() or an event handler",
         )
     })?;
 
     if !subscribed {
-        return Err(Exception::throw_type(
+        return Err(js_error::type_error(
             ctx,
             "this calendar state has been released; a handle cannot be used after release()",
         ));
@@ -1644,11 +1752,11 @@ fn subscribe_calendar(
 fn alive(ctx: &Ctx<'_>, runtime: &Weak<ShellRuntime>) -> JsResult<std::rc::Rc<ShellRuntime>> {
     runtime
         .upgrade()
-        .ok_or_else(|| Exception::throw_message(ctx, "the runtime has shut down"))
+        .ok_or_else(|| js_error::error(ctx, "the runtime has shut down"))
 }
 
 fn needs_call(ctx: &Ctx<'_>, what: &str) -> rquickjs::Error {
-    Exception::throw_type(
+    js_error::type_error(
         ctx,
         &format!("{what} needs a live host call; call it from render or an event handler"),
     )

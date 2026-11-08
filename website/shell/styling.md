@@ -81,7 +81,7 @@ percentages and "auto" are not allowed here
 | Typography | `font_family`                                                              | string           |
 | Paint      | `opacity`                                                                  | number           |
 
-`line_height` is the one exception worth memorizing: a **bare number is a multiplier**, not pixels. `line_height(1.45)` means 1.45× the font size, because that is what it means everywhere else in the industry and 1.45px is never what anyone meant. A string still follows the ordinary grammar.
+`line_height` is the one exception worth memorizing: a **bare number is a multiplier**, not pixels. `line_height(1.45)` means 1.45× the font size, the same as CSS's unitless `line-height: 1.45` and Rust's `line_height(relative(1.45))`, because 1.45px is never what anyone meant. A string still follows the ordinary grammar, so `line_height("18px")` is a fixed height.
 
 ### What is deliberately not bound
 
@@ -152,6 +152,28 @@ Two implementation facts leak far enough to be worth knowing:
 
 - **`active` and `focus` need a stable element identity.** A plain `div` acquires one lazily, derived from its position in the description, which is stable across renders for a stable tree. `Button`, `Checkbox` and `Input` already have one.
 - **A `Switch` ignores state styles.** The switch root is not the interactive element — its track is — so a state style on it has nowhere to land. The runtime logs a warning saying to style the row around it instead, rather than dropping the declaration silently.
+
+### Group hover
+
+`hover` styles the element under the pointer. To style an element while the pointer is over one of its ancestors, name the ancestor with `group(name)` and declare `group_hover(name, declare)` on the element inside it:
+
+```js
+renderRow(row, cx) {
+  return h_flex()
+    .group("row")
+    .justify_between()
+    .child(row.title)
+    .child(
+      div()
+        .text_color(cx.theme().colors.muted_foreground)
+        .opacity(0)
+        .group_hover("row", (style) => style.opacity(1))
+        .child(row.id),
+    );
+}
+```
+
+A group hover follows the nearest ancestor with that name, so every row of a list can use the same one. Like `hover`, it resolves natively and runs no script, and it is a style rather than a handler, so a virtual list's item renderer may declare it. One that changes the element's size or position needs a stable identity, `.id(name)`, because GPUI lays the element out from its own state; one that only paints, such as an opacity or a colour, does not.
 
 ## Scrolling overflow
 

@@ -129,6 +129,11 @@ impl WrapMap {
         self.wrapper.set_wrapping_indent(wrapping_indent, cx);
     }
 
+    /// Set the number of spaces per tab stop. Returns whether it changed.
+    pub(super) fn set_tab_size(&mut self, tab_size: usize, cx: &mut App) -> bool {
+        self.wrapper.set_tab_size(tab_size, cx)
+    }
+
     /// Set font parameters
     pub(super) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrapper.set_font(font, font_size, cx);

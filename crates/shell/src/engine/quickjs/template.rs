@@ -53,7 +53,8 @@
 //! row is a third of what filling costs. That is measured rather than
 //! estimated — §20.7 carries the number.
 
-use rquickjs::{Coerced, Ctx, Exception, Function, Persistent, Result as JsResult, Value};
+use crate::engine::quickjs::js_error;
+use rquickjs::{Coerced, Ctx, Function, Persistent, Result as JsResult, Value};
 use smallvec::SmallVec;
 
 use super::{CallbackEntry, ShellRuntime};
@@ -98,7 +99,7 @@ impl ShellRuntime {
     /// nothing that has been promised.
     pub(super) fn begin_template(&self, ctx: &Ctx<'_>, arity: usize) -> JsResult<()> {
         if self.discovery.borrow().is_some() {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "a template body cannot define or call another template. Build the \
                  inner structure inline, or call the inner template where the outer \
@@ -125,7 +126,7 @@ impl ShellRuntime {
     /// Finishes a body and answers the id its closure will keep.
     pub(super) fn end_template(&self, ctx: &Ctx<'_>, root: Option<SpecId>) -> JsResult<u32> {
         let Some(discovery) = self.discovery.borrow_mut().take() else {
-            return Err(Exception::throw_type(ctx, "no template is being defined"));
+            return Err(js_error::type_error(ctx, "no template is being defined"));
         };
 
         // The interrupted description goes back before any refusal below, or a
@@ -135,14 +136,14 @@ impl ShellRuntime {
         let root = root
             .filter(|root| (*root as usize) < recorded.len())
             .ok_or_else(|| {
-                Exception::throw_type(
+                js_error::type_error(
                     ctx,
                     "a template body must return one element built inside it",
                 )
             })?;
 
         if recorded.mounts_an_entity() {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "a template cannot mount a nested view or a dock area: it is grafted \
                  once per call, and GPUI mounts one entity at one place. Put the entity \
@@ -151,7 +152,7 @@ impl ShellRuntime {
         }
 
         if let Some(method) = inline_handler(&recorded, &discovery.slots) {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "`{method}` inside a template body registers one handler for the life \
@@ -162,7 +163,7 @@ impl ShellRuntime {
         }
 
         if let Some(argument) = unused_argument(discovery.arity, &discovery.slots) {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "template argument {argument} is never used in the body. A parameter \
@@ -196,7 +197,7 @@ impl ShellRuntime {
         arguments: Vec<Value<'js>>,
     ) -> JsResult<SpecId> {
         if self.discovery.borrow().is_some() {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 "a template body cannot call another template. Call it where the outer \
                  template is called",
@@ -210,14 +211,14 @@ impl ShellRuntime {
             .cloned()
             .flatten()
             .ok_or_else(|| {
-                Exception::throw_type(
+                js_error::type_error(
                     ctx,
                     "this template belongs to an application that has been unloaded",
                 )
             })?;
 
         if arguments.len() != template.arity() {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "this template takes {} argument(s) and was given {}",
@@ -243,7 +244,7 @@ impl ShellRuntime {
         for (slot, value) in template.slots().iter().zip(values) {
             arena
                 .write_slot(base, slot, value)
-                .map_err(|error| Exception::throw_type(ctx, &error.to_string()))?;
+                .map_err(|error| js_error::type_error(ctx, &error.to_string()))?;
         }
 
         Ok(root)
@@ -263,28 +264,37 @@ impl ShellRuntime {
                 op,
                 argument: index,
             } => {
-                let value = super::bridge(ctx, argument)?;
-                // The check the ordinary path runs while recording. It could
-                // not run then — the value did not exist — so it runs here,
-                // which still reports one call rather than one frame later.
-                if let Some(SpecOp::ParamStyle(name, existing)) = template
+                let style = template
                     .arena()
                     .node(slot.node())
                     .map(crate::spec::SpecNode::ops)
                     .and_then(|ops| ops.get(op as usize))
-                {
+                    .and_then(|op| match op {
+                        SpecOp::ParamStyle(name, existing) => Some((*name, existing)),
+                        _ => None,
+                    });
+                // A style argument is read for its method, so `shadow`'s array
+                // of records fills a slot exactly as it is passed directly.
+                let value = match style {
+                    Some((name, _)) => super::bridge_style(ctx, name, argument)?,
+                    None => super::bridge(ctx, argument)?,
+                };
+                // The check the ordinary path runs while recording. It could
+                // not run then — the value did not exist — so it runs here,
+                // which still reports one call rather than one frame later.
+                if let Some((name, existing)) = style {
                     let mut checked: SmallVec<[Bridged; 2]> = existing.clone();
                     if let Some(place) = checked.get_mut(index as usize) {
                         *place = value.clone();
                     }
                     style::apply_param(name, &checked, Default::default())
-                        .map_err(|error| Exception::throw_type(ctx, error.message()))?;
+                        .map_err(|error| js_error::type_error(ctx, error.message()))?;
                 }
                 Ok(SlotValue::Value(value))
             }
             SlotSite::Handler { .. } => {
                 let handler = argument.as_function().ok_or_else(|| {
-                    Exception::throw_type(
+                    js_error::type_error(
                         ctx,
                         "this template argument fills a handler and must be a function",
                     )
@@ -320,7 +330,7 @@ impl ShellRuntime {
         self.require_discovery(ctx)?;
 
         let Some(name) = super::callback_op_name(method).filter(|_| position == 0) else {
-            return Err(Exception::throw_type(
+            return Err(js_error::type_error(
                 ctx,
                 &format!(
                     "`{method}` cannot take a template argument: a template fills text \
@@ -402,7 +412,7 @@ impl ShellRuntime {
         if self.discovery.borrow().is_some() {
             return Ok(());
         }
-        Err(Exception::throw_type(
+        Err(js_error::type_error(
             ctx,
             "a template argument escaped the body that declared it. It can be passed to a \
              builder call inside the template, and nowhere else",
@@ -416,9 +426,9 @@ impl ShellRuntime {
             .node(id)
             .map(|node| node.ops().len())
             .filter(|count| *count > 0)
-            .ok_or_else(|| Exception::throw_type(ctx, "no operation to attach a slot to"))?;
+            .ok_or_else(|| js_error::type_error(ctx, "no operation to attach a slot to"))?;
         u16::try_from(count - 1).map_err(|_| {
-            Exception::throw_type(
+            js_error::type_error(
                 ctx,
                 "one element recorded more operations than a template can address",
             )
@@ -431,7 +441,7 @@ impl ShellRuntime {
                 discovery.slots.push(slot);
                 Ok(())
             }
-            None => Err(Exception::throw_type(ctx, "no template is being defined")),
+            None => Err(js_error::type_error(ctx, "no template is being defined")),
         }
     }
 }
@@ -484,8 +494,11 @@ fn unused_argument(arity: usize, slots: &[Slot]) -> Option<usize> {
 /// — because the ordinary path is `.child(String(value))` in the prelude, and a
 /// number has to read the same whichever path recorded it.
 fn text_of<'js>(ctx: &Ctx<'js>, value: &Value<'js>) -> JsResult<String> {
-    if matches!(super::bridge(ctx, value)?, Bridged::Nil) {
-        return Err(Exception::throw_type(
+    if matches!(
+        super::bridge(ctx, value)?,
+        Bridged::Nil | Bridged::Background(_) | Bridged::Shadows(_)
+    ) {
+        return Err(js_error::type_error(
             ctx,
             "this template argument fills a text child and must be a string, a number \
              or a boolean",

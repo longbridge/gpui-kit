@@ -18,6 +18,9 @@ use crate::{
 pub(crate) struct DropdownField<T> {
     options: Vec<(SharedString, SharedString)>,
     scrollable: bool,
+    /// The setting's title. The button shows only the selected option, so its
+    /// accessible name puts the title in front of that option.
+    title: SharedString,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -25,10 +28,12 @@ impl<T> DropdownField<T> {
     pub(crate) fn new(
         options: Option<&Vec<(SharedString, SharedString)>>,
         scrollable: bool,
+        title: SharedString,
     ) -> Self {
         Self {
             options: options.cloned().unwrap_or_default(),
             scrollable,
+            title,
             _marker: std::marker::PhantomData,
         }
     }
@@ -59,6 +64,7 @@ where
 
         Button::new("btn")
             .when(options.layout().is_vertical(), |this| this.w_full())
+            .accessibility_label(format!("{}: {}", self.title, old_label))
             .label(old_label)
             .dropdown_caret(true)
             .outline()

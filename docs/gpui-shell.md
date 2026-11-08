@@ -75,9 +75,11 @@ gpui_shell::init(cx);
 let runtime = gpui_shell::ShellRuntime::new(cx)?;
 ```
 
-The shell pins every LLRT crate to commit
-`7b95c82a9b15e7ddfb2778eca4b5a63111e74f51`, whose modules share
-`rquickjs 0.12`. LLRT supplies Standard Runtime implementations and data types;
+The shell uses the matching crates.io releases of `quickjs-jit`,
+`quickjs-jit-runtime` and `quickjs-jit-stdlib` (0.14.1). The standard modules
+are vendored into `quickjs-jit-stdlib` and share the same VM and binding types,
+without Git-only LLRT dependencies or a local compatibility facade. LLRT supplies
+Standard Runtime implementations and data types;
 GPUI Shell remains responsible for the VM, scheduler, Policy and OS authority.
 
 Scripts import bare GPUI Shell module names:
@@ -102,6 +104,7 @@ manifest-declared Git dependencies are resolved.
 | `os`                                      | Honest read-only subset: platform, architecture, and line ending; no invented home/temp paths                                                           |
 | `fs/promises`                             | Shell adapter over capability directory handles; no callback-style `fs` module or ambient `std::fs` access                                              |
 | global `fetch`                            | Capability-checked HTTP, including every redirect; 30-second timeout and 8 MiB buffered-body limit                                                      |
+| global `TextEncoder`, `TextDecoder`       | Shell implementation of the WHATWG Encoding classes, UTF-8 only; needs no capability                                                                    |
 | `net`                                     | Capability-checked TCP connect; 30-second I/O timeout and 1 MiB per-call read/write limit                                                               |
 | `websocket.WebSocket`                     | Capability-checked `connect` plus asynchronous text/binary `read`, `write`, and `close`; not a browser global or constructor; 8 MiB message/frame limit |
 
@@ -202,7 +205,9 @@ Seven things are deliberately absent, and will stay absent:
    Standard Runtime deliberately exposes selected bare modules plus a
    WinterCG-style `fetch`; those individual APIs do not imply browser or Node.js
    compatibility. The shell's narrow `window` and `process` globals expose only
-   GPUI/host capabilities.
+   GPUI/host capabilities. `WebView` (§14.8) does not change this: it embeds a
+   web page as one element, and the script around it still runs in QuickJS
+   with no DOM.
 
 ---
 
@@ -786,8 +791,9 @@ length; `.rounded("50%")` reports that radius needs an absolute one.
 
 `line_height` is the single exception in the grammar: a bare number is a
 multiplier, not pixels, because `line_height(1.45)` means 1.45× the font size
-everywhere else in the industry and 1.45px is never what anyone meant. A string
-still goes through the ordinary grammar.
+everywhere else in the industry — CSS's unitless `line-height: 1.45`, Rust's
+`line_height(relative(1.45))` — and 1.45px is never what anyone meant. A string
+still goes through the ordinary grammar, so `line_height("18px")` is fixed.
 
 ### 7.2 Descriptions
 
@@ -835,6 +841,14 @@ The event names a script can subscribe to are `change`, `submit`, `focus`, and
 `blur` — named for what they mean rather than for the key that produced them, so
 `submit` covers base's `InputEvent::PressEnter`. An unknown name reports the
 full valid set.
+
+Base emits `PressEnter` for every Enter, including one a textarea has just
+turned into a line break, so a textarea's `submit` arrives after the break is
+in the text. `TextareaState.set_submit_on_enter(true)` passes through to base's
+`set_submit_on_enter`: Enter then inserts nothing and only submits, and
+Shift+Enter still inserts a line break and is still reported, with
+`shift: true`. The shell does not filter that second `submit`, because base
+reports it and a script may want it; the handler checks `event.shift`.
 
 ### 7.4 Cycles across two garbage collectors
 
@@ -1083,7 +1097,8 @@ input editing and animation are native throughout.
 #### Materialization
 
 `materialize` is a depth-first walk in pure Rust: it reads each node from the
-snapshot's arena, replays its ops in order, recurses into children, and produces
+snapshot's arena, replays its ops in order, recurses into children (at most 64
+levels, bounded while the description is recorded; §19.3), and produces
 an `AnyElement`. It is **non-destructive** — that is what makes a snapshot
 replayable — and it never calls script, which is what lets it be benchmarked and
 snapshot-tested independently of the VM (§20.3, §22.1).
@@ -1128,9 +1143,9 @@ not the interactive element (`SwitchTrack` is) and the style has nowhere to land
 
 #### State styles resolve natively
 
-`.hover(...)`, `.active(...)` and `.focus(...)` record their declarations into a
-detached node while the script runs, and materialization turns them into
-`StyleRefinement`s that GPUI applies itself. A pointer moving across the
+`.hover(...)`, `.active(...)`, `.focus(...)` and `.group_hover(name, ...)` record
+their declarations into a detached node while the script runs, and
+materialization turns them into `StyleRefinement`s that GPUI applies itself. A pointer moving across the
 interface executes no script at all. The same rule is what any future animation
 API has to follow: the script creates a native animation once, and receives at
 most a completion callback — never a per-frame one.
@@ -1416,8 +1431,8 @@ available to a script; the script re-derives them with `when`.
 ### 10.5 Input events
 
 `on_key_down`, `on_key_up`, `on_modifiers_changed`,
-`on_mouse_down(button, …)`, `on_mouse_up`, `on_mouse_down_out` and
-`on_scroll_wheel` are GPUI's own `InteractiveElement` builders, installed
+`on_mouse_down(button, …)`, `on_mouse_up`, `on_mouse_down_out`,
+`on_scroll_wheel` and `on_pinch` are GPUI's own `InteractiveElement` builders, installed
 together by `materialize::with_input_handlers`.
 
 ```js
@@ -1790,7 +1805,7 @@ each.
 
 ### 13.2 Styles that take arguments
 
-Fifty-seven methods are bound by hand in `style.rs`, and they are indistinguishable
+Sixty methods are bound by hand in `style.rs`, and they are indistinguishable
 from the reflected ones at the call site:
 
 ```js
@@ -1805,15 +1820,27 @@ function panel(cx) {
 }
 ```
 
-They divide as 9 size, 7 padding, 7 margin, 5 position, 6 flex, 6 paint, 8
-border, and 9 radius. Five families are deliberately unbound, with the reason
-recorded at the head of the array: `shadow` takes a `Vec<BoxShadow>` and belongs
-with the animation and token work rather than as a positional argument list;
-`cursor`, `text_align`, `text_overflow`, and `font_weight` take GPUI enums and
+They divide as 9 size, 7 padding, 7 margin, 5 position, 6 flex, 9 paint, 8
+border, and 9 radius. Two of the paint methods take a structured value rather
+than a primitive. `bg` accepts a `Background` from the script's `Background`
+builder as well as a colour, so a rounded element can be filled with a linear
+gradient; it reuses the `BackgroundSpec` that `window.paint_path` records, and
+both convert through one function. `shadow` takes an array of CSS-like records,
+`{ x, y, blur, spread, color, inset }`, where `blur` keeps CSS semantics and is
+halved into GPUI's gaussian deviation, and the list is reversed so the first
+shadow paints on top as in CSS; `[]` removes the shadows, and the
+`shadow_*` presets stay nullary and reflected. Both cross the bridge as
+`Bridged::Background` and `Bridged::Shadows`, so they replay through the same
+`SpecOp::ParamStyle` path as every other style, including state styles such as
+`.hover(...)` and template slots.
+
+Three families are deliberately unbound, with the reason recorded at the head
+of the array: `cursor`, `text_align`, and `text_overflow` take GPUI enums and
 would each need a name mapping when every variant already has a nullary form
-(`cursor_pointer`, `text_center`, `font_bold`); and `scrollbar_width` is
-not exposed because the shell owns native overflow behavior but does not yet
-offer configurable scrollbar presentation.
+(`cursor_pointer`, `text_center`); `font_weight` is bound only because GPUI
+represents it as a number; and `scrollbar_width` is not exposed because the
+shell owns native overflow behavior but does not yet offer configurable
+scrollbar presentation.
 
 Overflow itself is an element behavior rather than a `StyleRefinement` entry:
 `.overflow_scroll()`, `.overflow_x_scroll()`, and `.overflow_y_scroll()` wrap a
@@ -2027,7 +2054,10 @@ dependency runs upward only — `"gpui-base"` imports the element and
 component-factory types it is built out of from `"gpui-kit"`, and `"gpui-kit"` refers
 down only where one shared element prototype forces it: `track_scroll`, `mode`,
 `axis` and `cx.theme()` name their argument types with an inline
-`import("gpui-base").X`.
+`import("gpui-base").X`. The component catalog's block is declared under the
+specifier its registry carries (§14.7) — `"gpui-component"` for the shipped
+catalog — and a directory whose scripts import only that specifier gets the
+file too.
 
 What makes the declarations trustworthy is that they are generated from **the
 tables the runtime dispatches through**, not transcribed from documentation:
@@ -2118,7 +2148,13 @@ the one command, and Cargo forbids the dependency cycle a feature on a separate
 crate would have needed. `gpui_shell::init` installs the base layer;
 `gpui_shell::components::init` installs the catalog and then the runtime. A
 host that wants the protocol without the catalog builds `gpui-shell` without
-the feature and gets an empty registry, which declares no module at all.
+the feature and gets an empty registry, which declares no module at all. A host
+that wants the catalog and components of its own calls
+`gpui_shell::components::registry()`, which returns the catalog before it is
+frozen, registers into it, and freezes it; `components()` is that call followed
+by `freeze`. The registry already carries the catalog's initializer and window
+opener. A host whose components need startup of their own replaces the
+initializer with a function that calls `gpui_component::init` first.
 
 **A registry is built, then frozen.** `ComponentRegistry::new(api_version,
 module_specifier)` opens one; `register` and `register_state` add to it;
@@ -2195,7 +2231,27 @@ proof the module stamps on it. The proof comes from `RandomState`'s OS-seeded
 keys: anything a script can observe — a process id, a clock, a counter — would
 be reconstructible, and a forged handle would reach another application's state.
 Retained values are owned by the application generation that created them and
-are released with it.
+are released with it, or earlier when the script calls `release()` on the state
+object. `release()` drops the value and its event subscriptions, returns whether
+the state was still live, and is refused during render and layout like any other
+change to retained state. A method called on it afterwards throws.
+A registered state method may not be named `release`.
+
+A retained state built on the text engine — an `Entity<InputBaseState<M>>`,
+which is what both `gpui-component`'s `InputState` and `TextareaState` are —
+declares `with_input_events::<M>()`, and its script object gains
+`on(event, handler)` with the events, payloads and call scope of `gpui-base`'s
+`InputState.on`: `change`, `submit` (Enter, carrying `secondary` and `shift`),
+`focus` and `blur`. The subscription lives in the state's slot and ends with it.
+The two modules' states share a kind name but not a handle table, so a
+registered component refuses a `gpui-base` state of a kind the registry also
+registers, naming the module whose state it wants, rather than resolving the
+handle in the wrong table.
+
+Every export of the generated module — component and state alike — is callable
+as `Type.new(...)`, the form `gpui-base` uses, as well as by the plain call and
+`new Type(...)` it accepted first. A script importing from both modules writes
+one construction form.
 
 **Effects.** Some native surfaces change state that outlives the render asking
 for it: an application menu bar, a window title. `MaterializeRequest::app_effects`
@@ -2218,6 +2274,55 @@ from the public exports. Each entry is either registered — naming its
 descriptor, its exports, and any companion parts — or explicitly deferred with a
 reason. That file is the single answer to "why is X not bound"; a prose list
 beside the source would be a second answer, and the one nothing checks.
+
+### 14.8 WebView
+
+`WebViewState` and `WebView` are registered in the catalog by the default
+`webview` feature, over `gpui-webview`. They follow the retained-state shape
+of `EditorState` and `Editor`: the state owns the native webview, so the
+document, its history and its scroll position survive renders, and the element
+places it in the layout.
+
+**Traffic in both directions is text.** The script reaches the page with
+`evaluate_script(js)`, which returns nothing; the page answers with
+`window.ipc.postMessage(text)`, delivered to `WebView.on_message`.
+`WebView.on_load(url)` reports each document that finishes loading, whoever
+navigated, because that is the first moment a page can be spoken to. A JSON
+protocol between the two is the application's to define.
+
+The native handlers have no `App`, so they push into a bounded channel
+(1,024 events; a message over 1 MiB is dropped) that a window task drains,
+invoking the listeners of the most recent render. The listeners live in the
+state rather than on the element, the way an input's `on_change` does, and a
+render that drops one stops its delivery. The channel's senders live in the
+native webview, so the task ends when the state is released.
+
+**Only `http` and `https` load.** The rule applies to `load_url`, the initial
+URL, and the page's own navigation, through wry's navigation handler; `about:`
+is let through because the engines use `about:blank` while setting up. Without
+it a page or a script could open `file:` URLs and read the disk past every
+`fs` grant.
+
+**A page needs the network grant a `fetch` of it would.** The script runs code
+in the page with `evaluate_script` and reads its replies through `on_message`,
+so showing a page is network access: without a grant, a WebView would read
+loopback and LAN services that the application's own `fetch` is refused. The
+creating script's grant is kept with the state and checked, as a `GET` of the
+URL (`Capabilities::may_get`), on the initial URL, `load_url`, every navigation
+through wry's navigation handler, and `evaluate_script`. A page message is
+delivered only when its sending document is granted, and `on_load` reports only
+granted documents, so a document reached past the navigation check (a server
+redirect the engine does not route through the handler) can neither answer the
+script nor run its code. A navigation that is not granted is cancelled rather
+than handed to the system browser, because a page can navigate without a
+gesture. On macOS the handler also sees frame navigations, so an iframe from an
+ungranted host does not load either.
+
+**Platform limits come from `gpui-webview`.** GPUI overlays render above the
+page only with GPUI Fast, so the feature selects GPUI Fast for the whole runtime. On Linux the page needs an X11
+window; on a Wayland window `WebViewState` throws with that reason, and the
+host does not force X11 on applications that never create a page. On Windows
+the native page draws above GPUI content it overlaps.
 
 ---
 
@@ -2385,10 +2490,13 @@ is what happens when two of them are open at once.
 
 `ShellRoot` is that decision, and it is the only reason `root.rs` exists: a
 stacking order plus a dismissal order, with the smallest presentation that makes
-them visible. The first view of a shell window is always a `ShellRoot`, the same
-way the first view of a `gpui-component` window is always a `Root`, and a script
-reaches it only through `ShellRoot::update` — never by constructing overlays
-itself.
+them visible. The first view of a shell window is a `ShellRoot`, the same way the
+first view of a `gpui-component` window is a `Root` — or, when a catalog opens
+the window itself so that its own overlays find their `Root`
+(`ComponentWindowOpener`), the view directly inside that `Root`. A script
+reaches it only through `ShellRoot::update`, which looks in both places — never
+by constructing overlays itself. A view's `init` runs before its window has a
+root, so an overlay call made there is refused with a message that says so.
 
 **Stacking**, painted back to front: the script's content; at most one sheet,
 anchored to a viewport edge; the dialog stack in open order, each deferred at
@@ -2544,7 +2652,15 @@ The public module is `fs/promises`; the callback-style `fs` name is deliberately
 not registered. `readFile(path)` resolves to `Uint8Array`, while an explicit
 `"utf8"` or `{ encoding: "utf8" }` resolves to text. `writeFile` accepts a string
 or `Uint8Array`. `readdir(path)` resolves to sorted names; pass
-`{ withFileTypes: true }` for `Dirent` objects with `isDirectory()`. The remaining
+`{ withFileTypes: true }` for `Dirent` objects with `isDirectory()`. `stat(path)`
+follows a symlink and `lstat(path)` does not; both resolve to a `Stats`-shaped
+object with `isFile()`, `isDirectory()`, `isSymbolicLink()`, `size`, `mode`, and
+`mtime`/`atime`/`birthtime` as `Date`s plus their `…Ms` numbers (a time the
+filesystem does not record reads as the epoch). `readlink(path)` resolves to the
+stored target text, which may name a place outside every root; reading the text
+is not following it. `stat`, `lstat`, and `readlink` need read access;
+`rename(from, to)` needs write access to both paths, because taking a file out
+of a directory changes that directory as much as putting one in. The remaining
 subset is `exists`, `unlink`, `rmdir`, and `mkdir`. Streams, file descriptors,
 watches, and sync operations are not part of the experimental contract.
 
@@ -2587,8 +2703,13 @@ flush barriers may wait for durability at once.
 Three experimental surfaces are implemented. Global `fetch(url, options?)`
 supports bounded requests of any HTTP method -- which methods actually reach a
 host is the capability policy's decision -- string or `Uint8Array` bodies, safe
-request headers, and resolves to `{ status, ok, url, , json() }`; both
-body readers return promises. The `gpui-kit` module exports
+request headers, and resolves to
+`{ status, ok, url, text(), json(), arrayBuffer(), bytes() }`; every body reader
+returns a promise. The body is kept as bytes until a reader asks for text, so a
+binary download survives `arrayBuffer()` unchanged. Requests carry
+`User-Agent: gpui-shell/<version>` unless the script sets its own, because some
+APIs, GitHub's among them, refuse a request without one; the WebSocket handshake
+does the same. The `gpui-kit` module exports
 `WebSocket.connect(url, { headers }?)`, returning a socket with asynchronous
 text/binary `read`, `write`, and `close`. Bare module `net` provides raw
 `connect(host, port)` with bounded async `read` and `write`; its synchronous
@@ -2726,6 +2847,16 @@ process: it ends it, with the code the script asked for.
 `process` is installed as a global as well as a `gpui-kit` module member, because
 `process` is the name a JavaScript author, or a model writing JavaScript, will
 reach for.
+
+An application also needs to know where things are. `process.dataDir` is its
+data directory (`Policy::with_data_dir`, which `set_bundle_id` sets);
+`os.homedir()` is the user's home; `import.meta.url` is the `file:` URL of the
+running module. None needs a grant: a path says where something is, and reaching
+it is still `capabilities.fs`'s decision. `process.env` is the exception, because
+an environment variable's _value_ can be a secret — it holds only the defaults
+in `crates/shell/src/default-env` and the names `capabilities.process.env` lists. `env` and `dataDir` are getters on the default
+object rather than named exports, so each read answers for the application whose
+code is running (§18.3).
 
 There is no streaming subprocess: pipe semantics conflict with the asynchronous
 model, and a case that needs streaming output belongs behind a host-registered
@@ -2967,7 +3098,8 @@ that scheme's standard port; a manifest writes `port` only for a non-default
 endpoint. Redirects are
 checked again with the same rule, so an allowed endpoint cannot redirect a
 credentialed request onto an unlisted path or host. An HTTP-only grant does not
-also grant TCP or WebSocket access to its host.
+also grant TCP or WebSocket access to its host. A `WebView` page is a `GET` of
+its URL and needs the same grant (§14.8).
 
 **Capability is permission; contribution is behavior.** Commands, panels, key
 bindings, settings, and themes are registered from script, never declared a
@@ -3019,7 +3151,43 @@ come from the host and nowhere else. A relative path is anchored to the plugin
 directory; an absolute path is taken as written, and is exactly the case a host
 policy or an approval prompt exists to gate.
 
-`execute` is either an allowlist of command names or the string `"*"`.
+`${homeDir}` is the user's home directory (`HOME`, or `USERPROFILE`), so an
+application that manages the user's own files — `${homeDir}/.claude/skills` —
+can ask for them without hard-coding a user name. It grants nothing the
+equivalent absolute path would not; it only makes that path portable. When no
+home directory is known, a root under it is dropped from the grant rather than
+left as a relative directory named `${homeDir}` inside the plugin. `~/` is not
+expanded: it is shell syntax, and a placeholder that looks like the other two is
+one rule for an author to learn instead of two. Any other `${…}` is an error.
+A root that starts with `$HOME`, `${HOME}`, `$USERPROFILE`, `%USERPROFILE%` or
+`~` is refused by name with the `${homeDir}` spelling to use: without that
+check the unbraced forms are not placeholders at all and would quietly become a
+relative directory that grants nothing.
+
+A local run (`gpui-shell run`) _adds_ the application directory and its data
+directory to the manifest's roots. An earlier version replaced the manifest's
+roots with those two, which silently dropped every other directory the manifest
+asked for.
+
+`process.env` shows a default set of variables that describe the user's
+machine, session and preferences (`HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`,
+`PATH`, `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories and their
+Windows counterparts) and are never tokens, keys or passwords (the proxy URLs
+are left out because they can carry a user name and password), so an application does not have
+to list the same names every other one does. The set is maintained in one
+place, `crates/shell/src/default-env`, one name per line; a test in
+`capability.rs` refuses a duplicate, a malformed name, or one that looks like it
+holds a credential. `capabilities.process.env` lists anything beyond it. Names match without regard
+to case, because the same variable is spelled both ways (`http_proxy`,
+`HTTP_PROXY`) and Windows does not distinguish them; the list keeps one
+upper-case spelling and `process.env` reports the one the environment uses. The
+rest of the environment stays out of reach, because it routinely holds tokens
+and keys handed to the host rather than to every script it runs; `process.env`
+is always an object, so `process.env.X ?? fallback` works without a grant.
+
+`execute` is either an allowlist of command names or the string `"*"`; any
+other string is a manifest error, since `"git"` would otherwise read as one
+command while granting all of them.
 Unrestricted execution has to be spellable — a host that cannot express it pushes
 its users toward granting a wildcard read root instead, which is worse — but it
 is spelled differently from an allowlist so a permission sheet can show it at the
@@ -3042,8 +3210,8 @@ non-zero start-up cost that has to be budgeted (§20.8), and makes "do real work
 in the entry module" a convention violation tooling can flag.
 
 Data lives under the plugin's `id` rather than under its path, so it survives an
-upgrade that moves the plugin directory — which is exactly what §23's path digest
-cannot do for a directory run from the command line.
+upgrade that moves the plugin directory. §23's path digest is only for a
+directory with no manifest, which has no `id` to use.
 
 ### 18.3 Authority travels with the code, not with the moment
 
@@ -3203,19 +3371,21 @@ persisting a decision in host configuration are all part of §18 and not built.
 
 ### 19.3 Resource limits
 
-| Limit             | Mechanism                                                | Value                                                                                                                                                          |
-| ----------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runaway execution | `Runtime::set_interrupt_handler`, on a per-call deadline | 50 ms in `Render`/`Layout`, 500 ms in `Event`/`Task`, 5 s outside any scope                                                                                    |
-| Memory            | `Runtime::set_memory_limit`                              | 256 MiB — a leak reports as a catchable exception on the offending allocation rather than an OOM kill of the host                                              |
-| Stack             | `Runtime::set_max_stack_size`                            | 1 MiB against QuickJS's 256 KiB default, so deep recursion is a `RangeError` a script can report rather than a native stack overflow, which is a process abort |
-| Microtask storms  | Bounded drain (§12.2)                                    | 100,000 jobs per drain                                                                                                                                         |
-| Host task fan-out | Per-runtime scheduler registry                           | 1,024 outstanding tasks                                                                                                                                        |
-| Module source     | Bounded module loader                                    | 8 MiB per module                                                                                                                                               |
-| Filesystem output | Bounded adapters                                         | 8 MiB per `writeFile`; `readdir` stops at 10,000 entries or 1 MiB of names                                                                                     |
-| Store             | Bounded cache and barriers                               | 8 MiB total; 4,096 keys; 1 MiB per value; 1,024 pending flush waiters                                                                                          |
-| Assets            | Bounded asset source                                     | 16 MiB per asset; listing stops at 10,000 entries or 1 MiB of names                                                                                            |
-| WebSocket queue   | Bounded actor channel                                    | 8 combined read/write/close commands                                                                                                                           |
-| Child processes   | Bounded adapter plus cancellation hook                   | 30 seconds; 8 MiB stdout and 8 MiB stderr; kill and reap on timeout, overflow, cancellation, owner loss or runtime shutdown                                    |
+| Limit             | Mechanism                                                                                                       | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runaway execution | `Runtime::set_interrupt_handler`, on a per-call deadline                                                        | A watchdog for scripts that never return, not a performance budget: 2 s in `Render`/`Layout`, 5 s in `Event`/`Task`, 10 s outside any scope. A call that is only slow logs a warning (100 ms in `Render`/`Layout`, 1 s elsewhere) and is not stopped                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Memory            | None                                                                                                            | Unbounded, as in a GPUI application written in Rust: the operating system manages memory. A 256 MiB ceiling turned a large data set into a broken application long before the machine was short of memory. An embedding host may still bound its own runtime; exhaustion is reported as running out of memory rather than as the `null` QuickJS throws when it cannot allocate the error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Stack             | `Runtime::set_max_stack_size`                                                                                   | 1 MiB against QuickJS's 256 KiB default, so deep script recursion is a `RangeError` a script can report rather than a native stack overflow, which is a process abort. It does not bound the native walks over a description: a script builds a deep tree one `child()` call at a time, and each call returns at once                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Description depth | Recorded height per node in `SpecArena`                                                                         | 64 levels, counting children, filled slots and registered components' element arguments. The call that would cross it throws a script error and records nothing. Every native walk over a description — materialization, GPUI layout, prepaint and paint, the element tree's drop — recurses once per level, so the bound is what keeps those walks inside the native stack. 64 is sized so an unoptimized build draws the costliest chain measured, nested `Checkbox`es, on a 2 MiB thread with room to spare.                                                                                                                                                                                                                                                                                                                                                                                      |
+| Nested views      | Per-thread stack of the views being drawn, kept by the frame every `ScriptView::render` wraps around its output | 65 levels across views drawn one inside another, each counting its description's height and one level for itself, so views together take what one view at the description bound takes; a mounted dock area counts 4 more for the views base draws between it and a panel. A view that is already being drawn, directly or through other views or a dock, or that would cross the bound, draws nothing at that mount and logs an error once per snapshot; the rest of the window draws. Layout reaches a nested view without entering the script, so neither the description bound nor the interpreter stack sees a chain or a cycle of views. The costliest chain measured, nested `Checkbox`es split across views, draws at most 73 levels in an unoptimized build on a 2 MiB thread. One view mounted under two parents that do not enclose each other is not a recursion and draws in both places |
+| Microtask storms  | Bounded drain (§12.2)                                                                                           | 100,000 jobs per drain                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Host task fan-out | Per-runtime scheduler registry                                                                                  | 1,024 outstanding tasks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Module source     | Bounded module loader                                                                                           | 8 MiB per module                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Filesystem output | Bounded adapters                                                                                                | 8 MiB per `writeFile`; `readdir` stops at 10,000 entries or 1 MiB of names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Store             | Bounded cache and barriers                                                                                      | 8 MiB total; 4,096 keys; 1 MiB per value; 1,024 pending flush waiters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Assets            | Bounded asset source                                                                                            | 16 MiB per asset; listing stops at 10,000 entries or 1 MiB of names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| WebSocket queue   | Bounded actor channel                                                                                           | 8 combined read/write/close commands                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Child processes   | Bounded adapter plus cancellation hook                                                                          | 30 seconds; 8 MiB stdout and 8 MiB stderr; kill and reap on timeout, overflow, cancellation, owner loss or runtime shutdown                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 The budget is per host call, not global: every `scope::enter` mints a fresh
 generation, and a change of generation is the signal that a new call has begun
@@ -4221,20 +4391,22 @@ can fail, since a caller who mistyped a flag is exactly the caller who needs
 Usage errors exit 2; a runtime that fails to start exits 1.
 
 **Storage is per application, under the user's data directory, keyed by the
-canonical path of the application root.** The path is
-`<data home>/gpui-shell/apps/<directory name>-<16 hex digits>/store.json`, where
+manifest `id`.** The path is `<data home>/gpui-shell/apps/<id>/store.json`,
+whether the application is run with `-d`, installed or packaged, so a copy being
+edited and the installed copy share their data and the path an application shows
+its user is predictable. Script reads the directory as `process.dataDir`.
+
+A directory without a manifest has no `id`, and is keyed by its canonical path
+instead: `<data home>/gpui-shell/apps/<directory name>-<16 hex digits>/`, where
 the digits are an FNV-1a hash of the canonical root — not a security boundary,
 just enough to keep two directories from sharing a folder. Keeping the directory
-name in the path makes the folder recognizable; the digest disambiguates it, so
-two checkouts of the same application are genuinely different installations.
+name in the path makes the folder recognizable; the digest disambiguates it.
 `<data home>` honors `XDG_DATA_HOME`, and otherwise follows the platform
 convention — `~/Library/Application Support` on macOS, `%APPDATA%` on Windows,
 `~/.local/share` elsewhere.
 
 Storage lives outside the application directory because that directory may be
 read-only, is often a git checkout, and is not where a user expects their data.
-When the plugin model lands, a manifest `id` should replace the digest, so an
-installed plugin keeps its data across an upgrade that moves it.
 
 Assets — the files `svg(path)` names — are served from the application directory
 and nowhere else, with the same traversal check as the module resolver. Note the
@@ -4330,7 +4502,7 @@ Asynchrony: promises bridged to GPUI tasks, job-queue draining, `spawn`,
 unhandled-rejection reporting. Multiple runtimes may coexist; tasks retain their
 originating runtime and policy, and initialization runs only after the final
 `ScriptView` exists. `Link` with an absolute HTTP(S) `.href(...)` opened by the
-host. `ShellRoot` with the dialog stack, one sheet, the
+host. `WebView` with page messages and load events (§14.8). `ShellRoot` with the dialog stack, one sheet, the
 toast stack, focus restoration, and Tab navigation, reached through `cx`. System
 capabilities for asynchronous `fs`, storage, clipboard, `process`,
 scoped HTTP, TCP, and WebSocket, all default-denied. HTTP redirect

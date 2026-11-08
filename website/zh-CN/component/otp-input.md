@@ -10,7 +10,12 @@ OtpInput 是为一次性验证码（OTP）设计的输入组件，会以网格�
 ## 导入
 
 ```rust
-use gpui_kit::component::input::{OtpInput, OtpState};
+use gpui_kit::component::{
+    Disableable as _, Sizable as _, button::Button,
+    input::{OtpEvent, OtpInput, OtpState}, v_flex,
+};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 ```
 
 ## 用法
@@ -84,23 +89,46 @@ OtpInput::new(&auth_state).groups(2)
 
 ### 处理 OTP 事件
 
-```rust
-let otp_state = cx.new(|cx| OtpState::new(6, window, cx));
+请把 `cx.subscribe` 返回的 `Subscription` 保存在视图中；一旦丢弃，订阅会立即取消。
 
-cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-    match event {
-        InputEvent::Change => {
-            let code = state.read(cx).value();
-            if code.len() == 6 {
-                println!("Complete OTP: {}", code);
-                this.verify_otp(&code, cx);
-            }
+```rust
+struct OtpForm {
+    otp_state: Entity<OtpState>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl OtpForm {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let otp_state = cx.new(|cx| OtpState::new(6, window, cx));
+
+        let _subscriptions = vec![
+            cx.subscribe(&otp_state, |this, state, event: &OtpEvent, cx| {
+                match event {
+                    OtpEvent::Change => {
+                        // 每次编辑后触发。
+                    }
+                    OtpEvent::Complete => {
+                        // 输入完最后一位时触发。
+                        let code = state.read(cx).value().to_string();
+                        this.verify_otp(&code, cx);
+                    }
+                    OtpEvent::Focus => println!("OTP input focused"),
+                    OtpEvent::Blur => println!("OTP input lost focus"),
+                }
+            }),
+        ];
+
+        Self {
+            otp_state,
+            _subscriptions,
         }
-        InputEvent::Focus => println!("OTP input focused"),
-        InputEvent::Blur => println!("OTP input lost focus"),
-        _ => {}
     }
-});
+
+    fn verify_otp(&mut self, code: &str, cx: &mut Context<Self>) {
+        println!("Complete OTP: {}", code);
+        cx.notify();
+    }
+}
 ```
 
 ### 程序化控制
@@ -118,7 +146,8 @@ otp_state.update(cx, |state, cx| {
     state.focus(window, cx);
 });
 
-let current_value = otp_state.read(cx).value();
+// 获取当前值（先克隆，之后才能再次可变借用 cx）
+let current_value = otp_state.read(cx).value().to_string();
 ```
 
 ## API 参考
@@ -147,13 +176,14 @@ let current_value = otp_state.read(cx).value();
 | `large()` | 大尺寸 |
 | `with_size(px)` | 自定义单格尺寸 |
 
-### InputEvent
+### OtpEvent
 
-| 事件 | 说明 |
-| -------- | ------------------------------------------------- |
-| `Change` | 所有数字输入完毕后触发 |
-| `Focus` | 输入框获得焦点 |
-| `Blur` | 输入框失去焦点 |
+| 事件       | 说明                         |
+| ---------- | ---------------------------- |
+| `Change`   | 每次成功编辑后触发           |
+| `Complete` | 输入完最后一位数字时触发     |
+| `Focus`    | OTP 输入获得焦点             |
+| `Blur`     | OTP 输入失去焦点             |
 
 ## 示例
 
@@ -164,35 +194,40 @@ struct SmsVerification {
     otp_state: Entity<OtpState>,
     phone_number: String,
     is_verifying: bool,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl SmsVerification {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let otp_state = cx.new(|cx| OtpState::new(6, window, cx));
 
-        cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                let code = state.read(cx).value();
-                this.verify_sms_code(&code, cx);
-            }
-        });
+        let _subscriptions = vec![
+            cx.subscribe(&otp_state, |this, state, event: &OtpEvent, cx| {
+                if let OtpEvent::Complete = event {
+                    let code = state.read(cx).value().to_string();
+                    this.verify_sms_code(&code, cx);
+                }
+            }),
+        ];
 
         Self {
             otp_state,
             phone_number: "+1234567890".to_string(),
             is_verifying: false,
+            _subscriptions,
         }
     }
 
     fn verify_sms_code(&mut self, code: &str, cx: &mut Context<Self>) {
         self.is_verifying = true;
+        // API call to verify SMS code
         println!("Verifying SMS code: {}", code);
         cx.notify();
     }
 }
 
 impl Render for SmsVerification {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_4()
             .child(format!("Enter the 6-digit code sent to {}", self.phone_number))
@@ -214,10 +249,7 @@ struct TwoFactorAuth {
 
 impl TwoFactorAuth {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let otp_state = cx.new(|cx|
-            OtpState::new(6, window, cx)
-                .masked(true)
-        );
+        let otp_state = cx.new(|cx| OtpState::new(6, window, cx).masked(true));
 
         Self {
             otp_state,
@@ -225,16 +257,22 @@ impl TwoFactorAuth {
         }
     }
 
-    fn toggle_visibility(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_visibility(
+        &mut self,
+        _: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.is_masked = !self.is_masked;
+        let masked = self.is_masked;
         self.otp_state.update(cx, |state, cx| {
-            state.set_masked(self.is_masked, window, cx);
+            state.set_masked(masked, window, cx);
         });
     }
 }
 
 impl Render for TwoFactorAuth {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_4()
             .child("Enter your authenticator code")
@@ -242,7 +280,7 @@ impl Render for TwoFactorAuth {
             .child(
                 Button::new("toggle-visibility")
                     .label(if self.is_masked { "Show" } else { "Hide" })
-                    .on_click(cx.listener(Self::toggle_visibility))
+                    .on_click(cx.listener(Self::toggle_visibility)),
             )
     }
 }
@@ -255,30 +293,40 @@ struct PinEntry {
     pin_state: Entity<OtpState>,
     attempts: usize,
     max_attempts: usize,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl PinEntry {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let pin_state = cx.new(|cx|
-            OtpState::new(4, window, cx)
-                .masked(true)
-        );
+        let pin_state = cx.new(|cx| OtpState::new(4, window, cx).masked(true));
 
-        cx.subscribe(&pin_state, |this, state, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                let pin = state.read(cx).value();
-                this.verify_pin(&pin, cx);
-            }
-        });
+        let _subscriptions = vec![
+            cx.subscribe_in(
+                &pin_state,
+                window,
+                |this, state, event: &OtpEvent, window, cx| {
+                    if let OtpEvent::Complete = event {
+                        let pin = state.read(cx).value().to_string();
+                        this.verify_pin(&pin, window, cx);
+                    }
+                },
+            ),
+        ];
 
         Self {
             pin_state,
             attempts: 0,
             max_attempts: 3,
+            _subscriptions,
         }
     }
 
-    fn verify_pin(&mut self, pin: &str, cx: &mut Context<Self>) {
+    fn verify_pin(
+        &mut self,
+        pin: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.attempts += 1;
 
         if pin == "1234" {
@@ -296,7 +344,7 @@ impl PinEntry {
 }
 
 impl Render for PinEntry {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_locked = self.attempts >= self.max_attempts;
 
         v_flex()
@@ -328,7 +376,13 @@ impl Render for PinEntry {
 - **自动聚焦**：输入数字后自动跳到下一个输入框。
 - **退格**：删除当前数字并回到前一个输入框。
 - **长度限制**：不会超过设定长度。
-- **自动完成**：所有输入框填满后触发 `Change` 事件。
+- **自动完成**：所有输入框填满后触发 `Complete` 事件。
+
+`OtpState` 会发出 `OtpEvent`：
+
+- 每次成功编辑后触发 `Change`
+- 输入完最后一位数字时触发 `Complete`
+- OTP 输入获得或失去焦点时触发 `Focus` / `Blur`
 
 ### 视觉反馈
 
@@ -339,32 +393,33 @@ impl Render for PinEntry {
 
 ### 键盘导航
 
-- **方向键**：在输入框之间移动。
-- **Tab**：切换到下一个可聚焦元素。
-- **Shift+Tab**：切换到上一个可聚焦元素。
-- **Backspace**：删除当前数字并向前移动。
-- **Delete**：清空当前输入框。
+- **Tab**：将焦点移到下一个可聚焦元素；所有 OTP 格子共用一个焦点。
+- **Shift+Tab**：将焦点移到上一个可聚焦元素。
+- **Backspace**：删除最后一位数字。
+- **方向键 / Delete**：`OtpInput` 不处理。
 
 ## 常见模式
 
 ### 输入完成后自动提交
 
 ```rust
-cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-    if let InputEvent::Change = event {
-        let code = state.read(cx).value();
-        if code.len() == 6 {
-            this.submit_verification_code(&code, cx);
-        }
+// 请把返回的 Subscription 保存在视图中。
+cx.subscribe(&otp_state, |this, state, event: &OtpEvent, cx| {
+    if let OtpEvent::Complete = event {
+        let code = state.read(cx).value().to_string();
+        this.submit_verification_code(&code, cx);
     }
 });
 ```
 
 ### 聚焦时清空旧值
 
+需要在回调中使用 `window` 时，请改用 `subscribe_in`：
+
 ```rust
-cx.subscribe(&otp_state, |this, state, event: &InputEvent, cx| {
-    if let InputEvent::Focus = event {
+cx.subscribe_in(&otp_state, window, |this, state, event: &OtpEvent, window, cx| {
+    if let OtpEvent::Focus = event {
+        // 用户开始输入新验证码时清空旧值
         state.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });

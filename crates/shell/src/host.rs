@@ -287,13 +287,6 @@ impl Application {
             }),
         }
     }
-
-    /// Whether the application has an identity beyond its path. An installed
-    /// or packaged application keeps its data when it is moved or upgraded; a
-    /// directory being edited is keyed by where it is.
-    fn is_installed(&self) -> bool {
-        matches!(self, Self::Installed(_) | Self::Bundled)
-    }
 }
 
 /// The command name and version shown by the reusable CLI host.
@@ -394,8 +387,8 @@ impl Arguments {
 
     /// Whether the application is a packaged one rather than a directory
     /// being edited: the one beside the executable, or one a bundle's
-    /// launcher runs with `--packaged`. It keeps its data under its `id`, is
-    /// titled by its `name`, and has no editor files written into it.
+    /// launcher runs with `--packaged`. It must have a manifest, is titled by
+    /// its `name`, and has no editor files written into it.
     fn is_packaged(&self) -> bool {
         self.packaged || self.application == Application::Bundled
     }
@@ -702,8 +695,8 @@ Options:
   -d, --dir <directory>
                The application root, or the {ENTRY} inside it.
   --packaged   With run, run the directory as a packaged application, the way a
-               bundle's launcher does: its data stays under the manifest's id
-               wherever it is, and no editor files are written into it.
+               bundle's launcher does: it must have a manifest, is titled by
+               its name, and no editor files are written into it.
   --watch      With run, reload the application when its sources change.
                `dev` always does.
   --dev        With run or dev, development mode: relax the sandbox, opening
@@ -799,11 +792,7 @@ fn run(
             // application inside the window builder.
             let manifest = read_local_manifest(&root);
             if let Ok(manifest) = &manifest {
-                grant_local_access(
-                    &root,
-                    manifest.as_ref(),
-                    arguments.application.is_installed() || arguments.is_packaged(),
-                );
+                grant_local_access(&root, manifest.as_ref());
             }
 
             // The declarations describe the runtime that is about to run this
@@ -877,10 +866,24 @@ fn run(
             //
             // Deferred to the next turn of the loop: asked for while the
             // application is still finishing its launch, the request is dropped.
-            cx.defer(move |cx| {
-                cx.activate(true);
-                let _ = window.update(cx, |_, window, _| window.activate_window());
-            });
+            //
+            // A spawned task rather than `cx.defer`: a deferred effect runs at
+            // the end of whatever update flushes next, and on Wayland that can
+            // be a platform callback. The desktop portal's button-layout and
+            // appearance events call into the window while GPUI still holds the
+            // Wayland client state borrowed, so activating from inside one
+            // panics on that borrow, and the window dropped while unwinding
+            // panics again and aborts. Whether the portal answers before the
+            // first flush is a race, which is why only some launches crashed.
+            // A task is polled from the executor's own event source, outside
+            // every platform callback.
+            cx.spawn(async move |cx| {
+                cx.update(|cx| {
+                    cx.activate(true);
+                    let _ = window.update(cx, |_, window, _| window.activate_window());
+                });
+            })
+            .detach();
 
             let loaded = built.borrow_mut().take().ok_or(());
 
@@ -947,11 +950,7 @@ fn check(
                     outcome.exit(&directory);
                 }
             };
-            grant_local_access(
-                &root,
-                manifest.as_ref(),
-                arguments.application.is_installed(),
-            );
+            grant_local_access(&root, manifest.as_ref());
 
             // Finish opening before checking so catalog-owned roots and window
             // facilities are installed when native materializers use them.
@@ -1056,18 +1055,14 @@ impl CheckOutcome {
 
 /// Installs the storage location and the capability grant for a local run.
 ///
-/// `installed` is whether the application has an identity beyond its path: an
-/// installed or packaged application keeps its data under its manifest `id`,
-/// so moving or upgrading it does not start the user over.
-fn grant_local_access(
-    root: &Path,
-    manifest: Option<&crate::plugin::PluginManifest>,
-    installed: bool,
-) {
-    // A directory this command was pointed at has no name of its own, so its
-    // path is its identity — which is right while someone is editing it, and is
-    // exactly what an installed application should not do.
-    let id = match manifest.filter(|_| installed) {
+/// An application with a manifest keeps its data under the manifest `id`, so
+/// running it from its source directory, installing it, moving it or packaging
+/// it all reach the same data — and the path an author shows a user is one they
+/// can predict.
+fn grant_local_access(root: &Path, manifest: Option<&crate::plugin::PluginManifest>) {
+    // A directory without a manifest has no name of its own, so its path is its
+    // identity: the same directory always reaches the same data.
+    let id = match manifest {
         Some(manifest) => manifest.id().to_owned(),
         None => crate::bundle_id_for_path(root),
     };
@@ -1141,13 +1136,12 @@ struct CommandTheme {
 fn install_palette(cx: &mut App) {
     match serde_json::from_str::<CommandThemes>(PALETTE) {
         Ok(themes) => {
-            gpui_base::Theme::global_mut(cx).tokens = gpui_base::SemanticThemeTokens {
-                colors: themes.light.colors,
-                radius: themes.light.radius,
-                spacing: themes.light.spacing,
-                typography: themes.light.typography,
-                shadow: themes.light.shadow,
-            };
+            let tokens = &mut gpui_base::Theme::global_mut(cx).tokens;
+            tokens.colors = themes.light.colors;
+            tokens.radius = themes.light.radius;
+            tokens.spacing = themes.light.spacing;
+            tokens.typography = themes.light.typography;
+            tokens.shadow = themes.light.shadow;
         }
         // The file is compiled in, so a parse error is a build-time mistake
         // that reached a user; the neutral fallback keeps the window legible.
@@ -1171,10 +1165,14 @@ fn read_local_manifest(root: &Path) -> Result<Option<crate::plugin::PluginManife
 ///
 /// Running a directory from the command line is an explicit act of trust, the
 /// same as `node app.js`: the application may read its own sources and use its
-/// own storage. It is deliberately narrower than "everything" — no network, no
-/// process execution, no clipboard, and no filesystem access outside those two
-/// directories — because an installed plugin will run through the same code
-/// path with a manifest deciding instead.
+/// own storage, and whatever else its manifest asks for. Without a manifest it
+/// is deliberately narrower than "everything" — no network, no process
+/// execution, no clipboard, and no filesystem access outside those two
+/// directories.
+///
+/// The two directories are *added* to the manifest's roots. Replacing them
+/// would silently drop every other directory the manifest names, such as a
+/// folder under `${homeDir}` the application exists to manage.
 fn local_capabilities(
     root: &Path,
     store: &Path,
@@ -1190,8 +1188,8 @@ fn local_capabilities(
     };
 
     capabilities
-        .read_roots([root.to_path_buf(), store.to_path_buf()])
-        .write_roots([store.to_path_buf()])
+        .add_read_roots([root.to_path_buf(), store.to_path_buf()])
+        .add_write_roots([store.to_path_buf()])
         .exit(true)
 }
 
@@ -1595,8 +1593,6 @@ mod tests {
         };
         assert_eq!(arguments.application, Application::Bundled);
         assert!(matches!(parse_args(&[]), Ok(Invocation::Bare(_))));
-        assert!(arguments.application.is_installed());
-        assert!(!Application::Path(PathBuf::from("app")).is_installed());
     }
 
     #[test]
@@ -1684,6 +1680,61 @@ mod tests {
         assert!(capabilities.is_clipboard_writable());
         assert!(!capabilities.is_clipboard_readable());
         assert!(!capabilities.may_reach("trade.example.com"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_local_application_keeps_the_directories_its_manifest_grants() {
+        let root = std::env::temp_dir().join(format!(
+            "gpui-shell-local-manifest-roots-{}",
+            std::process::id()
+        ));
+        let data = root.join("data");
+        std::fs::create_dir_all(&root).expect("temporary app directory");
+        std::fs::write(
+            root.join("gpui-shell.json"),
+            r#"{
+              "id": "com.example.skills",
+              "name": "Skills",
+              "entry": "main.js",
+              "capabilities": {
+                "fs": {
+                  "read": ["/srv/shared", "${pluginDir}"],
+                  "write": ["/srv/shared/out"]
+                }
+              }
+            }"#,
+        )
+        .expect("manifest");
+
+        let manifest = read_local_manifest(&root)
+            .expect("valid manifest")
+            .expect("present manifest");
+        let summary = local_capabilities(&root, &data, Some(&manifest)).summary();
+        let line = |prefix: &str| {
+            summary
+                .iter()
+                .find(|line| line.starts_with(prefix))
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        // The manifest's own roots survive, and the application's directory and
+        // storage are added rather than put in their place — once each.
+        let read = line("fs read: ");
+        let shared = Path::new("/srv/shared").display().to_string();
+        assert!(read.contains(&shared), "{read}");
+        assert!(read.contains(&data.display().to_string()), "{read}");
+        assert_eq!(
+            read.matches(&root.display().to_string()).count(),
+            2,
+            "{read}"
+        );
+        let write = line("fs write: ");
+        let out = Path::new("/srv/shared/out").display().to_string();
+        assert!(write.contains(&out), "{write}");
+        assert!(write.contains(&data.display().to_string()), "{write}");
 
         let _ = std::fs::remove_dir_all(root);
     }

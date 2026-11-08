@@ -64,6 +64,20 @@ remain necessary.
   modal forms, notifications, nested menus and Dock drag/zoom workflows. See the guide's
   per-suite contract matrix; this is not exhaustive option coverage or packaged-app automation.
 
+Input, Textarea and Editor keep their component IDs on the outer frame for hit
+testing, layout and addon scopes. `window.find(component_id)` reads role, label,
+value and focus from the explicitly associated native editor while retaining
+the frame's path, bounds and visibility. Existing ID queries do not require an
+accessible label or knowledge of an internal editor ID. An independent addon
+can have focus inside the frame while the component's text owner reports no
+focus.
+
+The relationship does not add a native text node or register another focus
+handle. `find_by_label` and role queries still enumerate the actual native
+owners once, not the component-ID projections. Give controls meaningful
+accessible names where appropriate, and scope repeated names or IDs to their
+owning frame. Do not guess an editor from a fixed list of text roles.
+
 ## Inspect accessibility targets and individual events
 
 Import `gpui_kit::test::{TestQueryExt, TestEventExt}` for additional observation

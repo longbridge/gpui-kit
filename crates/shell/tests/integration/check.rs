@@ -179,7 +179,7 @@ fn check_reports_load_and_render_failures_without_hanging() {
             export default class App extends View {
                 render() { while (true) {} }
             }"#,
-            "interrupted",
+            "render() ran for 2 s without returning and was stopped.",
         ),
     ] {
         let (status, stdout, stderr) = CheckApp::new(source).run();

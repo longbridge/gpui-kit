@@ -1,4 +1,8 @@
+#[cfg(test)]
+mod block_surface_tests;
 mod document;
+pub mod editor_host;
+mod editor_seam;
 mod format;
 mod inline;
 mod inline_element;
@@ -28,6 +32,7 @@ pub use style::*;
 pub use text_view::*;
 
 pub(crate) fn init(cx: &mut App) {
+    inline::init(cx);
     state::init(cx);
 }
 

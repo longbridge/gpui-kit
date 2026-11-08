@@ -76,6 +76,31 @@ impl NativeWebViewSurface {
         Ok(())
     }
 
+    // The browser keeps its full DOM viewport; only its existing native container clips.
+    pub(super) fn set_geometry(
+        &self,
+        webview: &wry::WebView,
+        document: Bounds<gpui::Pixels>,
+        visible: Bounds<gpui::Pixels>,
+    ) -> Result<()> {
+        let scale = self.scale_factor.get();
+        self.surface
+            .platform_surface()?
+            .set_bounds(visible.to_device_pixels(scale))?;
+        let offset = document.origin - visible.origin;
+        webview.webview().setFrame(NSRect::new(
+            NSPoint::new(
+                f64::from(offset.x),
+                f64::from(visible.size.height - offset.y - document.size.height),
+            ),
+            NSSize::new(
+                f64::from(document.size.width),
+                f64::from(document.size.height),
+            ),
+        ));
+        Ok(())
+    }
+
     pub(super) fn set_visible(&self, visible: bool) -> Result<()> {
         self.surface.platform_surface()?.set_visible(visible)
     }

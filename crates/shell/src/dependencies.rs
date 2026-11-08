@@ -129,7 +129,9 @@ impl GitDependencyStore {
             _ => unreachable!("manifest validation requires one supported Git selector"),
         };
         let mut fetch = git_command();
-        fetch.args(["fetch", "--force", "--depth", "1", "origin", &reference]);
+        fetch.args([
+            "fetch", "--force", "--depth", "1", "--", "origin", &reference,
+        ]);
         fetch.current_dir(&mirror);
         run_command(name, "fetch", fetch)?;
 

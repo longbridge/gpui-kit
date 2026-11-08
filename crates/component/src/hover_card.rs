@@ -19,6 +19,9 @@ use crate::{StyledExt as _, popover::Popover};
 pub struct HoverCard {
     id: ElementId,
     style: StyleRefinement,
+    /// Style for the trigger container, the element laid out in the parent
+    /// and measured to anchor the card.
+    trigger_style: Option<StyleRefinement>,
     anchor: Anchor,
     trigger: Option<Box<dyn FnOnce(&mut Window, &App) -> AnyElement + 'static>>,
     content: Option<
@@ -40,6 +43,7 @@ impl HoverCard {
         Self {
             id: id.into(),
             style: StyleRefinement::default(),
+            trigger_style: None,
             anchor: Anchor::TopCenter,
             trigger: None,
             content: None,
@@ -63,6 +67,16 @@ impl HoverCard {
         T: IntoElement + 'static,
     {
         self.trigger = Some(Box::new(|_, _| trigger.into_any_element()));
+        self
+    }
+
+    /// Set the style for the trigger container.
+    ///
+    /// The container is the element laid out in the parent and measured to
+    /// anchor the card, so this is where `w_full` or `flex_1` must go for the
+    /// trigger to fill its slot.
+    pub fn trigger_style(mut self, style: StyleRefinement) -> Self {
+        self.trigger_style = Some(style);
         self
     }
 
@@ -129,6 +143,7 @@ impl RenderOnce for HoverCard {
         let content = self.content;
         let children = self.children;
         let style = self.style;
+        let trigger_style = self.trigger_style;
 
         BaseHoverCard::new(self.id)
             .anchor(anchor)
@@ -147,6 +162,84 @@ impl RenderOnce for HoverCard {
             .when_some(self.on_open_change, |this, callback| {
                 this.on_open_change(move |open, window, cx| callback(open, window, cx))
             })
+            .when_some(trigger_style, |this, style| this.refine_style(&style))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{button::Button, h_flex};
+    use gpui::{Context, Render, point, px};
+
+    struct TriggerStyleHarness {
+        styled: bool,
+    }
+
+    impl Render for TriggerStyleHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            // Keep the trigger clear of the popup's window margin so the
+            // content position reflects only the trigger container's bounds.
+            div().size_full().child(
+                h_flex()
+                    .absolute()
+                    .left(px(100.))
+                    .top(px(100.))
+                    .w(px(200.))
+                    .child(
+                        HoverCard::new("trigger-style-hover-card")
+                            .appearance(false)
+                            .open_delay(Duration::ZERO)
+                            .anchor(Anchor::TopRight)
+                            .when(self.styled, |this| {
+                                this.trigger_style(StyleRefinement::default().w_full())
+                            })
+                            .trigger(Button::new("styled-trigger").size(px(40.)))
+                            .child(
+                                div()
+                                    .debug_selector(|| "styled-content".into())
+                                    .size(px(20.)),
+                            ),
+                    ),
+            )
+        }
+    }
+
+    /// `trigger_style` styles the container the parent lays out and the card
+    /// is anchored to. Applied to anything nested inside it, `w_full` would
+    /// resolve against a container that only wraps its content.
+    #[gpui::test]
+    fn trigger_style_is_applied_to_the_trigger_container(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, _| TriggerStyleHarness { styled: false });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(point(px(110.), px(110.)), None, Default::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+        });
+        // Unstyled: the container wraps the 40px trigger, so the content's right
+        // edge meets the trigger's right edge at 140px.
+        assert_eq!(
+            cx.debug_bounds("styled-content").unwrap().top_right().x,
+            px(140.)
+        );
+
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.styled = true;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+        });
+        // `w_full` stretches the container across the 200px row, and the card
+        // follows the container's right edge at 300px.
+        assert_eq!(
+            cx.debug_bounds("styled-content").unwrap().top_right().x,
+            px(300.)
+        );
     }
 }

@@ -369,7 +369,9 @@ impl PluginManifest {
                 .map_err(|error| ManifestProblem::Capabilities(error.to_string()))?,
         };
         capabilities.validate_placeholders()?;
+        capabilities.validate_execute()?;
         capabilities.validate_network()?;
+        capabilities.validate_env()?;
 
         let window = match fields.get("window") {
             None | Some(serde_json::Value::Null) => None,
@@ -443,8 +445,18 @@ impl PluginManifest {
     /// host and nowhere else. A relative path is anchored to the plugin
     /// directory; an absolute path is taken as written, and is the case a host
     /// policy or an approval prompt (§19.2) exists to gate.
+    ///
+    /// `${homeDir}` is the user's home directory, read from the environment,
+    /// so that a grant on the user's own files — `${homeDir}/.config/app` —
+    /// does not have to hard-code a user name. A path under it is dropped from
+    /// the grant when the home directory is unknown, rather than anchored
+    /// somewhere it was not meant to be.
     pub fn capabilities(&self, plugin_dir: &Path, data_dir: &Path) -> Capabilities {
-        self.capabilities.grant(plugin_dir, data_dir)
+        self.capabilities.grant(&Anchors {
+            plugin_dir,
+            data_dir,
+            home_dir: crate::runtime::home_dir().as_deref(),
+        })
     }
 }
 
@@ -522,7 +534,7 @@ fn validate_dependencies(
 
 fn valid_git_ref_name(reference: &str) -> bool {
     reference != "@"
-        && !reference.starts_with(['.', '/'])
+        && !reference.starts_with(['.', '/', '-'])
         && !reference.ends_with(['.', '/'])
         && !reference.contains("..")
         && !reference.contains("@{")
@@ -750,11 +762,13 @@ struct CapabilitiesFile {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct FsGrantFile {
-    /// Directories that may be read. `${pluginDir}` and `${dataDir}` expand to
-    /// the plugin's own directory and its storage directory.
+    /// Directories that may be read. `${pluginDir}`, `${dataDir}` and
+    /// `${homeDir}` expand to the plugin's own directory, its storage directory
+    /// and the user's home directory; a relative path is anchored to the plugin
+    /// directory, and an absolute one is taken as written.
     #[serde(default)]
     read: Vec<String>,
-    /// Directories that may be written.
+    /// Directories that may be written, with the same placeholders as `read`.
     #[serde(default)]
     write: Vec<String>,
     /// Commands `process.run` may start.
@@ -772,8 +786,11 @@ struct FsGrantFile {
 #[serde(untagged)]
 enum ExecuteFile {
     Allowed(Vec<String>),
+    #[schemars(extend("const" = UNRESTRICTED_EXECUTE))]
     Unrestricted(String),
 }
+
+const UNRESTRICTED_EXECUTE: &str = "*";
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -817,12 +834,26 @@ struct ClipboardGrantFile {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProcessGrantFile {
+    /// Whether `process.exit()` may ask the host to exit.
     #[serde(default)]
     exit: bool,
+    /// Environment variables `process.env` shows, by name. Every other
+    /// variable is absent, because the environment routinely holds tokens and
+    /// keys meant for the host rather than for every script it runs.
+    #[serde(default)]
+    env: Vec<String>,
 }
 
 const PLUGIN_DIR_PLACEHOLDER: &str = "${pluginDir}";
 const DATA_DIR_PLACEHOLDER: &str = "${dataDir}";
+const HOME_DIR_PLACEHOLDER: &str = "${homeDir}";
+
+/// The directories a manifest's placeholders expand to.
+struct Anchors<'a> {
+    plugin_dir: &'a Path,
+    data_dir: &'a Path,
+    home_dir: Option<&'a Path>,
+}
 
 fn granted() -> bool {
     true
@@ -846,7 +877,7 @@ impl Default for CapabilitiesFile {
 }
 
 impl CapabilitiesFile {
-    fn grant(&self, plugin_dir: &Path, data_dir: &Path) -> Capabilities {
+    fn grant(&self, anchors: &Anchors) -> Capabilities {
         let fs = self.fs.clone().unwrap_or_default();
         let clipboard = self.clipboard.clone().unwrap_or_default();
         let process = self.process.clone().unwrap_or_default();
@@ -858,8 +889,8 @@ impl CapabilitiesFile {
 
         let network = self.network.clone().unwrap_or_default();
         Capabilities::new()
-            .read_roots(expand_all(&fs.read, plugin_dir, data_dir))
-            .write_roots(expand_all(&fs.write, plugin_dir, data_dir))
+            .read_roots(expand_all(&fs.read, anchors))
+            .write_roots(expand_all(&fs.write, anchors))
             .execute(execute)
             .network_hosts(network.hosts.into_iter().map(|host| host.to_lowercase()))
             .http_requests(network.http.into_iter().map(|request| {
@@ -879,6 +910,7 @@ impl CapabilitiesFile {
             .clipboard_read(clipboard.read)
             .clipboard_write(clipboard.write)
             .exit(process.exit)
+            .env_variables(process.env)
     }
 
     /// A placeholder the host does not expand would otherwise reach
@@ -892,6 +924,13 @@ impl CapabilitiesFile {
 
         for (field, paths) in [("read", &fs.read), ("write", &fs.write)] {
             for path in paths {
+                if let Some(problem) = unexpanded_home(path) {
+                    return Err(ManifestProblem::UnexpandedPath {
+                        field: format!("capabilities.fs.{field}"),
+                        path: path.clone(),
+                        suggestion: problem,
+                    });
+                }
                 if let Some(placeholder) = unknown_placeholder(path) {
                     return Err(ManifestProblem::UnknownPlaceholder {
                         field: format!("capabilities.fs.{field}"),
@@ -901,6 +940,33 @@ impl CapabilitiesFile {
             }
         }
 
+        Ok(())
+    }
+
+    /// Any other string would deserialize as [`ExecuteFile::Unrestricted`], so
+    /// `"git"` would read as one command while granting every command.
+    fn validate_execute(&self) -> Result<(), ManifestProblem> {
+        match self.fs.as_ref().and_then(|fs| fs.execute.as_ref()) {
+            Some(ExecuteFile::Unrestricted(value)) if value != UNRESTRICTED_EXECUTE => {
+                Err(ManifestProblem::Capabilities(format!(
+                    "capabilities.fs.execute must be \"{UNRESTRICTED_EXECUTE}\" or an array of command names, not {value:?}; write [{value:?}] to allow only that command"
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn validate_env(&self) -> Result<(), ManifestProblem> {
+        let Some(process) = &self.process else {
+            return Ok(());
+        };
+        for name in &process.env {
+            if name.is_empty() || name.contains(['=', '\0']) {
+                return Err(ManifestProblem::Capabilities(format!(
+                    "process.env entry `{name}` must be an environment variable name"
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -954,13 +1020,46 @@ impl CapabilitiesFile {
     }
 }
 
+/// Spellings of the home directory a shell or an environment would expand,
+/// which a manifest does not.
+///
+/// The manifest's own spelling is `${homeDir}`, but `$HOME`, `${HOME}` and `~`
+/// are what an author types from habit. `${HOME}` would at least be refused as
+/// an unknown placeholder; the other two are not placeholders at all, so they
+/// would quietly become a relative directory such as `<app>/$HOME/.claude`
+/// and grant nothing. Each one is caught here with the path rewritten.
+const HOME_SPELLINGS: [&str; 6] = [
+    "${HOME}",
+    "$HOME",
+    "${USERPROFILE}",
+    "$USERPROFILE",
+    "%USERPROFILE%",
+    "~",
+];
+
+/// The path rewritten with `${homeDir}` when it starts with a home spelling
+/// the manifest does not expand, and `None` otherwise.
+fn unexpanded_home(path: &str) -> Option<String> {
+    HOME_SPELLINGS.iter().find_map(|spelling| {
+        let rest = path.strip_prefix(spelling)?;
+        (rest.is_empty() || rest.starts_with(['/', '\\']))
+            .then(|| format!("{HOME_DIR_PLACEHOLDER}{rest}"))
+    })
+}
+
 fn unknown_placeholder(value: &str) -> Option<String> {
     let mut rest = value;
     while let Some(start) = rest.find("${") {
         let tail = &rest[start..];
         let end = tail.find('}')? + 1;
         let placeholder = &tail[..end];
-        if placeholder != PLUGIN_DIR_PLACEHOLDER && placeholder != DATA_DIR_PLACEHOLDER {
+        if ![
+            PLUGIN_DIR_PLACEHOLDER,
+            DATA_DIR_PLACEHOLDER,
+            HOME_DIR_PLACEHOLDER,
+        ]
+        .contains(&placeholder)
+        {
             return Some(placeholder.to_owned());
         }
         rest = &tail[end..];
@@ -968,27 +1067,38 @@ fn unknown_placeholder(value: &str) -> Option<String> {
     None
 }
 
-fn expand_all(paths: &[String], plugin_dir: &Path, data_dir: &Path) -> Vec<PathBuf> {
+fn expand_all(paths: &[String], anchors: &Anchors) -> Vec<PathBuf> {
     paths
         .iter()
-        .map(|path| expand(path, plugin_dir, data_dir))
+        .filter_map(|path| expand(path, anchors))
         .collect()
 }
 
-fn expand(raw: &str, plugin_dir: &Path, data_dir: &Path) -> PathBuf {
-    let expanded = raw
+/// `None` for a path under `${homeDir}` when there is no home directory: left
+/// in, the placeholder would become a relative directory inside the plugin.
+fn expand(raw: &str, anchors: &Anchors) -> Option<PathBuf> {
+    let mut expanded = raw
         .replace(
             PLUGIN_DIR_PLACEHOLDER,
-            plugin_dir.to_string_lossy().as_ref(),
+            anchors.plugin_dir.to_string_lossy().as_ref(),
         )
-        .replace(DATA_DIR_PLACEHOLDER, data_dir.to_string_lossy().as_ref());
+        .replace(
+            DATA_DIR_PLACEHOLDER,
+            anchors.data_dir.to_string_lossy().as_ref(),
+        );
+    if expanded.contains(HOME_DIR_PLACEHOLDER) {
+        expanded = expanded.replace(
+            HOME_DIR_PLACEHOLDER,
+            anchors.home_dir?.to_string_lossy().as_ref(),
+        );
+    }
 
     let path = PathBuf::from(expanded);
-    if path.is_absolute() {
+    Some(if path.is_absolute() {
         path
     } else {
-        plugin_dir.join(path)
-    }
+        anchors.plugin_dir.join(path)
+    })
 }
 
 // -----------------------------------------------------------------------------
@@ -1076,6 +1186,13 @@ pub enum ManifestProblem {
     UnknownPlaceholder {
         field: String,
         placeholder: String,
+    },
+    /// A path that starts with a shell's spelling of the home directory, with
+    /// the same path written the way the manifest expands it.
+    UnexpandedPath {
+        field: String,
+        path: String,
+        suggestion: String,
     },
     Capabilities(String),
     Dependencies(String),
@@ -1169,7 +1286,15 @@ impl std::fmt::Display for ManifestProblem {
             ),
             ManifestProblem::UnknownPlaceholder { field, placeholder } => write!(
                 f,
-                "unknown placeholder `{placeholder}` in {field}: the manifest may use {PLUGIN_DIR_PLACEHOLDER} and {DATA_DIR_PLACEHOLDER}"
+                "unknown placeholder `{placeholder}` in {field}: the manifest may use {PLUGIN_DIR_PLACEHOLDER}, {DATA_DIR_PLACEHOLDER} and {HOME_DIR_PLACEHOLDER}"
+            ),
+            ManifestProblem::UnexpandedPath {
+                field,
+                path,
+                suggestion,
+            } => write!(
+                f,
+                "\"{path}\" in {field} is not expanded: the manifest does not read environment variables or `~`; write \"{suggestion}\""
             ),
             ManifestProblem::Capabilities(error) => write!(
                 f,
@@ -1276,6 +1401,7 @@ fn load_plugin(
             // the same name apart.
             .with_application(&id)
             .with_capabilities(manifest.capabilities(&root, &data_dir))
+            .with_data_dir(data_dir.clone())
             .with_storage_path(store_path.clone()),
     );
 
@@ -2412,6 +2538,7 @@ mod tests {
             "huacnlee//omarchy-ui",
             "huacnlee/omarchy-ui#",
             "https://github.com/huacnlee/omarchy-ui#",
+            "file:///tmp/omarchy-ui#--upload-pack=touch${IFS}/tmp/pwned;true",
             "not a git dependency",
         ] {
             let error = PluginManifest::parse(&format!(
@@ -2897,15 +3024,95 @@ mod tests {
 
     #[test]
     fn an_unexpanded_placeholder_is_caught_before_it_becomes_a_directory() {
-        let source = VALID.replacen("${dataDir}", "${homeDir}", 1);
-        let error = PluginManifest::parse(&source).expect_err("`${homeDir}` does not exist");
+        let source = VALID.replacen("${dataDir}", "${desktopDir}", 1);
+        let error = PluginManifest::parse(&source).expect_err("`${desktopDir}` does not exist");
         assert_eq!(
             error.problem(),
             &ManifestProblem::UnknownPlaceholder {
                 field: "capabilities.fs.read".to_owned(),
-                placeholder: "${homeDir}".to_owned(),
+                placeholder: "${desktopDir}".to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn a_shell_spelling_of_home_is_refused_with_the_manifest_spelling() {
+        for (written, suggestion) in [
+            ("$HOME/.claude", "${homeDir}/.claude"),
+            ("${HOME}/.claude", "${homeDir}/.claude"),
+            ("~/.claude", "${homeDir}/.claude"),
+            ("~", "${homeDir}"),
+            ("%USERPROFILE%\\\\.claude", "${homeDir}\\\\.claude"),
+        ] {
+            let source = VALID.replacen("${dataDir}", written, 1);
+            let error = PluginManifest::parse(&source)
+                .expect_err("a shell spelling of home must not become a relative directory");
+            assert_eq!(
+                error.problem(),
+                &ManifestProblem::UnexpandedPath {
+                    field: "capabilities.fs.read".to_owned(),
+                    path: written.replace("\\\\", "\\"),
+                    suggestion: suggestion.replace("\\\\", "\\"),
+                },
+            );
+        }
+
+        // A directory that merely starts with the same letters is a real name.
+        let source = VALID.replacen("${dataDir}", "~notes", 1);
+        assert!(PluginManifest::parse(&source).is_ok());
+    }
+
+    #[test]
+    fn the_home_directory_placeholder_names_the_users_own_files() {
+        let source = VALID.replacen(
+            "\"read\": [\"${pluginDir}\", \"${dataDir}\"]",
+            "\"read\": [\"${pluginDir}\", \"${homeDir}/.claude/skills\"]",
+            1,
+        );
+        let manifest = PluginManifest::parse(&source).expect("`${homeDir}` is a placeholder");
+        let fs = manifest.capabilities.fs.as_ref().expect("an fs grant");
+        let home = Path::new("/home/example");
+        let anchors = Anchors {
+            plugin_dir: Path::new("/plugins/a"),
+            data_dir: Path::new("/data/a"),
+            home_dir: Some(home),
+        };
+        assert_eq!(
+            expand_all(&fs.read, &anchors),
+            [PathBuf::from("/plugins/a"), home.join(".claude/skills")]
+        );
+
+        // Without a home directory the grant shrinks rather than landing in
+        // a directory named `${homeDir}` inside the plugin.
+        let homeless = Anchors {
+            home_dir: None,
+            ..anchors
+        };
+        assert_eq!(
+            expand_all(&fs.read, &homeless),
+            [PathBuf::from("/plugins/a")]
+        );
+    }
+
+    #[test]
+    fn environment_variables_are_granted_by_name() {
+        let source = VALID.replacen(
+            "\"process\": { \"exit\": true }",
+            "\"process\": { \"exit\": true, \"env\": [\"EDITOR\"] }",
+            1,
+        );
+        let manifest = PluginManifest::parse(&source).expect("`env` is a process grant");
+        let capabilities = manifest.capabilities(Path::new("/plugins/a"), Path::new("/data/a"));
+        assert_eq!(capabilities.granted_env_variables(), ["EDITOR"]);
+        assert!(capabilities.summary().contains(&"env: EDITOR".to_owned()));
+
+        let source = VALID.replacen(
+            "\"process\": { \"exit\": true }",
+            "\"process\": { \"env\": [\"A=B\"] }",
+            1,
+        );
+        let error = PluginManifest::parse(&source).expect_err("`A=B` is not a name");
+        assert!(matches!(error.problem(), ManifestProblem::Capabilities(_)));
     }
 
     #[test]
@@ -2915,6 +3122,19 @@ mod tests {
         let capabilities = manifest.capabilities(Path::new("/plugins/a"), Path::new("/data/a"));
         assert_eq!(capabilities.execute_grant(), &ExecuteGrant::Unrestricted);
         assert!(capabilities.may_run("anything"));
+    }
+
+    #[test]
+    fn an_execute_string_other_than_the_wildcard_is_refused() {
+        let source = VALID.replacen("[\"git\"]", "\"git\"", 1);
+        let error = PluginManifest::parse(&source).expect_err("`git` is not `*`");
+        assert!(matches!(error.problem(), ManifestProblem::Capabilities(_)));
+        let message = error.to_string();
+        assert!(message.contains("capabilities.fs.execute"), "{message}");
+        assert!(message.contains("[\"git\"]"), "{message}");
+
+        let schema = manifest_schema().to_string();
+        assert!(schema.contains("\"const\":\"*\""), "{schema}");
     }
 
     #[test]
@@ -3054,6 +3274,7 @@ mod tests {
             "clipboard",
             "process",
             "exit",
+            "env",
         ] {
             assert!(
                 schema.contains(grant),

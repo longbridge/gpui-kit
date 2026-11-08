@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 /// The entrance presentation shared by Dialog and AlertDialog.
 ///
-/// Closing remains immediate. Reduced motion displays the final state for every option.
+/// Closing animates the surface and backdrop back out. Reduced motion displays
+/// the final state for every option, and [`DialogEntrance::None`] opens and
+/// closes in a single frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum DialogEntrance {

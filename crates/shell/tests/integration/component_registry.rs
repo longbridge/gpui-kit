@@ -111,3 +111,30 @@ fn registry_rejects_an_incompatible_api_version() {
                 && actual == COMPONENT_REGISTRY_API_VERSION + 1
     ));
 }
+
+/// Every state object answers `release()`, so a registered method may not
+/// take the name.
+#[test]
+fn registry_rejects_a_state_method_named_release() {
+    let mut registry = ComponentRegistry::new(
+        COMPONENT_REGISTRY_API_VERSION,
+        gpui_shell::DEFAULT_COMPONENT_MODULE,
+    )
+    .unwrap();
+    let state = gpui_shell::StateDescriptor::new("ProbeState", "ProbeState", vec![], |_, _, _| {
+        Ok(Box::new(()))
+    })
+    .with_methods(vec![gpui_shell::StateMethodDescriptor::new::<()>(
+        "release",
+        "(): void",
+        |_, _, _, _| Ok(gpui_shell::ComponentDataValue::Null),
+    )]);
+
+    assert!(matches!(
+        registry.register_state(state),
+        Err(RegistryError::InvalidMethod {
+            component: "ProbeState",
+            method: "release"
+        })
+    ));
+}

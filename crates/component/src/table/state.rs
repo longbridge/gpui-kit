@@ -16,15 +16,12 @@ use gpui::{
     AppContext, Axis, Bounds, ClickEvent, Context, Div, DragMoveEvent, ElementId, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton,
     MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled, Task, UniformListScrollHandle, Window, div,
+    StatefulInteractiveElement as _, Styled, Task, TextAlign, UniformListScrollHandle, Window, div,
     prelude::FluentBuilder, px, uniform_list,
 };
 use rust_i18n::t;
 
 use super::*;
-
-/// How far behind the pointer a resize drag trails the column edge.
-const HANDLE_SIZE: Pixels = px(2.);
 
 /// Grab room on each side of a resize handle's hairline, so the divider can be
 /// caught without pixel-hunting. Both halves of the band are this wide, so
@@ -148,6 +145,14 @@ impl TableVisibleRange {
     }
 }
 
+/// Where a column resize started: the pointer's x at the press on the
+/// resize handle, and the column's width then.
+#[derive(Clone, Copy)]
+struct ResizeOrigin {
+    x: Pixels,
+    width: Pixels,
+}
+
 /// The state for [`DataTable`].
 ///
 /// # Selection Modes
@@ -213,8 +218,10 @@ pub struct TableState<D: TableDelegate> {
     pub(super) options: TableOptions,
     /// The bounds of the table container.
     bounds: Bounds<Pixels>,
-    /// The bounds of the fixed head cols.
+    /// The bounds of the left fixed head cols.
     fixed_head_cols_bounds: Bounds<Pixels>,
+    /// The bounds of the right fixed head cols.
+    fixed_right_head_cols_bounds: Bounds<Pixels>,
 
     col_groups: Vec<ColGroup>,
     header_layout: Vec<Vec<HeaderCell>>,
@@ -227,6 +234,17 @@ pub struct TableState<D: TableDelegate> {
     pub col_selectable: bool,
     /// Whether the table can select row.
     pub row_selectable: bool,
+    /// Whether a row click with the secondary modifier (⌘ on macOS, Ctrl
+    /// elsewhere) or Shift held selects the row, default is `true`.
+    ///
+    /// Set to `false` when the delegate keeps its own multi-row selection and
+    /// handles those clicks itself. The table then leaves its selected row
+    /// alone on a modified click, so a click that takes a row out of the
+    /// delegate's selection is not undone by the table selecting it.
+    ///
+    /// In cell selection without a row header, a modified click on the
+    /// selected cell does not escalate it to its row either.
+    select_on_modifier_click: bool,
     /// Whether the table can select cell, default is false.
     ///
     /// When enabled:
@@ -266,6 +284,8 @@ pub struct TableState<D: TableDelegate> {
 
     /// The column index that is being resized.
     resizing_col: Option<usize>,
+    /// Where the press on a resize handle was, and the column's width then.
+    resize_origin: Option<ResizeOrigin>,
     /// The column a double-click on its resize handle just fitted.
     ///
     /// The double-click's second press also starts a drag on the handle, which
@@ -306,14 +326,17 @@ where
             selected_col: None,
             selected_cell: None,
             resizing_col: None,
+            resize_origin: None,
             fitted_col: None,
             col_drag_gap: None,
             bounds: Bounds::default(),
             fixed_head_cols_bounds: Bounds::default(),
+            fixed_right_head_cols_bounds: Bounds::default(),
             visible_range: TableVisibleRange::default(),
             loop_selection: true,
             col_selectable: true,
             row_selectable: true,
+            select_on_modifier_click: true,
             cell_selectable: false,
             row_header: true,
             sortable: true,
@@ -365,6 +388,13 @@ where
     /// Set to enable/disable row selectable, default true
     pub fn row_selectable(mut self, row_selectable: bool) -> Self {
         self.row_selectable = row_selectable;
+        self
+    }
+
+    /// Set whether a row click with the secondary modifier or Shift held
+    /// selects the row, default is `true`.
+    pub fn select_on_modifier_click(mut self, select_on_modifier_click: bool) -> Self {
+        self.select_on_modifier_click = select_on_modifier_click;
         self
     }
 
@@ -425,7 +455,12 @@ where
 
     // Scroll to the column at the given index.
     pub fn scroll_to_col(&mut self, col_ix: usize, cx: &mut Context<Self>) {
-        let col_ix = col_ix.saturating_sub(self.fixed_left_cols_count());
+        let scrollable_cols = self.scrollable_cols();
+        // Right-fixed columns are always in view.
+        if col_ix >= scrollable_cols.end {
+            return;
+        }
+        let col_ix = col_ix.saturating_sub(scrollable_cols.start);
 
         // Resolve the offset here instead of deferring it to the virtual list.
         //
@@ -467,7 +502,7 @@ where
             return None;
         }
 
-        let cols = self.col_groups.get(self.fixed_left_cols_count()..)?;
+        let cols = self.col_groups.get(self.scrollable_cols())?;
         let col_left: Pixels = cols.get(..col_ix)?.iter().map(|col| col.width).sum();
         let col_right = col_left + cols.get(col_ix)?.width;
         let offset_x = self.horizontal_scroll_handle.offset().x;
@@ -766,15 +801,39 @@ where
         self.header_layout = layout;
     }
 
-    fn fixed_left_cols_count(&self) -> usize {
+    fn fixed_cols_count(&self, side: ColumnFixed) -> usize {
         if !self.col_fixed {
             return 0;
         }
 
         self.col_groups
             .iter()
-            .filter(|col| col.column.fixed == Some(ColumnFixed::Left))
+            .filter(|col| col.column.fixed == Some(side))
             .count()
+    }
+
+    /// The columns between the left and right fixed columns, which scroll
+    /// horizontally.
+    ///
+    /// Left-fixed columns are the leading ones and right-fixed columns the
+    /// trailing ones, so this is everything in between.
+    fn scrollable_cols(&self) -> Range<usize> {
+        let total = self.col_groups.len();
+        let left = self.fixed_cols_count(ColumnFixed::Left).min(total);
+        let right = self.fixed_cols_count(ColumnFixed::Right).min(total - left);
+        left..total - right
+    }
+
+    /// The fixed side of the column at `col_ix`, `None` for a scrollable column.
+    fn col_fixed_side(&self, col_ix: usize) -> Option<ColumnFixed> {
+        let scrollable_cols = self.scrollable_cols();
+        if col_ix < scrollable_cols.start {
+            Some(ColumnFixed::Left)
+        } else if col_ix >= scrollable_cols.end {
+            Some(ColumnFixed::Right)
+        } else {
+            None
+        }
     }
 
     /// One header row. An unset header height matches the body rows.
@@ -839,11 +898,19 @@ where
         }
 
         cx.stop_propagation();
-        self.set_selected_row(row_ix, cx);
+        if self.selects_row_on_click(e, cx) {
+            self.set_selected_row(row_ix, cx);
+        }
 
         if e.click_count() == 2 {
             cx.emit(TableEvent::DoubleClickedRow(row_ix));
         }
+    }
+
+    /// Whether a click on a row selects it, see `select_on_modifier_click`.
+    fn selects_row_on_click(&self, e: &ClickEvent, cx: &App) -> bool {
+        let modifiers = e.modifiers();
+        self.select_on_modifier_click || !(modifiers.secondary(cx) || modifiers.shift)
     }
 
     fn on_col_head_click(&mut self, col_ix: usize, _: &mut Window, cx: &mut Context<Self>) {
@@ -884,8 +951,11 @@ where
         // Double-clicks are passed through to `DoubleClickedCell` and never
         // trigger the escalation.
         let is_reselect = self.selected_cell() == Some((row_ix, col_ix));
-        let should_escalate_to_row =
-            !self.row_header && self.row_selectable && is_reselect && !is_double_click;
+        let should_escalate_to_row = !self.row_header
+            && self.row_selectable
+            && is_reselect
+            && !is_double_click
+            && self.selects_row_on_click(e, cx);
         if should_escalate_to_row {
             self.set_selected_row(row_ix, cx);
             return;
@@ -1372,25 +1442,32 @@ where
     /// coordinate `x`, or `None` when dropping there would not move the
     /// dragged column at `drag_col_ix`.
     fn drag_gap_at(&self, x: Pixels, drag_col_ix: usize) -> Option<usize> {
-        let fixed_count = self.fixed_left_cols_count();
+        let scrollable_cols = self.scrollable_cols();
 
         // A column can only be reordered within its own region: rendering
-        // pins the first `fixed_count` columns, so a cross-region move would
-        // change which columns are pinned without updating their `fixed`
-        // flags.
-        let drag_in_fixed = drag_col_ix < fixed_count;
-        let pointer_in_fixed = fixed_count > 0 && x < self.fixed_head_cols_bounds.right();
-        if drag_in_fixed != pointer_in_fixed {
+        // pins the leading and trailing columns by count, so a cross-region
+        // move would change which columns are pinned without updating their
+        // `fixed` flags.
+        let pointer_side = if scrollable_cols.start > 0 && x < self.fixed_head_cols_bounds.right() {
+            Some(ColumnFixed::Left)
+        } else if scrollable_cols.end < self.col_groups.len()
+            && x >= self.fixed_right_head_cols_bounds.left()
+        {
+            Some(ColumnFixed::Right)
+        } else {
+            None
+        };
+        if self.col_fixed_side(drag_col_ix) != pointer_side {
             return None;
         }
 
-        // Columns scrolled beneath the fixed region keep stale bounds, so
-        // resolve `x` against the fixed columns alone when it falls in that
+        // Columns scrolled beneath the fixed regions keep stale bounds, so
+        // resolve `x` against the fixed columns alone when it falls in either
         // region, and against the visible scrollable columns otherwise.
-        let candidates = if pointer_in_fixed {
-            0..fixed_count
-        } else {
-            self.calculate_visible_leaf_col_range(fixed_count).0
+        let candidates = match pointer_side {
+            Some(ColumnFixed::Left) => 0..scrollable_cols.start,
+            Some(ColumnFixed::Right) => scrollable_cols.end..self.col_groups.len(),
+            None => self.calculate_visible_leaf_col_range(scrollable_cols).0,
         };
 
         // The gap sits after the last candidate column whose center is left of `x`.
@@ -1494,6 +1571,13 @@ where
             .overflow_hidden()
             .whitespace_nowrap()
             .table_cell_size(self.options.size)
+            // Text alignment is inherited, so this aligns the header name and
+            // the delegate's cell text without changing how cells lay out.
+            .map(|this| match col_group.column.align {
+                TextAlign::Center => this.text_center(),
+                TextAlign::Right => this.text_right(),
+                _ => this,
+            })
             .map(|this| match col_padding {
                 Some(padding) => this
                     .pl(padding.left)
@@ -1502,6 +1586,40 @@ where
                     .pb(padding.bottom),
                 None => this,
             })
+    }
+
+    /// Expose a body cell to assistive technology: its role, its column and
+    /// the delegate's [`cell_label`](TableDelegate::cell_label).
+    ///
+    /// In cell selection mode the cell is a `GridCell` that reports whether it
+    /// is selected; otherwise it is a plain `Cell`.
+    fn a11y_cell<E>(&self, cell: E, row_ix: usize, col_ix: usize, window: &Window, cx: &App) -> E
+    where
+        E: gpui::StatefulInteractiveElement + FluentBuilder,
+    {
+        let cell = if self.cell_selectable {
+            let is_selected = self.selected_cell() == Some((row_ix, col_ix));
+            cell.role(gpui::Role::GridCell)
+                .aria_selected(is_selected)
+                // While the table has focus, the selected cell is the
+                // focused node for assistive technology.
+                .when(
+                    is_selected && self.focus_handle.is_focused(window),
+                    |this| this.aria_active_descendant(),
+                )
+        } else {
+            cell.role(gpui::Role::Cell)
+        };
+        // Labels are only read through the accessibility tree, so skip
+        // building them when no assistive technology is connected (tests
+        // read them through test support).
+        let label = if window.is_a11y_active() || cfg!(feature = "test-support") {
+            self.delegate.cell_label(row_ix, col_ix, cx)
+        } else {
+            None
+        };
+        cell.aria_column_index(col_ix)
+            .when_some(label, |this, label| this.aria_label(label))
     }
 
     /// Show Column selection style, when the column is selected and the selection state is Column.
@@ -1542,7 +1660,17 @@ where
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let Some(prev) = ix.checked_sub(1).filter(|ix| self.is_col_resizable(*ix)) else {
+        // The first right-fixed column stays put while the column before it
+        // resizes, so its edge would not follow the pointer; that column's
+        // own handle remains.
+        let is_fixed_right = |ix: usize| {
+            self.col_fixed
+                && self.col_groups.get(ix).and_then(|col| col.column.fixed)
+                    == Some(ColumnFixed::Right)
+        };
+        let Some(prev) = ix.checked_sub(1).filter(|prev| {
+            self.is_col_resizable(*prev) && (!is_fixed_right(ix) || is_fixed_right(*prev))
+        }) else {
             return div().into_any_element();
         };
 
@@ -1646,9 +1774,17 @@ where
                                 .expect("BUG: invalid col index")
                                 .clone();
 
+                            // The width at the press, plus how far the pointer
+                            // has moved since. The column's left edge isn't a
+                            // fixed point: it moves when the table scrolls,
+                            // and the scroll offset clamps as the columns
+                            // narrow.
+                            let Some(origin) = view.resize_origin else {
+                                return;
+                            };
                             view.resize_cols(
                                 ix,
-                                e.event.position.x - HANDLE_SIZE - col_group.bounds.left(),
+                                origin.width + (e.event.position.x - origin.x),
                                 window,
                                 cx,
                             );
@@ -1665,17 +1801,22 @@ where
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(
-                    move |view, e: &MouseDownEvent, window, cx| match e.click_count {
-                        1 => view.fitted_col = None,
-                        2 if view.fit_col(ix, window, cx) => view.fitted_col = Some(ix),
-                        _ => {}
-                    },
-                ),
+                cx.listener(move |view, e: &MouseDownEvent, window, cx| {
+                    view.resize_origin = view.col_groups.get(ix).map(|col_group| ResizeOrigin {
+                        x: e.position.x,
+                        width: col_group.width,
+                    });
+                    if e.click_count == 1 {
+                        view.fitted_col = None;
+                    } else if e.click_count == 2 && view.fit_col(ix, window, cx) {
+                        view.fitted_col = Some(ix);
+                    }
+                }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
                 cx.listener(|view, _, _, cx| {
+                    view.resize_origin = None;
                     if view.resizing_col.is_none() {
                         return;
                     }
@@ -1689,19 +1830,21 @@ where
             )
     }
 
-    /// The border on the right edge of the fixed columns, unless turned off
-    /// with [`DataTable::fixed_cols_border`].
-    fn render_fixed_cols_border(&self, cx: &App) -> Option<Div> {
+    /// The border on the inner edge of the fixed columns pinned to `side`,
+    /// unless turned off with [`DataTable::fixed_cols_border`].
+    fn render_fixed_cols_border(&self, side: ColumnFixed, cx: &App) -> Option<Div> {
         self.options.fixed_cols_border.then(|| {
             div()
                 .absolute()
                 .top_0()
-                .right_0()
                 .bottom_0()
                 .w_0()
                 .flex_shrink_0()
-                .border_r_1()
                 .border_color(cx.theme().border)
+                .map(|this| match side {
+                    ColumnFixed::Left => this.right_0().border_r_1(),
+                    ColumnFixed::Right => this.left_0().border_l_1(),
+                })
         })
     }
 
@@ -1723,9 +1866,11 @@ where
             .table_cell_size(self.options.size)
             .when(!is_head, |this| {
                 this.when(self.row_selectable, |this| {
-                    this.on_click(cx.listener(move |table, _, _window, cx| {
+                    this.on_click(cx.listener(move |table, e: &ClickEvent, _window, cx| {
                         cx.stop_propagation();
-                        table.set_selected_row(row_ix, cx);
+                        if table.selects_row_on_click(e, cx) {
+                            table.set_selected_row(row_ix, cx);
+                        }
                     }))
                 })
             })
@@ -1793,7 +1938,18 @@ where
             .h_full()
             .child(
                 self.render_cell(None, col_ix, window, cx)
+                    // A header given its own height may be shorter than a
+                    // row, with no room for a row's padding above and below
+                    // the name, so the name centres in it instead. A column's
+                    // own paddings still apply.
+                    .when(
+                        self.options.header_row_height.is_some() && paddings.is_none(),
+                        |this| this.py_0(),
+                    )
                     .id(("col-header", col_ix))
+                    .role(gpui::Role::ColumnHeader)
+                    .aria_label(name.clone())
+                    .aria_column_index(col_ix)
                     .test_support()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.on_col_head_click(col_ix, window, cx);
@@ -1874,15 +2030,16 @@ where
     /// columns is returned to avoid a blank header on initial paint.
     fn calculate_visible_leaf_col_range(
         &self,
-        left_columns_count: usize,
+        scrollable_cols: Range<usize>,
     ) -> (Range<usize>, Pixels) {
-        let total_cols = self.col_groups.len();
+        let (left_columns_count, total_cols) = (scrollable_cols.start, scrollable_cols.end);
 
         if self.bounds.size.width == px(0.) {
-            return (left_columns_count..total_cols, px(0.));
+            return (scrollable_cols, px(0.));
         }
 
-        let fixed_width = self.fixed_head_cols_bounds.size.width;
+        let fixed_width =
+            self.fixed_head_cols_bounds.size.width + self.fixed_right_head_cols_bounds.size.width;
         let available_width = (self.bounds.size.width - fixed_width).max(px(0.));
         // The scroll handle offset is negative when scrolled right; negate it
         // to obtain a positive distance from the left edge of the scroll area.
@@ -1923,11 +2080,10 @@ where
 
     fn render_table_header(
         &mut self,
-        left_columns_count: usize,
+        scrollable_cols: Range<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let view = cx.entity().clone();
         let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
 
         // Header leaf-column virtualization.
@@ -1944,8 +2100,10 @@ where
         // The spacers preserve the flex container's total content width so that
         // the scrollbar range stays correct.
         let total_cols = self.col_groups.len();
+        let left_columns_count = scrollable_cols.start;
+        let right_columns_start = scrollable_cols.end;
         let (visible_col_range, left_spacer) =
-            self.calculate_visible_leaf_col_range(left_columns_count);
+            self.calculate_visible_leaf_col_range(scrollable_cols.clone());
 
         let layout_len = self.header_layout.len();
         let header_row_height = self.header_row_height();
@@ -1954,12 +2112,19 @@ where
         if left_columns_count == 0 {
             self.fixed_head_cols_bounds = Bounds::default();
         }
+        if right_columns_start == total_cols {
+            self.fixed_right_head_cols_bounds = Bounds::default();
+        }
 
         let mut header = self.delegate_mut().render_header(window, cx);
         let style = header.style().clone();
         let layout = self.header_layout.clone();
 
         header
+            // One header row holds every column header, including the pinned
+            // ones, which are laid out in a separate container.
+            .role(gpui::Role::Row)
+            .aria_row_index(0)
             .h_flex()
             .w_full()
             .flex_shrink_0()
@@ -1998,52 +2163,12 @@ where
                 this.child(self.render_row_header_cell(0, true, cx))
             })
             .when(left_columns_count > 0, |this| {
-                let view = view.clone();
-                // Render left fixed columns
-                this.child(
-                    h_flex()
-                        .relative()
-                        .h_full()
-                        .bg(cx.theme().tokens.table_head)
-                        .child(v_flex().min_w_full().flex_shrink_0().children(
-                            layout.iter().enumerate().map(|(_row_ix, row_cells)| {
-                                h_flex()
-                                    .min_w_full()
-                                    .h(header_row_height)
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .children(row_cells.iter().filter_map(|cell| {
-                                        if cell.start_leaf_col_ix < left_columns_count {
-                                            if cell.is_leaf {
-                                                if let Some(ix) = cell.leaf_col_ix {
-                                                    return Some(
-                                                        self.render_th(ix, window, cx)
-                                                            .into_any_element(),
-                                                    );
-                                                }
-                                            } else {
-                                                return Some(
-                                                    self.delegate_mut()
-                                                        .render_group_th(
-                                                            &cell.label,
-                                                            cell.col_span,
-                                                            cell.width,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                        .into_any_element(),
-                                                );
-                                            }
-                                        }
-                                        None
-                                    }))
-                            }),
-                        ))
-                        .children(self.render_fixed_cols_border(cx))
-                        .on_prepaint(move |bounds, _, cx| {
-                            view.update(cx, |r, _| r.fixed_head_cols_bounds = bounds)
-                        }),
-                )
+                this.child(self.render_fixed_head_cols(
+                    0..left_columns_count,
+                    ColumnFixed::Left,
+                    window,
+                    cx,
+                ))
             })
             .child(
                 // Columns
@@ -2085,9 +2210,9 @@ where
                                                 None
                                             }
                                         }))
-                                        .when(visible_col_range.end < total_cols, |r| {
+                                        .when(visible_col_range.end < right_columns_start, |r| {
                                             let right_spacer: Pixels = self.col_groups
-                                                [visible_col_range.end..total_cols]
+                                                [visible_col_range.end..right_columns_start]
                                                 .iter()
                                                 .map(|g| g.width)
                                                 .sum();
@@ -2098,7 +2223,7 @@ where
                                         // Group header rows have far fewer cells (one per group),
                                         // so the cost of rendering all of them is negligible.
                                         this.children(row_cells.iter().filter_map(|cell| {
-                                            if cell.start_leaf_col_ix >= left_columns_count {
+                                            if scrollable_cols.contains(&cell.start_leaf_col_ix) {
                                                 if cell.is_leaf {
                                                     if let Some(ix) = cell.leaf_col_ix {
                                                         return Some(
@@ -2128,6 +2253,75 @@ where
                         }),
                     )),
             )
+            .when(right_columns_start < total_cols, |this| {
+                this.child(self.render_fixed_head_cols(
+                    right_columns_start..total_cols,
+                    ColumnFixed::Right,
+                    window,
+                    cx,
+                ))
+            })
+    }
+
+    /// Render the header cells of the fixed columns `cols` pinned to `side`,
+    /// including group header cells that start in `cols`.
+    fn render_fixed_head_cols(
+        &mut self,
+        cols: Range<usize>,
+        side: ColumnFixed,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let view = cx.entity().clone();
+        let header_row_height = self.header_row_height();
+        let layout = self.header_layout.clone();
+
+        h_flex()
+            .relative()
+            .h_full()
+            .flex_shrink_0()
+            .bg(cx.theme().tokens.table_head)
+            .child(
+                v_flex()
+                    .min_w_full()
+                    .flex_shrink_0()
+                    .children(layout.iter().map(|row_cells| {
+                        h_flex()
+                            .min_w_full()
+                            .h(header_row_height)
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .children(row_cells.iter().filter_map(|cell| {
+                                if !cols.contains(&cell.start_leaf_col_ix) {
+                                    return None;
+                                }
+
+                                if cell.is_leaf {
+                                    let ix = cell.leaf_col_ix?;
+                                    Some(self.render_th(ix, window, cx).into_any_element())
+                                } else {
+                                    Some(
+                                        self.delegate_mut()
+                                            .render_group_th(
+                                                &cell.label,
+                                                cell.col_span,
+                                                cell.width,
+                                                window,
+                                                cx,
+                                            )
+                                            .into_any_element(),
+                                    )
+                                }
+                            }))
+                    })),
+            )
+            .children(self.render_fixed_cols_border(side, cx))
+            .on_prepaint(move |bounds, _, cx| {
+                view.update(cx, |table, _| match side {
+                    ColumnFixed::Left => table.fixed_head_cols_bounds = bounds,
+                    ColumnFixed::Right => table.fixed_right_head_cols_bounds = bounds,
+                })
+            })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2135,7 +2329,7 @@ where
         &mut self,
         row_ix: usize,
         rows_count: usize,
-        left_columns_count: usize,
+        scrollable_cols: Range<usize>,
         col_sizes: Rc<Vec<gpui::Size<Pixels>>>,
         columns_count: usize,
         is_filled: bool,
@@ -2155,10 +2349,25 @@ where
 
             let mut tr = self.delegate.render_tr(row_ix, window, cx);
             let style = tr.style().clone();
+            // As with cell labels, only build the name when it can be read.
+            let label = if window.is_a11y_active() || cfg!(feature = "test-support") {
+                self.delegate.row_label(row_ix, cx)
+            } else {
+                None
+            };
 
             tr.test_support()
                 .role(gpui::Role::Row)
+                // Row 0 is the header row.
+                .aria_row_index(row_ix + 1)
+                .when_some(label, |this, label| this.aria_label(label))
                 .aria_selected(is_selected)
+                // While the table has focus, the selected row is the focused
+                // node for assistive technology.
+                .when(
+                    is_selected && self.focus_handle.is_focused(window),
+                    |this| this.aria_active_descendant(),
+                )
                 .h_flex()
                 .w_full()
                 .h(row_height)
@@ -2177,82 +2386,14 @@ where
                 .when(self.cell_selectable && self.row_header, |this| {
                     this.child(self.render_row_header_cell(row_ix, false, cx))
                 })
-                .when(left_columns_count > 0, |this| {
-                    // Left fixed columns
-                    this.child(
-                        h_flex()
-                            .relative()
-                            .h_full()
-                            .children({
-                                let mut items = Vec::with_capacity(left_columns_count);
-
-                                (0..left_columns_count).for_each(|col_ix| {
-                                    let is_cell_selected =
-                                        self.selected_cell() == Some((row_ix, col_ix));
-                                    let is_cell_right_clicked =
-                                        self.right_clicked_cell == Some((row_ix, col_ix));
-
-                                    items.push(
-                                        self.render_col_wrap(Some(row_ix), col_ix, window, cx)
-                                            .child(
-                                                self.render_cell(Some(row_ix), col_ix, window, cx)
-                                                    .id(format!("table-cell:{}:{}", row_ix, col_ix))
-                                                    .relative()
-                                                    .child(self.measure_render_td(
-                                                        row_ix, col_ix, window, cx,
-                                                    ))
-                                                    .when(is_cell_selected, |this| {
-                                                        this.child(
-                                                            div()
-                                                                .absolute()
-                                                                .inset_0()
-                                                                .bg(cx.theme().tokens.table_active),
-                                                        )
-                                                    })
-                                                    .when(
-                                                        is_cell_right_clicked && !is_cell_selected,
-                                                        |this| {
-                                                            this.child(
-                                                                div()
-                                                                    .absolute()
-                                                                    .inset_0()
-                                                                    .border_1()
-                                                                    .border_color(
-                                                                        cx.theme()
-                                                                            .table_active_border
-                                                                            .opacity(0.5),
-                                                                    ),
-                                                            )
-                                                        },
-                                                    )
-                                                    .when(self.cell_selectable, |this| {
-                                                        this.on_click(cx.listener(
-                                                            move |table, e, window, cx| {
-                                                                table.on_cell_click(
-                                                                    e, row_ix, col_ix, window, cx,
-                                                                );
-                                                            },
-                                                        ))
-                                                        .on_mouse_down(
-                                                            MouseButton::Right,
-                                                            cx.listener(
-                                                                move |table, e, window, cx| {
-                                                                    table.on_cell_right_click(
-                                                                        e, row_ix, col_ix, window,
-                                                                        cx,
-                                                                    );
-                                                                },
-                                                            ),
-                                                        )
-                                                    }),
-                                            ),
-                                    );
-                                });
-
-                                items
-                            })
-                            .children(self.render_fixed_cols_border(cx)),
-                    )
+                .when(scrollable_cols.start > 0, |this| {
+                    this.child(self.render_fixed_cells(
+                        row_ix,
+                        0..scrollable_cols.start,
+                        ColumnFixed::Left,
+                        window,
+                        cx,
+                    ))
                 })
                 .child(
                     h_flex()
@@ -2267,10 +2408,11 @@ where
                                 Axis::Horizontal,
                                 col_sizes,
                                 {
+                                    let scrollable_cols = scrollable_cols.clone();
                                     move |table, visible_range: Range<usize>, window, cx| {
                                         table.update_visible_range_if_need(
                                             visible_range.clone(),
-                                            columns_count.saturating_sub(left_columns_count),
+                                            scrollable_cols.len(),
                                             Axis::Horizontal,
                                             window,
                                             cx,
@@ -2281,7 +2423,7 @@ where
                                         );
 
                                         visible_range.for_each(|col_ix| {
-                                            let col_ix = col_ix + left_columns_count;
+                                            let col_ix = col_ix + scrollable_cols.start;
                                             let is_cell_selected =
                                                 table.selected_cell() == Some((row_ix, col_ix));
                                             let is_cell_right_clicked =
@@ -2291,16 +2433,24 @@ where
                                                 .render_col_wrap(Some(row_ix), col_ix, window, cx)
                                                 .child(
                                                     table
-                                                        .render_cell(
-                                                            Some(row_ix),
+                                                        .a11y_cell(
+                                                            table
+                                                                .render_cell(
+                                                                    Some(row_ix),
+                                                                    col_ix,
+                                                                    window,
+                                                                    cx,
+                                                                )
+                                                                .id(format!(
+                                                                    "table-cell-{}:{}",
+                                                                    row_ix, col_ix
+                                                                ))
+                                                                .test_support(),
+                                                            row_ix,
                                                             col_ix,
                                                             window,
                                                             cx,
                                                         )
-                                                        .id(format!(
-                                                            "table-cell-{}:{}",
-                                                            row_ix, col_ix
-                                                        ))
                                                         .relative()
                                                         .child(table.measure_render_td(
                                                             row_ix, col_ix, window, cx,
@@ -2365,6 +2515,15 @@ where
                         )
                         .child(self.delegate.render_last_empty_col(window, cx)),
                 )
+                .when(scrollable_cols.end < self.col_groups.len(), |this| {
+                    this.child(self.render_fixed_cells(
+                        row_ix,
+                        scrollable_cols.end..self.col_groups.len(),
+                        ColumnFixed::Right,
+                        window,
+                        cx,
+                    ))
+                })
                 // Row selected style
                 .when(is_selected, |this| {
                     let bg = if cx.theme().list.active_highlight {
@@ -2431,6 +2590,73 @@ where
                 .child(self.delegate.render_last_empty_col(window, cx))
                 .into_any_element()
         }
+    }
+
+    /// Render the body cells of the fixed columns `cols` pinned to `side`.
+    fn render_fixed_cells(
+        &mut self,
+        row_ix: usize,
+        cols: Range<usize>,
+        side: ColumnFixed,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let items: Vec<_> = cols
+            .map(|col_ix| {
+                let is_cell_selected = self.selected_cell() == Some((row_ix, col_ix));
+                let is_cell_right_clicked = self.right_clicked_cell == Some((row_ix, col_ix));
+
+                self.render_col_wrap(Some(row_ix), col_ix, window, cx)
+                    .child(
+                        self.a11y_cell(
+                            self.render_cell(Some(row_ix), col_ix, window, cx)
+                                .id(format!("table-cell:{}:{}", row_ix, col_ix))
+                                .test_support(),
+                            row_ix,
+                            col_ix,
+                            window,
+                            cx,
+                        )
+                        .relative()
+                        .child(self.measure_render_td(row_ix, col_ix, window, cx))
+                        .when(is_cell_selected, |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .bg(cx.theme().tokens.table_active),
+                            )
+                        })
+                        .when(is_cell_right_clicked && !is_cell_selected, |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .border_1()
+                                    .border_color(cx.theme().table_active_border.opacity(0.5)),
+                            )
+                        })
+                        .when(self.cell_selectable, |this| {
+                            this.on_click(cx.listener(move |table, e, window, cx| {
+                                table.on_cell_click(e, row_ix, col_ix, window, cx);
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(move |table, e, window, cx| {
+                                    table.on_cell_right_click(e, row_ix, col_ix, window, cx);
+                                }),
+                            )
+                        }),
+                    )
+            })
+            .collect();
+
+        h_flex()
+            .relative()
+            .h_full()
+            .flex_shrink_0()
+            .children(items)
+            .children(self.render_fixed_cols_border(side, cx))
     }
 
     /// Calculate the extra rows needed to fill the table empty space when `stripe` is true.
@@ -2521,7 +2747,7 @@ where
         div()
             .absolute()
             .left(self.fixed_head_cols_bounds.size.width)
-            .right_0()
+            .right(self.fixed_right_head_cols_bounds.size.width)
             .bottom_0()
             .h(Scrollbar::width())
             .child(Scrollbar::horizontal(&self.horizontal_scroll_handle).viewport_from_layout())
@@ -2546,11 +2772,7 @@ where
         self.measure(window, cx);
 
         let columns_count = self.delegate.columns_count(cx);
-        let left_columns_count = self
-            .col_groups
-            .iter()
-            .filter(|col| self.col_fixed && col.column.fixed == Some(ColumnFixed::Left))
-            .count();
+        let scrollable_cols = self.scrollable_cols();
         let rows_count = self.delegate.rows_count(cx);
         let loading = self.delegate.loading(cx);
 
@@ -2599,9 +2821,10 @@ where
 
         let inner_table = v_flex()
             .id("table-inner")
+            .test_support()
             .size_full()
             .overflow_hidden()
-            .child(self.render_table_header(left_columns_count, window, cx))
+            .child(self.render_table_header(scrollable_cols.clone(), window, cx))
             .context_menu({
                 let view = cx.entity().clone();
                 move |this, window: &mut Window, cx: &mut Context<PopupMenu>| {
@@ -2631,8 +2854,9 @@ where
                                         let col_sizes: Rc<Vec<gpui::Size<Pixels>>> = Rc::new(
                                             table
                                                 .col_groups
+                                                .get(scrollable_cols.clone())
+                                                .unwrap_or_default()
                                                 .iter()
-                                                .skip(left_columns_count)
                                                 .map(|col| gpui::Size {
                                                     width: col.width,
                                                     height: px(0.),
@@ -2674,7 +2898,7 @@ where
                                             items.push(table.render_table_row(
                                                 row_ix,
                                                 rows_count,
-                                                left_columns_count,
+                                                scrollable_cols.clone(),
                                                 col_sizes.clone(),
                                                 columns_count,
                                                 is_filled,
@@ -2691,6 +2915,16 @@ where
                             .size_full()
                             .with_sizing_behavior(ListSizingBehavior::Auto)
                             .track_scroll(&self.vertical_scroll_handle)
+                            .map(|rows| {
+                                gpui_base::ScrollBounce::new(
+                                    "table-scroll-bounce",
+                                    &self.vertical_scroll_handle,
+                                    rows,
+                                )
+                                .when_some(self.options.scroll_bounce, |bounce, on| {
+                                    bounce.enabled(on)
+                                })
+                            })
                             .into_any_element(),
                         ),
                     )
@@ -2747,11 +2981,104 @@ where
 
 #[cfg(test)]
 mod tests {
-    use gpui::{App, TestAppContext};
+    use gpui::{App, Entity, TestAppContext};
 
     use super::*;
 
     struct WidthsDelegate;
+
+    struct BounceDelegate;
+
+    impl TableDelegate for BounceDelegate {
+        fn columns_count(&self, _: &App) -> usize {
+            1
+        }
+        fn rows_count(&self, _: &App) -> usize {
+            40
+        }
+        fn column(&self, _: usize, _: &App) -> Column {
+            Column::new("value", "Value")
+        }
+        fn render_td(
+            &mut self,
+            row: usize,
+            _: usize,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) -> impl IntoElement {
+            div().child(row.to_string())
+        }
+    }
+
+    struct BounceTable(Entity<TableState<BounceDelegate>>);
+
+    impl Render for BounceTable {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(240.))
+                .h(px(200.))
+                .child(DataTable::new(&self.0).scroll_bounce(true))
+        }
+    }
+
+    #[gpui::test]
+    fn scroll_bounce_table_keeps_headers_fixed_and_accepts_new_wheel_input(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate, window, cx)))
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        let header = state.read_with(cx, |state, _| state.col_groups[0].bounds);
+        let wheel = |cx: &mut gpui::VisualTestContext, dy| {
+            cx.simulate_event(gpui::ScrollEvent {
+                position: gpui::point(px(100.), px(100.)),
+                delta: gpui::ScrollDelta::Lines(gpui::point(0., dy)),
+                ..Default::default()
+            });
+        };
+        for (dy, phase) in [
+            (-10000., gpui::TouchPhase::Started),
+            (0., gpui::TouchPhase::Ended),
+        ] {
+            cx.simulate_event(gpui::ScrollEvent {
+                position: gpui::point(px(100.), px(100.)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(dy))),
+                touch_phase: phase,
+                ..Default::default()
+            });
+        }
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let end = state.read_with(cx, |state, _| {
+            state
+                .vertical_scroll_handle
+                .0
+                .borrow()
+                .base_handle
+                .offset()
+                .y
+        });
+        assert!(end < px(0.));
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            state.read_with(cx, |state, _| state.col_groups[0].bounds),
+            header
+        );
+        wheel(cx, 2.);
+        assert!(
+            state.read_with(cx, |state, _| state
+                .vertical_scroll_handle
+                .0
+                .borrow()
+                .base_handle
+                .offset()
+                .y)
+                > end
+        );
+    }
 
     impl TableDelegate for WidthsDelegate {
         fn columns_count(&self, _: &App) -> usize {

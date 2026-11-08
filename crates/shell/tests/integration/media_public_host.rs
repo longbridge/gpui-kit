@@ -269,18 +269,24 @@ fn catalog_exposes_only_renderable_media_surfaces() {
     .unwrap();
     media::register(&mut registry).unwrap();
     let frozen = registry.freeze().unwrap();
+    let mut descriptors = vec!["Image", "Editor", "Diff"];
+    let mut states = vec!["EditorState", "DiffState"];
+    if cfg!(feature = "webview") {
+        descriptors.push("WebView");
+        states.push("WebViewState");
+    }
     assert_eq!(
         frozen
             .descriptors()
             .map(|descriptor| descriptor.name())
             .collect::<Vec<_>>(),
-        ["Image", "Editor", "Diff"]
+        descriptors
     );
     assert_eq!(
         frozen
             .states()
             .map(|state| state.export())
             .collect::<Vec<_>>(),
-        ["EditorState", "DiffState"]
+        states
     );
 }

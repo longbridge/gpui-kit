@@ -4,6 +4,8 @@ use gpui::{
     prelude::FluentBuilder as _, relative,
 };
 
+use gpui_base::TestTextExt as _;
+
 use crate::{ActiveTheme, StyledExt};
 
 /// A tag for displaying keyboard keybindings.
@@ -238,7 +240,7 @@ impl RenderOnce for Kbd {
         div()
             // Lets a test ask whether a given shortcut hint was painted this
             // frame; a no-op outside test-support builds.
-            .debug_selector(|| format!("kbd:{}", self.stroke.unparse()))
+            .debug_selector(|| format!("kbd:{}", self.stroke.unparse(cx.platform_info().os)))
             .text_color(cx.theme().muted_foreground)
             .bg(cx.theme().tokens.muted)
             .when(self.outline, |this| {
@@ -257,6 +259,7 @@ impl RenderOnce for Kbd {
             .flex_shrink_0()
             .refine_style(&self.style)
             .child(Self::format(&self.stroke))
+            .test_text(Self::format(&self.stroke))
             .into_any_element()
     }
 }
@@ -273,10 +276,7 @@ mod tests {
             assert_eq!(Kbd::format(&Keystroke::parse("cmd--").unwrap()), "⌘-");
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-+").unwrap()), "⌘+");
             assert_eq!(Kbd::format(&Keystroke::parse("cmd-enter").unwrap()), "⌘⏎");
-            assert_eq!(
-                Kbd::format(&Keystroke::parse("secondary-f12").unwrap()),
-                "⌘F12"
-            );
+            assert_eq!(Kbd::format(&Keystroke::parse("cmd-f12").unwrap()), "⌘F12");
             assert_eq!(
                 Kbd::format(&Keystroke::parse("shift-pagedown").unwrap()),
                 "⇧Page Down"

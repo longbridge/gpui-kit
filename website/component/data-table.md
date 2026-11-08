@@ -120,8 +120,12 @@ Column::new("price", "Price")
     .sortable()
 
 // Fixed column (pinned to left)
-Column::new("actions", "Actions")
+Column::new("name", "Name")
     .fixed(ColumnFixed::Left)
+
+// Fixed column (pinned to right), must be one of the last columns
+Column::new("actions", "Actions")
+    .fixed(ColumnFixed::Right)
     .resizable(false)
     .movable(false)
 
@@ -295,6 +299,21 @@ impl TableDelegate for MyTableDelegate {
 }
 ```
 
+### Accessibility
+
+Text drawn by `render_td` is not read by screen readers. Return each cell's text from `cell_label` so a screen reader can read the cell:
+
+```rust
+impl TableDelegate for MyTableDelegate {
+    fn cell_label(&self, row_ix: usize, col_ix: usize, _: &App) -> Option<SharedString> {
+        let row = self.data.get(row_ix)?;
+        Some(row.get_field_value(self.columns.get(col_ix)?.key.as_ref()).into())
+    }
+}
+```
+
+Each row is then named after its cells' labels, joined with commas (for example "Alice, Active, 80%"). Override `row_label` to name a row differently, or return `None` to leave it unnamed.
+
 ### Selection Modes
 
 The table supports three distinct selection modes:
@@ -322,6 +341,20 @@ let state = cx.new(|cx| {
         .row_selectable(true)   // Keep row selection for row selector column
         .col_selectable(false)
         .cell_selectable(true)  // Enable cell selection
+});
+```
+
+### Modified Clicks
+
+A row click with ⌘ (Ctrl on Windows and Linux) or Shift held selects the row,
+as a plain click does. A delegate that keeps its own multi-row selection
+handles those clicks itself, usually on mouse down. Turn the table's selection
+off for them, so it does not undo the delegate's:
+
+```rust
+let state = cx.new(|cx| {
+    TableState::new(delegate, window, cx)
+        .select_on_modifier_click(false)
 });
 ```
 
@@ -483,7 +516,7 @@ DataTable::new(&state)
     .header_row_height(px(48.))     // Taller header rows
     .stripe(true)                   // Alternating row colors
     .bordered(true)                 // Border around table
-    .fixed_cols_border(true)        // Border after the fixed columns
+    .fixed_cols_border(true)        // Border on the inner edge of the fixed columns
     .scrollbar_visible(true, true)  // Vertical, horizontal scrollbars
 ```
 
@@ -670,12 +703,12 @@ impl TableDelegate for MyTableDelegate {
 - `PageUp/PageDown` - Navigate by page
 - `Escape` - Clear selection
 
+Tab and Shift+Tab move focus out of the table in both modes: the table is one tab stop.
+
 ### Cell Selection Mode
 
 - `↑/↓` - Navigate up/down within current column
 - `←/→` - Navigate left/right within current row
-- `Tab` - Move to next cell (right, then next row)
-- `Shift+Tab` - Move to previous cell
 - `Home` - Jump to first cell in current row
 - `End` - Jump to last cell in current row
 - `PageUp/PageDown` - Navigate by page within current column
@@ -726,7 +759,8 @@ impl TableDelegate for MyTableDelegate {
 - `descending()` - Set default sort to descending
 - `text_right()` - Right-align column text
 - `text_center()` - Center-align column text
-- `fixed(ColumnFixed)` - Pin column to left
+- `fixed(ColumnFixed)` - Pin column to left or right; left-fixed columns come first and right-fixed columns last
+- `fixed_left()` / `fixed_right()` - Shorthand for `fixed(ColumnFixed::Left)` / `fixed(ColumnFixed::Right)`
 - `resizable(bool)` - Enable/disable column resizing
 - `movable(bool)` - Enable/disable column moving
 - `selectable(bool)` - Enable/disable column/cell selection
@@ -754,3 +788,16 @@ impl TableDelegate for MyTableDelegate {
 [TableSelection]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableSelection.html
 [ColumnSort]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnSort.html
 [ColumnFixed]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnFixed.html
+
+## Scroll bounce
+
+```rust
+DataTable::new(&state).scroll_bounce(true)
+```
+
+`scroll_bounce(true)` lets overflowing vertical content stretch at its ends and
+spring back with precise pixel scrolling, such as a trackpad or Magic Mouse
+on macOS. Ordinary mouse wheels use line scrolling and do not bounce. A new
+precise gesture or reversed precise scroll takes over the return; ordinary
+wheel input cancels it and scrolls normally. The logical scroll position remains clamped,
+and scrollbars stay fixed, as do the table headers. Content that fits does not bounce. It is enabled by default on iOS, Android and macOS, whose own scroll views bounce, and disabled elsewhere. Reduced motion disables displacement.

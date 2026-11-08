@@ -9,6 +9,8 @@ pub(super) use super::support::bool_method;
 mod diff;
 mod editor;
 mod image;
+#[cfg(feature = "webview")]
+mod webview;
 
 use gpui_shell::{ComponentRegistry, RegistryError};
 
@@ -16,5 +18,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     image::register(registry)?;
     editor::register(registry)?;
     diff::register(registry)?;
+    #[cfg(feature = "webview")]
+    webview::register(registry)?;
     Ok(())
 }

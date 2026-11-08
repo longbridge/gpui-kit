@@ -80,14 +80,20 @@ export default class App extends View {
     let view = mounted.borrow().clone().unwrap();
 
     delegate_collections::test_probe::take_rows();
-    context.update(|window, cx| window.draw(cx).clear(cx));
+    context.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx)
+    });
     let initial = delegate_collections::test_probe::take_rows();
     assert!(!initial.is_empty());
     assert!(initial.iter().all(|id| id == "alpha"), "{initial:?}");
     context.update(|_, cx| view.update(cx, |view, cx| view.refresh(cx)));
     context.run_until_parked();
     delegate_collections::test_probe::take_rows();
-    context.update(|window, cx| window.draw(cx).clear(cx));
+    context.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx)
+    });
     let refreshed = delegate_collections::test_probe::take_rows();
     assert!(!refreshed.is_empty());
     assert!(refreshed.iter().all(|id| id == "beta"), "{refreshed:?}");

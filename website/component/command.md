@@ -287,6 +287,16 @@ Command::new(&state)
     }))
 ```
 
+## Scroll bounce
+
+```rust
+Command::new(&state).scroll_bounce(true)
+```
+
+`scroll_bounce(true)` lets the command list stretch at its ends and spring back
+with precise pixel scrolling, such as a trackpad or Magic Mouse on macOS, as
+[List](./list.md#scroll-bounce) does. The search field and footer stay fixed. It is enabled by default on iOS, Android and macOS, whose own scroll views bounce, and disabled elsewhere.
+
 ## Command
 
 | Method | Signature and description |
