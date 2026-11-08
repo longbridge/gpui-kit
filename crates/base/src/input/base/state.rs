@@ -5335,6 +5335,23 @@ mod tests {
     use super::*;
 
     #[gpui::test]
+    fn test_set_value_waits_for_the_first_layout(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(|window, cx| {
+            let mut state = crate::input::InputState::new(window, cx);
+            state.set_value("hello", window, cx);
+            // Made outside drawing, the state only has a placeholder font to shape with.
+            assert_eq!(state.display_map().wrap_row_count(), 0);
+            state
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.value(), "hello");
+            assert_eq!(state.display_map().wrap_row_count(), 1);
+        });
+    }
+
+    #[gpui::test]
     fn accessibility_actions_recheck_live_editability(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (state, cx) = cx.add_window_view(|window, cx| {
