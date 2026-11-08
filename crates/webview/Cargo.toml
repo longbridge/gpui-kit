@@ -33,4 +33,6 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+gdkx11 = "0.18"
 gtk = "0.18"
+x11 = { version = "2.21", features = ["xlib"] }
