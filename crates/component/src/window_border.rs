@@ -174,21 +174,7 @@ impl RenderOnce for WindowBorder {
         window.set_client_inset(platform_inset);
         let window_size = window.window_bounds().get_bounds().size;
         let is_window_active = window.is_window_active();
-        let border_color = if cx.theme().is_dark() {
-            Hsla {
-                h: 0.,
-                s: 0.,
-                l: 0.2,
-                a: 1.0,
-            }
-        } else {
-            Hsla {
-                h: 0.,
-                s: 0.,
-                l: 0.8,
-                a: 1.0,
-            }
-        };
+        let border_color = cx.theme().window_border;
 
         div()
             .id("window-backdrop")
