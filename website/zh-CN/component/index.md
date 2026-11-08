@@ -58,5 +58,6 @@ collapsed: false
 - [Carousel](carousel) - 浏览一组相关内容
 - [DataTable](data-table) - 高性能数据表格
 - [Dock](dock) - 支持标签、分割与状态持久化的生产级 Dock 布局
+- [GridLayout](grid-layout) - 可拖动、可调整大小的网格，适用于仪表盘和小组件面板
 - [Tree](tree) - 树形结构组件
 - [VirtualList](virtual-list) - 大数据量虚拟列表

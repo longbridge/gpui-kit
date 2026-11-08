@@ -1,7 +1,7 @@
 [package]
 name = "gpui-shell"
 description = "A scriptable application runtime for GPUI, built on gpui-base."
-version = "0.8.1"
+version = "0.9.0"
 keywords = ["desktop", "gpui", "javascript", "runtime"]
 license = "Apache-2.0"
 publish = true
@@ -60,7 +60,7 @@ gpui-webview = { workspace = true, optional = true }
 # Not named in the source: `gpui-webview` takes its GPUI types from the Kit, whose backend
 # follows the runtime's `gpui-fast`. It stays non-optional because GPUI's macros route their
 # paths through `gpui_kit` whenever the manifest lists it, enabled or not.
-gpui-kit = { path = "../kit", version = "0.8.1", default-features = false }
+gpui-kit = { path = "../kit", version = "0.9.0", default-features = false }
 wry = { version = "0.53.3", package = "lb-wry", optional = true }
 
 # Keep bindings, JIT runtime and vendored standard modules on the same crates.io release.

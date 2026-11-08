@@ -975,7 +975,7 @@ mod tests {
         });
         cx.run_until_parked();
         log.borrow_mut().draggable.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             log.borrow().draggable,
@@ -1003,7 +1003,7 @@ mod tests {
         });
         cx.run_until_parked();
         log.borrow_mut().draggable.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             log.borrow().draggable,
@@ -1151,7 +1151,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         cx.debug_bounds(ZOOM_CONTROL_SELECTOR).is_some()
     }
 
@@ -1235,7 +1235,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let window_height = cx.update(|window, _| window.viewport_size().height);
         assert!(
@@ -1309,8 +1309,8 @@ mod tests {
         cx.run_until_parked();
         let draw = |cx: &mut VisualTestContext| {
             cx.update(|window, _| window.refresh());
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
         };
         draw(cx);
 
@@ -1471,7 +1471,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let window_height = cx.update(|window, _| window.viewport_size().height);
         let content = height.get();
@@ -1588,7 +1588,7 @@ mod tests {
                 area.update(cx, |area, cx| area.set_center(layout, window, cx));
             });
             cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
             height.get()
         };
 
@@ -1676,7 +1676,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         let button = cx.debug_bounds(CLOSE_BUTTON_SELECTOR);
         if enabled && closable {
             assert_eq!(
@@ -1738,7 +1738,7 @@ mod tests {
         for (visible, expected) in [(false, false), (true, true), (false, false)] {
             cx.update(|_, cx| skin.set_close_button_visible(visible, cx));
             cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
             assert_eq!(cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(), expected);
         }
     }
@@ -1773,7 +1773,7 @@ mod tests {
             (ids.0, ids.1, activated)
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert!(
             cx.update(|_, cx| area.read(cx).panel(closable_id).is_some()),
@@ -1821,7 +1821,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         // `debug_bounds` takes a `'static` selector.
         let tab = |cx: &mut VisualTestContext, ix: usize| {
@@ -1841,7 +1841,7 @@ mod tests {
             clipped.origin + gpui::point(px(4.), px(16.)),
             Modifiers::none(),
         );
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert_eq!(first_left(cx), start, "the first frame has not snapped");
 
         let mut lefts = Vec::new();
@@ -1850,7 +1850,7 @@ mod tests {
                 .advance_clock(std::time::Duration::from_millis(16));
             cx.update(|window, cx| {
                 window.simulate_next_frame(cx);
-                window.draw(cx).clear(cx);
+                crate::test_redraw(window, cx);
             });
             lefts.push(first_left(cx));
         }
@@ -1888,7 +1888,7 @@ mod tests {
             .detach();
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let selector = format!("{DOCK_TOGGLE_SELECTOR}-{:?}", DockPlacement::Left).leak();
         let button = cx
@@ -1940,7 +1940,7 @@ mod tests {
             .detach();
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(!cx.read(|cx| area.read(cx).is_dock_open(DockPlacement::Bottom)));
 
         let tab = cx
@@ -2012,7 +2012,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(),
             "an open group with two closable panels offers a close button"
@@ -2026,7 +2026,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_none(),
             "a collapsed group must not offer a close button"

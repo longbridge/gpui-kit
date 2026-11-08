@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, App, Div, ElementId, FocusHandle, InteractiveElement, Interactivity, IntoElement,
-    KeyDownEvent, ParentElement, RenderOnce, Role, SharedString, Stateful,
+    AnyElement, App, Axis, Div, ElementId, FocusHandle, InteractiveElement, Interactivity,
+    IntoElement, KeyDownEvent, ParentElement, RenderOnce, Role, SharedString, Stateful,
     StatefulInteractiveElement, StyleRefinement, Styled, Window, accesskit, div,
     prelude::FluentBuilder as _,
 };
@@ -24,6 +24,8 @@ use crate::{StyledExt as _, TestSupportExt as _};
 ///
 /// - Left and Right move focus to the previous or next focusable descendant,
 ///   wrapping around at either end (the same default as Base UI's `loopFocus`).
+///   A vertical toolbar ([`Toolbar::axis`]) uses Up and Down instead and
+///   reports a vertical orientation.
 /// - When `disabled`, the arrow keys do nothing. Hosted controls must be
 ///   disabled by their owner; the flag only suppresses the toolbar's own
 ///   navigation.
@@ -42,6 +44,7 @@ pub struct Toolbar {
     base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     disabled: bool,
+    axis: Axis,
     children: SmallVec<[AnyElement; 4]>,
 }
 
@@ -52,6 +55,7 @@ impl Toolbar {
             base: div().id(id.clone()).test_support(),
             style: StyleRefinement::default(),
             disabled: false,
+            axis: Axis::Horizontal,
             children: SmallVec::new(),
             id,
         }
@@ -61,6 +65,13 @@ impl Toolbar {
     /// not automatically disabled.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// The direction the items run: horizontal (Left/Right, the default) or
+    /// vertical (Up/Down). Assistive technology hears the same orientation.
+    pub fn axis(mut self, axis: Axis) -> Self {
+        self.axis = axis;
         self
     }
 }
@@ -107,6 +118,7 @@ fn move_focus(container: &FocusHandle, forward: bool, window: &mut Window, cx: &
 
 fn handle_key_down(
     disabled: bool,
+    axis: Axis,
     container: &FocusHandle,
     event: &KeyDownEvent,
     window: &mut Window,
@@ -116,9 +128,9 @@ fn handle_key_down(
         return;
     }
 
-    let forward = match event.keystroke.key.as_str() {
-        "left" => Some(false),
-        "right" => Some(true),
+    let forward = match (axis, event.keystroke.key.as_str()) {
+        (Axis::Horizontal, "left") | (Axis::Vertical, "up") => Some(false),
+        (Axis::Horizontal, "right") | (Axis::Vertical, "down") => Some(true),
         _ => None,
     };
 
@@ -154,6 +166,7 @@ impl RenderOnce for Toolbar {
             base,
             style,
             disabled,
+            axis,
             children,
             ..
         } = self;
@@ -170,13 +183,16 @@ impl RenderOnce for Toolbar {
         let key_handler = {
             let focus_handle = focus_handle.clone();
             move |event: &KeyDownEvent, window: &mut Window, cx: &mut App| {
-                handle_key_down(disabled, &focus_handle, event, window, cx);
+                handle_key_down(disabled, axis, &focus_handle, event, window, cx);
             }
         };
 
         base.track_focus(&focus_handle)
             .role(Role::Toolbar)
-            .aria_orientation(accesskit::Orientation::Horizontal)
+            .aria_orientation(match axis {
+                Axis::Horizontal => accesskit::Orientation::Horizontal,
+                Axis::Vertical => accesskit::Orientation::Vertical,
+            })
             .on_key_down(key_handler)
             // The handle exists for containment checks only. Without this, a
             // press on blank space or non-focusable content would focus the
@@ -280,7 +296,12 @@ mod tests {
         let toolbar = Toolbar::new("toolbar");
 
         assert!(!toolbar.disabled);
+        assert_eq!(toolbar.axis, Axis::Horizontal);
         assert!(toolbar.children.is_empty());
+        assert_eq!(
+            Toolbar::new("toolbar").axis(Axis::Vertical).axis,
+            Axis::Vertical
+        );
     }
 
     #[test]
@@ -357,6 +378,39 @@ mod tests {
             assert_focused(cx, &first, "first (wrapped)");
 
             cx.simulate_keystrokes("left");
+            assert_focused(cx, &third, "third (wrapped back)");
+        }
+
+        #[gpui::test]
+        fn a_vertical_toolbar_roves_with_up_and_down(cx: &mut TestAppContext) {
+            struct Vertical([FocusHandle; 3]);
+
+            impl Render for Vertical {
+                fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                    let [first, second, third] = &self.0;
+                    Toolbar::new("vertical-toolbar")
+                        .axis(Axis::Vertical)
+                        .child(div().id("first").size(px(20.)).track_focus(first))
+                        .child(div().id("second").size(px(20.)).track_focus(second))
+                        .child(div().id("third").size(px(20.)).track_focus(third))
+                }
+            }
+
+            let (state, cx) = cx.add_window_view(|window, cx| {
+                let items = [(); 3].map(|_| cx.focus_handle().tab_stop(true));
+                items[0].focus(window, cx);
+                Vertical(items)
+            });
+            let [first, second, third] = state.read_with(cx, |harness, _| harness.0.clone());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            cx.simulate_keystrokes("right");
+            assert_focused(cx, &first, "first (Right is not a vertical key)");
+            cx.simulate_keystrokes("down");
+            assert_focused(cx, &second, "second");
+            cx.simulate_keystrokes("down down");
+            assert_focused(cx, &first, "first (wrapped)");
+            cx.simulate_keystrokes("up");
             assert_focused(cx, &third, "third (wrapped back)");
         }
 

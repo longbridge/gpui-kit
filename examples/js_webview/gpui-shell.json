@@ -1,0 +1,10 @@
+{
+  "id": "com.gpui-kit.examples.webview",
+  "name": "WebView",
+  "entry": "main.js",
+  "capabilities": {
+    "network": {
+      "hosts": ["gpui-kit.com"]
+    }
+  }
+}

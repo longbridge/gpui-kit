@@ -2,7 +2,7 @@ use crate::{ActiveTheme, Disableable, StyledExt, h_flex};
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, Window, prelude::FluentBuilder as _,
+    StyleRefinement, Styled, Window, accesskit::Toggled, prelude::FluentBuilder as _,
 };
 use gpui_base::TestSupportExt as _;
 use smallvec::SmallVec;
@@ -14,6 +14,7 @@ pub(crate) struct MenuItemElement {
     style: StyleRefinement,
     disabled: bool,
     selected: bool,
+    checked: Option<bool>,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     children: SmallVec<[AnyElement; 2]>,
@@ -29,6 +30,7 @@ impl MenuItemElement {
             style: StyleRefinement::default(),
             disabled: false,
             selected: false,
+            checked: None,
             on_click: None,
             on_hover: None,
             children: SmallVec::new(),
@@ -38,6 +40,14 @@ impl MenuItemElement {
     /// Set ListItem as the selected item style.
     pub(crate) fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Set whether the menu item is checked, for assistive technology, or
+    /// `None` for an item that is not an option. The check mark itself is
+    /// drawn by the menu.
+    pub(crate) fn checked(mut self, checked: Option<bool>) -> Self {
+        self.checked = checked;
         self
     }
 
@@ -97,6 +107,13 @@ impl RenderOnce for MenuItemElement {
             .role(Role::MenuItem)
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .aria_selected(self.selected)
+            .when_some(self.checked, |this, checked| {
+                this.aria_toggled(if checked {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
+            })
             .gap_x_1()
             .py_1()
             .px_2()

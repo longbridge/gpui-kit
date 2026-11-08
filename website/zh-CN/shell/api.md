@@ -580,6 +580,7 @@ render() {
 | `children(iterable)`      | 按顺序添加多个                                                               |
 | `when(condition, branch)` | `condition` 为真时应用 `branch`，让链保持完整                                |
 | `id(name)`                | 给这个元素一个稳定的名字，作为它的身份                                       |
+| `group(name)`             | 把这个元素命名为一个 group，里面元素的 `group_hover` 跟随它                  |
 
 ### 插槽
 
@@ -754,6 +755,7 @@ property 取 `"opacity"`、`"width"`、`"height"`、`"left"`、`"top"` 之一，
 | `hover(declare)`             | 指针悬停在元素上时                                             |
 | `active(declare)`            | 元素被按下时                                                   |
 | `focus(declare)`             | 元素持有焦点时                                                 |
+| `group_hover(name, declare)` | 指针悬停在以 `group(name)` 命名的最近祖先上时                  |
 | `range_style(declare)`       | `SliderIndicator` 已填充的部分——只管它长什么样，从不管它在哪里 |
 | `cell_style(declare)`        | `OtpInput` 的每个格子；没有它屏幕上什么都没有                  |
 | `cell_active_style(declare)` | 叠在上面一层，用于下一个数字将落入的那个格子                   |

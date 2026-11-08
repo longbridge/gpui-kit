@@ -50,6 +50,8 @@ export default class FluentContracts extends View {
         .bg(Background.linear_gradient(180, Background.stop('#f7da74', 0), Background.stop('#fdcd12', 1)))
         .shadow(raised)
         .hover(style => style.bg('#fff').shadow([])),
+      div().group('row').p(2)
+        .child(div().opacity(0).group_hover('row', style => style.opacity(1))),
       new Separator().p(2).label('Section'),
       new Skeleton().flex().secondary(),
       new HForm().child(new Field().label('Name').child('Ada')).children([]).columns(2),

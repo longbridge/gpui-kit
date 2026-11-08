@@ -5,12 +5,17 @@ use crate::{
     setting::{SettingGroup, SettingItem},
 };
 use gpui::{
-    Context, Render, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, point, size,
+    Context, Focusable as _, KeyBinding, Render, ScrollDelta, ScrollEvent, TestAppContext,
+    VisualTestContext, actions, point, size,
 };
+
+actions!(settings_test, [Dismiss]);
 
 struct SettingsHost {
     pages: Vec<SettingPage>,
     state: Option<Entity<SettingsState>>,
+    /// Escape presses that reached the host, like an enclosing dialog's.
+    dismissed: usize,
 }
 
 impl Render for SettingsHost {
@@ -24,7 +29,11 @@ impl Render for SettingsHost {
             .render(window, cx)
             .into_any_element();
         self.state = Some(window.use_keyed_state("search-test", cx, |_, _| unreachable!()));
-        div().size_full().child(settings)
+        div()
+            .size_full()
+            .key_context("SettingsHost")
+            .on_action(cx.listener(|this, _: &Dismiss, _, _| this.dismissed += 1))
+            .child(settings)
     }
 }
 
@@ -52,6 +61,7 @@ fn setup(cx: &mut TestAppContext) -> (Entity<SettingsHost>, &mut VisualTestConte
     cx.update(|cx| {
         crate::init(cx);
         crate::Theme::global_mut(cx).font_size = px(16.);
+        cx.bind_keys([KeyBinding::new("escape", Dismiss, Some("SettingsHost"))]);
     });
     let pages = vec![
         SettingPage::new("General").group(SettingGroup::new().item(item("language"))),
@@ -68,7 +78,11 @@ fn setup(cx: &mut TestAppContext) -> (Entity<SettingsHost>, &mut VisualTestConte
     ];
     let mut host = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|_| SettingsHost { pages, state: None });
+        let view = cx.new(|_| SettingsHost {
+            pages,
+            state: None,
+            dismissed: 0,
+        });
         host = Some(view.clone());
         Root::new(view, window, cx)
     });
@@ -152,6 +166,36 @@ fn search_preserves_the_page_and_clicks_use_original_indices(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+fn escape_clears_the_search_and_passes_through_when_empty(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    let input = cx.update(|_, cx| {
+        host.read(cx)
+            .state
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .search_input
+            .clone()
+    });
+    cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
+    draw(cx);
+    cx.simulate_input("font");
+    draw(cx);
+    assert!(cx.debug_bounds("setting-1-1-0").is_none());
+
+    // A query is cleared, and the host does not see the Escape.
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert_eq!(cx.update(|_, cx| input.read(cx).value()), "");
+    assert!(cx.debug_bounds("setting-1-1-0").is_some());
+    assert_eq!(cx.update(|_, cx| host.read(cx).dismissed), 0);
+
+    // An empty query leaves Escape to the host.
+    cx.simulate_keystrokes("escape");
+    assert_eq!(cx.update(|_, cx| host.read(cx).dismissed), 1);
+}
+
+#[gpui::test]
 fn scrolling_marks_the_group_at_the_top(cx: &mut TestAppContext) {
     let (host, cx) = setup(cx);
     cx.update(|_, cx| {
@@ -183,6 +227,56 @@ fn scrolling_marks_the_group_at_the_top(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn empty_search_keeps_input_editable_and_restores_selected_page(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    let input = cx.update(|window, cx| {
+        let input = host
+            .read(cx)
+            .state
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .search_input
+            .clone();
+        input.update(cx, |input, cx| input.focus(window, cx));
+        input
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("settings-no-results").is_none());
+
+    cx.simulate_input("no matching setting");
+    draw(cx);
+    assert!(cx.debug_bounds("settings-no-results").is_some());
+    assert!(cx.debug_bounds("setting-1-2-1").is_none());
+    assert_eq!(selection(&host, cx), (1, None));
+    cx.update(|window, cx| {
+        assert!(input.read(cx).focus_handle(cx).is_focused(window));
+    });
+
+    // Continue typing without refocusing while the empty state is visible.
+    cx.simulate_input("x");
+    draw(cx);
+    cx.update(|window, cx| {
+        assert_eq!(input.read(cx).value(), "no matching settingx");
+        assert!(input.read(cx).focus_handle(cx).is_focused(window));
+    });
+    assert!(cx.debug_bounds("settings-no-results").is_some());
+
+    #[cfg(target_os = "macos")]
+    cx.simulate_keystrokes("cmd-a backspace");
+    #[cfg(not(target_os = "macos"))]
+    cx.simulate_keystrokes("ctrl-a backspace");
+    draw(cx);
+    cx.update(|window, cx| {
+        assert!(input.read(cx).value().is_empty());
+        assert!(input.read(cx).focus_handle(cx).is_focused(window));
+    });
+    assert!(cx.debug_bounds("settings-no-results").is_none());
+    assert_eq!(selection(&host, cx), (1, None));
+    assert!(cx.debug_bounds("setting-1-2-1").is_some());
+}
+
+#[gpui::test]
 fn search_preserves_group_and_item_identity(cx: &mut TestAppContext) {
     let (host, cx) = setup(cx);
     // Make the target group require scrolling, with an unnamed group before it.
@@ -211,6 +305,40 @@ fn search_preserves_group_and_item_identity(cx: &mut TestAppContext) {
     search(&host, "colors", cx);
     assert_eq!(selection(&host, cx), (1, None));
     assert!(cx.debug_bounds("setting-1-1-0").is_some());
+}
+
+#[gpui::test]
+fn search_placeholder_follows_the_locale_and_keeps_the_page(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    let (state, input) = cx.update(|_, cx| {
+        let state = host.read(cx).state.clone().unwrap();
+        let input = state.read(cx).search_input.clone();
+        (state, input)
+    });
+
+    // The locale is process-wide and tests run in parallel, so stand in for a
+    // switch with a state that was created under another locale.
+    cx.update(|window, cx| {
+        state.update(cx, |state, _| {
+            state.selected_index = SelectIndex {
+                page_ix: 2,
+                group_ix: None,
+            };
+        });
+        input.update(cx, |input, cx| {
+            let placeholder = t!("Settings.search_placeholder", locale = "zh-CN");
+            input.set_placeholder(placeholder, window, cx);
+        });
+        // As an application does after `set_locale`.
+        window.refresh();
+    });
+    draw(cx);
+
+    cx.update(|_, cx| {
+        let placeholder = input.read(cx).presentation().placeholder().clone();
+        assert_eq!(placeholder, &*t!("Settings.search_placeholder"));
+    });
+    assert_eq!(selection(&host, cx), (2, None));
 }
 
 #[gpui::test]

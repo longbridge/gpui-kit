@@ -109,6 +109,46 @@ pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + 
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+pub(crate) type TaskToggleHandlerFn = dyn Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync;
+
+/// A click on the checkbox of a Markdown task list item, passed to the
+/// [`TextView::on_task_toggle`] handler.
+///
+/// The ranges are byte ranges in the view's source text.
+#[derive(Debug, Clone)]
+pub struct TaskToggleEvent {
+    checked: bool,
+    item_range: Range<usize>,
+    marker_range: Range<usize>,
+}
+
+impl TaskToggleEvent {
+    pub(crate) fn new(checked: bool, item_range: Range<usize>, marker_range: Range<usize>) -> Self {
+        Self {
+            checked,
+            item_range,
+            marker_range,
+        }
+    }
+
+    /// The checked state the item should now have: the opposite of the
+    /// state its checkbox shows.
+    pub fn checked(&self) -> bool {
+        self.checked
+    }
+
+    /// The list item's source span, starting at its list marker (`-`, `*`,
+    /// `1.`) and covering its content, nested lists included.
+    pub fn item_range(&self) -> Range<usize> {
+        self.item_range.clone()
+    }
+
+    /// The item's task marker: the `[ ]` or `[x]` itself, brackets included.
+    pub fn marker_range(&self) -> Range<usize> {
+        self.marker_range.clone()
+    }
+}
+
 /// Kept by the element only, so unlike the handlers the state carries, it
 /// may hold a `ScrollHandle`.
 pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
@@ -169,6 +209,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
     image_source: Option<Arc<ImageSourceFn>>,
     reveal_handler: Option<Rc<RevealHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
@@ -220,6 +261,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
             markdown_extensions: Arc::default(),
@@ -248,6 +290,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
             markdown_extensions: Arc::default(),
@@ -276,6 +319,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
             markdown_extensions: Arc::default(),
@@ -456,6 +500,22 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Make the checkboxes of Markdown task list items (`- [ ]`, `- [x]`)
+    /// clickable.
+    ///
+    /// The handler receives a [`TaskToggleEvent`] with the checked state the
+    /// item should now have and where the item and its `[ ]` / `[x]` marker
+    /// are in the source text. The view does not change its text: the caller
+    /// owns the source, replaces the marker and sets the new text. Without a
+    /// handler, the checkboxes are not interactive.
+    pub fn on_task_toggle<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.task_toggle_handler = Some(Arc::new(handler));
         self
     }
 
@@ -771,6 +831,7 @@ impl Element for TextView {
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.task_toggle_handler = self.task_toggle_handler.clone();
             state.image_source = self.image_source.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
             if let Some(motion) = &self.motion {
@@ -998,7 +1059,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use super::{TextView, TextViewPlugin};
+    use super::{TaskToggleEvent, TextView, TextViewPlugin};
     use crate::text::{SelectionFormat, TableData, TextViewState, TextViewStyle};
     use gpui::{
         AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
@@ -1918,6 +1979,104 @@ mod tests {
         assert_eq!(copied.trim(), "Cell A");
     }
 
+    /// Text in a right-aligned or centered column is selected where it is
+    /// painted: a drag over it selects it, and the highlight covers it.
+    #[gpui::test]
+    fn table_drag_selects_aligned_cell_text_where_it_is_painted(cx: &mut TestAppContext) {
+        const SELECTION: u32 = 0xf020b0;
+
+        struct AlignedTableRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for AlignedTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                // The underline is painted under the glyphs, so it shows
+                // where the text is drawn.
+                div()
+                    .w(px(520.))
+                    .underline()
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).style(
+                        TextViewStyle::default().with_selection(gpui::rgb(SELECTION).into()),
+                    ))
+            }
+        }
+
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| AlignedTableRoot {
+            text_view: cx.new(|cx| {
+                TextViewState::markdown(
+                    "| Quarterly revenue | Review status |\n| ---: | :---: |\n| 42 | ok |",
+                    cx,
+                )
+            }),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let mut underlines = cx.update(|window, _| {
+            let scale_factor = window.scale_factor();
+            window
+                .painted_underlines()
+                .into_iter()
+                .map(|underline| underline.bounds.map(|value| px(value.0 / scale_factor)))
+                .collect::<Vec<_>>()
+        });
+        underlines.sort_by(|a, b| {
+            (a.top(), a.left())
+                .partial_cmp(&(b.top(), b.left()))
+                .expect("finite bounds")
+        });
+        let [right_head, center_head, right, center] = underlines[..] else {
+            panic!("expected one underline per cell, got {underlines:?}");
+        };
+        // The body text is narrower than its header, so it is drawn at the
+        // end or in the middle of its column.
+        assert!((right.right() - right_head.right()).abs() < px(1.));
+        assert!(right.left() > right_head.left() + px(1.));
+        assert!((center.center().x - center_head.center().x).abs() < px(1.));
+        assert!(center.left() > center_head.left() + px(1.));
+
+        for (underline, expected) in [(right, "42"), (center, "ok")] {
+            // A few pixels above the underline is inside the text's line.
+            let y = underline.top() - px(4.);
+            let start = point(underline.left() + px(0.1), y);
+            let end = point(underline.right() - px(0.1), y);
+            cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let selected = root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
+            let copied = cx.update(|window, cx| crate::TextSelection::selected_text(window, cx));
+            assert_eq!(selected.trim(), expected);
+            assert_eq!(copied.trim(), expected);
+            let highlights = cx.update(|window, _| {
+                let selection: gpui::Background = gpui::rgb(SELECTION).into();
+                let scale_factor = window.scale_factor();
+                window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == selection)
+                    .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
+                    .collect::<Vec<_>>()
+            });
+            assert!(
+                highlights.iter().any(|highlight| {
+                    highlight.left() <= underline.left() + px(1.)
+                        && highlight.right() >= underline.right() - px(1.)
+                        && highlight.top() <= y
+                        && highlight.bottom() >= underline.bottom()
+                }),
+                "the highlight {highlights:?} must cover the text above {underline:?}"
+            );
+        }
+    }
+
     struct CellSelectionTestRoot {
         text_view: Entity<TextViewState>,
         scrollable: bool,
@@ -2129,6 +2288,91 @@ mod tests {
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });
+    }
+
+    struct FittedListTestRoot {
+        text_view: Entity<TextViewState>,
+        width: Pixels,
+    }
+
+    impl Render for FittedListTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(self.width)
+                .flex()
+                .flex_col()
+                .items_end()
+                .text_size(px(16.))
+                .child(crate::TextSelectionLayer)
+                .child(
+                    div()
+                        .debug_selector(|| "fitted-list".into())
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .max_w_full()
+                        .p_4()
+                        .child(TextView::new(&self.text_view).selectable(true)),
+                )
+        }
+    }
+
+    fn fitted_list_bounds(
+        source: &str,
+        width: f32,
+        cx: &mut TestAppContext,
+    ) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>) {
+        let (root, cx) = cx.add_window_view(|_, cx| FittedListTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(source, cx)),
+            width: px(width),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let bubble = cx.debug_bounds("fitted-list").unwrap();
+        let rows = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert!(!rows.is_empty(), "list text must be painted: {source:?}");
+        for row in &rows {
+            assert!(
+                row.left() >= bubble.left() && row.right() <= bubble.right(),
+                "text must remain visible inside the fitted container: {source:?}, {bubble:?}, {row:?}"
+            );
+        }
+        (bubble, rows)
+    }
+
+    #[gpui::test]
+    fn fitted_lists_include_their_body_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (plain, _) = fitted_list_bounds("Hello world", 600., cx);
+        for source in [
+            "3. Hello world",
+            "- Hello world",
+            "- [ ] Hello world",
+            "- [x] Hello world",
+            "Intro\n\n- Hello world",
+            "- Outer\n  - Hello world",
+        ] {
+            let (bubble, _) = fitted_list_bounds(source, 600., cx);
+            assert!(
+                bubble.size.width > plain.size.width,
+                "the marker must leave room for the full body: {source:?}, {bubble:?}, {plain:?}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn fitted_lists_wrap_their_body_within_the_available_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let body = "Visible text that wraps without being clipped. ".repeat(12);
+        for width in [600., 180.] {
+            for prefix in ["3. ", "- ", "- [ ] ", "- [x] ", "- Outer\n  - "] {
+                let (bubble, rows) = fitted_list_bounds(&format!("{prefix}{body}"), width, cx);
+                assert!(bubble.size.width <= px(width));
+                assert!(rows.len() > 1, "the body must wrap: {prefix:?}, {width}");
+            }
+        }
     }
 
     #[gpui::test]
@@ -2358,6 +2602,126 @@ mod tests {
             );
             assert_eq!(data.span, Some(0..52));
         }
+    }
+
+    /// A task under each list marker, one of them nested.
+    const TASK_LIST: &str =
+        "- [ ] Open\n  - [x] Nested\n* [X] Star\n+ [ ] Plus\n1. [x] One\n2) [ ] Two\n";
+    const TASK_LABELS: [&str; 6] = ["Open", "Nested", "Star", "Plus", "One", "Two"];
+
+    type TaskToggles = Arc<std::sync::Mutex<Vec<TaskToggleEvent>>>;
+
+    struct TaskListTestRoot {
+        text_view: Entity<TextViewState>,
+        toggles: Option<TaskToggles>,
+        container_clicks: Arc<AtomicUsize>,
+    }
+
+    impl Render for TaskListTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let container_clicks = self.container_clicks.clone();
+            div()
+                .id("task-list-container")
+                .w(px(300.))
+                .text_size(px(16.))
+                .on_click(move |_, _, _| {
+                    container_clicks.fetch_add(1, Ordering::Relaxed);
+                })
+                .child(crate::TextSelectionLayer)
+                .child(TextView::new(&self.text_view).when_some(
+                    self.toggles.clone(),
+                    |this, toggles| {
+                        this.on_task_toggle(move |event, _, _| {
+                            toggles.lock().unwrap().push(event.clone());
+                        })
+                    },
+                ))
+        }
+    }
+
+    /// Clicks the checkbox of each item of [`TASK_LIST`], then the text of
+    /// its first item, and returns how many clicks reached the container.
+    fn click_task_list(toggles: Option<TaskToggles>, cx: &mut TestAppContext) -> usize {
+        cx.update(crate::init);
+        let container_clicks = Arc::new(AtomicUsize::new(0));
+        let (root, cx) = cx.add_window_view({
+            let container_clicks = container_clicks.clone();
+            move |_, cx| TaskListTestRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(TASK_LIST, cx)),
+                toggles,
+                container_clicks,
+            }
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let text = |label: &str, cx: &mut VisualTestContext| {
+            root.read_with(cx, |root, cx| {
+                root.text_view
+                    .read(cx)
+                    .selection_adapter
+                    .text_position(label, 0)
+            })
+        };
+        for label in TASK_LABELS {
+            // The checkbox sits just before the item's text.
+            let checkbox = text(label, cx) - point(px(16.), px(0.));
+            cx.simulate_click(checkbox, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        let open = text("Open", cx);
+        cx.simulate_click(open, Modifiers::default());
+        container_clicks.load(Ordering::Relaxed)
+    }
+
+    #[gpui::test]
+    fn task_checkbox_click_reports_its_new_state_item_and_marker(cx: &mut TestAppContext) {
+        let toggles = TaskToggles::default();
+        let container_clicks = click_task_list(Some(toggles.clone()), cx);
+
+        let reported: Vec<_> = toggles
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| (event.checked(), event.item_range(), event.marker_range()))
+            .collect();
+        let task = |checked, item: &str, marker: &str| {
+            let item_start = TASK_LIST.find(item).unwrap();
+            let marker_start = item_start + item.find(marker).unwrap();
+            (
+                checked,
+                item_start..item_start + item.len(),
+                marker_start..marker_start + marker.len(),
+            )
+        };
+        assert_eq!(
+            reported,
+            vec![
+                task(true, "- [ ] Open\n  - [x] Nested", "[ ]"),
+                task(false, "- [x] Nested", "[x]"),
+                task(false, "* [X] Star", "[X]"),
+                task(true, "+ [ ] Plus", "[ ]"),
+                task(false, "1. [x] One", "[x]"),
+                task(true, "2) [ ] Two", "[ ]"),
+            ],
+            "each checkbox reports the flipped state, its item with any nested \
+             list and exactly its `[ ]` / `[x]`, and a click on the item text \
+             toggles nothing",
+        );
+        assert_eq!(
+            container_clicks, 1,
+            "only the click on the text reaches the container"
+        );
+    }
+
+    #[gpui::test]
+    fn task_checkboxes_without_a_handler_are_not_interactive(cx: &mut TestAppContext) {
+        let container_clicks = click_task_list(None, cx);
+
+        assert_eq!(
+            container_clicks,
+            TASK_LABELS.len() + 1,
+            "every click, including those on a checkbox, reaches the container"
+        );
     }
 
     #[test]
@@ -3157,6 +3521,131 @@ mod tests {
                 quad.corner_radii.bottom_right, square,
                 "{mode}: bottom right"
             );
+        }
+    }
+
+    /// A table body row under the pointer takes the hover background and the
+    /// header does not. Every row of every table keeps its own hover state, so
+    /// each move onto or off a row notifies the view, even a move between the
+    /// same row of two tables.
+    #[test]
+    fn table_body_row_under_the_pointer_takes_the_hover_background() {
+        use gpui::TestApp;
+        use std::{cell::Cell, rc::Rc};
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const ROW_HOVER: u32 = 0x7711aa;
+
+        struct HoverTableRoot {
+            text_view: Entity<TextViewState>,
+            scroll: bool,
+        }
+
+        impl Render for HoverTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                if self.scroll {
+                    table.overflow.x = Some(Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table)
+                    .with_table_row_hover(gpui::rgb(ROW_HOVER).into());
+                div()
+                    .w(px(400.))
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        let table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |";
+        let source = format!("{table}\n\nBetween\n\n{table}");
+        for scroll in [false, true] {
+            let mode = if scroll { "scroll" } else { "wrap" };
+            let mut app = TestApp::new();
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| HoverTableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+
+            // The text view's own view paints the rows, so it is the one
+            // their hover notifies.
+            let notifications = Rc::new(Cell::new(0));
+            let text_view = window.update(|root, _, _| root.text_view.clone());
+            app.update(|cx| {
+                let notifications = notifications.clone();
+                cx.observe(&text_view, move |_, _| {
+                    notifications.set(notifications.get() + 1)
+                })
+                .detach();
+            });
+
+            // The header rows, top to bottom, in logical pixels.
+            let (heads, scale) = window.update(|_, window, _| {
+                let scale = window.scale_factor();
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                let mut heads = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == head)
+                    .map(|quad| quad.bounds.map(|value| px(value.as_f32() / scale)))
+                    .collect::<Vec<_>>();
+                heads.sort_by_key(|bounds| bounds.origin.y);
+                (heads, scale)
+            });
+            assert_eq!(heads.len(), 2, "{mode}: two header rows");
+            let first_body_row =
+                |head: Bounds<Pixels>| point(head.center().x, head.bottom() + px(4.));
+            let first_head = heads[0].center();
+            let first_row = first_body_row(heads[0]);
+            let second_row = first_body_row(heads[1]);
+            let outside = point(px(600.), first_row.y);
+
+            for (step, position, highlighted) in [
+                ("first table's body row", first_row, true),
+                ("first table's header", first_head, false),
+                ("second table's body row", second_row, true),
+                ("same row of the first table", first_row, true),
+                ("outside the tables", outside, false),
+            ] {
+                let before = notifications.get();
+                window.simulate_mouse_move(position);
+                assert!(
+                    notifications.get() > before,
+                    "{mode}: moving onto the {step} notifies the view"
+                );
+                window.draw();
+
+                let hovered = window.update(|_, window, _| {
+                    let hover: gpui::Background = gpui::rgb(ROW_HOVER).into();
+                    window
+                        .painted_quads()
+                        .into_iter()
+                        .filter(|quad| quad.background == hover)
+                        .map(|quad| quad.bounds)
+                        .collect::<Vec<_>>()
+                });
+                if highlighted {
+                    assert_eq!(
+                        hovered.len(),
+                        1,
+                        "{mode}: one row is highlighted on the {step}"
+                    );
+                    assert!(
+                        hovered[0].contains(&position.scale(scale)),
+                        "{mode}: the {step} is highlighted, not {:?}",
+                        hovered[0]
+                    );
+                } else {
+                    assert!(
+                        hovered.is_empty(),
+                        "{mode}: nothing is highlighted on the {step}"
+                    );
+                }
+            }
         }
     }
 

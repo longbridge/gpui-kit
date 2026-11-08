@@ -456,7 +456,7 @@ that every option or combination of every component has been exhaustively tested
 | `input_focus.rs` | Repeated Tab/Shift-Tab traversal with passive addons, addon button focus and activation, and Textarea/Editor body-click focus followed by editing |
 | `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
-| `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
+| `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization, Tab leaving the table and wheel scrolling |
 | `query_helpers.rs` | Exact accessible labels and roles, scoped ambiguity, invisible registrations and immutable snapshots |
 | `event_helpers.rs` | Separate pointer/key transitions, auto-repeat and retained modifiers |
 | `control_steps.rs` | Button drag-out cancellation, Checkbox key repeat and Switch disabled before key release |
