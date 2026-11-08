@@ -1,9 +1,9 @@
 // From:
 // https://github.com/zed-industries/zed/blob/56daba28d40301ee4c05546fadb691d070b7b2b6/crates/gpui/examples/window_shadow.rs
 use gpui::{
-    AnyElement, App, Corners, CursorStyle, Decorations, Edges, Global, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderOnce,
-    ResizeEdge, Size, Styled as _, Tiling, Window, div, point, prelude::FluentBuilder as _, px,
+    AnyElement, App, Corners, CursorStyle, Decorations, Edges, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement, Pixels, Point, RenderOnce, ResizeEdge, Size,
+    Styled as _, Tiling, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
 use crate::ActiveTheme;
@@ -16,37 +16,17 @@ const BORDER_SIZE: Pixels = px(1.0);
 /// Half-width of the resize hit band on each side of the visible frame (inner border).
 const RESIZE_HIT_SIZE: Pixels = px(4.0);
 
-/// Window corner radius used when the application has not called
-/// [`set_window_corner_radius`].
+/// The window's current corner radii: the theme's `window.radius`
+/// ([`crate::Theme::window_radius`]) for every corner of a client-decorated
+/// window that isn't next to a tiled edge, zero otherwise.
 ///
 /// GPUI clips overflowing children to a rectangular content mask, so a non-zero
 /// radius only rounds the frame itself. Elements with a background that touch a
-/// window corner (the root surface, [`crate::TitleBar`], an application's bottom bar)
-/// must round that corner too; see [`window_corner_radii`]. The default stays square
-/// for applications that don't do so.
-pub(crate) const BORDER_RADIUS: Pixels = px(0.0);
-
-struct WindowCornerRadius(Pixels);
-
-impl Global for WindowCornerRadius {}
-
-/// Rounds the corners of client-decorated windows by `radius`.
-///
-/// Corners next to a tiled edge stay square. Call it once at startup, after
-/// `gpui_kit::init`. The default is `0`, a square window.
-pub fn set_window_corner_radius(radius: impl Into<Pixels>, cx: &mut App) {
-    cx.set_global(WindowCornerRadius(radius.into()));
-}
-
-/// The window's current corner radii: the [`set_window_corner_radius`] value for
-/// every corner of a client-decorated window that isn't next to a tiled edge,
-/// zero otherwise. Use it to round elements that touch a window corner, for
-/// example `div().rounded_bl(radii.bottom_left)` on a bottom bar.
+/// window corner (the root surface, [`crate::TitleBar`], an application's bottom
+/// bar) must round that corner too, for example
+/// `div().rounded_bl(radii.bottom_left)`. The default stays square.
 pub fn window_corner_radii(window: &Window, cx: &App) -> Corners<Pixels> {
-    let radius = cx
-        .try_global::<WindowCornerRadius>()
-        .map_or(BORDER_RADIUS, |radius| radius.0);
-    corner_radii(radius, window.window_decorations())
+    corner_radii(cx.theme().window_radius, window.window_decorations())
 }
 
 fn corner_radii(radius: Pixels, decorations: Decorations) -> Corners<Pixels> {
