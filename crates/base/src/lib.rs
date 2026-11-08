@@ -141,8 +141,8 @@ pub use motion::{
     KeyframeError, Keyframes, LinearStop, MotionPhase, MotionReveal, MotionStatus, MotionTransform,
     MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, ReducedMotion,
     Sequence, SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger,
-    StaggerOrigin, StepPosition, Timing, TimingSample, Transition, TransitionId, animate_keyframes,
-    spring, transition, transition_with_status,
+    StaggerOrigin, StepPosition, Timing, TimingSample, Transition, TransitionId, TransitionState,
+    animate_keyframes, spring, transition, transition_with_status,
 };
 pub use nav_stack::{NavMotion, NavOperation, NavPage, NavStack, NavStackEvent, NavStackState};
 pub use number_input::{
