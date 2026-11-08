@@ -9,7 +9,7 @@ use std::{
     },
 };
 
-use gpui::{AnyElement, App, IntoElement, SharedString, Window};
+use gpui::{AnyElement, App, Div, IntoElement, SharedString, Window};
 use markdown::{ParseOptions, mdast};
 
 use super::{InlineElement, InlineRenderContext};
@@ -31,6 +31,9 @@ pub type MarkdownBlockParserFn =
 /// Type for a custom Markdown block renderer.
 pub type MarkdownBlockRenderFn =
     dyn Fn(&MarkdownNode, &mut Window, &mut App) -> AnyElement + Send + Sync;
+
+/// Builds the container of a [block surface](MarkdownExtensions::block_surface).
+pub type BlockSurfaceRenderFn = dyn Fn(&mut Window, &mut App) -> Div + Send + Sync;
 
 /// Parser for a single inline AST node; follows the block parser contract.
 type MarkdownInlineParserFn = MarkdownBlockParserFn;
@@ -250,6 +253,7 @@ pub struct MarkdownExtensions {
     block_renderers: HashMap<SharedString, Arc<MarkdownBlockRenderFn>>,
     inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
     inline_renderers: HashMap<SharedString, Arc<MarkdownInlineRenderFn>>,
+    block_surfaces: HashMap<SharedString, Arc<BlockSurfaceRenderFn>>,
     revision: u64,
     parser_revision: u64,
 }
@@ -307,6 +311,62 @@ impl MarkdownExtensions {
         self
     }
 
+    /// Draw a top-level blockquote that opens with the marker `[!name]` inside
+    /// a container.
+    ///
+    /// ```markdown
+    /// > [!summary]
+    /// > Blocks of any kind, as many as you like.
+    /// >
+    /// > - They stay part of the document.
+    /// ```
+    ///
+    /// This is the syntax of GitHub alerts, with names of your own, and other
+    /// renderers show it as a blockquote. Names match ASCII-case-insensitively,
+    /// so `[!NOTE]` opens a surface registered as `note`. The marker is alone on
+    /// the first line, and is not document text; the lines after it are the
+    /// first paragraph.
+    ///
+    /// `render` runs each time the document renders and returns the container
+    /// with its background, shape, padding and text style, and any children to
+    /// show before the blocks, such as an icon and a title. The blocks are
+    /// appended to it and bring the view's paragraph gap, so a `gap` on the
+    /// container adds to that. Read theme colors in `render`, so a theme change
+    /// needs no new parse. What the container shows itself is not document text.
+    /// Unless the container sets a width, it takes the row's.
+    ///
+    /// The blocks remain the document's: selection, range highlights and
+    /// reveals go across and inside the container, and
+    /// [`rendered_text`](super::TextViewState::rendered_text) has them without
+    /// the marker. A select-all copies the source verbatim. A partial source
+    /// copy is quoted under the marker line, as a blockquote's is quoted.
+    ///
+    /// Only a blockquote at the top level of a Markdown view, with a registered
+    /// name, is a surface. A nested one stays a blockquote, and so does one with
+    /// text after the marker on its line, such as Obsidian's `> [!note] Title`:
+    /// the container shows its own title. Surfaces do not nest. The marker is
+    /// markup, so escape text you don't control, as with any other Markdown.
+    ///
+    /// A surface is one row of a scrollable view, so keep it to what fits a few
+    /// screens. While it is the last block of a streaming view, each append
+    /// parses and measures all of it again, so streaming one costs time
+    /// quadratic in its length. Until its marker line is complete, it shows as
+    /// a blockquote.
+    pub fn block_surface<F>(mut self, name: impl Into<SharedString>, render: F) -> Self
+    where
+        F: Fn(&mut Window, &mut App) -> Div + Send + Sync + 'static,
+    {
+        let name = name.into();
+        let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            name.to_ascii_lowercase().into()
+        } else {
+            name
+        };
+        self.block_surfaces.insert(name, Arc::new(render));
+        self.bump_revision();
+        self
+    }
+
     /// Apply a reusable Markdown plugin.
     pub fn plugin<P>(self, plugin: P) -> Self
     where
@@ -356,6 +416,11 @@ impl MarkdownExtensions {
             && self.block_renderers.len() == other.block_renderers.len()
             && self.inline_parsers.len() == other.inline_parsers.len()
             && self.inline_renderers.len() == other.inline_renderers.len()
+            && self.block_surfaces.len() == other.block_surfaces.len()
+            && self
+                .block_surfaces
+                .keys()
+                .all(|name| other.block_surfaces.contains_key(name))
             && self
                 .inline_renderers
                 .keys()
@@ -406,6 +471,32 @@ impl MarkdownExtensions {
             options.constructs.mdx_jsx_text = true;
         }
         options
+    }
+
+    pub(crate) fn has_block_surfaces(&self) -> bool {
+        !self.block_surfaces.is_empty()
+    }
+
+    /// The registered name that `written` matches, ignoring ASCII case.
+    pub(crate) fn block_surface_name(&self, written: &str) -> Option<SharedString> {
+        let name = if written.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            self.block_surfaces
+                .get_key_value(written.to_ascii_lowercase().as_str())
+        } else {
+            self.block_surfaces.get_key_value(written)
+        };
+        name.map(|(name, _)| name.clone())
+    }
+
+    pub(crate) fn render_block_surface(
+        &self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Div> {
+        self.block_surfaces
+            .get(name)
+            .map(|render| render(window, cx))
     }
 
     pub(crate) fn parse_block(
