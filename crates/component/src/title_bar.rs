@@ -327,6 +327,7 @@ impl RenderOnce for TitleBar {
         let is_macos = cfg!(target_os = "macos");
 
         let state = window.use_state(cx, |_, _| TitleBarState { should_move: false });
+        let radii = crate::window_corner_radii(window, cx);
 
         div().flex_shrink_0().child(
             div()
@@ -337,6 +338,8 @@ impl RenderOnce for TitleBar {
                 .justify_between()
                 .h(TITLE_BAR_HEIGHT)
                 .pl(TITLE_BAR_LEFT_PADDING)
+                .rounded_tl(radii.top_left)
+                .rounded_tr(radii.top_right)
                 .border_b_1()
                 .border_color(cx.theme().title_bar_border)
                 .bg(default_title_bar_background(
