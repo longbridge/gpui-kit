@@ -1738,7 +1738,7 @@ impl Paragraph {
                 }
                 node_highlights.push((inner_range, highlight));
             }
-            highlights = combine_highlights(highlights, node_highlights);
+            append_node_highlights(&mut highlights, node_highlights);
             offset += text_len;
         }
         let text = SharedString::from(text);
@@ -2904,6 +2904,23 @@ fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHig
     }
 }
 
+fn append_node_highlights(
+    highlights: &mut Vec<(Range<usize>, InlineHighlight)>,
+    node_highlights: Vec<(Range<usize>, InlineHighlight)>,
+) {
+    // Nodes occupy disjoint byte ranges, so normally only their own marks
+    // overlap. Preserve merging for caller-provided marks extending past a node.
+    if highlights.last().is_some_and(|(last, _)| {
+        node_highlights
+            .iter()
+            .any(|(range, _)| !range.is_empty() && range.start < last.end)
+    }) {
+        *highlights = combine_highlights(std::mem::take(highlights), node_highlights);
+    } else {
+        highlights.extend(combine_highlights([], node_highlights));
+    }
+}
+
 impl Paragraph {
     /// The highlights over [`Self::text`], for measuring the paragraph with
     /// the runs it renders with. Link colors are left out: they do not move
@@ -2926,7 +2943,7 @@ impl Paragraph {
                     )
                 })
                 .collect::<Vec<_>>();
-            highlights = combine_highlights(highlights, node_highlights);
+            append_node_highlights(&mut highlights, node_highlights);
             offset += inline_node.text.len();
         }
         highlights
@@ -3094,7 +3111,7 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = combine_highlights(highlights, node_highlights);
+                append_node_highlights(&mut highlights, node_highlights);
                 offset += text_len;
             }
         }
@@ -3303,7 +3320,7 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = combine_highlights(highlights, node_highlights);
+                append_node_highlights(&mut highlights, node_highlights);
                 offset += text_len;
             }
         }
@@ -4708,6 +4725,132 @@ impl BlockNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paragraph_highlights_preserve_overlaps_and_utf8_boundaries() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let context = NodeContext::default();
+            let link = LinkMark {
+                url: "https://example.com".into(),
+                ..Default::default()
+            };
+            let paragraph = Paragraph {
+                children: vec![
+                    InlineNode::new("a中😀").marks(vec![
+                        (0..8, TextMark::default().bold()),
+                        (1..8, TextMark::default().italic()),
+                        (4..8, TextMark::default().code()),
+                    ]),
+                    InlineNode::new("文b").marks(vec![
+                        (0..4, TextMark::default().link(link.clone())),
+                        (0..3, TextMark::default().bold()),
+                    ]),
+                ],
+                ..Default::default()
+            };
+            let measured = paragraph.inline_highlights(&context, cx);
+            let (text, highlights, links) = paragraph.plain_render(&context, cx);
+            assert_eq!(text.as_ref(), "a中😀文b");
+            assert_eq!(links, vec![(8..12, link)]);
+            for spans in [&measured, &highlights] {
+                assert_eq!(
+                    spans
+                        .iter()
+                        .map(|(range, _)| range.clone())
+                        .collect::<Vec<_>>(),
+                    vec![0..1, 1..4, 4..8, 8..11, 11..12]
+                );
+                for ix in [1, 2] {
+                    assert_eq!(spans[ix].1.style.font_weight, Some(FontWeight::BOLD));
+                    assert_eq!(spans[ix].1.style.font_style, Some(FontStyle::Italic));
+                }
+                assert!(spans[2].1.code_style.is_some());
+                assert_eq!(spans[2].1.font_size_scale, Some(0.875));
+                assert_eq!(spans[3].1.style.font_weight, Some(FontWeight::BOLD));
+                assert_eq!(spans[3].1.style.font_style, None);
+                assert!(spans[3].1.code_style.is_none());
+                assert_eq!(spans[4].1.style.font_weight, None);
+            }
+            assert!(highlights[3..].iter().all(|(_, highlight)| {
+                highlight.style.color == Some(context.style.link())
+                    && highlight.style.underline.is_some()
+            }));
+            let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            let [
+                InlineFlowItem::Text {
+                    text: flow_text,
+                    highlights: flow_highlights,
+                    links: flow_links,
+                    ..
+                },
+            ] = items.as_slice()
+            else {
+                panic!("one text item");
+            };
+            assert_eq!(flow_text, &text);
+            assert_eq!(flow_highlights, &highlights);
+            assert_eq!(flow_links, &links);
+
+            // Public callers can supply marks extending into the next node.
+            let paragraph = Paragraph {
+                children: vec![
+                    InlineNode::new("a").marks(vec![(0..2, TextMark::default().bold())]),
+                    InlineNode::new("bc").marks(vec![(0..2, TextMark::default().italic())]),
+                ],
+                ..Default::default()
+            };
+            let highlights = paragraph.inline_highlights(&context, cx);
+            assert_eq!(
+                highlights
+                    .iter()
+                    .map(|(range, _)| range.clone())
+                    .collect::<Vec<_>>(),
+                vec![0..1, 1..2, 2..3]
+            );
+            assert_eq!(highlights[1].1.style.font_weight, Some(FontWeight::BOLD));
+            assert_eq!(highlights[1].1.style.font_style, Some(FontStyle::Italic));
+            assert_eq!(highlights[2].1.style.font_weight, None);
+        });
+    }
+
+    #[test]
+    fn paragraph_highlight_builders_merge_each_mark_once() {
+        use super::super::inline::COMBINED_HIGHLIGHT_INPUTS;
+
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let context = NodeContext::default();
+            let inputs = || COMBINED_HIGHLIGHT_INPUTS.with(|inputs| inputs.get());
+            for node_count in [64, 128] {
+                let paragraph = Paragraph {
+                    children: (0..node_count)
+                        .map(|_| {
+                            InlineNode::new("a中😀").marks(vec![
+                                (0..8, TextMark::default().bold()),
+                                (1..8, TextMark::default().italic()),
+                                (4..8, TextMark::default().code()),
+                            ])
+                        })
+                        .collect(),
+                    ..Default::default()
+                };
+                let before = inputs();
+                paragraph.inline_highlights(&context, cx);
+                assert_eq!(inputs() - before, 3 * node_count);
+                let before = inputs();
+                paragraph.plain_render(&context, cx);
+                assert_eq!(inputs() - before, 3 * node_count);
+                let before = inputs();
+                paragraph.inline_flow_items(None, &[], &[], &context, cx);
+                assert_eq!(inputs() - before, 3 * node_count);
+            }
+        });
+    }
 
     #[test]
     fn host_foregrounds_follow_the_render_context_without_entering_the_paragraph_cache() {

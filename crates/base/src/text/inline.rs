@@ -132,6 +132,11 @@ impl From<HighlightStyle> for InlineHighlight {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static COMBINED_HIGHLIGHT_INPUTS: Cell<usize> = const { Cell::new(0) };
+}
+
 /// Merges two highlight lists over one text into non-overlapping ranges,
 /// cutting at every endpoint of every input range. Same sweep as
 /// [`gpui::combine_highlights`], for [`InlineHighlight`] payloads.
@@ -142,6 +147,8 @@ pub(super) fn combine_highlights(
     let mut endpoints = Vec::new();
     let mut highlights = Vec::new();
     for (range, highlight) in a.into_iter().chain(b) {
+        #[cfg(test)]
+        COMBINED_HIGHLIGHT_INPUTS.with(|inputs| inputs.set(inputs.get() + 1));
         if !range.is_empty() {
             let id = highlights.len();
             endpoints.push((range.start, id, true));
