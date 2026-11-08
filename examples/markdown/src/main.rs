@@ -24,9 +24,9 @@ use gpui_kit::component::{
     resizable::{h_resizable, resizable_panel},
     status_bar::StatusBar,
     text::{
-        InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
-        RangeHighlight, RangeHighlightError, RenderedText, SelectionFormat, TextView,
-        TextViewState, TextViewStyle, markdown_ast,
+        InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
+        MarkdownPlugin, RangeHighlight, RangeHighlightError, RenderedText, SelectionFormat,
+        TextView, TextViewState, TextViewStyle, markdown_ast,
     },
     v_flex,
 };
@@ -1343,6 +1343,36 @@ impl Example {
         TextViewStyle::default().table(table)
     }
 
+    /// Register the block surfaces used by `## Block surfaces` in the
+    /// fixture, `> [!note]` and `> [!card]`. Their blocks stay part of the
+    /// document, so selection, find and copy run across them.
+    fn markdown_extensions() -> MarkdownExtensions {
+        MarkdownExtensions::default()
+            .block_surface("note", |_, cx| {
+                v_flex()
+                    .p_3()
+                    .rounded(cx.theme().radius_lg)
+                    .border_1()
+                    .border_color(cx.theme().info.opacity(0.3))
+                    .bg(cx.theme().info.opacity(0.08))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_color(cx.theme().info)
+                            .child(Icon::new(IconName::Info))
+                            .child("Note"),
+                    )
+            })
+            .block_surface("card", |_, cx| {
+                v_flex()
+                    .p_4()
+                    .rounded(cx.theme().radius_lg)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().secondary)
+            })
+    }
+
     fn on_action_open(&mut self, _: &Open, window: &mut Window, cx: &mut Context<Self>) {
         let path = cx.prompt_for_paths(PathPromptOptions {
             files: true,
@@ -1409,6 +1439,8 @@ impl Render for Example {
                                 .child(
                                     resizable_panel().child(
                                         TextView::new(&self.text_view)
+                                            // Set before the plugins, which add to it.
+                                            .markdown_extensions(Self::markdown_extensions())
                                             .plugin(self.inline_math.clone())
                                             .plugin(mention::MentionPlugin)
                                             .code_block_actions(|code_block, _window, _cx| {
