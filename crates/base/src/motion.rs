@@ -140,7 +140,7 @@ impl Transition {
     /// The application's preference and other motion channels are unchanged.
     ///
     /// [`transition`], [`transition_with_status`] and
-    /// [`TransitionPlayback::sample`] read it. [`Presence`] still finishes at
+    /// [`TransitionState::sample`] read it. [`Presence`] still finishes at
     /// once under reduced motion.
     pub fn reduced_motion(mut self, behavior: ReducedMotion) -> Self {
         self.reduced_motion = behavior;
@@ -288,16 +288,24 @@ pub struct MotionValue<T> {
 
 /// Caller-owned state for one target-value transition, independent of mounting.
 ///
+/// Keyed state lives only while its element renders, so a virtualized row that
+/// scrolls out and back restarts at its target. Keep a `TransitionState` with the
+/// row's data instead and sample it while rendering:
+///
+/// ```ignore
+/// let opacity = row.highlight.sample(target, policy, window, cx).value;
+/// ```
+///
 /// Clones share its clock and interruption/reversal history. The first sample
 /// adopts its target immediately; later samples use the same algorithm as
-/// [`transition_with_status`]. Keep one handle per channel within one app.
-/// No view, window or scheduled callback is retained. A new handle resets it.
+/// [`transition_with_status`]. No view or window is retained. A new handle
+/// resets it.
 #[derive(Clone)]
-pub struct TransitionPlayback<T> {
+pub struct TransitionState<T> {
     state: Rc<RefCell<Option<ValueTransition<T>>>>,
 }
 
-impl<T> Default for TransitionPlayback<T> {
+impl<T> Default for TransitionState<T> {
     fn default() -> Self {
         Self {
             state: Rc::new(RefCell::new(None)),
@@ -305,11 +313,20 @@ impl<T> Default for TransitionPlayback<T> {
     }
 }
 
-impl<T: Interpolate + PartialEq + 'static> TransitionPlayback<T> {
-    /// Sample or retarget without requesting any frames. The caller schedules
-    /// visible animation while status is Running/Delayed and forwards offscreen
-    /// target or reduced-motion changes at their actual event time.
-    pub fn sample(&self, target: T, policy: Transition, cx: &App) -> MotionValue<T> {
+impl<T: Interpolate + PartialEq + 'static> TransitionState<T> {
+    /// Returns the current value toward `target`, as [`transition_with_status`]
+    /// does, and requests the next animation frame while the status is
+    /// `Delayed` or `Running`.
+    ///
+    /// Call this while rendering an element. A target that changes while the
+    /// element is not rendered starts transitioning at the next sample.
+    pub fn sample(
+        &self,
+        target: T,
+        policy: Transition,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> MotionValue<T> {
         let now = cx.background_executor().now();
         let mut state = self.state.borrow_mut();
         let state = state.get_or_insert_with(|| ValueTransition {
@@ -322,14 +339,21 @@ impl<T: Interpolate + PartialEq + 'static> TransitionPlayback<T> {
             duration: policy.duration,
         });
         let snapshot = state.clone();
-        sample_transition(
+        let sampled = sample_transition(
             &snapshot,
             target,
             policy,
             now,
             cx.reduce_motion(),
             |update| update(state),
-        )
+        );
+        if matches!(
+            sampled.status,
+            MotionStatus::Delayed | MotionStatus::Running
+        ) {
+            window.request_animation_frame();
+        }
+        sampled
     }
 }
 
@@ -1009,7 +1033,9 @@ mod tests {
         time::Duration,
     };
 
-    use gpui::{Empty, IntoElement, Render, TestAppContext, WindowHandle, px, size};
+    use gpui::{
+        Empty, IntoElement, Render, TestAppContext, VisualTestContext, WindowHandle, px, size,
+    };
 
     use super::*;
 
@@ -1267,8 +1293,36 @@ mod tests {
         assert_eq!(fixture.render(cx, 0.0).value, 0.0);
     }
 
+    struct PairView {
+        target: f32,
+        policy: Transition,
+        state: TransitionState<f32>,
+        samples: Rc<RefCell<Vec<(MotionValue<f32>, MotionValue<f32>)>>>,
+    }
+
+    impl Render for PairView {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let keyed = transition_with_status(
+                ("pair-test", "value"),
+                self.target,
+                self.policy.clone(),
+                window,
+                cx,
+            );
+            let owned = self
+                .state
+                .sample(self.target, self.policy.clone(), window, cx);
+            self.samples.borrow_mut().push((keyed, owned));
+            Empty
+        }
+    }
+
     #[gpui::test]
-    fn caller_playback_matches_keyed_transition_retarget_reverse_and_delay(
+    fn transition_state_matches_keyed_transition_retarget_reverse_and_delay(
         cx: &mut TestAppContext,
     ) {
         for policy in [
@@ -1277,15 +1331,21 @@ mod tests {
                 .easing(Easing::Ease)
                 .delay(SignedDuration::negative(Duration::from_millis(10))),
         ] {
-            let fixture = StatusFixture::open(cx, policy.clone());
-            let playback = TransitionPlayback::default();
-            cx.update(|cx| {
-                playback.sample(0_f32, policy.clone(), cx);
+            let samples = Rc::new(RefCell::new(Vec::new()));
+            let (view, cx) = cx.add_window_view(|_, _| PairView {
+                target: 0.,
+                policy,
+                state: TransitionState::default(),
+                samples: samples.clone(),
             });
             for (millis, target) in [(0, 1.), (40, 1.), (0, 0.), (20, 0.), (0, 1.), (100, 1.)] {
                 cx.executor().advance_clock(Duration::from_millis(millis));
-                let expected = fixture.render(cx, target);
-                let actual = cx.update(|cx| playback.sample(target, policy.clone(), cx));
+                cx.update(|window, cx| {
+                    view.update(cx, |view, _| view.target = target);
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+                let (expected, actual) = *samples.borrow().last().unwrap();
                 assert_eq!(actual.status, expected.status);
                 assert!((actual.value - expected.value).abs() < 0.00001);
             }
@@ -1293,81 +1353,133 @@ mod tests {
     }
 
     struct PersistentTransitionView {
-        playback: TransitionPlayback<f32>,
+        state: TransitionState<f32>,
+        policy: Transition,
         mounted: bool,
         target: f32,
-        sampled: Rc<Cell<f32>>,
+        sampled: Rc<Cell<Option<MotionValue<f32>>>>,
     }
+
     impl Render for PersistentTransitionView {
-        fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
             if self.mounted {
-                self.sampled.set(
-                    self.playback
-                        .sample(
-                            self.target,
-                            Transition::new(Duration::from_millis(100)).easing(Easing::Linear),
-                            cx,
-                        )
-                        .value,
-                );
+                self.sampled.set(Some(self.state.sample(
+                    self.target,
+                    self.policy.clone(),
+                    window,
+                    cx,
+                )));
             }
             Empty
         }
     }
 
-    #[gpui::test]
-    fn caller_playback_survives_unmount_and_offscreen_reversal_without_scheduling(
-        cx: &mut TestAppContext,
-    ) {
-        let playback = TransitionPlayback::default();
-        let sampled = Rc::new(Cell::new(-1_f32));
-        let (view, cx) = cx.add_window_view(|_, _| PersistentTransitionView {
-            playback: playback.clone(),
-            mounted: true,
-            target: 0.,
-            sampled: sampled.clone(),
-        });
-        cx.update(|window, cx| {
-            view.update(cx, |view, _| view.target = 1.);
-            window.refresh();
-            window.draw(cx).clear(cx);
-            assert_eq!(window.simulate_next_frame(cx), 0);
-            view.update(cx, |view, _| view.mounted = false);
-            window.refresh();
-            window.draw(cx).clear(cx);
-            window.refresh();
-            window.draw(cx).clear(cx);
-        });
-        cx.executor().advance_clock(Duration::from_millis(40));
-        cx.update(|window, cx| {
-            let at_reverse = playback.sample(
-                0.,
-                Transition::new(Duration::from_millis(100)).easing(Easing::Linear),
-                cx,
-            );
-            assert!((at_reverse.value - 0.4).abs() < 0.00001);
-            assert_eq!(window.simulate_next_frame(cx), 0);
-        });
-        cx.executor().advance_clock(Duration::from_millis(20));
-        cx.update(|window, cx| {
-            view.update(cx, |view, _| {
-                view.mounted = true;
-                view.target = 0.;
+    struct Persistent {
+        view: gpui::Entity<PersistentTransitionView>,
+        sampled: Rc<Cell<Option<MotionValue<f32>>>>,
+    }
+
+    impl Persistent {
+        fn open(cx: &mut TestAppContext, policy: Transition) -> (Self, &mut VisualTestContext) {
+            let sampled = Rc::new(Cell::new(None));
+            let (view, cx) = cx.add_window_view(|_, _| PersistentTransitionView {
+                state: TransitionState::default(),
+                policy,
+                mounted: true,
+                target: 0.,
+                sampled: sampled.clone(),
             });
-            window.refresh();
-            window.draw(cx).clear(cx);
-            assert_eq!(window.simulate_next_frame(cx), 0);
-        });
-        assert!(
-            (sampled.get() - 0.2).abs() < 0.00001,
-            "40ms shortened reversal continues after remount"
+            (Self { view, sampled }, cx)
+        }
+
+        /// Draws once with `update` applied, returning the sample (if mounted)
+        /// and how many animation frames that draw requested.
+        fn draw(
+            &self,
+            cx: &mut VisualTestContext,
+            update: impl FnOnce(&mut PersistentTransitionView),
+        ) -> (Option<MotionValue<f32>>, usize) {
+            self.sampled.set(None);
+            cx.update(|window, cx| {
+                window.simulate_next_frame(cx);
+                self.view.update(cx, |view, _| update(view));
+                window.refresh();
+                window.draw(cx).clear(cx);
+                (self.sampled.get(), window.simulate_next_frame(cx))
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn transition_state_requests_frames_only_while_delayed_or_running(cx: &mut TestAppContext) {
+        let (fixture, cx) = Persistent::open(
+            cx,
+            Transition::new(Duration::from_millis(100)).delay(Duration::from_millis(20)),
         );
-        cx.executor().advance_clock(Duration::from_millis(20));
-        cx.update(|window, cx| {
-            window.refresh();
-            window.draw(cx).clear(cx);
-        });
-        assert_eq!(sampled.get(), 0.);
+        let (adopted, frames) = fixture.draw(cx, |_| {});
+        assert_eq!(adopted.unwrap().status, MotionStatus::Idle);
+        assert_eq!(frames, 0, "the first sample adopts its target");
+
+        let (delayed, frames) = fixture.draw(cx, |view| view.target = 1.);
+        assert_eq!(delayed.unwrap().status, MotionStatus::Delayed);
+        assert!(frames > 0, "a delayed transition requests the next frame");
+
+        cx.executor().advance_clock(Duration::from_millis(70));
+        let (running, frames) = fixture.draw(cx, |_| {});
+        assert_eq!(running.unwrap().status, MotionStatus::Running);
+        assert!(frames > 0, "a running transition requests the next frame");
+
+        cx.executor().advance_clock(Duration::from_millis(50));
+        let (finished, frames) = fixture.draw(cx, |_| {});
+        assert_eq!(finished.unwrap().status, MotionStatus::Finished);
+        assert_eq!(frames, 0, "a settled transition requests no frame");
+    }
+
+    #[gpui::test]
+    fn transition_state_survives_unmount_and_reverses_on_remount(cx: &mut TestAppContext) {
+        let (fixture, cx) = Persistent::open(
+            cx,
+            Transition::new(Duration::from_millis(100)).easing(Easing::Linear),
+        );
+        fixture.draw(cx, |view| view.target = 1.);
+        cx.executor().advance_clock(Duration::from_millis(40));
+        let (sample, _) = fixture.draw(cx, |_| {});
+        assert!((sample.unwrap().value - 0.4).abs() < 0.00001);
+
+        let (sample, frames) = fixture.draw(cx, |view| view.mounted = false);
+        assert_eq!(sample, None);
+        assert_eq!(frames, 0, "an unmounted state requests no frames");
+
+        // The target changes while the element is not rendered; the clock keeps
+        // the forward transition, and the reversal starts at the next sample.
+        cx.executor().advance_clock(Duration::from_millis(30));
+        fixture.draw(cx, |view| view.target = 0.);
+        let (sample, frames) = fixture.draw(cx, |view| view.mounted = true);
+        let sample = sample.unwrap();
+        assert_eq!(sample.status, MotionStatus::Running);
+        assert!((sample.value - 0.7).abs() < 0.00001);
+        assert!(frames > 0);
+
+        cx.executor().advance_clock(Duration::from_millis(35));
+        let (sample, _) = fixture.draw(cx, |_| {});
+        assert!(
+            (sample.unwrap().value - 0.35).abs() < 0.00001,
+            "the 70ms shortened reversal continues after remount"
+        );
+        cx.executor().advance_clock(Duration::from_millis(35));
+        let (sample, frames) = fixture.draw(cx, |_| {});
+        assert_eq!(
+            sample.unwrap(),
+            MotionValue {
+                value: 0.,
+                status: MotionStatus::Finished
+            }
+        );
+        assert_eq!(frames, 0);
     }
 
     struct KeyframeView {
