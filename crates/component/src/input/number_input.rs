@@ -410,4 +410,47 @@ mod interaction_tests {
             "4"
         );
     }
+
+    /// The frame does not track the editor's focus handle (#3873: two painted
+    /// elements tracking one focused handle both claim accessibility focus
+    /// and abort debug builds), so a step button press must still leave the
+    /// editor focused, step once, and keep arrow keys stepping.
+    #[gpui::test]
+    fn step_button_keeps_editor_focused_and_arrows_step(cx: &mut TestAppContext) {
+        use gpui::{AppContext as _, Modifiers, MouseButton};
+
+        cx.update(crate::init);
+        let (probe, mut cx) = cx.add_window_view(|window, cx| Probe {
+            state: cx.new(|cx| InputState::new(window, cx).default_value("3")),
+            show_stepper: true,
+        });
+        let state = probe.read_with(cx, |probe, _| probe.state.clone());
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| state.focus(window, cx));
+        });
+        draw(&mut cx);
+
+        let center = button(&mut cx, "increment").unwrap().bounds().center();
+        cx.simulate_mouse_move(center, None, Modifiers::default());
+        cx.simulate_mouse_down(center, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| {
+            assert!(
+                state.read(cx).focus_handle(cx).is_focused(window),
+                "pressing the step button moved focus off the editor"
+            );
+        });
+        cx.simulate_mouse_up(center, MouseButton::Left, Modifiers::default());
+        draw(&mut cx);
+        cx.update(|window, cx| {
+            assert!(state.read(cx).focus_handle(cx).is_focused(window));
+            assert_eq!(state.read(cx).value(), "4");
+        });
+
+        cx.simulate_keystrokes("up up down");
+        draw(&mut cx);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value().to_string()),
+            "5"
+        );
+    }
 }

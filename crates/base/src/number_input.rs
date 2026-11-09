@@ -1,10 +1,9 @@
 use crate::input::InputState;
 use std::rc::Rc;
 
-use gpui::Focusable;
 use gpui::{
     AnyElement, App, Entity, EventEmitter, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    MouseButton, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _,
 };
 
@@ -330,7 +329,19 @@ impl RenderOnce for NumberInput {
         };
 
         InputBase::new(("number-input", self.state.entity_id()))
-            .track_focus(&self.state.focus_handle(cx))
+            // The editor rendered below owns the state's focus handle. Tracking it
+            // here as well would make two painted elements claim accessibility
+            // focus in one frame (#3873); the key context above still receives
+            // the editor's Up and Down, so clicks on the frame hand focus over.
+            .on_mouse_down(MouseButton::Left, {
+                let state = self.state.clone();
+                move |_, window, cx| {
+                    if !window.default_prevented() {
+                        state.update(cx, |state, cx| state.focus(window, cx));
+                        window.prevent_default();
+                    }
+                }
+            })
             .flex()
             .items_center()
             .disabled(disabled)
@@ -412,6 +423,7 @@ mod tests {
     use super::*;
 
     use crate::theme::Theme;
+    use gpui::Focusable as _;
     use gpui::{
         AppContext as _, Context, Entity, Modifiers, MouseButton, Render, TestAppContext,
         VisualTestContext, point, px,
