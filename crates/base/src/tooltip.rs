@@ -119,6 +119,7 @@ pub struct TooltipRequest {
     build: TooltipBuilder,
     trigger_bounds: Bounds<Pixels>,
     preferred_placement: Option<Placement>,
+    offset: Pixels,
     show_delay: Option<Duration>,
 }
 
@@ -131,6 +132,7 @@ impl TooltipRequest {
             build: Rc::new(build),
             trigger_bounds,
             preferred_placement: None,
+            offset: px(0.),
             show_delay: None,
         }
     }
@@ -144,6 +146,12 @@ impl TooltipRequest {
     #[deprecated(note = "use `with_placement`")]
     pub fn placement(self, placement: Placement) -> Self {
         self.with_placement(placement)
+    }
+
+    /// Sets the gap between the trigger and tooltip. Defaults to zero.
+    pub fn with_offset(mut self, offset: Pixels) -> Self {
+        self.offset = offset;
+        self
     }
 
     /// Overrides [`TooltipDefaults::show_delay`] for this trigger.
@@ -317,6 +325,7 @@ impl Render for TooltipOverlay {
         let rendered = (self.renderer)(view, transition, window, cx);
         deferred(
             TooltipPositioner::new(content.trigger_bounds)
+                .offset(content.offset)
                 .when_some(content.preferred_placement, |this, placement| {
                     this.placement(placement)
                 })
@@ -342,6 +351,12 @@ impl TooltipPositioner {
         self.0 = self.0.placement(placement);
         self
     }
+
+    /// Sets the gap between the trigger and tooltip. Defaults to zero.
+    pub fn offset(mut self, offset: Pixels) -> Self {
+        self.0 = self.0.offset(offset);
+        self
+    }
 }
 
 impl ParentElement for TooltipPositioner {
@@ -365,6 +380,111 @@ mod tests {
 
     fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<Pixels> {
         Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+
+    #[gpui::test]
+    fn request_offset_reaches_popup_layout_and_preserves_edge_placement(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use std::cell::Cell;
+
+        struct Content(Rc<Cell<Option<Bounds<Pixels>>>>);
+        impl Render for Content {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let measured = self.0.clone();
+                gpui::canvas(
+                    move |bounds, _, _| measured.set(Some(bounds)),
+                    |_, _, _, _| {},
+                )
+                .w(px(40.))
+                .h(px(24.))
+            }
+        }
+
+        struct Harness(gpui::Entity<TooltipOverlay>);
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().child(self.0.clone())
+            }
+        }
+
+        let measured = Rc::new(Cell::new(None));
+        let (harness, cx) = cx.add_window_view(|_, cx| Harness(cx.new(|_| TooltipOverlay::new())));
+        let overlay = cx.update(|_, cx| harness.read(cx).0.clone());
+        cx.simulate_resize(size(px(500.), px(400.)));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let height = cx.update(|window, _| f32::from(window.viewport_size().height));
+        for (trigger, placement, offset, expected) in [
+            (
+                bounds(100., 100., 40., 20.),
+                Placement::Top,
+                None,
+                point(px(100.), px(76.)),
+            ),
+            (
+                bounds(100., 100., 40., 20.),
+                Placement::Top,
+                Some(px(4.)),
+                point(px(100.), px(72.)),
+            ),
+            (
+                bounds(100., 100., 40., 20.),
+                Placement::Bottom,
+                Some(px(8.)),
+                point(px(100.), px(128.)),
+            ),
+            (
+                bounds(100., 100., 40., 20.),
+                Placement::Left,
+                Some(px(4.)),
+                point(px(56.), px(98.)),
+            ),
+            (
+                bounds(100., 100., 40., 20.),
+                Placement::Right,
+                Some(px(8.)),
+                point(px(148.), px(98.)),
+            ),
+            (
+                bounds(100., 4., 40., 20.),
+                Placement::Top,
+                Some(px(4.)),
+                point(px(100.), px(28.)),
+            ),
+            (
+                bounds(100., height - 24., 40., 20.),
+                Placement::Bottom,
+                Some(px(4.)),
+                point(px(100.), px(height - 52.)),
+            ),
+            (
+                bounds(0., 100., 20., 20.),
+                Placement::Top,
+                Some(px(8.)),
+                point(px(4.), px(68.)),
+            ),
+        ] {
+            let output = measured.clone();
+            let request = TooltipRequest::new(trigger, move |_, cx| {
+                cx.new(|_| Content(output.clone())).into()
+            })
+            .with_placement(placement)
+            .with_show_delay(Duration::ZERO);
+            let request = match offset {
+                Some(offset) => request.with_offset(offset),
+                None => request,
+            };
+            measured.set(None);
+            cx.update(|window, cx| {
+                overlay.update(cx, |overlay, cx| overlay.request_show(request, window, cx));
+                window.draw(cx).clear(cx);
+            });
+            assert_eq!(
+                measured.get(),
+                Some(Bounds::new(expected, size(px(40.), px(24.))))
+            );
+        }
     }
 
     #[gpui::test]
