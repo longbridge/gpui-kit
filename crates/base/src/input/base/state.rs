@@ -12981,14 +12981,20 @@ impl InputBaseState<crate::input::EditorMode> {
         true
     }
 
-    /// Horizontal gap between source text and the line-number or folding gutter.
+    /// Horizontal offset from the content area's left edge to unscrolled source text.
     ///
-    /// This gap remains when line numbers and folding are disabled. It excludes
-    /// the input frame's padding and the width of any visible gutter contents.
-    /// Static source views can share this metric to preserve the text origin
-    /// when they mount an editor.
-    pub fn text_gutter_margin() -> Pixels {
-        super::element::LINE_NUMBER_RIGHT_MARGIN
+    /// Includes the laid-out gap, line numbers, folding controls, and gutter
+    /// decorations. Excludes input-frame padding, horizontal scrolling, and
+    /// text alignment. For left-aligned text, add this to the content area's
+    /// origin and the horizontal scroll offset to recover the text origin.
+    ///
+    /// Returns `None` before the first layout. Like [`Self::range_to_bounds`],
+    /// this describes the most recent layout; render again after changing
+    /// gutter settings or typography before using it to align a static view.
+    pub fn text_origin_offset(&self) -> Option<Pixels> {
+        self.last_layout
+            .as_ref()
+            .map(|layout| layout.line_number_width)
     }
 
     /// Set enable/disable line number.
