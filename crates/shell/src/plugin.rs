@@ -369,6 +369,7 @@ impl PluginManifest {
                 .map_err(|error| ManifestProblem::Capabilities(error.to_string()))?,
         };
         capabilities.validate_placeholders()?;
+        capabilities.validate_execute()?;
         capabilities.validate_network()?;
         capabilities.validate_env()?;
 
@@ -785,8 +786,11 @@ struct FsGrantFile {
 #[serde(untagged)]
 enum ExecuteFile {
     Allowed(Vec<String>),
+    #[schemars(extend("const" = UNRESTRICTED_EXECUTE))]
     Unrestricted(String),
 }
+
+const UNRESTRICTED_EXECUTE: &str = "*";
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -937,6 +941,19 @@ impl CapabilitiesFile {
         }
 
         Ok(())
+    }
+
+    /// Any other string would deserialize as [`ExecuteFile::Unrestricted`], so
+    /// `"git"` would read as one command while granting every command.
+    fn validate_execute(&self) -> Result<(), ManifestProblem> {
+        match self.fs.as_ref().and_then(|fs| fs.execute.as_ref()) {
+            Some(ExecuteFile::Unrestricted(value)) if value != UNRESTRICTED_EXECUTE => {
+                Err(ManifestProblem::Capabilities(format!(
+                    "capabilities.fs.execute must be \"{UNRESTRICTED_EXECUTE}\" or an array of command names, not {value:?}; write [{value:?}] to allow only that command"
+                )))
+            }
+            _ => Ok(()),
+        }
     }
 
     fn validate_env(&self) -> Result<(), ManifestProblem> {
@@ -3105,6 +3122,19 @@ mod tests {
         let capabilities = manifest.capabilities(Path::new("/plugins/a"), Path::new("/data/a"));
         assert_eq!(capabilities.execute_grant(), &ExecuteGrant::Unrestricted);
         assert!(capabilities.may_run("anything"));
+    }
+
+    #[test]
+    fn an_execute_string_other_than_the_wildcard_is_refused() {
+        let source = VALID.replacen("[\"git\"]", "\"git\"", 1);
+        let error = PluginManifest::parse(&source).expect_err("`git` is not `*`");
+        assert!(matches!(error.problem(), ManifestProblem::Capabilities(_)));
+        let message = error.to_string();
+        assert!(message.contains("capabilities.fs.execute"), "{message}");
+        assert!(message.contains("[\"git\"]"), "{message}");
+
+        let schema = manifest_schema().to_string();
+        assert!(schema.contains("\"const\":\"*\""), "{schema}");
     }
 
     #[test]

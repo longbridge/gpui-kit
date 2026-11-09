@@ -189,6 +189,8 @@ pub struct Theme {
     pub radius: Pixels,
     /// Radius for the large elements, e.g.: Dialog, Notification border radius.
     pub radius_lg: Pixels,
+    /// Corner radius of client-decorated windows, default 0 (square).
+    pub window_radius: Pixels,
     pub shadow: bool,
     /// Whether focused controls draw a ring outside their border, default true.
     ///
@@ -779,6 +781,7 @@ impl From<&ThemeColor> for Theme {
             mono_font_size: px(13.),
             radius: px(6.),
             radius_lg: px(8.),
+            window_radius: px(0.),
             shadow: true,
             focus_ring: true,
             scrollbar_mode: ScrollbarMode::default(),

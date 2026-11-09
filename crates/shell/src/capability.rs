@@ -15,7 +15,10 @@ use cap_std::{ambient_authority, fs::Dir};
 /// any of them becomes a way to hand an arbitrary URI to whatever handler the
 /// desktop has registered for its scheme, which is a considerably larger thing
 /// than opening a page.
-pub(crate) fn is_openable_url(url: &str) -> bool {
+///
+/// A component that hands a script's URL to the system opener checks it here,
+/// when the script names it, so the script gets the error.
+pub fn is_openable_url(url: &str) -> bool {
     reqwest::Url::parse(url).is_ok_and(|parsed| {
         matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
     })
@@ -1170,10 +1173,22 @@ mod symlink_tests {
     }
 
     #[test]
+    fn proxy_urls_are_not_shown_by_default() {
+        let capabilities = Capabilities::new();
+        for name in ["HTTP_PROXY", "https_proxy", "ALL_PROXY"] {
+            assert!(!capabilities.may_show_env_variable(name), "{name}");
+        }
+        assert!(capabilities.may_show_env_variable("no_proxy"));
+
+        let granted = Capabilities::new().env_variables(["HTTPS_PROXY".to_owned()]);
+        assert!(granted.may_show_env_variable("https_proxy"));
+    }
+
+    #[test]
     fn a_variable_is_shown_under_any_spelling_of_a_listed_name() {
         let capabilities = Capabilities::new().env_variables(["my_app_mode".to_owned()]);
-        assert!(capabilities.may_show_env_variable("HTTP_PROXY"));
-        assert!(capabilities.may_show_env_variable("http_proxy"));
+        assert!(capabilities.may_show_env_variable("PATH"));
+        assert!(capabilities.may_show_env_variable("Path"));
         assert!(capabilities.may_show_env_variable("MY_APP_MODE"));
         assert!(!capabilities.may_show_env_variable("GITHUB_TOKEN"));
     }

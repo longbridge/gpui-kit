@@ -364,7 +364,8 @@ is a small browser built on it.
 position and tail following; `MessageScroller` places it and asks the script
 for each visible row by index. A transcript changes while it is on screen, so
 the state is edited in place rather than recreated, which would drop the
-reader's position.
+reader's position. A state holds at most 1,000,000 rows; a count or an edit
+that would exceed it throws.
 
 ```js
 import { MessageScroller, MessageScrollerState } from "gpui-component";
@@ -420,7 +421,12 @@ script cost follows what your application does rather than the frame rate.
 
 Elements are single-use values. Build them in `render` and never store one on
 the instance — a stored element belongs to a render that has already ended, and
-reusing it throws rather than drawing something unexpected.
+reusing it throws rather than drawing something unexpected. A description
+nests at most 64 levels, counting children, filled slots and component element
+arguments; the call that would go deeper throws. Views mounted inside one another
+share that depth: together they may span 65 levels, one more for each view, and
+a mount past it, or a view mounted inside itself, draws nothing and logs an
+error.
 
 ## Capabilities and Asynchronous I/O
 
@@ -576,8 +582,8 @@ that.
 ## Host capabilities
 
 Present today: the element and style surface, state styles (`hover` / `active` /
-`focus`), `Button`, `Checkbox`, `Switch`, retained `InputState` with input
-events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
+`focus`, and `group_hover` under a `group`), `Button`, `Checkbox`, `Switch`,
+retained `InputState` with input events, icons through `svg()`, dialogs, sheets and toasts on `window`, promises and
 timers, `fs` / `localStorage` / clipboard / `process` behind capabilities,
 capability-gated HTTP and text/binary WebSocket clients, native target-value
 transitions and springs, hot reload, `check`, and generated TypeScript

@@ -86,7 +86,7 @@ pub(in crate::materialize) fn dock_area(
              which are added with add_panel(...) rather than described"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles are ignored on a dock_area: it has no interactive state of its own. \
              Put them on the chrome you draw for it, or on an element around the area"
@@ -122,7 +122,13 @@ pub(in crate::materialize) fn dock_area(
     // failure with no visible cause on screen.
     let mut frame = div().size_full();
     frame.style().refine(&refinement);
-    frame.child(area).into_any_element()
+    frame
+        .child(crate::view::nesting_frame(
+            area.entity_id(),
+            crate::view::DOCK_AREA_LEVELS,
+            area.into_any_element(),
+        ))
+        .into_any_element()
 }
 
 /// Where the dock's own content goes inside the chrome drawn around it.

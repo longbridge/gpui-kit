@@ -23,7 +23,8 @@ use crate::{
     input::{self, SelectAll},
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TextViewStyle,
+        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TaskToggleHandlerFn,
+        TextViewStyle,
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
@@ -134,6 +135,7 @@ pub struct TextViewState {
     pub(super) link_tooltip: Option<std::sync::Arc<super::text_view::LinkTooltipFn>>,
     pub(super) hovered_link_tooltip: Option<(SharedString, gpui::AnyView)>,
     pub(super) link_tooltip_target: Option<(usize, SharedString)>,
+    pub(super) task_toggle_handler: Option<std::sync::Arc<TaskToggleHandlerFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 
     pub(super) is_selecting: bool,
@@ -242,6 +244,7 @@ impl TextViewState {
             link_tooltip: None,
             hovered_link_tooltip: None,
             link_tooltip_target: None,
+            task_toggle_handler: None,
             image_source: None,
             markdown_extensions: Arc::default(),
             is_selecting: false,
@@ -1141,6 +1144,7 @@ impl Render for TextViewState {
             code_block_highlighter: self.code_block_highlighter.clone(),
             table_actions: self.table_actions.clone(),
             link_click_handler: self.link_click_handler.clone(),
+            task_toggle_handler: self.task_toggle_handler.clone(),
             image_source: self.image_source.clone(),
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,

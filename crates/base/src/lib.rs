@@ -139,10 +139,10 @@ pub use measure::{Measure, measure, measure_if};
 pub use motion::{
     Discrete, DiscreteError, Easing, EasingError, Interpolate, IterationCount, Keyframe,
     KeyframeError, Keyframes, LinearStop, MotionPhase, MotionReveal, MotionStatus, MotionTransform,
-    MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, Sequence,
-    SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger, StaggerOrigin,
-    StepPosition, Timing, TimingSample, Transition, TransitionId, animate_keyframes, spring,
-    transition, transition_with_status,
+    MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, ReducedMotion,
+    Sequence, SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger,
+    StaggerOrigin, StepPosition, Timing, TimingSample, Transition, TransitionId, TransitionState,
+    animate_keyframes, spring, transition, transition_with_status,
 };
 pub use nav_stack::{NavMotion, NavOperation, NavPage, NavStack, NavStackEvent, NavStackState};
 pub use number_input::{
@@ -192,8 +192,8 @@ pub use tabs::{Tab, TabStyles, Tabs};
 pub use text::{
     InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
     MarkdownPlugin, RangeHighlight, RangeHighlightError, RenderedText, SelectionFormat, TableData,
-    Text, TextView, TextViewDefaults, TextViewMotion, TextViewPlugin, TextViewState, TextViewStyle,
-    html, markdown, markdown_ast,
+    TaskToggleEvent, Text, TextView, TextViewDefaults, TextViewMotion, TextViewPlugin,
+    TextViewState, TextViewStyle, html, markdown, markdown_ast,
 };
 pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,

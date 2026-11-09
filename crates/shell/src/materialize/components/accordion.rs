@@ -68,7 +68,7 @@ pub(in crate::materialize) fn accordion_item(
     cx: &mut App,
 ) -> AnyElement {
     warn_unhonoured_a11y(&behavior, "AccordionItem", &[]);
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on an AccordionItem are ignored; put them on the trigger, which is \
              the interactive part"

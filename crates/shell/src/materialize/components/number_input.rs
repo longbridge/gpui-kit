@@ -90,7 +90,7 @@ pub(in crate::materialize) fn number_input(
     // renders an `InputBase` and hangs its actions on that, so a state style on
     // the root has no `Interactivity` to land on. The `Switch` precedent — say
     // so rather than drop it in silence.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a NumberInput are ignored; put them on the step buttons, which are \
              interactive, or on the row around the control"

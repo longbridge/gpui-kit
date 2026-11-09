@@ -114,19 +114,11 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
           </div>
         </a>
         <a href={nativeShellUrl} target="_blank" rel="noopener noreferrer">
-          <svg class="site-nav__project-logo site-nav__native-shell-logo" viewBox="14 12 100 100" aria-hidden="true">
-            <defs>
-              <linearGradient id="nav-native-shell-gradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" class="site-nav__native-shell-top" />
-                <stop offset="1" class="site-nav__native-shell-bottom" />
-              </linearGradient>
-            </defs>
-            <path d="M30 100 V58 a34 34 0 0 1 68 0 V100" fill="none" stroke="url(#nav-native-shell-gradient)" stroke-width="20" stroke-linecap="round" />
-            <circle cx="64" cy="76" r="11" fill="currentColor" />
-          </svg>
+          <img class="site-nav__project-logo nsh-logo nsh-logo--light" src={`${base}nsh-logo.svg`} alt="" />
+          <img class="site-nav__project-logo nsh-logo nsh-logo--dark" src={`${base}nsh-logo-dark.svg`} alt="" />
           <div class="site-nav__project-copy">
             <strong>Native Shell</strong>
-            <span>{isZh ? '由 AI 生成、原生渲染的 UI' : 'AI-generated UI, rendered natively'}</span>
+            <span>{isZh ? '一次构建，全平台 Native' : 'Build once, native everywhere'}</span>
           </div>
         </a>
       </div>

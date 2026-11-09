@@ -715,13 +715,19 @@ impl gpui_base::RootPlugin for WindowState {
         TextSelection::activate_scope(self.active_text_selection_scope(), window, cx);
     }
 
-    fn style(&self, surface: &mut gpui::Stateful<gpui::Div>, _window: &mut Window, cx: &mut App) {
+    fn style(&self, surface: &mut gpui::Stateful<gpui::Div>, window: &mut Window, cx: &mut App) {
         use gpui::Refineable as _;
+        // The surface's background must follow the window's rounded corners.
+        let radii = window_border::window_corner_radii(window, cx);
         surface.style().refine(
             &gpui::StyleRefinement::default()
                 .font_family(cx.theme().font_family.clone())
                 .bg(cx.theme().tokens.background)
-                .text_color(cx.theme().foreground),
+                .text_color(cx.theme().foreground)
+                .rounded_tl(radii.top_left)
+                .rounded_tr(radii.top_right)
+                .rounded_bl(radii.bottom_left)
+                .rounded_br(radii.bottom_right),
         );
     }
 
