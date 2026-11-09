@@ -3797,6 +3797,7 @@ dependencies = [
  "criterion",
  "data-url",
  "futures",
+ "gpui-base",
  "gpui-fast",
  "gpui-fast-platform",
  "gpui-pre",
