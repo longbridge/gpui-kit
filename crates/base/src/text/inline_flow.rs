@@ -1039,7 +1039,14 @@ fn layout_measured_flow(
             })
         })
         .collect::<Vec<_>>();
-    let line_ranges = line_ranges(items, &image_sizes, &objects, text_style, wrap_width, window);
+    let line_ranges = line_ranges(
+        items,
+        &image_sizes,
+        &objects,
+        text_style,
+        wrap_width,
+        window,
+    );
     let font_size = text_style.font_size.to_pixels(rem_size);
     let mut fragments = Vec::new();
     let mut empty_lines = Vec::new();
@@ -2010,8 +2017,8 @@ mod tests {
 
     #[test]
     fn inline_image_wider_than_the_wrap_is_narrowed_to_it() {
-        use gpui::{AbsoluteLength, Empty, TestApp};
         use super::super::inline::test_fonts::{BODY, WideMonoTextSystem};
+        use gpui::{AbsoluteLength, Empty, TestApp};
 
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
         let mut window = app.open_window(|_, _| Empty);

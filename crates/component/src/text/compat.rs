@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Element, ElementId, Entity, GlobalElementId,
+    AnyElement, AnyView, App, Bounds, ClickEvent, Element, ElementId, Entity, GlobalElementId,
     HighlightStyle, InspectorElementId, IntoElement, LayoutId, Pixels, Refineable as _, RenderOnce,
     SharedString, StyleRefinement, Styled, Window,
 };
@@ -183,6 +183,15 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.inner = self.inner.on_link_click(f);
+        self
+    }
+    /// Shows an application-supplied tooltip beside the pointer over a link.
+    /// The tooltip is cached until a different destination is shown.
+    pub fn link_tooltip<F>(mut self, builder: F) -> Self
+    where
+        F: Fn(&SharedString, &mut Window, &mut App) -> AnyView + Send + Sync + 'static,
+    {
+        self.inner = self.inner.link_tooltip(builder);
         self
     }
     /// Makes Markdown task list checkboxes clickable, reporting the clicked

@@ -2890,6 +2890,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-link-tooltip"
+version = "0.9.0"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "example-markdown"
 version = "0.9.0"
 dependencies = [

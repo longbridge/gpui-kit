@@ -2,7 +2,7 @@ use std::{ops::Range, rc::Rc, sync::Arc};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, ContentMask, Element, ElementId, Entity, Global,
+    AnyElement, AnyView, App, Bounds, ClickEvent, ContentMask, Element, ElementId, Entity, Global,
     GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
     LayoutId, MouseButton, ParentElement, Pixels, Refineable as _, SharedString, StyleRefinement,
     Styled, Window, div, point, px,
@@ -109,6 +109,8 @@ pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + 
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+pub(crate) type LinkTooltipFn =
+    dyn Fn(&SharedString, &mut Window, &mut App) -> AnyView + Send + Sync;
 pub(crate) type TaskToggleHandlerFn = dyn Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync;
 
 /// A click on the checkbox of a Markdown task list item, passed to the
@@ -208,6 +210,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    link_tooltip: Option<Arc<LinkTooltipFn>>,
     task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
     image_source: Option<Arc<ImageSourceFn>>,
     reveal_handler: Option<Rc<RevealHandlerFn>>,
@@ -259,6 +262,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_tooltip: None,
             task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
@@ -287,6 +291,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_tooltip: None,
             task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
@@ -315,6 +320,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_tooltip: None,
             task_toggle_handler: None,
             image_source: None,
             reveal_handler: None,
@@ -489,6 +495,18 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Show a tooltip that follows the pointer while it is over a link.
+    ///
+    /// The builder receives the link's URL. The view caches the tooltip
+    /// until a different destination is shown.
+    pub fn link_tooltip<F>(mut self, builder: F) -> Self
+    where
+        F: Fn(&SharedString, &mut Window, &mut App) -> AnyView + Send + Sync + 'static,
+    {
+        self.link_tooltip = Some(Arc::new(builder));
         self
     }
 
@@ -814,6 +832,7 @@ impl Element for TextView {
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.link_tooltip = self.link_tooltip.clone();
             state.task_toggle_handler = self.task_toggle_handler.clone();
             state.image_source = self.image_source.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
@@ -3704,6 +3723,112 @@ mod tests {
             single_line,
             "the table text refinement is measured"
         );
+    }
+
+    #[gpui::test]
+    fn link_tooltip_follows_the_pointer_and_clears_on_exit(cx: &mut TestAppContext) {
+        struct Preview;
+        impl Render for Preview {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .debug_selector(|| "link-destination-preview".into())
+                    .w(px(180.))
+                    .h(px(24.))
+                    .child("/tmp/report.json")
+            }
+        }
+        struct Root {
+            view: Entity<TextViewState>,
+            covered: bool,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .relative()
+                    .child(
+                        TextView::new(&self.view)
+                            .w(px(160.))
+                            .link_tooltip(|_, _, cx| cx.new(|_| Preview).into()),
+                    )
+                    .when(self.covered, |view| {
+                        view.child(div().absolute().top_0().left_0().size_full().occlude())
+                    })
+            }
+        }
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| Root {
+            covered: true,
+            view: cx.new(|cx| {
+                TextViewState::markdown("[preview destination with a label that wraps over several lines](file:///tmp/report.json)", cx)
+            }),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let rows = root.read_with(cx, |root, cx| {
+            root.view.read(cx).selection_adapter.text_bounds()
+        });
+        assert!(rows.len() > 1, "the native link label wraps");
+        let bounds = rows[0];
+        let start = point(bounds.left() + px(2.), bounds.center().y);
+        cx.update(|window, cx| window.simulate_mouse_move(start, cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds("link-destination-preview").is_none(),
+            "an occluded link cannot activate a preview"
+        );
+        root.update(cx, |root, cx| {
+            root.covered = false;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            cx.update(|window, cx| window.simulate_next_frame(cx)),
+            1,
+            "a new hover requests the frame that shows its preview",
+        );
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let first = cx
+            .debug_bounds("link-destination-preview")
+            .expect("hovering a native link paints its destination preview");
+        assert_eq!(
+            cx.update(|window, cx| window.simulate_next_frame(cx)),
+            0,
+            "an idle preview does not request more frames",
+        );
+        cx.update(|window, cx| window.simulate_mouse_move(start + point(px(20.), px(0.)), cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let second = cx.debug_bounds("link-destination-preview").unwrap();
+        assert_eq!(second.left() - first.left(), px(20.));
+        assert_eq!(second.top(), first.top());
+        cx.update(|window, cx| window.simulate_mouse_move(rows[1].center(), cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("link-destination-preview").is_some());
+        root.update(cx, |root, cx| {
+            root.covered = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds("link-destination-preview").is_none(),
+            "covering an active link clears its preview"
+        );
+        root.update(cx, |root, cx| {
+            root.covered = false;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.simulate_mouse_move(point(bounds.right() + px(30.), bounds.center().y), cx)
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("link-destination-preview").is_none());
     }
 
     #[gpui::test]
