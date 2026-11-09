@@ -4430,6 +4430,106 @@ mod tests {
         (editor.unwrap(), window)
     }
 
+    #[gpui::test]
+    fn text_origin_offset_tracks_rendered_gutter_and_scrolling(cx: &mut TestAppContext) {
+        let line = format!("{}\n", "source text ".repeat(20));
+        let text = line.repeat(80);
+        cx.update(crate::init);
+        cx.open_window(size(px(240.), px(140.)), |window, cx| {
+            let _editor = cx.new(|cx| {
+                let state = EditorState::new(window, cx);
+                assert_eq!(state.text_origin_offset(), None);
+                state
+            });
+            gpui::EmptyView
+        });
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_scroll_bounce(false, cx);
+                state.set_editor_paddings(Edges {
+                    left: px(11.),
+                    ..Default::default()
+                });
+            });
+
+            for font_size in [14., 18., 24.] {
+                window.set_rem_size(px(font_size));
+                for (numbers, folding) in
+                    [(false, false), (true, false), (true, true), (false, false)]
+                {
+                    editor.update(cx, |state, cx| {
+                        state.set_line_number(numbers, window, cx);
+                        state.set_folding(folding, window, cx);
+                        state.set_scroll_offset(Point::default(), cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let offset = state.text_origin_offset().unwrap();
+                    let first = state.range_to_bounds(&(0..3)).unwrap();
+                    assert!(
+                        (first.origin.x - state.input_bounds().left() - offset).abs() < px(0.001)
+                    );
+                    assert!(first.size.width > px(0.));
+                    if numbers || folding {
+                        assert!(offset > LINE_NUMBER_RIGHT_MARGIN);
+                    } else {
+                        assert_eq!(offset, LINE_NUMBER_RIGHT_MARGIN);
+                    }
+
+                    let height = state.line_height().unwrap();
+                    editor.update(cx, |state, cx| {
+                        state.set_scroll_offset(point(px(-25.), -height * 10.), cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    assert!(state.scroll_offset().x < px(0.));
+                    assert!(state.scroll_offset().y < px(0.));
+                    assert_eq!(state.text_origin_offset(), Some(offset));
+                    let row = state.visible_row_range().unwrap().start;
+                    assert!(row > 0);
+                    let start = row * line.len();
+                    let visible = state.range_to_bounds(&(start..start + 3)).unwrap();
+                    // Screen coordinates use f32; allow only subpixel roundoff.
+                    assert!(
+                        (visible.origin.x
+                            - (state.input_bounds().left() + offset + state.scroll_offset().x))
+                            .abs()
+                            < px(0.001)
+                    );
+                    // Subtracting scrolled f32 coordinates can round differently.
+                    assert!((visible.size.width - first.size.width).abs() < px(0.001));
+                }
+            }
+
+            let without = editor.read(cx).text_origin_offset().unwrap();
+            let collection = editor.update(cx, |state, cx| {
+                state.create_gutter_decorations_collection(Vec::new(), cx)
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let with = state.text_origin_offset().unwrap();
+            assert!(
+                with > without,
+                "decoration lanes contribute to the text origin"
+            );
+            let row = state.visible_row_range().unwrap().start;
+            let start = row * line.len();
+            assert!(
+                (state.range_to_bounds(&(start..start + 3)).unwrap().origin.x
+                    - (state.input_bounds().left() + with + state.scroll_offset().x))
+                    .abs()
+                    < px(0.001)
+            );
+            collection.dispose(cx);
+            window.draw(cx).clear(cx);
+            assert_eq!(editor.read(cx).text_origin_offset(), Some(without));
+        });
+    }
+
     /// A list as tall as the window, whose second item is an input that
     /// starts 180 px down, so its bottom is cut off by the window's edge.
     struct RevealHarness {
