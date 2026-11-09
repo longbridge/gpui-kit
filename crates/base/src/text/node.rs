@@ -3987,7 +3987,8 @@ impl BlockNode {
                         for (child_ix, child) in children.iter().enumerate() {
                             match child {
                                 BlockNode::Paragraph { .. } => {
-                                    let last_not_list = child_ix > 0
+                                    let continuation = child_ix > 0;
+                                    let last_not_list = continuation
                                         && !matches!(
                                             children[child_ix - 1],
                                             BlockNode::List { .. }
@@ -4021,6 +4022,21 @@ impl BlockNode {
                                             );
                                             continue;
                                         }
+                                    }
+
+                                    // A paragraph after a nested sub-list still
+                                    // belongs to this item: it takes no marker of
+                                    // its own, but lines up with the item's text.
+                                    if continuation {
+                                        items.push(
+                                            div()
+                                                .w_full()
+                                                .min_w_0()
+                                                .pl(indent)
+                                                .overflow_hidden()
+                                                .child(text),
+                                        );
+                                        continue;
                                     }
 
                                     items.push(Self::render_list_item_row(
