@@ -123,7 +123,7 @@ Toggle::new("disabled-checked-toggle")
 | **Use Cases**          | Toolbar buttons, filters, binary options    | Settings, preferences, on/off states      |
 | **Visual Style**       | Rectangular button shape                    | Rounded switch track with thumb           |
 | **State Indication**   | Background color change, pressed appearance | Position of sliding thumb                 |
-| **Multiple Selection** | Supports groups with multiple selection     | Individual switches only                  |
+| **Multiple Selection** | Multiple or single selection in groups      | Individual switches only                  |
 
 **Use Toggle when you want:**
 
@@ -207,9 +207,10 @@ ToggleGroup::new("mini-toolbar")
 
 ### Segmented Toggle Group
 
-Use `segmented()` when a group should render as a connected segmented control. The
-group still uses the same multi-toggle behavior: `on_click` receives a `Vec<bool>`
-with the new checked state for each item.
+Use `segmented()` when a group should render as a connected segmented control. It
+only changes the look: `on_click` still receives a `Vec<bool>` with the new checked
+state for each item, and every item toggles on its own unless the group is also
+[single-selection](#single-selection).
 
 ```rust
 ToggleGroup::new("formatting")
@@ -243,9 +244,38 @@ ToggleGroup::new("quick-actions")
     .child(Toggle::new(2).label("Pin"))
 ```
 
-If you need mutually exclusive behavior, keep that state in your view model and
-set only one child to `checked(true)` until a dedicated single-selection API is
-available.
+### Single Selection
+
+Call `single()` when the group is one choice between its items rather than a set
+of independent switches. A click checks the clicked item and clears the others. A
+click on the checked item clears it, so the group can also have nothing selected.
+`on_click` still receives the new checked state of every item; at most one of them
+is `true`.
+
+```rust
+struct ReportView {
+    period: Option<usize>,
+}
+
+impl Render for ReportView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        ToggleGroup::new("period")
+            .single()
+            .segmented()
+            .outline()
+            .child(Toggle::new(0).label("Day").checked(self.period == Some(0)))
+            .child(Toggle::new(1).label("Week").checked(self.period == Some(1)))
+            .child(Toggle::new(2).label("Month").checked(self.period == Some(2)))
+            .on_click(cx.listener(|view, states, _, cx| {
+                view.period = states.iter().position(|checked| *checked);
+                cx.notify();
+            }))
+    }
+}
+```
+
+The group does not reconcile a state in which several items are `checked(true)`;
+keep at most one checked in your view model.
 
 ## Event Handling
 

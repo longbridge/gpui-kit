@@ -33,6 +33,7 @@ mod event;
 mod focus_trap;
 mod geometry;
 mod global_state;
+pub mod grid_layout;
 mod history;
 mod hover_card;
 mod index_path;
@@ -120,6 +121,9 @@ pub use focus_trap::FocusTrapElement;
 pub use focus_trap::active_focus_trap;
 pub use geometry::*;
 pub use global_state::{DeferredPopover, GlobalState};
+pub use grid_layout::{
+    GridArea, GridItem, GridLayout, GridLayoutEvent, GridLayoutState, grid_drag_handle,
+};
 pub use history::History;
 pub use hover_card::{HoverCard, HoverCardState};
 pub use index_path::IndexPath;
@@ -135,10 +139,10 @@ pub use measure::{Measure, measure, measure_if};
 pub use motion::{
     Discrete, DiscreteError, Easing, EasingError, Interpolate, IterationCount, Keyframe,
     KeyframeError, Keyframes, LinearStop, MotionPhase, MotionReveal, MotionStatus, MotionTransform,
-    MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, Sequence,
-    SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger, StaggerOrigin,
-    StepPosition, Timing, TimingSample, Transition, TransitionId, animate_keyframes, spring,
-    transition, transition_with_status,
+    MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, ReducedMotion,
+    Sequence, SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger,
+    StaggerOrigin, StepPosition, Timing, TimingSample, Transition, TransitionId, TransitionState,
+    animate_keyframes, spring, transition, transition_with_status,
 };
 pub use nav_stack::{NavMotion, NavOperation, NavPage, NavStack, NavStackEvent, NavStackState};
 pub use number_input::{
@@ -188,8 +192,8 @@ pub use tabs::{Tab, TabStyles, Tabs};
 pub use text::{
     InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
     MarkdownPlugin, RangeHighlight, RangeHighlightError, RenderedText, SelectionFormat, TableData,
-    Text, TextView, TextViewDefaults, TextViewMotion, TextViewPlugin, TextViewState, TextViewStyle,
-    html, markdown, markdown_ast,
+    TaskToggleEvent, Text, TextView, TextViewDefaults, TextViewMotion, TextViewPlugin,
+    TextViewState, TextViewStyle, html, markdown, markdown_ast,
 };
 pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,
@@ -251,6 +255,7 @@ pub fn init(cx: &mut App) {
     time_field::init(cx);
     input::init(cx);
     tree::init(cx);
+    grid_layout::init(cx);
     text::init(cx);
     root::init(cx);
 }

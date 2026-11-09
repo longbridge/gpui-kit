@@ -22,9 +22,13 @@
 //! materialization cost proportional to application activity rather than frame
 //! rate.
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
-use gpui::{Context, EntityId, IntoElement, ParentElement as _, Render, Styled as _, Window, div};
+use gpui::{
+    AnyElement, App, Bounds, Context, Element, ElementId, Empty, EntityId, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, ParentElement as _, Pixels, Render, Styled as _,
+    Window, div,
+};
 
 use crate::{
     engine::{ShellRuntime, ViewObject},
@@ -32,6 +36,7 @@ use crate::{
     policy::Policy,
     runtime::{ViewFailure, error_banner, error_overlay},
     snapshot::RenderSnapshot,
+    spec::MAX_DESCRIPTION_DEPTH,
 };
 
 pub struct ScriptView {
@@ -75,6 +80,9 @@ pub struct ScriptView {
     /// the same surface as a render failure. Takes precedence over `error`,
     /// which describes code the author has already edited away.
     reload_error: Option<String>,
+    /// Why this view was last drawn as nothing at a nested mount, so a mount
+    /// refused on every frame is reported once per snapshot.
+    refused: Option<NestingRefusal>,
     /// Whose authority this view's script runs under.
     ///
     /// Captured when the view is constructed rather than read when it is used:
@@ -134,6 +142,7 @@ impl ScriptView {
             theme: None,
             error: None,
             reload_error: None,
+            refused: None,
             ownership,
             runtime,
         }
@@ -208,6 +217,11 @@ impl ScriptView {
         self.current.as_ref()
     }
 
+    #[cfg(test)]
+    pub(crate) fn nesting_refusal(&self) -> Option<NestingRefusal> {
+        self.refused
+    }
+
     /// Whether the next GPUI render will enter the VM.
     /// The authority this view's script runs under.
     pub fn policy(&self) -> Rc<Policy> {
@@ -276,9 +290,27 @@ impl ScriptView {
                 // before last: dropping it releases its callbacks.
                 self.previous = self.current.replace(snapshot);
                 self.error = None;
+                self.refused = None;
             }
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    /// Draws nothing at a mount that would recurse or nest too deep.
+    fn refuse(&mut self, entity: EntityId, refusal: NestingRefusal) -> AnyElement {
+        if self.refused != Some(refusal) {
+            self.refused = Some(refusal);
+            match refusal {
+                NestingRefusal::Reentered => tracing::error!(
+                    "script view {entity} is mounted inside itself; the inner mount draws nothing"
+                ),
+                NestingRefusal::TooDeep => tracing::error!(
+                    "script view {entity} would nest views more than {MAX_NESTED_VIEW_DEPTH} \
+                     levels deep; it draws nothing at this mount"
+                ),
+            }
+        }
+        Empty.into_any_element()
     }
 }
 
@@ -306,6 +338,10 @@ impl Render for ScriptView {
         if self.retired {
             return div().into_any_element();
         }
+        let entity = cx.entity_id();
+        if DrawingViews::contains(entity) {
+            return self.refuse(entity, NestingRefusal::Reentered);
+        }
         let theme = crate::theme_tokens::sync(cx);
         if self.theme.as_ref() != Some(&theme) {
             self.theme = Some(theme);
@@ -315,12 +351,21 @@ impl Render for ScriptView {
             self.rebuild(window, cx);
         }
 
+        // The view itself is one level: the frame and GPUI's view element.
+        let height = 1 + self
+            .current
+            .as_ref()
+            .map_or(1, |snapshot| u32::from(snapshot.height()));
+        if DrawingViews::depth() + height > MAX_NESTED_VIEW_DEPTH {
+            return self.refuse(entity, NestingRefusal::TooDeep);
+        }
+
         let failure = match (self.reload_error.as_deref(), self.error.as_deref()) {
             (Some(message), _) => Some((ViewFailure::Reload, message)),
             (None, Some(message)) => Some((ViewFailure::Render, message)),
             (None, None) => None,
         };
-        match (failure, self.current.as_ref()) {
+        let element = match (failure, self.current.as_ref()) {
             (None, Some(snapshot)) => materialize(&self.runtime, snapshot, window, cx),
             // A build that failed left the last good snapshot in place, so the
             // interface is still there to show. Reporting over it beats
@@ -338,6 +383,154 @@ impl Render for ScriptView {
             // records an error. An empty element is the honest answer if it ever
             // is reached, rather than a panic in a render.
             (None, None) => div().into_any_element(),
-        }
+        };
+        nesting_frame(entity, height, element)
+    }
+}
+
+/// How many levels views drawn one inside another may span together, each
+/// counting its description's height and one level for itself: what one view
+/// at [`MAX_DESCRIPTION_DEPTH`] takes.
+///
+/// Layout, prepaint and paint recurse through a mounted view without entering
+/// the script, so neither the description bound nor the interpreter's stack
+/// limit sees a chain or a cycle of views. The costliest chain measured, nested
+/// `Checkbox`es split across views, draws at most 73 levels in an unoptimized
+/// build on a 2 MiB test thread.
+pub(crate) const MAX_NESTED_VIEW_DEPTH: u32 = MAX_DESCRIPTION_DEPTH as u32 + 1;
+
+/// What a mounted dock area counts towards [`MAX_NESTED_VIEW_DEPTH`].
+///
+/// Base draws several views of its own between the area and a panel's script
+/// view: measured, one nesting costs the stack of about seven `Checkbox`
+/// levels, three of which the descriptions on either side already count.
+pub(crate) const DOCK_AREA_LEVELS: u32 = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NestingRefusal {
+    Reentered,
+    TooDeep,
+}
+
+/// Holds `entity` on the drawing stack while `element` is laid out, prepainted
+/// and painted, counting `levels` towards [`MAX_NESTED_VIEW_DEPTH`].
+pub(crate) fn nesting_frame(entity: EntityId, levels: u32, element: AnyElement) -> AnyElement {
+    NestingFrame {
+        entity,
+        levels,
+        element,
+    }
+    .into_any_element()
+}
+
+/// The entities whose elements are being laid out, prepainted or painted on
+/// this thread, outermost first. GPUI keeps its own view stack private.
+#[derive(Default)]
+struct DrawingViews {
+    entities: Vec<(EntityId, u32)>,
+    depth: u32,
+}
+
+thread_local! {
+    static DRAWING_VIEWS: RefCell<DrawingViews> = RefCell::default();
+}
+
+impl DrawingViews {
+    fn contains(entity: EntityId) -> bool {
+        DRAWING_VIEWS.with_borrow(|drawing| drawing.entities.iter().any(|(id, _)| *id == entity))
+    }
+
+    fn depth() -> u32 {
+        DRAWING_VIEWS.with_borrow(|drawing| drawing.depth)
+    }
+
+    fn enter(entity: EntityId, levels: u32) -> DrawingGuard {
+        DRAWING_VIEWS.with_borrow_mut(|drawing| {
+            drawing.entities.push((entity, levels));
+            drawing.depth += levels;
+        });
+        DrawingGuard
+    }
+}
+
+/// Pops on drop, so a panic unwinding through a phase leaves the stack as it
+/// found it.
+struct DrawingGuard;
+
+impl Drop for DrawingGuard {
+    fn drop(&mut self) {
+        DRAWING_VIEWS.with_borrow_mut(|drawing| {
+            if let Some((_, levels)) = drawing.entities.pop() {
+                drawing.depth -= levels;
+            }
+        });
+    }
+}
+
+/// Every mount reaches a script view through its `render` — a child view, a
+/// dock panel, a dialog or sheet, the window root — so the frame there covers
+/// them all. A clean frame replays the cached subtree without visiting it.
+struct NestingFrame {
+    entity: EntityId,
+    levels: u32,
+    element: AnyElement,
+}
+
+impl IntoElement for NestingFrame {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for NestingFrame {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let _drawing = DrawingViews::enter(self.entity, self.levels);
+        (self.element.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let _drawing = DrawingViews::enter(self.entity, self.levels);
+        self.element.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let _drawing = DrawingViews::enter(self.entity, self.levels);
+        self.element.paint(window, cx);
     }
 }

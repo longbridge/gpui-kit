@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ops::Range,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use gpui::{
@@ -20,11 +20,11 @@ use crate::{
     scrollable_mask::horizontal_scroll_area,
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        MarkdownNode, TableActionsFn,
+        MarkdownNode, TableActionsFn, TaskToggleEvent, TaskToggleHandlerFn,
         document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
             Inline, InlineHighlight, InlineState, code_insets, combine_highlights, fade_highlights,
-            point_in_text_selection, text_runs, text_size_ranges,
+            foreground_highlights, point_in_text_selection, text_runs, text_size_ranges,
         },
         inline_flow::{InlineFlow, InlineFlowItem, slice_ranges},
         range_highlight::{RangeHighlightFrame, RevealAt, RevealRequest},
@@ -66,6 +66,19 @@ pub enum BlockNode {
         children: Vec<BlockNode>,
         span: Option<Span>,
     },
+    /// A blockquote opening with the marker of a
+    /// [block surface](super::MarkdownExtensions::block_surface), drawn inside
+    /// the container registered for `name`.
+    ///
+    /// Its text, selection, highlights and reveals are its children's, which
+    /// leave out the marker line.
+    Surface {
+        /// The name it is registered under, in ASCII lowercase.
+        name: SharedString,
+        children: Vec<BlockNode>,
+        /// The source of the whole blockquote, marker included.
+        span: Option<Span>,
+    },
     List {
         /// Only contains ListItem, others will be ignored
         children: Vec<BlockNode>,
@@ -79,6 +92,8 @@ pub enum BlockNode {
         spread: bool,
         /// Whether the list item is checked, if None, it's not a checkbox
         checked: Option<bool>,
+        /// The source of a Markdown task item's `[ ]` / `[x]` marker.
+        task_marker: Option<Span>,
         span: Option<Span>,
     },
     CodeBlock(CodeBlock),
@@ -262,6 +277,9 @@ impl Element for TableCellElement {
 struct CustomBlockElement {
     content: AnyElement,
     state: BlockState,
+    /// A pending reveal of this block, when it is inside a block surface and
+    /// so has no row of its own to scroll to.
+    reveal: Option<RevealAt>,
 }
 
 impl IntoElement for CustomBlockElement {
@@ -298,12 +316,29 @@ impl Element for CustomBlockElement {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
         self.content.prepaint(window, cx);
+        if let Some(reveal) = &self.reveal {
+            // A list scrolls to its edge, which layout may miss by a fraction of
+            // a pixel.
+            let slack = px(0.5);
+            let view = window.content_mask().bounds;
+            let inside =
+                bounds.top() >= view.top() - slack && bounds.bottom() <= view.bottom() + slack;
+            // A block taller than the view has no place to scroll to where it
+            // fits, and asking from each edge in turn would never settle.
+            let fills =
+                bounds.top() <= view.top() + slack && bounds.bottom() >= view.bottom() - slack;
+            let visible = inside || fills;
+            if !visible {
+                window.request_autoscroll(bounds);
+            }
+            reveal.report(bounds, visible);
+        }
     }
 
     fn paint(
@@ -421,6 +456,20 @@ impl BlockNode {
         matches!(self, Self::ListItem { .. })
     }
 
+    /// Whether this block shows nothing: a link definition, a comment, a `<br>`.
+    fn draws_nothing(&self) -> bool {
+        match self {
+            Self::Definition { .. } | Self::Break { .. } | Self::Unknown => true,
+            Self::Root { children, .. } => children.iter().all(Self::draws_nothing),
+            Self::Paragraph(paragraph) => paragraph.children().iter().all(|inline| {
+                inline.as_image().is_none()
+                    && inline.as_custom().is_none()
+                    && inline.text().trim().is_empty()
+            }),
+            _ => false,
+        }
+    }
+
     /// Combine all children, omitting the empt parent nodes.
     pub(super) fn compact(self) -> BlockNode {
         match self {
@@ -436,6 +485,7 @@ impl BlockNode {
             BlockNode::Paragraph(paragraph) => paragraph.span,
             BlockNode::Heading { span, .. } => *span,
             BlockNode::Blockquote { span, .. } => *span,
+            BlockNode::Surface { span, .. } => *span,
             BlockNode::List { span, .. } => *span,
             BlockNode::ListItem { span, .. } => *span,
             BlockNode::CodeBlock(code_block) => code_block.span,
@@ -471,6 +521,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 for child in children {
@@ -510,6 +561,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 for child in children {
@@ -603,25 +655,24 @@ impl BlockNode {
 
                 if !block_text.is_empty() {
                     if matches!(kind, BlockTextKind::SelectedSource) {
-                        // Prefix every line with `> ` so a selected blockquote
-                        // round-trips as Markdown.
-                        let quoted = block_text
-                            .trim_end_matches('\n')
-                            .lines()
-                            .map(|line| {
-                                if line.is_empty() {
-                                    ">".to_string()
-                                } else {
-                                    format!("> {}", line)
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        text.push_str(&quoted);
+                        text.push_str(&quoted_source(None, &block_text));
                     } else {
                         text.push_str(&block_text);
                     }
                     text.push('\n');
+                }
+            }
+            BlockNode::Surface { name, children, .. } => {
+                let block_text = Self::children_text(children, kind);
+                if matches!(kind, BlockTextKind::SelectedSource) {
+                    // Quoted under its marker, as a blockquote's selection is
+                    // quoted, so that it round-trips as the same surface.
+                    if !block_text.is_empty() {
+                        text.push_str(&quoted_source(Some(name), &block_text));
+                        text.push('\n');
+                    }
+                } else {
+                    text.push_str(&block_text);
                 }
             }
             BlockNode::Table(table) => {
@@ -716,6 +767,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 children.iter().any(|child| child.has_selection())
@@ -743,6 +795,7 @@ impl BlockNode {
         match self {
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => {
                 for child in children.iter() {
@@ -1039,6 +1092,7 @@ fn set_leaf_key(state: &mut Arc<Mutex<InlineState>>, key: u64) {
     *state = Arc::new(Mutex::new(InlineState {
         text,
         editor_key: Some(key),
+        selection_rows: None,
         cleanup_senders: Vec::new(),
         ..Default::default()
     }));
@@ -1373,6 +1427,25 @@ fn table_selected_source(table: &Table) -> String {
     lines.join("\n")
 }
 
+/// `text` as the source of a blockquote, each line prefixed with `> ` so it
+/// round-trips as Markdown, under a block surface's `[!marker]` line when it has
+/// one.
+fn quoted_source(marker: Option<&SharedString>, text: &str) -> String {
+    marker
+        .map(|name| format!("[!{name}]"))
+        .into_iter()
+        .chain(text.trim_end_matches('\n').lines().map(str::to_string))
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Reconstruct the Markdown source of the selected items of a list.
 ///
 /// Restores the list marker (`- ` / `N. `) and task-list checkbox (`[x] ` /
@@ -1637,7 +1710,12 @@ impl Paragraph {
         {
             return (
                 cached.text.clone(),
-                cached.highlights.clone(),
+                foreground_highlights(
+                    cached.highlights.clone(),
+                    &cached.text,
+                    0,
+                    node_cx.foregrounds(self.leaf_key()),
+                ),
                 cached.links.clone(),
             );
         }
@@ -1660,7 +1738,7 @@ impl Paragraph {
                 }
                 node_highlights.push((inner_range, highlight));
             }
-            highlights = combine_highlights(highlights, node_highlights);
+            append_node_highlights(&mut highlights, node_highlights);
             offset += text_len;
         }
         let text = SharedString::from(text);
@@ -1674,6 +1752,8 @@ impl Paragraph {
                 links: links.clone(),
             }));
         }
+        let highlights =
+            foreground_highlights(highlights, &text, 0, node_cx.foregrounds(self.leaf_key()));
         (text, highlights, links)
     }
 
@@ -2024,8 +2104,15 @@ impl std::fmt::Debug for TableColumnWidthsCache {
     }
 }
 
+fn text_system_id(window: &Window) -> usize {
+    std::rc::Rc::as_ptr(window.text_system()) as usize
+}
+
 struct TableColumnWidths {
-    text_system: Weak<gpui::WindowTextSystem>,
+    /// Identity of the window text system the widths were measured with.
+    /// `WindowTextSystem` is `Rc`-shared and the cache must stay `Send`, so
+    /// only its address is kept.
+    text_system: usize,
     /// The styles the header row and the body rows render with.
     text_styles: TableTextStyles,
     rem_size: Pixels,
@@ -2671,11 +2758,14 @@ pub(crate) struct NodeContext {
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,
     pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    pub(crate) task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
     /// This frame's streamed fade-in, when any text is still fading.
     pub(crate) stream_fade: Option<Arc<StreamFadeFrame>>,
     /// The application's range highlights, when there are any.
     pub(crate) range_highlights: Option<Arc<RangeHighlightFrame>>,
+    /// Render-local glyph colors supplied by an external editor, keyed by leaf.
+    pub(crate) foregrounds: Option<Arc<HashMap<u64, Vec<(Range<usize>, Hsla)>>>>,
     /// The line being scrolled into view, when there is one.
     pub(crate) reveal: Option<RevealRequest>,
     /// The font size the text view inherits this frame, or zero when not
@@ -2684,6 +2774,11 @@ pub(crate) struct NodeContext {
 }
 
 impl NodeContext {
+    fn foregrounds(&self, key: Option<u64>) -> &[(Range<usize>, Hsla)] {
+        key.and_then(|key| self.foregrounds.as_ref()?.get(&key))
+            .map_or(&[], Vec::as_slice)
+    }
+
     fn image_source(&self, image: &ImageNode) -> ImageSource {
         match &self.image_source {
             Some(resolve) => resolve(&image.url),
@@ -2809,6 +2904,23 @@ fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHig
     }
 }
 
+fn append_node_highlights(
+    highlights: &mut Vec<(Range<usize>, InlineHighlight)>,
+    node_highlights: Vec<(Range<usize>, InlineHighlight)>,
+) {
+    // Nodes occupy disjoint byte ranges, so normally only their own marks
+    // overlap. Preserve merging for caller-provided marks extending past a node.
+    if highlights.last().is_some_and(|(last, _)| {
+        node_highlights
+            .iter()
+            .any(|(range, _)| !range.is_empty() && range.start < last.end)
+    }) {
+        *highlights = combine_highlights(std::mem::take(highlights), node_highlights);
+    } else {
+        highlights.extend(combine_highlights([], node_highlights));
+    }
+}
+
 impl Paragraph {
     /// The highlights over [`Self::text`], for measuring the paragraph with
     /// the runs it renders with. Link colors are left out: they do not move
@@ -2831,7 +2943,7 @@ impl Paragraph {
                     )
                 })
                 .collect::<Vec<_>>();
-            highlights = combine_highlights(highlights, node_highlights);
+            append_node_highlights(&mut highlights, node_highlights);
             offset += inline_node.text.len();
         }
         highlights
@@ -2853,7 +2965,7 @@ impl Paragraph {
 
         if self.should_render_inline_flow() {
             return InlineFlow::new(
-                leaf_element_id(fade_key),
+                self.element_id(fade_key),
                 self.inline_flow_items(fade_key, fades, backgrounds, node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
@@ -2999,7 +3111,7 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = combine_highlights(highlights, node_highlights);
+                append_node_highlights(&mut highlights, node_highlights);
                 offset += text_len;
             }
         }
@@ -3034,9 +3146,26 @@ impl Paragraph {
         }
 
         div()
-            .id(leaf_element_id(fade_key))
+            .id(self.element_id(fade_key))
             .children(child_nodes)
             .into_any_element()
+    }
+
+    /// The element id of this paragraph when it needs one: an inline flow,
+    /// whose objects are accessibility nodes, or an image, whose element
+    /// state is its animation. The leaf key is unique per paragraph in a
+    /// parsed Markdown document. The HTML parser records no spans, so its
+    /// paragraphs fall back to an id derived from their own render state:
+    /// sharing one name mounted every span-less flow under the same id, and
+    /// the flows read each other's cached layout.
+    fn element_id(&self, fade_key: Option<TextLeafKey>) -> ElementId {
+        match fade_key {
+            Some(key) => ElementId::from(key),
+            None => ElementId::NamedInteger(
+                "p".into(),
+                Arc::as_ptr(&self.state) as *const () as usize as u64,
+            ),
+        }
     }
 
     /// The key an external editor gave this leaf, if any.
@@ -3191,7 +3320,7 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = combine_highlights(highlights, node_highlights);
+                append_node_highlights(&mut highlights, node_highlights);
                 offset += text_len;
             }
         }
@@ -3216,6 +3345,37 @@ impl Paragraph {
             });
         }
 
+        let foregrounds = node_cx.foregrounds(self.leaf_key());
+        if !foregrounds.is_empty() {
+            let mut offset = 0;
+            for item in &mut items {
+                match item {
+                    InlineFlowItem::Text {
+                        text, highlights, ..
+                    } => {
+                        *highlights = foreground_highlights(
+                            std::mem::take(highlights),
+                            text,
+                            offset,
+                            foregrounds,
+                        );
+                        offset += text.len();
+                    }
+                    InlineFlowItem::Object { style, .. } => {
+                        let end = offset + '\u{FFFC}'.len_utf8();
+                        if let Some((_, color)) = foregrounds
+                            .iter()
+                            .rev()
+                            .find(|(range, _)| range.start <= offset && end <= range.end)
+                        {
+                            style.color = Some(*color);
+                        }
+                        offset = end;
+                    }
+                    InlineFlowItem::Image { .. } => offset += '\u{FFFC}'.len_utf8(),
+                }
+            }
+        }
         items
     }
 }
@@ -3226,14 +3386,6 @@ impl Paragraph {
 /// their siblings: unique among them, though not across nesting levels.
 fn block_element_id(kind: &'static str, span: Option<Span>, ix: usize) -> ElementId {
     (kind, span.map_or(ix, |span| span.start)).into()
-}
-
-/// The element id of a paragraph that needs one: an inline flow, whose
-/// objects are accessibility nodes, or an image, whose element state is its
-/// animation. The leaf key is unique per paragraph in a parsed Markdown
-/// document; the HTML parser records no spans, so its paragraphs share one.
-fn leaf_element_id(fade_key: Option<TextLeafKey>) -> ElementId {
-    fade_key.map_or_else(|| ElementId::from("p"), ElementId::from)
 }
 
 /// A link's underline: a hairline in a translucent link color, so a run of
@@ -3378,10 +3530,7 @@ fn measure_table_columns(
                     && cached.rem_size == rem_size
                     && cached.mono_family == mono_family
                     && cached.inline_code == inline_code
-                    && cached
-                        .text_system
-                        .upgrade()
-                        .is_some_and(|system| Arc::ptr_eq(&system, window.text_system()))
+                    && cached.text_system == text_system_id(window)
             })
             .cloned()
     });
@@ -3389,7 +3538,7 @@ fn measure_table_columns(
         let (widths, custom_cells) =
             measure_table_text_columns(table, col_count, &text_styles, node_cx, window, cx);
         let measured = Arc::new(TableColumnWidths {
-            text_system: Arc::downgrade(window.text_system()),
+            text_system: text_system_id(window),
             text_styles: text_styles.clone(),
             rem_size,
             mono_family,
@@ -3447,7 +3596,7 @@ fn measure_table_text_columns(
                 .children
                 .children
                 .iter()
-                .any(|node| node.custom.is_some())
+                .any(|node| node.custom.is_some() || node.image.is_some())
             {
                 custom_cells.push((row_ix, ix));
                 continue;
@@ -3605,6 +3754,14 @@ impl BlockNode {
                     .collect::<Vec<_>>()
                     .join("\n")
             }
+            BlockNode::Surface { name, children, .. } => {
+                let content = children
+                    .iter()
+                    .map(|child| child.to_markdown())
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                quoted_source(Some(name), &content)
+            }
             BlockNode::List {
                 children,
                 ordered,
@@ -3678,11 +3835,15 @@ impl BlockNode {
 }
 
 impl BlockNode {
+    /// `task_toggle` is the view's task toggle handler with the event a click
+    /// on the item's checkbox reports, when the checkbox should be clickable.
+    #[allow(clippy::too_many_arguments)]
     fn render_list_item_row(
         content: AnyElement,
         ix: usize,
         options: NodeRenderOptions,
         checked: Option<bool>,
+        task_toggle: Option<(Arc<TaskToggleHandlerFn>, TaskToggleEvent)>,
         style: &TextViewStyle,
         line_height: Pixels,
         indent: Pixels,
@@ -3756,7 +3917,18 @@ impl BlockNode {
                                         .size(rems(0.75)),
                                     )
                                 }),
-                        ),
+                        )
+                        .map(|checkbox| match task_toggle {
+                            Some((handler, event)) => checkbox
+                                .id(("task-toggle", event.item_range().start))
+                                .on_click(move |_, window, cx| {
+                                    crate::TextSelection::end(window, cx);
+                                    cx.stop_propagation();
+                                    handler(&event, window, cx);
+                                })
+                                .into_any_element(),
+                            None => checkbox.into_any_element(),
+                        }),
                 )
             })
             .child(
@@ -3787,10 +3959,22 @@ impl BlockNode {
                 children,
                 spread,
                 checked,
-                ..
+                task_marker,
+                span,
             } => {
                 let body = body_font_size(node_cx, window);
                 let indent = body * 1.4;
+                let task_toggle = match (&node_cx.task_toggle_handler, checked, span, task_marker) {
+                    (Some(handler), Some(checked), Some(item), Some(marker)) => Some((
+                        handler.clone(),
+                        TaskToggleEvent::new(
+                            !checked,
+                            item.start..item.end,
+                            marker.start..marker.end,
+                        ),
+                    )),
+                    _ => None,
+                };
                 div()
                     .w_full()
                     .min_w_0()
@@ -3844,6 +4028,7 @@ impl BlockNode {
                                         ix,
                                         options,
                                         *checked,
+                                        task_toggle.clone(),
                                         &node_cx.style,
                                         window.line_height(),
                                         indent,
@@ -3865,6 +4050,7 @@ impl BlockNode {
                                 BlockNode::Root { .. }
                                 | BlockNode::Heading { .. }
                                 | BlockNode::Blockquote { .. }
+                                | BlockNode::Surface { .. }
                                 | BlockNode::CodeBlock(_)
                                 | BlockNode::Custom { .. }
                                 | BlockNode::Table(_)
@@ -3887,6 +4073,7 @@ impl BlockNode {
                                             ix,
                                             options,
                                             *checked,
+                                            task_toggle.clone(),
                                             &node_cx.style,
                                             window.line_height(),
                                             indent,
@@ -4056,6 +4243,9 @@ impl BlockNode {
             .into_any_element()
         } else {
             div()
+                // Scopes the row ids to this table, as the scroll area's id
+                // does, so rows of two tables never share hover state.
+                .id(block_element_id("table", table.span, options.ix))
                 .w_full()
                 .overflow_hidden()
                 .refine_style(&frame)
@@ -4187,8 +4377,17 @@ impl BlockNode {
                             .min_w(px(column.min))
                             .max_w(px(column.max))
                             .overflow_hidden()
-                            .when(align == ColumnumnAlign::Center, |this| this.text_center())
-                            .when(align == ColumnumnAlign::Right, |this| this.text_right())
+                            // Align the content box, not its text: GPUI
+                            // paints `text_align` with an offset that
+                            // `TextLayout` hit-testing leaves out, so
+                            // aligned text could not be selected where it
+                            // shows.
+                            .when(align == ColumnumnAlign::Center, |this| {
+                                this.flex().flex_col().items_center()
+                            })
+                            .when(align == ColumnumnAlign::Right, |this| {
+                                this.flex().flex_col().items_end()
+                            })
                             .px_3()
                             .py(px(7.))
                             .refine_style(&style.table_cell())
@@ -4207,6 +4406,9 @@ impl BlockNode {
             }
             rows.push(
                 div()
+                    // GPUI keys hover state by element id, so each row needs
+                    // its own for its hover highlight to follow the pointer.
+                    .id(("row", row_ix))
                     .w_full()
                     .when(row_ix < row_count - 1, |this| this.border_b_1())
                     .border_color(style.border())
@@ -4226,6 +4428,11 @@ impl BlockNode {
                         this.when_some(bottom_left, |this, radius| this.rounded_bl(radius))
                             .when_some(bottom_right, |this, radius| this.rounded_br(radius))
                     })
+                    // Body rows only: the header keeps its own fill.
+                    .when_some(
+                        style.table_row_hover().filter(|_| row_ix > 0),
+                        |this, color| this.hover(|this| this.bg(color)),
+                    )
                     .children(cells)
                     .into_any_element(),
             );
@@ -4360,6 +4567,50 @@ impl BlockNode {
                     .into_any_element(),
                 mb,
             ),
+            BlockNode::Surface { name, children, .. } => {
+                if children.iter().all(Self::draws_nothing) {
+                    // Nothing to hold, as when a stream has only sent the marker.
+                    return div().into_any_element();
+                }
+                // Unless the container sets its own width, it takes the row's,
+                // as a blockquote does, so lists and tables in it wrap to the
+                // view instead of measuring at their unwrapped width.
+                let mut container = node_cx
+                    .markdown_extensions
+                    .render_block_surface(name, window, cx)
+                    .unwrap_or_else(div)
+                    .map(|mut this| {
+                        let style = this.style();
+                        let unset_width = style.size.width.is_none();
+                        let unset_min_width = style.min_size.width.is_none();
+                        this.when(unset_width, |this| this.w_full())
+                            .when(unset_min_width, |this| this.min_w_0())
+                    });
+                // Nested tables measure while rendering, before the container
+                // applies its text style.
+                let text_style = container.style().text.clone();
+                let blocks = window.with_text_style(Some(text_style), |window| {
+                    children
+                        .iter()
+                        .enumerate()
+                        .map(|(ix, child)| {
+                            let (is_first, prev) = flow_position(children, ix);
+                            child.render_block(
+                                NodeRenderOptions {
+                                    is_first,
+                                    prev,
+                                    ..options
+                                        .is_last(children[ix + 1..].iter().all(Self::draws_nothing))
+                                },
+                                node_cx,
+                                window,
+                                cx,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
+                gapped(container.children(blocks).into_any_element(), mb)
+            }
             BlockNode::List {
                 children,
                 ordered,
@@ -4408,6 +4659,11 @@ impl BlockNode {
                     .child(CustomBlockElement {
                         content: inner,
                         state: state.clone(),
+                        reveal: node_cx.reveal_at(
+                            node.span.map(|span| TextLeafKey::block(span.start)),
+                            0,
+                            1,
+                        ),
                     })
                     .into_any_element()
             }
@@ -4469,6 +4725,280 @@ impl BlockNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paragraph_highlights_preserve_overlaps_and_utf8_boundaries() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let context = NodeContext::default();
+            let link = LinkMark {
+                url: "https://example.com".into(),
+                ..Default::default()
+            };
+            let paragraph = Paragraph {
+                children: vec![
+                    InlineNode::new("a中😀").marks(vec![
+                        (0..8, TextMark::default().bold()),
+                        (1..8, TextMark::default().italic()),
+                        (4..8, TextMark::default().code()),
+                    ]),
+                    InlineNode::new("文b").marks(vec![
+                        (0..4, TextMark::default().link(link.clone())),
+                        (0..3, TextMark::default().bold()),
+                    ]),
+                ],
+                ..Default::default()
+            };
+            let measured = paragraph.inline_highlights(&context, cx);
+            let (text, highlights, links) = paragraph.plain_render(&context, cx);
+            assert_eq!(text.as_ref(), "a中😀文b");
+            assert_eq!(links, vec![(8..12, link)]);
+            for spans in [&measured, &highlights] {
+                assert_eq!(
+                    spans
+                        .iter()
+                        .map(|(range, _)| range.clone())
+                        .collect::<Vec<_>>(),
+                    vec![0..1, 1..4, 4..8, 8..11, 11..12]
+                );
+                for ix in [1, 2] {
+                    assert_eq!(spans[ix].1.style.font_weight, Some(FontWeight::BOLD));
+                    assert_eq!(spans[ix].1.style.font_style, Some(FontStyle::Italic));
+                }
+                assert!(spans[2].1.code_style.is_some());
+                assert_eq!(spans[2].1.font_size_scale, Some(0.875));
+                assert_eq!(spans[3].1.style.font_weight, Some(FontWeight::BOLD));
+                assert_eq!(spans[3].1.style.font_style, None);
+                assert!(spans[3].1.code_style.is_none());
+                assert_eq!(spans[4].1.style.font_weight, None);
+            }
+            assert!(highlights[3..].iter().all(|(_, highlight)| {
+                highlight.style.color == Some(context.style.link())
+                    && highlight.style.underline.is_some()
+            }));
+            let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            let [
+                InlineFlowItem::Text {
+                    text: flow_text,
+                    highlights: flow_highlights,
+                    links: flow_links,
+                    ..
+                },
+            ] = items.as_slice()
+            else {
+                panic!("one text item");
+            };
+            assert_eq!(flow_text, &text);
+            assert_eq!(flow_highlights, &highlights);
+            assert_eq!(flow_links, &links);
+
+            // Public callers can supply marks extending into the next node.
+            let paragraph = Paragraph {
+                children: vec![
+                    InlineNode::new("a").marks(vec![(0..2, TextMark::default().bold())]),
+                    InlineNode::new("bc").marks(vec![(0..2, TextMark::default().italic())]),
+                ],
+                ..Default::default()
+            };
+            let highlights = paragraph.inline_highlights(&context, cx);
+            assert_eq!(
+                highlights
+                    .iter()
+                    .map(|(range, _)| range.clone())
+                    .collect::<Vec<_>>(),
+                vec![0..1, 1..2, 2..3]
+            );
+            assert_eq!(highlights[1].1.style.font_weight, Some(FontWeight::BOLD));
+            assert_eq!(highlights[1].1.style.font_style, Some(FontStyle::Italic));
+            assert_eq!(highlights[2].1.style.font_weight, None);
+        });
+    }
+
+    #[test]
+    fn paragraph_highlight_builders_merge_each_mark_once() {
+        use super::super::inline::COMBINED_HIGHLIGHT_INPUTS;
+
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let context = NodeContext::default();
+            let inputs = || COMBINED_HIGHLIGHT_INPUTS.with(|inputs| inputs.get());
+            for node_count in [64, 128] {
+                let paragraph = Paragraph {
+                    children: (0..node_count)
+                        .map(|_| {
+                            InlineNode::new("a中😀").marks(vec![
+                                (0..8, TextMark::default().bold()),
+                                (1..8, TextMark::default().italic()),
+                                (4..8, TextMark::default().code()),
+                            ])
+                        })
+                        .collect(),
+                    ..Default::default()
+                };
+                let before = inputs();
+                paragraph.inline_highlights(&context, cx);
+                assert_eq!(inputs() - before, 3 * node_count);
+                let before = inputs();
+                paragraph.plain_render(&context, cx);
+                assert_eq!(inputs() - before, 3 * node_count);
+                let before = inputs();
+                paragraph.inline_flow_items(None, &[], &[], &context, cx);
+                assert_eq!(inputs() - before, 3 * node_count);
+            }
+        });
+    }
+
+    #[test]
+    fn host_foregrounds_follow_the_render_context_without_entering_the_paragraph_cache() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let link = LinkMark {
+                url: "https://example.com".into(),
+                ..Default::default()
+            };
+            let mut paragraph = Paragraph::default().with_leaf_key(7);
+            paragraph.push(InlineNode::new("a中😀link").marks(vec![
+                (0..12, TextMark::default().bold()),
+                (1..12, TextMark::default().italic().link(link.clone())),
+            ]));
+            let original = paragraph.clone();
+            let base = NodeContext::default();
+            let (_, inherited, _) = paragraph.plain_render(&base, cx);
+            let cached = paragraph.render_cache.0.lock().unwrap().clone().unwrap();
+            for color in [gpui::red(), gpui::blue()] {
+                let context = NodeContext {
+                    foregrounds: Some(Arc::new(HashMap::from([(7, vec![(0..12, color)])]))),
+                    ..base.clone()
+                };
+                let (text, highlights, links) = paragraph.plain_render(&context, cx);
+                assert_eq!(text.as_ref(), "a中😀link");
+                assert_eq!(links, vec![(1..12, link.clone())]);
+                assert!(highlights.iter().all(|(_, h)| h.style.color == Some(color)));
+                assert!(
+                    highlights
+                        .iter()
+                        .all(|(_, h)| h.style.font_weight == Some(FontWeight::BOLD))
+                );
+                assert!(
+                    highlights
+                        .iter()
+                        .filter(|(r, _)| r.start >= 1)
+                        .all(|(_, h)| h.style.font_style == Some(FontStyle::Italic)
+                            && h.style.underline.is_some())
+                );
+                assert!(Arc::ptr_eq(
+                    &cached,
+                    paragraph.render_cache.0.lock().unwrap().as_ref().unwrap()
+                ));
+            }
+            // Clearing a context's ranges restores inherited mark/link colors,
+            // even though the document and cached mark styles are unchanged.
+            let context = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(7, vec![])]))),
+                ..base.clone()
+            };
+            assert_eq!(paragraph.plain_render(&context, cx).1, inherited);
+            let invalid = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(7, vec![(2..3, gpui::red())])]))),
+                ..base.clone()
+            };
+            assert_eq!(paragraph.plain_render(&invalid, cx).1, inherited);
+            let other_leaf = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(8, vec![(0..12, gpui::red())])]))),
+                ..base
+            };
+            assert_eq!(paragraph.plain_render(&other_leaf, cx).1, inherited);
+            assert_eq!(paragraph, original);
+        });
+    }
+
+    #[test]
+    fn host_foregrounds_override_mixed_links_and_preserve_atom_byte_coordinates() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let link = LinkMark {
+                url: "https://example.com".into(),
+                ..Default::default()
+            };
+            let mut paragraph = Paragraph::default().with_leaf_key(7);
+            paragraph.push(InlineNode::new("a中😀link").marks(vec![
+                (0..12, TextMark::default().bold()),
+                (1..12, TextMark::default().link(link.clone())),
+                (4..8, TextMark::default().code()),
+            ]));
+            paragraph.push(
+                InlineNode::custom(MarkdownNode::new("atom", ()).text("long fallback"))
+                    .marks(vec![(0..13, TextMark::default().link(link.clone()))]),
+            );
+            paragraph.push(InlineNode::new("尾"));
+            paragraph.push(InlineNode::image(ImageNode::default()));
+            paragraph.push(InlineNode::new("z"));
+            let context = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(
+                    7,
+                    vec![
+                        (0..22, gpui::red()),
+                        (15..18, gpui::blue()),
+                        (21..22, gpui::blue()),
+                    ],
+                )]))),
+                ..Default::default()
+            };
+            let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            assert_eq!(items.len(), 5);
+            let InlineFlowItem::Text {
+                text,
+                highlights,
+                links,
+                ..
+            } = &items[0]
+            else {
+                panic!("text");
+            };
+            assert_eq!(text.as_ref(), "a中😀link");
+            assert_eq!(links, &vec![(1..12, link.clone())]);
+            assert!(
+                highlights
+                    .iter()
+                    .all(|(_, h)| h.style.color == Some(gpui::red()))
+            );
+            assert!(
+                highlights
+                    .iter()
+                    .any(|(r, h)| r.start == 4 && h.code_style.is_some())
+            );
+            let InlineFlowItem::Object {
+                style,
+                link: actual_link,
+                ..
+            } = &items[1]
+            else {
+                panic!("object");
+            };
+            assert_eq!(style.color, Some(gpui::red()));
+            assert_eq!(actual_link.as_ref(), Some(&link));
+            assert!(style.underline.is_some());
+            for ix in [2, 4] {
+                let InlineFlowItem::Text { highlights, .. } = &items[ix] else {
+                    panic!("trailing text");
+                };
+                assert!(
+                    highlights
+                        .iter()
+                        .all(|(_, h)| h.style.color == Some(gpui::blue()))
+                );
+                assert!(!highlights.is_empty());
+            }
+        });
+    }
 
     #[test]
     fn block_plugin_selection_copies_both_formats_and_clears_synchronously() {
@@ -4881,6 +5411,59 @@ mod tests {
     }
 
     #[test]
+    fn block_surface_typography_reaches_nested_table_measurement() {
+        use crate::text::MarkdownExtensions;
+        use crate::text::inline::test_draw::in_prepaint;
+        use crate::text::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::TestApp;
+
+        let surface = BlockNode::Surface {
+            name: "large".into(),
+            children: vec![BlockNode::Table(table_of(
+                vec![vec![plain_cell("0123456789")]],
+                vec![],
+            ))],
+            span: None,
+        };
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            cx.set_global(crate::Theme::default());
+            window.with_text_style(
+                Some(
+                    StyleRefinement::default()
+                        .font_family(BODY)
+                        .text_size(px(15.))
+                        .text,
+                ),
+                |window| {
+                    let node_cx = NodeContext {
+                        body_font_size: px(15.),
+                        markdown_extensions: Arc::new(MarkdownExtensions::default().block_surface(
+                            "large",
+                            |_, _| {
+                                div()
+                                    .font_family(MONO)
+                                    .text_size(px(30.))
+                                    .font_weight(FontWeight::BOLD)
+                            },
+                        )),
+                        ..Default::default()
+                    };
+                    surface.render_block(NodeRenderOptions::default(), &node_cx, window, cx);
+                    let BlockNode::Surface { children, .. } = &surface else {
+                        unreachable!()
+                    };
+                    let BlockNode::Table(table) = &children[0] else {
+                        unreachable!()
+                    };
+                    // The same as a blockquote with this text style.
+                    assert_eq!(cached_column_widths(table).widths, vec![199.]);
+                },
+            );
+        });
+    }
+
+    #[test]
     fn table_columns_cache_preserves_plain_widths_and_clones() {
         use crate::text::inline::test_draw::in_prepaint;
         use crate::text::inline::test_fonts::{BODY, WideMonoTextSystem, record_shaped_lines};
@@ -5124,6 +5707,53 @@ mod tests {
             mono_w,
             CELL_PAD_PX
         );
+    }
+
+    /// A column must fit the images in its cells, as a browser's column fits
+    /// its `<img>`: an image adds no text, so its cell is measured again
+    /// outside the cache, where its explicit size counts. Measured at a
+    /// fixed 100x50 so the test needs no image to load.
+    #[test]
+    fn table_column_of_an_image_cell_fits_the_image_width() {
+        use crate::text::inline::test_draw::in_prepaint;
+        use crate::text::inline::test_fonts::{BODY, WideMonoTextSystem};
+        use gpui::{Refineable as _, TestApp, TextStyle};
+
+        let mut paragraph = Paragraph::default();
+        paragraph.push(InlineNode::image(ImageNode {
+            url: "https://example.com/photo.png".into(),
+            width: Some(px(100.).into()),
+            height: Some(px(50.).into()),
+            ..Default::default()
+        }));
+        let table = Table {
+            children: vec![TableRow {
+                children: vec![TableCell {
+                    children: paragraph,
+                    width: None,
+                }],
+            }],
+            column_aligns: vec![],
+            span: None,
+            table_data_cache: TableDataCache::default(),
+            column_widths_cache: TableColumnWidthsCache::default(),
+        };
+        let node_cx = NodeContext::default();
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            let style = TextStyle {
+                font_family: BODY.into(),
+                font_size: px(20.).into(),
+                ..Default::default()
+            };
+            window.with_text_style(Some(style.subtract(&Default::default())), |window| {
+                assert_eq!(
+                    measure_table_columns(&table, 1, &node_cx, window, cx),
+                    vec![100. + CELL_PAD_PX]
+                );
+            });
+        });
     }
 
     #[test]
@@ -5378,6 +6008,7 @@ mod tests {
             children: vec![BlockNode::Paragraph(selected_paragraph(text))],
             spread: false,
             checked: None,
+            task_marker: None,
             span: None,
         };
         let unselected_item = BlockNode::ListItem {
@@ -5386,6 +6017,7 @@ mod tests {
             ]))],
             spread: false,
             checked: None,
+            task_marker: None,
             span: None,
         };
         let list = BlockNode::List {
@@ -5403,6 +6035,7 @@ mod tests {
             children: vec![BlockNode::Paragraph(selected_paragraph(text))],
             spread: false,
             checked: None,
+            task_marker: None,
             span: None,
         };
         let list = BlockNode::List {
@@ -5468,12 +6101,14 @@ mod tests {
                     children: vec![BlockNode::Paragraph(selected_paragraph("one"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("two"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -5495,12 +6130,14 @@ mod tests {
                     children: vec![BlockNode::Paragraph(selected_paragraph("three"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("four"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -5523,12 +6160,14 @@ mod tests {
                     children: vec![BlockNode::Paragraph(selected_paragraph("nested"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("again"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -5542,12 +6181,14 @@ mod tests {
                     children: vec![BlockNode::Paragraph(selected_paragraph("three")), nested],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("four"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -5569,12 +6210,14 @@ mod tests {
                     ],
                     spread: true,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("four"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -5598,6 +6241,7 @@ mod tests {
                 children: vec![BlockNode::Paragraph(selected_paragraph("nested"))],
                 spread: false,
                 checked: None,
+                task_marker: None,
                 span: None,
             }],
         };
@@ -5610,12 +6254,14 @@ mod tests {
                     children: vec![BlockNode::Paragraph(selected_paragraph("one")), nested],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("two"))],
                     spread: false,
                     checked: None,
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -5637,12 +6283,14 @@ mod tests {
                     children: vec![BlockNode::Paragraph(selected_paragraph("done"))],
                     spread: false,
                     checked: Some(true),
+                    task_marker: None,
                     span: None,
                 },
                 BlockNode::ListItem {
                     children: vec![BlockNode::Paragraph(selected_paragraph("todo"))],
                     spread: false,
                     checked: Some(false),
+                    task_marker: None,
                     span: None,
                 },
             ],
@@ -6098,12 +6746,14 @@ mod tests {
                             children: vec![BlockNode::Paragraph(selected_paragraph("one"))],
                             spread: false,
                             checked: None,
+                            task_marker: None,
                             span: None,
                         },
                         BlockNode::ListItem {
                             children: vec![BlockNode::Paragraph(selected_paragraph("two"))],
                             spread: false,
                             checked: None,
+                            task_marker: None,
                             span: None,
                         },
                     ],

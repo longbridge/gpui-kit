@@ -28,7 +28,7 @@ The script installs the binary to `~/.local/bin` and creates `~/.gpui-shell/apps
 ### Build from crates.io
 
 ```bash
-cargo install gpui-shell --version 0.8.1 --locked
+cargo install gpui-shell --version 0.9.1 --locked
 ```
 
 ### The latest from Git
@@ -230,7 +230,7 @@ The `gpui-shell` command lives in the library, so a binary of your own can be th
 
 ```toml
 [dependencies]
-gpui-shell = "0.8.1"
+gpui-shell = "0.9.1"
 ```
 
 ```rust

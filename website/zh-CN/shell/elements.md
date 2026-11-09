@@ -438,6 +438,18 @@ render(cx) {
 
 [示例应用](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist)就是这样写的：`ui.js` 把 `button`、`label`、`icon`、`checkbox` 等导出为函数，`main.js` 调用它们。读起来像一个组件库，而且不花什么代价——一次函数调用就是一段新描述的来源。
 
+## 嵌套有上限
+
+一份描述最多嵌套 **64 层**。子元素、`content` 这类已填入的 slot、组件以 element 参数接收的元素，都算一层。会嵌套得更深的那次调用直接抛错，并且不记录任何改动：
+
+```text
+this element would nest the description more than 64 levels deep; elements, filled slots and component element arguments may nest at most 64 levels
+```
+
+绘制描述时，原生代码会逐层遍历它。没有这个上限，脚本可以搭出一条足以撑爆原生栈的链，那会直接结束进程，而不是抛出异常。真实布局远到不了 64 层。元素也不能被放进它自己里面，无论直接放还是经由 slot：这同样会抛错。
+
+View 里挂载的 View 和外层共用这个深度。每个 View 计入它自己描述的层数，再加上它自身的一层；一个套一个绘制的 View 合计最多 **65** 层，也就是一个处在上限的 View 所占的层数。[dock area](./api.md#dock) 额外计 4 层。这里不会抛错，因为挂载关系要到窗口绘制时才落实：会越过上限的 View 在该位置什么都不画；View 挂进它自己（直接挂，或经由别的 View、dock 绕回来）也一样。两种情况都会记一条错误日志，窗口其余部分照常绘制。同一个 View 挂在两个互不包含的父 View 下不算递归，两处都会画出来。
+
 ## 回调属于它所在的那次渲染
 
 传给 `.on_click` 的处理函数属于那次渲染产出的那份描述——而不是属于某一帧。那份描述会[被之后的每一帧复用，直到有东西让它失效](./state.md#render-什么时候执行)，处理函数在这期间一直可调用。描述里只记录一个 id；Rust 装配的闭包持有对运行时的弱引用加上这个 id。

@@ -105,9 +105,7 @@ pub trait TableDelegate: Sized + 'static {
         window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(self.column(col_ix, cx).name.clone())
+        div().w_full().child(self.column(col_ix, cx).name.clone())
     }
 
     /// Render the row at the given row and column.
@@ -150,6 +148,26 @@ pub trait TableDelegate: Sized + 'static {
     /// default.
     fn cell_label(&self, row_ix: usize, col_ix: usize, cx: &App) -> Option<SharedString> {
         None
+    }
+
+    /// Return the name a screen reader should read for the row at the given
+    /// index, such as when the row is selected and the table has focus.
+    ///
+    /// Defaults to the row's [`cell_label`](Self::cell_label)s, joined with
+    /// commas, or `None` when none of its cells has a label. A name returned
+    /// here replaces an `aria_label` set in [`render_tr`](Self::render_tr).
+    fn row_label(&self, row_ix: usize, cx: &App) -> Option<SharedString> {
+        let mut label = String::new();
+        for text in (0..self.columns_count(cx))
+            .filter_map(|col_ix| self.cell_label(row_ix, col_ix, cx))
+            .filter(|text| !text.is_empty())
+        {
+            if !label.is_empty() {
+                label.push_str(", ");
+            }
+            label.push_str(&text);
+        }
+        (!label.is_empty()).then(|| label.into())
     }
 
     /// Move the column at the given `col_ix` so that it ends up at the index `to_ix`.

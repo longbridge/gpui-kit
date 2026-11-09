@@ -32,7 +32,7 @@ curl -fsSL https://gpui-kit.com/shell/install.sh | sh
 从 crates.io 安装本次发布的版本：
 
 ```bash
-cargo install gpui-shell --version 0.8.1 --locked
+cargo install gpui-shell --version 0.9.1 --locked
 ```
 
 也可以从 Git 构建开发版本：
@@ -232,7 +232,7 @@ gpui-shell run ./hello --watch    # 只重载
 
 ```toml
 [dependencies]
-gpui-shell = "0.8.1"
+gpui-shell = "0.9.1"
 ```
 
 ```rust

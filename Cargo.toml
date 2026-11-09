@@ -31,6 +31,7 @@ members = [
     "examples/system_monitor",
     "examples/focus_trap",
     "examples/tooltip_top_edge",
+    "examples/link_tooltip",
     "examples/sidebar",
     "examples/text_max_lines",
     "examples/text_selection",
@@ -48,14 +49,14 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
-gpui-kit = { path = "crates/kit", version = "0.8.1" }
-gpui-component = { path = "crates/component", version = "0.8.1" }
-gpui-base = { path = "crates/base", version = "0.8.1" }
-gpui-component-macros = { path = "crates/component-macros", version = "0.8.1" }
-gpui-kit-assets = { path = "crates/assets", version = "0.8.1" }
-gpui-fps = { path = "crates/fps", version = "0.8.1" }
-gpui-shell = { path = "crates/shell", version = "0.8.1" }
-gpui-webview = { path = "crates/webview", version = "0.8.1" }
+gpui-kit = { path = "crates/kit", version = "0.9.1" }
+gpui-component = { path = "crates/component", version = "0.9.1" }
+gpui-base = { path = "crates/base", version = "0.9.1" }
+gpui-component-macros = { path = "crates/component-macros", version = "0.9.1" }
+gpui-kit-assets = { path = "crates/assets", version = "0.9.1" }
+gpui-fps = { path = "crates/fps", version = "0.9.1" }
+gpui-shell = { path = "crates/shell", version = "0.9.1" }
+gpui-webview = { path = "crates/webview", version = "0.9.1" }
 story = { path = "crates/story" }
 
 # GPUI comes from the `gpui-pre-*` snapshots of Zed's crates, and any snapshot
@@ -65,18 +66,18 @@ story = { path = "crates/story" }
 # onto a newer snapshot that gpui-component did not compile with (#3156). Bump
 # every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
 # fails CI when a pin is not exact.
-gpui = { package = "gpui-pre", version = "=0.3.10" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.10", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "=0.3.10" }
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "=0.3.12" }
 # Fast is optional; existing crates select it through their gpui-fast feature.
 # Explicit package fields make Cargo use these dependency keys as Rust crate names;
 # the packages declare the same library names as the pre backend.
-gpui-fast = { package = "gpui-fast", version = "0.1.12", features = ["windows-manifest-provided-by-host"] }
-gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui-fast-web = { package = "gpui-fast-web", version = "0.1.12" }
-gpui_macros = { package = "gpui-pre-macros", version = "=0.3.10" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.10" }
+gpui-fast = { package = "gpui-fast", version = "0.1.14", features = ["windows-manifest-provided-by-host"] }
+gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.14", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-fast-web = { package = "gpui-fast-web", version = "0.1.14" }
+gpui_macros = { package = "gpui-pre-macros", version = "=0.3.12" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.12" }
+sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.12" }
 reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",

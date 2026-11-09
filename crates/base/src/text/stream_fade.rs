@@ -435,6 +435,7 @@ pub(super) fn text_leaves<'a>(block: &'a BlockNode, out: &mut Vec<(TextLeafKey, 
         }
         BlockNode::Root { children, .. }
         | BlockNode::Blockquote { children, .. }
+        | BlockNode::Surface { children, .. }
         | BlockNode::List { children, .. }
         | BlockNode::ListItem { children, .. } => {
             for child in children {
