@@ -28,6 +28,7 @@ pub struct NumberInput {
     focus_ring_enabled: bool,
     disabled: bool,
     accessibility_label: Option<SharedString>,
+    stepper: bool,
     style: StyleRefinement,
 }
 
@@ -44,6 +45,7 @@ impl NumberInput {
             focus_ring_enabled: true,
             disabled: false,
             accessibility_label: None,
+            stepper: true,
             style: StyleRefinement::default(),
         }
     }
@@ -79,6 +81,15 @@ impl NumberInput {
     /// label. This does not change what is displayed.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
+        self
+    }
+
+    /// Set whether the increment and decrement buttons are rendered.
+    ///
+    /// The buttons are rendered by default. Up and Down keys continue to step the
+    /// value when the buttons are omitted.
+    pub fn stepper(mut self, stepper: bool) -> Self {
+        self.stepper = stepper;
         self
     }
 }
@@ -144,30 +155,33 @@ impl RenderOnce for NumberInput {
         let base_state = self.state.clone();
         let content = BaseNumberInput::new(&base_state)
             .disabled(self.disabled)
+            .stepper(self.stepper)
             .when_some(self.accessibility_label, |this, label| {
                 this.accessibility_label(label)
             })
             .size_full()
-            .decrement_button(move |this| {
-                this.accessibility_label(t!("Input.Decrement"))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(button_foreground)
-                    .hover(move |this| this.bg(button_hover))
-                    .active(move |this| this.bg(button_active))
-                    // The frame owns the control height, so the buttons fill it
-                    // rather than setting their own and outgrowing the border.
-                    .h_full()
-                    .map(|this| match button_size {
-                        Size::XSmall | Size::Small => this.min_w_6(),
-                        Size::Medium | Size::Large => this.min_w_8(),
-                        Size::Size(size) => this.min_w(size),
-                    })
-                    // Only the outer corners are rounded, to follow the frame.
-                    .rounded_tl(button_radius)
-                    .rounded_bl(button_radius)
-                    .child(Icon::new(IconName::Minus).with_size(button_size))
+            .when(self.stepper, |this| {
+                this.decrement_button(move |this| {
+                    this.accessibility_label(t!("Input.Decrement"))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(button_foreground)
+                        .hover(move |this| this.bg(button_hover))
+                        .active(move |this| this.bg(button_active))
+                        // The frame owns the control height, so the buttons fill it
+                        // rather than setting their own and outgrowing the border.
+                        .h_full()
+                        .map(|this| match button_size {
+                            Size::XSmall | Size::Small => this.min_w_6(),
+                            Size::Medium | Size::Large => this.min_w_8(),
+                            Size::Size(size) => this.min_w(size),
+                        })
+                        // Only the outer corners are rounded, to follow the frame.
+                        .rounded_tl(button_radius)
+                        .rounded_bl(button_radius)
+                        .child(Icon::new(IconName::Minus).with_size(button_size))
+                })
             })
             .input(
                 Input::new(&self.state)
@@ -181,23 +195,25 @@ impl RenderOnce for NumberInput {
                     .when_some(self.prefix, |this, prefix| this.prefix(prefix))
                     .when_some(self.suffix, |this, suffix| this.suffix(suffix)),
             )
-            .increment_button(move |this| {
-                this.accessibility_label(t!("Input.Increment"))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(button_foreground)
-                    .hover(move |this| this.bg(button_hover))
-                    .active(move |this| this.bg(button_active))
-                    .h_full()
-                    .map(|this| match button_size {
-                        Size::XSmall | Size::Small => this.min_w_6(),
-                        Size::Medium | Size::Large => this.min_w_8(),
-                        Size::Size(size) => this.min_w(size),
-                    })
-                    .rounded_tr(button_radius)
-                    .rounded_br(button_radius)
-                    .child(Icon::new(IconName::Plus).with_size(button_size))
+            .when(self.stepper, |this| {
+                this.increment_button(move |this| {
+                    this.accessibility_label(t!("Input.Increment"))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(button_foreground)
+                        .hover(move |this| this.bg(button_hover))
+                        .active(move |this| this.bg(button_active))
+                        .h_full()
+                        .map(|this| match button_size {
+                            Size::XSmall | Size::Small => this.min_w_6(),
+                            Size::Medium | Size::Large => this.min_w_8(),
+                            Size::Size(size) => this.min_w(size),
+                        })
+                        .rounded_tr(button_radius)
+                        .rounded_br(button_radius)
+                        .child(Icon::new(IconName::Plus).with_size(button_size))
+                })
             });
 
         // The visual frame wraps the complete spinbutton. BaseNumberInput routes
@@ -320,6 +336,78 @@ mod tests {
         assert_eq!(
             step_value("1000", StepAction::Increment, 1., None, Some(100.)),
             None
+        );
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod interaction_tests {
+    use super::*;
+    use gpui::{Context, Render, TestAppContext, VisualTestContext};
+    use gpui_base::test_support::{ElementSnapshot, find};
+
+    struct Probe {
+        state: Entity<InputState>,
+        show_stepper: bool,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                NumberInput::new(&self.state).when(!self.show_stepper, |this| this.stepper(false)),
+            )
+        }
+    }
+
+    fn draw(cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn button(cx: &mut VisualTestContext, id: &'static str) -> Option<ElementSnapshot> {
+        cx.update(|window, _| find(window, &[], &id.into()))
+    }
+
+    #[gpui::test]
+    fn disabling_stepper_omits_buttons_and_keeps_keyboard_stepping(cx: &mut TestAppContext) {
+        use gpui::AppContext as _;
+
+        cx.update(crate::init);
+        let (probe, mut cx) = cx.add_window_view(|window, cx| Probe {
+            state: cx.new(|cx| InputState::new(window, cx).default_value("3")),
+            show_stepper: true,
+        });
+        let state = probe.read_with(cx, |probe, _| probe.state.clone());
+        draw(&mut cx);
+
+        for id in ["decrement", "increment"] {
+            assert!(
+                button(&mut cx, id).is_some(),
+                "{id} should exist by default"
+            );
+        }
+
+        probe.update(cx, |probe, cx| {
+            probe.show_stepper = false;
+            cx.notify();
+        });
+        draw(&mut cx);
+
+        for id in ["decrement", "increment"] {
+            assert!(
+                button(&mut cx, id).is_none(),
+                "{id} should not be constructed"
+            );
+        }
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.simulate_keystrokes("up");
+        draw(&mut cx);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value().to_string()),
+            "4"
         );
     }
 }

@@ -125,6 +125,14 @@ NumberInput::new(&input)
 NumberInput::new(&input).small()
 ```
 
+### 步进按钮
+
+默认会创建递增和递减按钮。调用 `.stepper(false)` 可省略按钮；仍可使用 `↑` 和 `↓` 键调整数值：
+
+```rust
+NumberInput::new(&input).stepper(false)
+```
+
 ### 前缀与后缀
 
 ```rust
@@ -226,6 +234,7 @@ NumberInput::decrement(&number_input, window, cx);
 | `size(size)` | 设置尺寸 |
 | `prefix(el)` | 添加前缀元素 |
 | `suffix(el)` | 添加后缀元素 |
+| `stepper(bool)` | 创建或省略递增/递减按钮 |
 | `appearance(bool)` | 开启或关闭默认样式 |
 | `accessibility_label(str)` | 屏幕阅读器朗读的名称 |
 | `disabled(bool)` | 设置禁用状态 |
