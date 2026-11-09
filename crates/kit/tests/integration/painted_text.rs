@@ -76,3 +76,47 @@ fn each_frame_replaces_the_text_of_the_last(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+// The second item's paragraph after a paragraph is the reference: it already
+// takes no marker and lines up with its item's text.
+const SUB_LIST_THEN_PARAGRAPH: &str = "\
+1. Prepare:
+   - check
+
+   Then tag.
+2. Publish.
+
+   Then announce.
+";
+
+struct NestedList;
+impl Render for NestedList {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().child(TextView::markdown("list", SUB_LIST_THEN_PARAGRAPH))
+    }
+}
+
+#[gpui_kit::test]
+fn a_paragraph_after_a_sub_list_takes_no_marker_of_its_own(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(600.), px(500.))), |_, cx| {
+        cx.new(|_| NestedList)
+    });
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        let texts = texts(window);
+        let left = |text: &str| {
+            texts
+                .iter()
+                .find(|snapshot| snapshot.text() == text)
+                .unwrap_or_else(|| panic!("{text:?} was not painted: {texts:?}"))
+                .bounds()
+                .left()
+        };
+        // After a marker, it would start where the item's own text does.
+        assert_eq!(left("Then tag."), left("Then announce."));
+        assert_ne!(left("Then tag."), left("Prepare:"));
+    })
+    .unwrap();
+}
