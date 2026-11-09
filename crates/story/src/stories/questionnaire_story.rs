@@ -84,6 +84,17 @@ impl QuestionnaireStory {
         })
     }
 
+    /// A muted summary line that fills the section width so long debug output
+    /// wraps inside the card instead of spilling past its edges.
+    fn summary_line(text: impl IntoElement, cx: &App) -> Div {
+        div()
+            .w_full()
+            .text_xs()
+            .text_center()
+            .text_color(cx.theme().muted_foreground)
+            .child(text)
+    }
+
     fn shortcut_state(
         items: Vec<QuestionnaireItemDefinition>,
         mode: QuestionnaireShortcutMode,
@@ -822,13 +833,13 @@ impl Render for QuestionnaireStory {
             .child(
                 section("Complete flow")
                     .description("Required single choice, multiple choice, freeform input, skip, disabled item, and submit events.")
-                    .w(px(448.))
+                    .max_w(px(448.))
                     .child(main),
             )
             .child(
                 section("Validation and external errors")
                     .description("Next validates the active item; external errors remain host-owned until cleared or fixed.")
-                    .w(px(600.))
+                    .max_w(px(600.))
                     .child(div().font_medium().child("Internal validation"))
                     .child(validation)
                     .child(div().font_medium().child("External error lifecycle"))
@@ -887,17 +898,15 @@ impl Render for QuestionnaireStory {
                                     }),
                             ),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!("External error: {external_error}")),
-                    ),
+                    .child(Self::summary_line(
+                        format!("External error: {external_error}"),
+                        cx,
+                    )),
             )
             .child(
                 section("Navigation state")
                     .description("The host can inspect current item, answers, status, available actions, and events.")
-                    .w(px(600.))
+                    .max_w(px(600.))
                     .child(
                         Button::new("questionnaire-reset")
                             .outline()
@@ -908,7 +917,9 @@ impl Render for QuestionnaireStory {
                     )
                     .child(
                         div()
+                            .w_full()
                             .text_sm()
+                            .text_center()
                             .text_color(cx.theme().muted_foreground)
                             .child(format!(
                                 "Current: {} · enabled items: {} · complete: {}",
@@ -921,25 +932,32 @@ impl Render for QuestionnaireStory {
                                 self.state.read(cx).is_complete()
                             )),
                     )
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child(status_summary))
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child(navigation_summary))
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child(if answer_summary.is_empty() {
-                        "Answers: none".to_string()
-                    } else {
-                        format!("Answers: {answer_summary}")
-                    }))
-                    .children(event_log.into_iter().map(|event| {
-                        div().text_xs().text_color(cx.theme().muted_foreground).child(event)
-                    })),
+                    .child(Self::summary_line(status_summary, cx))
+                    .child(Self::summary_line(navigation_summary, cx))
+                    .child(Self::summary_line(
+                        if answer_summary.is_empty() {
+                            "Answers: none".to_string()
+                        } else {
+                            format!("Answers: {answer_summary}")
+                        },
+                        cx,
+                    ))
+                    .children(
+                        event_log
+                            .into_iter()
+                            .map(|event| Self::summary_line(event, cx)),
+                    ),
             )
             .child(
                 section("Shortcuts and keyboard")
                     .description("The fixture exposes focus, answers, drafts, and events while testing the full keyboard contract.")
-                    .w(px(600.))
+                    .max_w(px(600.))
                     .child(
                         v_flex()
+                            .w_full()
                             .gap_1()
                             .text_sm()
+                            .text_center()
                             .text_color(cx.theme().muted_foreground)
                             .child("Up/Down: move through choices and the freeform input; text editing keeps native arrow behavior.")
                             .child("Left/Right: switch items outside text input and radio focus; Right requires an answer.")
@@ -953,25 +971,22 @@ impl Render for QuestionnaireStory {
                             .child(v_flex().flex_1().gap_2().child(div().font_medium().child("Letters")).child(letters))
                             .child(v_flex().flex_1().gap_2().child(div().font_medium().child("Numbers")).child(numbers)),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "Letters focus: {keyboard_focus} · answer={letters_answer:?} · draft={letters_draft:?}"
-                            )),
-                    )
-                    .children(keyboard_event_log.into_iter().map(|event| {
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(event)
-                    })),
+                    .child(Self::summary_line(
+                        format!(
+                            "Letters focus: {keyboard_focus} · answer={letters_answer:?} · draft={letters_draft:?}"
+                        ),
+                        cx,
+                    ))
+                    .children(
+                        keyboard_event_log
+                            .into_iter()
+                            .map(|event| Self::summary_line(event, cx)),
+                    ),
             )
             .child(
                 section("Controlled current, conditional items, and custom actions")
                     .description("The host synchronizes Environment from the Runtime answer; custom actions use NavigationState visibility.")
-                    .w(px(600.))
+                    .max_w(px(600.))
                     .child(
                         h_flex()
                             .gap_2()
@@ -1003,14 +1018,14 @@ impl Render for QuestionnaireStory {
             .child(
                 section("Card and Dialog composition")
                     .description("GroupBox or Dialog owns the surface and its close behavior; the questionnaire keeps progress, items, and actions together.")
-                    .w(px(600.))
+                    .max_w(px(600.))
                     .child(card)
                     .child(dialog),
             )
             .child(
                 section("Custom choice composition")
                     .description("Customize indicator, content, shortcut renderers, and style seams while preserving Questionnaire state and behavior.")
-                    .w(px(600.))
+                    .max_w(px(600.))
                     .child(custom_choice),
             )
     }

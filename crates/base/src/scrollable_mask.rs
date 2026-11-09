@@ -550,6 +550,16 @@ impl<H: ScrollbarHandle + Clone> Element for ScrollableMask<H> {
                         return;
                     }
 
+                    // With nothing to scroll sideways, a swipe that moves
+                    // vertically at all belongs to the parent scroller.
+                    if is_horizontal
+                        && !delta.y.is_zero()
+                        && scroll_handle.content_size().width
+                            <= scroll_handle.viewport_bounds().size.width
+                    {
+                        return;
+                    }
+
                     // Lock the gesture to the axis it started on, so a diagonal
                     // trackpad swipe cannot flip which mask consumes it from one
                     // event to the next. Line deltas carry no touch phase.
@@ -817,6 +827,53 @@ mod tests {
 
         // Vertical dominant: the list scrolls, the area does not.
         assert_eq!(scroll_handle.offset().x, px(0.));
+        let scroll_top = list_state.logical_scroll_top();
+        assert_ne!((scroll_top.item_ix, scroll_top.offset_in_item), (0, px(0.)));
+    }
+
+    /// A list whose first row is a horizontal scroll area with content that
+    /// fits, like a narrow Markdown table.
+    struct ListWithFittingAreaTest(ListState);
+
+    impl Render for ListWithFittingAreaTest {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(100.)).h(px(100.)).child(
+                list(self.0.clone(), |ix, _, _| {
+                    if ix == 0 {
+                        horizontal_scroll_area(
+                            "fitting-area",
+                            &ScrollHandle::new(),
+                            &Default::default(),
+                            div().w(px(50.)).h(px(40.)),
+                        )
+                        .into_any_element()
+                    } else {
+                        div().w(px(100.)).h(px(40.)).into_any_element()
+                    }
+                })
+                .w_full()
+                .h_full(),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn horizontal_scroll_area_that_fits_bubbles_horizontal_dominant_wheel(cx: &mut TestAppContext) {
+        let list_state = ListState::new(10, ListAlignment::Top, px(0.));
+        let (_, cx) = cx.add_window_view({
+            let list_state = list_state.clone();
+            move |_, _| ListWithFittingAreaTest(list_state.clone())
+        });
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        cx.simulate_event(ScrollEvent {
+            position: point(px(10.), px(10.)),
+            delta: ScrollDelta::Pixels(point(px(-40.), px(-10.))),
+            ..Default::default()
+        });
+        // Nothing to scroll sideways: the list takes the swipe.
         let scroll_top = list_state.logical_scroll_top();
         assert_ne!((scroll_top.item_ix, scroll_top.offset_in_item), (0, px(0.)));
     }

@@ -348,7 +348,7 @@ child
 
 `spawn` 和 `run` 使用相同的授权，按同样的方式在 Host 的 PATH 上查找命令，也同样以清空的环境启动。
 
-它受执行授权约束，授权有三种形态：拒绝（默认）、命令名白名单，或不受限。被拒绝的命令**在调用处抛出**而不是 reject，和被拒绝的 `fs` 路径一样——没人 await 的 rejected promise，等于没人看见的拒绝。
+它受执行授权约束，授权有三种形态：拒绝（默认）、命令名白名单，或不受限。manifest 里白名单写作 `"execute": ["git"]`，不受限写作 `"execute": "*"`；其他字符串（比如 `"git"`）在读取 manifest 时就会报错。被拒绝的命令**在调用处抛出**而不是 reject，和被拒绝的 `fs` 路径一样——没人 await 的 rejected promise，等于没人看见的拒绝。
 
 `process.exit` 在运行时内部是**一个请求，绝不是 `exit(2)`**。它把退出码交给 Host 安装的处理函数，由后者决定怎么做——关闭插件的面板、关闭窗口、结束进程。一个插件不能把 Host 进程带走，而 Host 可能还有未保存的状态。
 
@@ -369,13 +369,13 @@ import.meta.url; // "file:///…/main.js"，当前运行的模块
 process.env.EDITOR; // 默认可读；其他变量要在 manifest 里列出
 ```
 
-这些路径都不需要授权：路径只说明东西在哪里，能否读写仍由 `fs` 授权决定。环境变量不同，因为变量的*值*可能是交给 Host、而不是交给它运行的每个脚本的 token。所以 `process.env` 只包含一组描述用户机器、会话和偏好的默认变量——`HOME`、`USER`、`HOSTNAME`、`LANG`、`TZ`、`PATH`、`EDITOR`、`DISPLAY`、代理设置、XDG 目录及其 Windows 对应变量，但绝不包含 token、密钥或密码——再加上 `capabilities.process.env` 列出的变量，而且只包含已设置的：
+这些路径都不需要授权：路径只说明东西在哪里，能否读写仍由 `fs` 授权决定。环境变量不同，因为变量的*值*可能是交给 Host、而不是交给它运行的每个脚本的 token。所以 `process.env` 只包含一组描述用户机器、会话和偏好的默认变量——`HOME`、`USER`、`HOSTNAME`、`LANG`、`TZ`、`PATH`、`EDITOR`、`DISPLAY`、`NO_PROXY`、XDG 目录及其 Windows 对应变量，但绝不包含 token、密钥或密码——再加上 `capabilities.process.env` 列出的变量，而且只包含已设置的：
 
 ```json
 "process": { "env": ["MY_APP_MODE"] }
 ```
 
-变量名匹配不区分大小写：列出 `HTTP_PROXY` 时，环境里的 `http_proxy` 也能读到，键名保持环境中的原样。默认变量清单统一维护在 [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env)。
+变量名匹配不区分大小写：列出 `HTTP_PROXY` 时，环境里的 `http_proxy` 也能读到，键名保持环境中的原样。代理 URL（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`）不在默认清单里，因为其中可能带有用户名和密码；需要走代理的应用要自己列出它们。默认变量清单统一维护在 [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env)。
 
 它始终是一个对象，所以不授权时 `process.env.X ?? fallback` 也能用。
 
@@ -391,15 +391,17 @@ process.env.EDITOR; // 默认可读；其他变量要在 manifest 里列出
 
 **资源上限**，让失控的脚本报错而不是把窗口一起带走：
 
-| 上限                                       | 值                                                                           |
-| ------------------------------------------ | ---------------------------------------------------------------------------- |
-| 堆                                         | 256 MiB——泄漏表现为一个可捕获的 JavaScript 异常，而不是整个 Host 被 OOM kill |
-| 解释器栈                                   | 1 MiB——深递归表现为 `RangeError`，而不是原生栈溢出                           |
-| 已加载的 JavaScript module                 | 每个源码文件 8 MiB                                                           |
-| 尚未完成的 host task                       | 每个 runtime 1,024 个                                                        |
-| 单次调用耗时：render 与 layout             | 50 ms                                                                        |
-| 单次调用耗时：event 与 task                | 500 ms                                                                       |
-| 单次调用耗时：不在任何调用中，例如模块求值 | 5 秒                                                                         |
+| 上限                                       | 值                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| 堆                                         | 256 MiB——泄漏表现为一个可捕获的 JavaScript 异常，而不是整个 Host 被 OOM kill                           |
+| 解释器栈                                   | 1 MiB——脚本深递归表现为 `RangeError`，而不是原生栈溢出                                                 |
+| 元素嵌套                                   | 64 层——会嵌套得更深的那次调用直接抛错，深树在绘制时不会撑爆原生栈                                      |
+| View 嵌套                                  | 一个套一个的 View 合计 65 层——超出的那次挂载，或 View 挂进它自己，在该位置什么都不画，并记一条错误日志 |
+| 已加载的 JavaScript module                 | 每个源码文件 8 MiB                                                                                     |
+| 尚未完成的 host task                       | 每个 runtime 1,024 个                                                                                  |
+| 单次调用耗时：render 与 layout             | 50 ms                                                                                                  |
+| 单次调用耗时：event 与 task                | 500 ms                                                                                                 |
+| 单次调用耗时：不在任何调用中，例如模块求值 | 5 秒                                                                                                   |
 
 时钟在每一次 Host 调用时重置，这正是渲染路径能比事件回调有更紧预算的原因。**中断无法被 `catch` 吞掉**——这一点有测试来度量，因为如果能被吞掉，中断就根本不是一道防线。每个 WebSocket 另有一条由 `read`、`write` 与 `close` 共用的 8-command 队列；队列已满时新操作会 reject，并要求调用方等待 outstanding work。
 

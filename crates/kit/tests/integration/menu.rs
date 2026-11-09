@@ -5,12 +5,12 @@ use gpui_kit::component::{
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     text::{TextView, TextViewState},
 };
-use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
+use gpui_kit::test::{ClickOptions, TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
     InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, LongPressEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, TestAppContext, TouchPhase, Window, WindowHandle,
-    actions, base::Root, div, point, prelude::*, px, size,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, TestAppContext, TouchPhase, Window,
+    WindowHandle, actions, base::Root, div, point, prelude::*, px, size,
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -102,6 +102,44 @@ async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestA
         window.try_find("popup-menu").is_none()
     })
     .await;
+}
+
+struct Placement;
+impl Render for Placement {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(
+                Button::new("placement")
+                    .label("Placement")
+                    .dropdown_menu(|menu, _, _| {
+                        menu.menu_with_check("Left", true, Box::new(Save))
+                            .menu_with_check("Right", false, Box::new(Save))
+                            .separator()
+                            .menu("Reset", Box::new(Save))
+                    }),
+            )
+    }
+}
+
+/// The check a menu draws beside an item is its state for assistive
+/// technology too, so a screen reader can say which option is chosen. An
+/// option left unchecked says so, and a plain command has no check state.
+#[gpui_kit::test]
+fn a_checked_menu_item_reports_its_check(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |_, cx| {
+        cx.new(|_| Placement)
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("placement", cx);
+        let menu = window.within("popup-menu");
+        assert_eq!(menu.find(0usize).checked(), Some(true));
+        assert_eq!(menu.find(1usize).checked(), Some(false));
+        assert_eq!(menu.find(3usize).checked(), None);
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]
@@ -312,6 +350,92 @@ async fn submenu_opens_unclipped_from_a_scrollable_menu(cx: &mut TestAppContext)
         window.try_find("popup-menu").is_none()
     })
     .await;
+}
+
+/// 48 options in a menu that shows about five at a time, like a time picker,
+/// with `checked` as the current one.
+struct ScrollableOptions {
+    checked: Option<usize>,
+}
+impl Render for ScrollableOptions {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let checked = self.checked;
+        div()
+            .size_full()
+            .p_4()
+            .child(
+                Button::new("options")
+                    .label("Options")
+                    .dropdown_menu(move |menu, _, _| {
+                        (0..48).fold(menu.scrollable(true).max_h(px(160.)), |menu, ix| {
+                            menu.menu_with_check(
+                                format!("Option {ix}"),
+                                checked == Some(ix),
+                                Box::new(Save),
+                            )
+                        })
+                    }),
+            )
+    }
+}
+
+fn open_scrollable_options(checked: Option<usize>, cx: &mut TestAppContext) -> AnyWindowHandle {
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |_, cx| {
+        cx.new(|_| ScrollableOptions { checked })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("options", cx);
+    })
+    .unwrap();
+    handle.into()
+}
+
+/// How far the item `ix` of the open menu sits below the top of the menu.
+fn menu_item_top(window: &mut Window, ix: usize) -> Pixels {
+    let menu_top = window.find("popup-menu").bounds().top();
+    window.within("popup-menu").find(ix).bounds().top() - menu_top
+}
+
+/// A scrollable menu opens scrolled so its checked item is the first one in
+/// view, as a native picker opens on its current value, and leaves scrolling
+/// to the user after that. A menu with nothing checked opens on its first item.
+#[gpui_kit::test]
+fn a_scrollable_menu_opens_on_its_checked_item(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+
+    let handle = open_scrollable_options(None, cx);
+    let first_item_top = cx
+        .update_window(handle, |_, window, cx| {
+            let top = menu_item_top(window, 0);
+            window.render_frame(cx);
+            window.render_frame(cx);
+            assert!(window.within("popup-menu").find(0usize).visible());
+            assert_eq!(menu_item_top(window, 0), top);
+            top
+        })
+        .unwrap();
+
+    let handle = open_scrollable_options(Some(30), cx);
+    cx.update_window(handle, |_, window, cx| {
+        // The items are measured on the menu's first frame, and it scrolls on
+        // the next one.
+        window.render_frame(cx);
+        let menu = window.within("popup-menu");
+        assert!(menu.find(30usize).visible(), "{:?}", menu.find(30usize));
+        assert!(!menu.find(0usize).visible());
+        assert_eq!(menu_item_top(window, 30), first_item_top);
+
+        // It does not scroll back once the user scrolls it.
+        window.within("popup-menu").scroll(
+            30usize,
+            ScrollDelta::Pixels(point(px(0.), px(60.))),
+            cx,
+        );
+        window.render_frame(cx);
+        assert_eq!(menu_item_top(window, 30), first_item_top + px(60.));
+    })
+    .unwrap();
 }
 
 struct ContextMenuInputs {
@@ -733,8 +857,8 @@ fn hovering_away_from_a_keyboard_entered_submenu_refocuses_its_parent(cx: &mut T
         window.render_frame(cx);
         window.press("down", cx);
         window.press("down", cx);
-        // There is no room on the right, so the submenu opens to the left.
-        window.press("left", cx);
+        // There is room on the right, so the submenu opens there.
+        window.press("right", cx);
         window.render_frame(cx);
         assert_eq!(
             window.within("submenu").find("popup-menu").focused(),
@@ -1049,4 +1173,139 @@ fn nested_context_menu_uses_the_innermost_right_click_target(cx: &mut TestAppCon
         assert_eq!(outer_chosen.get(), 1);
     })
     .unwrap();
+}
+
+/// A context menu over the whole window, with one submenu.
+struct WindowMenu {
+    parent_width: f32,
+    submenu_width: f32,
+}
+impl Render for WindowMenu {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let parent_width = self.parent_width;
+        let submenu_width = self.submenu_width;
+        div()
+            .id("window-menu")
+            .test_support()
+            .size_full()
+            .context_menu(move |menu, window, cx| {
+                menu.min_w(px(parent_width))
+                    .submenu("More", window, cx, move |menu, _, _| {
+                        menu.min_w(px(submenu_width))
+                            .menu("Save copy", Box::new(Save))
+                    })
+            })
+    }
+}
+
+/// Opens [`WindowMenu`]'s menu at the window's `x` and its submenu, and
+/// gives back the submenu item's bounds and the submenu's.
+async fn open_submenu_at(
+    x: f32,
+    parent_width: f32,
+    submenu_width: f32,
+    cx: &mut TestAppContext,
+) -> (gpui_kit::Bounds<Pixels>, gpui_kit::Bounds<Pixels>) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
+        cx.new(|_| WindowMenu {
+            parent_width,
+            submenu_width,
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let options = ClickOptions::new()
+            .with_offset(point(px(x), px(40.)))
+            .with_button(MouseButton::Right);
+        window.click_with_options("window-menu", options, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    // The pointer rests on the first item, which opens its submenu; the
+    // parent is the menu that isn't inside another.
+    let parent_menu = |window: &mut Window| {
+        window
+            .find_all("popup-menu")
+            .into_iter()
+            .min_by_key(|menu| menu.path().len())
+            .expect("the menu")
+            .bounds()
+    };
+    let item = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let parent = parent_menu(window);
+            let item = window
+                .find_all(0usize)
+                .into_iter()
+                .map(|item| item.bounds())
+                .find(|bounds| parent.contains(&bounds.center()))
+                .expect("the submenu's item");
+            if window.try_find("submenu").is_none() {
+                window.dispatch_event(
+                    MouseMoveEvent {
+                        position: item.center(),
+                        pressed_button: None,
+                        modifiers: Default::default(),
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            }
+            item
+        })
+        .unwrap();
+    cx.wait_for(handle.into(), Duration::from_secs(1), |window, _| {
+        window.try_find("submenu").is_some()
+    })
+    .await;
+    let submenu = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.find("submenu").bounds()
+        })
+        .unwrap();
+    (item, submenu)
+}
+
+/// A submenu with room on the right opens there, though its menu is within
+/// the 500 px cap on a menu's width of the window's right edge.
+#[gpui_kit::test]
+async fn a_submenu_with_room_opens_on_the_right(cx: &mut TestAppContext) {
+    let (item, submenu) = open_submenu_at(400., 128., 128., cx).await;
+    assert!(
+        item.left() + px(500.) > px(800.) && item.right() + submenu.size.width < px(800.),
+        "the menu {item:?} is within 500 px of the right edge, with room after it"
+    );
+    assert!(
+        submenu.center().x > item.right(),
+        "the submenu {submenu:?} opens right of {item:?}"
+    );
+}
+
+/// A submenu without room on the right opens on the left.
+#[gpui_kit::test]
+async fn a_submenu_by_the_window_s_edge_opens_on_the_left(cx: &mut TestAppContext) {
+    let (item, submenu) = open_submenu_at(790., 128., 128., cx).await;
+    assert!(
+        submenu.center().x < item.left(),
+        "the submenu {submenu:?} opens left of {item:?}"
+    );
+}
+
+/// The first layout must use the measured submenu width, not its parent's width.
+#[gpui_kit::test]
+async fn submenus_with_different_widths_choose_the_side_that_fits(cx: &mut TestAppContext) {
+    let (item, submenu) = open_submenu_at(420., 128., 320., cx).await;
+    assert!(
+        submenu.right() <= item.left(),
+        "wide submenu {submenu:?} should open left of {item:?}"
+    );
+
+    let (item, submenu) = open_submenu_at(330., 300., 128., cx).await;
+    assert!(
+        submenu.center().x > item.right(),
+        "narrow submenu {submenu:?} should open right of {item:?}"
+    );
 }

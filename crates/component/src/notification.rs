@@ -462,6 +462,7 @@ impl Render for Notification {
                     .child(
                         Button::new("close")
                             .icon(IconName::Close)
+                            .accessibility_label("Close")
                             .ghost()
                             .xsmall()
                             .on_click(cx.listener(|this, _, window, cx| {
