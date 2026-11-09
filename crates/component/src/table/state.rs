@@ -2457,10 +2457,18 @@ where
                                                         ))
                                                         .when(is_cell_selected, |this| {
                                                             this.child(
-                                                                div().absolute().inset_0().bg(cx
-                                                                    .theme()
-                                                                    .tokens
-                                                                    .table_active),
+                                                                div()
+                                                                    .absolute()
+                                                                    .inset_0()
+                                                                    .bg(cx
+                                                                        .theme()
+                                                                        .tokens
+                                                                        .table_active)
+                                                                    .border_1()
+                                                                    .border_color(
+                                                                        cx.theme()
+                                                                            .table_active_border,
+                                                                    ),
                                                             )
                                                         })
                                                         .when(
@@ -2624,7 +2632,9 @@ where
                                 div()
                                     .absolute()
                                     .inset_0()
-                                    .bg(cx.theme().tokens.table_active),
+                                    .bg(cx.theme().tokens.table_active)
+                                    .border_1()
+                                    .border_color(cx.theme().table_active_border),
                             )
                         })
                         .when(is_cell_right_clicked && !is_cell_selected, |this| {
