@@ -1,4 +1,5 @@
 use gpui_kit::assets::IconName as AssetIconName;
+use gpui_kit::base::LayoutDirection;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IconName, IndexPath, Sizable as _, Size,
     button::{Button, Toggle},
@@ -22,6 +23,10 @@ use crate::{ChangeStorySize, section, story_toolbar_group};
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = toolbar_story, no_json)]
 struct ToggleDisabled;
+
+#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = toolbar_story, no_json)]
+struct ToggleRtl;
 
 pub struct ToolbarStory {
     focus_handle: FocusHandle,
@@ -87,7 +92,7 @@ fn icon_button(id: &'static str, icon: IconName, tooltip: &'static str, disabled
         .disabled(disabled)
 }
 
-fn toolbar_options(size: Size, disabled: bool) -> impl IntoElement {
+fn toolbar_options(size: Size, disabled: bool, rtl: bool) -> impl IntoElement {
     let label = match size {
         Size::XSmall => "XSmall",
         Size::Small => "Small",
@@ -114,6 +119,7 @@ fn toolbar_options(size: Size, disabled: bool) -> impl IntoElement {
             )
             .separator()
             .menu_with_check("Disabled", disabled, Box::new(ToggleDisabled))
+            .menu_with_check("Right to Left", rtl, Box::new(ToggleRtl))
         },
     )
 }
@@ -156,7 +162,16 @@ impl Render for ToolbarStory {
                 this.disabled = !this.disabled;
                 cx.notify();
             }))
-            .child(toolbar_options(self.size, self.disabled))
+            .on_action(cx.listener(|_, _: &ToggleRtl, _, cx| {
+                // Layout direction is global: this flips the whole app.
+                let rtl = !LayoutDirection::global(cx).is_rtl();
+                if rtl { LayoutDirection::Rtl } else { LayoutDirection::Ltr }.set_global(cx);
+            }))
+            .child(toolbar_options(
+                self.size,
+                self.disabled,
+                LayoutDirection::global(cx).is_rtl(),
+            ))
             .child(
                 section("Default")
                     .description("Keep document, history, and formatting commands in one compact editor toolbar.")

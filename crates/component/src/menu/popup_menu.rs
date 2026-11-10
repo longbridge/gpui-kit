@@ -13,7 +13,7 @@ use gpui::{
     prelude::FluentBuilder, px, rems,
 };
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
-use gpui_base::TestSupportExt as _;
+use gpui_base::{LayoutDirection, TestSupportExt as _};
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -1278,9 +1278,8 @@ impl PopupMenu {
     /// Calculate the anchor corner and left offset for child submenu
     fn update_submenu_menu_anchor(&mut self, window: &Window, cx: &App) {
         let bounds = self.bounds;
-        // Open the submenu on the left only when, placed at this menu's right
-        // edge, it would run past the window's. Its width is the one it was
-        // last drawn at, or this menu's own until it has been drawn.
+        // The submenu's width is the one it was last drawn at, or this
+        // menu's own until it has been drawn.
         let submenu_width = self
             .selected_index
             .and_then(|ix| match self.menu_items.get(ix) {
@@ -1290,7 +1289,14 @@ impl PopupMenu {
             .filter(|width| *width > Pixels::ZERO)
             .unwrap_or(bounds.size.width);
         let rem_size = window.rem_size();
-        let (anchor, left) = if bounds.right() + submenu_width > window.viewport_size().width {
+        // A submenu opens on the end side: right in LTR, left in RTL, and
+        // flips only when it would run past the window on that side.
+        let open_left = if LayoutDirection::global(cx).is_rtl() {
+            bounds.left() - submenu_width >= Pixels::ZERO
+        } else {
+            bounds.right() + submenu_width > window.viewport_size().width
+        };
+        let (anchor, left) = if open_left {
             (Anchor::TopRight, -rems(1.).to_pixels(rem_size))
         } else {
             (
@@ -1503,9 +1509,13 @@ impl PopupMenu {
                                 .justify_between()
                                 .child(label.clone())
                                 .child(
-                                    Icon::new(IconName::ChevronRight)
-                                        .xsmall()
-                                        .text_color(cx.theme().muted_foreground),
+                                    Icon::new(if LayoutDirection::global(cx).is_rtl() {
+                                        IconName::ChevronLeft
+                                    } else {
+                                        IconName::ChevronRight
+                                    })
+                                    .xsmall()
+                                    .text_color(cx.theme().muted_foreground),
                                 ),
                         ),
                 )

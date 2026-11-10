@@ -38,6 +38,7 @@ mod history;
 mod hover_card;
 mod index_path;
 pub mod input;
+mod layout_direction;
 mod link;
 mod list_settings;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -128,6 +129,7 @@ pub use history::History;
 pub use hover_card::{HoverCard, HoverCardState};
 pub use index_path::IndexPath;
 pub use input::{Editor, Input, InputBase, InputStyles, Textarea};
+pub use layout_direction::{LayoutDirection, LogicalStyledExt};
 pub use link::{Link, LinkStyles};
 pub use list_settings::ListSettings;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -244,6 +246,7 @@ pub fn init(cx: &mut App) {
     let _ = Theme::global_mut(cx);
     GlobalState::init(cx);
     reduce_motion::init(cx);
+    layout_direction::init(cx);
     dialog::init(cx);
     focus_trap::init(cx);
     popover::init(cx);

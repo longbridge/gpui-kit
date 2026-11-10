@@ -6,7 +6,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StyledExt as _, TestSupportExt as _};
+use crate::{LayoutDirection, StyledExt as _, TestSupportExt as _};
 
 /// An unstyled container that groups a set of controls and owns roving
 /// keyboard focus among them.
@@ -129,8 +129,11 @@ fn handle_key_down(
     }
 
     let forward = match (axis, event.keystroke.key.as_str()) {
-        (Axis::Horizontal, "left") | (Axis::Vertical, "up") => Some(false),
-        (Axis::Horizontal, "right") | (Axis::Vertical, "down") => Some(true),
+        // In a right-to-left layout the next item sits to the left.
+        (Axis::Horizontal, "left") => Some(LayoutDirection::global(cx).is_rtl()),
+        (Axis::Horizontal, "right") => Some(!LayoutDirection::global(cx).is_rtl()),
+        (Axis::Vertical, "up") => Some(false),
+        (Axis::Vertical, "down") => Some(true),
         _ => None,
     };
 
@@ -379,6 +382,24 @@ mod tests {
 
             cx.simulate_keystrokes("left");
             assert_focused(cx, &third, "third (wrapped back)");
+        }
+
+        #[gpui::test]
+        fn arrow_keys_follow_global_rtl_direction(cx: &mut gpui::TestAppContext) {
+            let ([first, second, third], cx) = harness(cx);
+            cx.update(|_, cx| crate::LayoutDirection::Rtl.set_global(cx));
+
+            // In RTL the next item sits to the left.
+            cx.simulate_keystrokes("left");
+            assert_focused(cx, &second, "second");
+            cx.simulate_keystrokes("left");
+            assert_focused(cx, &third, "third");
+            cx.simulate_keystrokes("right");
+            assert_focused(cx, &second, "second (back)");
+            cx.simulate_keystrokes("right");
+            cx.simulate_keystrokes("right");
+            assert_focused(cx, &third, "third (wrapped back)");
+            let _ = first;
         }
 
         #[gpui::test]
