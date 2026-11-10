@@ -292,6 +292,7 @@ Diff::new(&self.diff)
     .change_background(true)
     .hover_highlight(DiffHoverHighlight::None)
     .soft_wrap(false)
+    .split_ratio(0.5)
     .h(rems(24.))
 ```
 
@@ -303,6 +304,10 @@ Diff::new(&self.diff)
 - `hover_highlight` emphasizes the line, its number, or both under the pointer.
 - `soft_wrap(true)` wraps long lines at the column width, and rows grow instead
   of scrolling horizontally.
+- `split_ratio` gives the original column that share of the width in Split
+  mode (0.5 by default, clamped to 0.1–0.9), for example from a divider the
+  application lets users drag. Without soft wrap, neither column gets narrower
+  than its longest line.
 
 Syntax language is detected from each file's path; `DiffFile::with_language`
 overrides it with a highlighter language name such as `rust`. Enable the

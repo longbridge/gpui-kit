@@ -104,9 +104,11 @@ pub(crate) struct LayoutKey {
     line_number: bool,
     marker_lane: bool,
     soft_wrap: bool,
+    split_ratio: f32,
 }
 
 impl LayoutKey {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         rem: Pixels,
         font_size: Pixels,
@@ -115,6 +117,7 @@ impl LayoutKey {
         line_number: bool,
         marker_lane: bool,
         soft_wrap: bool,
+        split_ratio: f32,
     ) -> Self {
         Self {
             rem,
@@ -124,6 +127,7 @@ impl LayoutKey {
             line_number,
             marker_lane,
             soft_wrap,
+            split_ratio,
         }
     }
 }
