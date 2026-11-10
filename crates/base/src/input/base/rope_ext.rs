@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use ropey::{LineType, Rope, RopeSlice};
 use sum_tree::Bias;
+use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
 
 /// Parser-independent byte/row/column position used for incremental edits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -241,6 +242,32 @@ pub trait RopeExt {
     /// ```
     fn clip_offset(&self, offset: usize, bias: Bias) -> usize;
 
+    /// Get the byte offset where the grapheme cluster before `offset` starts.
+    ///
+    /// An `offset` inside a grapheme cluster returns the start of that cluster.
+    ///
+    /// ```
+    /// use gpui_base::input::{Rope, RopeExt};
+    ///
+    /// let rope = Rope::from("a👍🏽b");
+    /// assert_eq!(rope.previous_grapheme_boundary("a👍🏽".len()), 1);
+    /// assert_eq!(rope.previous_grapheme_boundary(0), 0);
+    /// ```
+    fn previous_grapheme_boundary(&self, offset: usize) -> usize;
+
+    /// Get the byte offset where the grapheme cluster at `offset` ends.
+    ///
+    /// An `offset` inside a grapheme cluster returns the end of that cluster.
+    ///
+    /// ```
+    /// use gpui_base::input::{Rope, RopeExt};
+    ///
+    /// let rope = Rope::from("a👍🏽b");
+    /// assert_eq!(rope.next_grapheme_boundary(1), "a👍🏽".len());
+    /// assert_eq!(rope.next_grapheme_boundary(rope.len()), rope.len());
+    /// ```
+    fn next_grapheme_boundary(&self, offset: usize) -> usize;
+
     /// Convert offset in characters to byte offset (0-based).
     ///
     /// Run in O(n) time.
@@ -434,6 +461,50 @@ impl RopeExt for Rope {
             self.floor_char_boundary(offset)
         } else {
             self.ceil_char_boundary(offset)
+        }
+    }
+
+    fn previous_grapheme_boundary(&self, offset: usize) -> usize {
+        let offset = self.clip_offset(offset, Bias::Right);
+        if offset == 0 {
+            return 0;
+        }
+        let mut cursor = GraphemeCursor::new(offset, self.len(), true);
+        let (mut chunk, mut chunk_start) = self.chunk(offset - 1);
+        loop {
+            match cursor.prev_boundary(chunk, chunk_start) {
+                Ok(boundary) => return boundary.unwrap_or(0),
+                Err(GraphemeIncomplete::PrevChunk) => {
+                    (chunk, chunk_start) = self.chunk(chunk_start - 1);
+                }
+                Err(GraphemeIncomplete::PreContext(end)) => {
+                    let (context, context_start) = self.chunk(end - 1);
+                    cursor.provide_context(context, context_start);
+                }
+                Err(_) => return self.clip_offset(offset - 1, Bias::Left),
+            }
+        }
+    }
+
+    fn next_grapheme_boundary(&self, offset: usize) -> usize {
+        let offset = self.clip_offset(offset, Bias::Left);
+        if offset >= self.len() {
+            return self.len();
+        }
+        let mut cursor = GraphemeCursor::new(offset, self.len(), true);
+        let (mut chunk, mut chunk_start) = self.chunk(offset);
+        loop {
+            match cursor.next_boundary(chunk, chunk_start) {
+                Ok(boundary) => return boundary.unwrap_or(self.len()),
+                Err(GraphemeIncomplete::NextChunk) => {
+                    (chunk, chunk_start) = self.chunk(chunk_start + chunk.len());
+                }
+                Err(GraphemeIncomplete::PreContext(end)) => {
+                    let (context, context_start) = self.chunk(end - 1);
+                    cursor.provide_context(context, context_start);
+                }
+                Err(_) => return self.clip_offset(offset + 1, Bias::Right),
+            }
         }
     }
 
@@ -697,6 +768,26 @@ mod tests {
         // Out of bounds
         assert_eq!(rope.clip_offset(26, Bias::Left), 26);
         assert_eq!(rope.clip_offset(100, Bias::Left), 26);
+    }
+
+    #[test]
+    fn test_grapheme_boundaries_match_unicode_segmentation() {
+        use unicode_segmentation::UnicodeSegmentation as _;
+
+        let text = "x".repeat(1500) + "🇸🇪🇸🇪🇸🇪" + "👨‍👩‍👧".repeat(200).as_str() + "e\u{301}\r\nend";
+        let rope = Rope::from(text.as_str());
+        let mut boundaries: Vec<usize> = text.grapheme_indices(true).map(|(ix, _)| ix).collect();
+        boundaries.push(text.len());
+
+        for pair in boundaries.windows(2) {
+            assert_eq!(rope.next_grapheme_boundary(pair[0]), pair[1]);
+            assert_eq!(rope.previous_grapheme_boundary(pair[1]), pair[0]);
+            for inside in pair[0] + 1..pair[1] {
+                assert_eq!(rope.previous_grapheme_boundary(inside), pair[0]);
+            }
+        }
+        assert_eq!(rope.previous_grapheme_boundary(0), 0);
+        assert_eq!(rope.next_grapheme_boundary(text.len()), text.len());
     }
 
     #[test]
