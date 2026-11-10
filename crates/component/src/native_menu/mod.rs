@@ -311,10 +311,17 @@ fn image_format_from_bytes(bytes: &[u8]) -> Option<ImageFormat> {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn is_svg_bytes(bytes: &[u8]) -> bool {
-    let text = match std::str::from_utf8(&bytes[..bytes.len().min(256)]) {
-        Ok(text) => text.trim_start(),
+    let head = &bytes[..bytes.len().min(256)];
+    let text = match std::str::from_utf8(head) {
+        Ok(text) => text,
+        // The 256-byte cut can land inside a multi-byte character; keep the
+        // complete characters before it.
+        Err(err) if err.error_len().is_none() => {
+            std::str::from_utf8(&head[..err.valid_up_to()]).unwrap_or_default()
+        }
         Err(_) => return false,
-    };
+    }
+    .trim_start();
     text.starts_with("<svg") || text.starts_with("<?xml")
 }
 
@@ -498,6 +505,16 @@ mod tests {
             )
             .expect("absolute icon should resolve from the filesystem");
             assert_eq!(image.bytes, FILE_SVG);
+        }
+
+        #[test]
+        fn test_svg_bytes_detected_when_256_byte_cut_splits_a_character() {
+            // 255 ASCII bytes, then a 3-byte character across the 256-byte cut.
+            let mut svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><title>"#.to_vec();
+            svg.resize(255, b'a');
+            svg.extend_from_slice("가</title></svg>".as_bytes());
+
+            assert_eq!(image_format_from_bytes(&svg), Some(ImageFormat::Svg));
         }
 
         #[test]
