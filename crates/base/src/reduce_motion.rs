@@ -21,11 +21,11 @@
 //!   D-Bus, so the reading lands a moment after `init` returns, and Base keeps
 //!   following the portal's change signal for the life of the application.
 //!
-//! An application owns the flag once it sets it. Base writes the
-//! flag only while it still holds what Base last wrote (or GPUI's initial
-//! `false`), so an application that calls [`App::set_reduce_motion`] after
-//! `init` is never overridden by a later reading, and one that wants to follow
-//! the system again calls [`apply_system_reduce_motion`].
+//! Use [`set_reduce_motion_override`] for an explicit application choice,
+//! including a choice equal to the current flag, or to resume the system
+//! preference. A direct [`App::set_reduce_motion`] call retains the legacy
+//! value-comparison behavior: Base leaves a value different from what it last
+//! wrote alone, but cannot recognize a same-value override.
 //!
 //! Under GPUI's test scheduler the platform is never consulted, whichever
 //! crate's tests are running: a probe that answers from another thread would
@@ -34,11 +34,12 @@
 
 use gpui::{App, Global};
 
-/// What Base last wrote into [`App::set_reduce_motion`], and whether it is
-/// already listening for the platform to change its mind.
+/// The last system reading, flag ownership and platform-listener state.
 #[derive(Default)]
 struct SystemReduceMotion {
     applied: Option<bool>,
+    system: Option<bool>,
+    overridden: bool,
     following: bool,
 }
 
@@ -53,12 +54,13 @@ pub(crate) fn init(cx: &mut App) {
 /// [`App::set_reduce_motion`].
 ///
 /// `gpui_base::init` calls this once. Call it again to re-read the preference
-/// on a platform Base does not follow live — macOS and Windows post no
-/// notification Base can subscribe to without a window, so a change made
-/// while the application runs reaches it only through this call.
+/// on a platform Base does not follow live. The current macOS and Windows
+/// implementations read the preference only when this function is called.
 ///
-/// The application wins over the system: when the flag no longer holds what
-/// Base last wrote, the application set it, and this call leaves it alone.
+/// Explicit overrides are preserved. For direct [`App::set_reduce_motion`]
+/// calls, a flag different from what Base last wrote is also left alone; a
+/// same-value application choice cannot be detected. This function does not
+/// clear either override: use [`set_reduce_motion_override`] with `None`.
 /// Where the platform cannot say (wasm, an unsupported desktop, a Linux
 /// session without the portal) the flag is left as it is, and under GPUI's
 /// test scheduler the platform is not asked at all.
@@ -71,6 +73,37 @@ pub fn apply_system_reduce_motion(cx: &mut App) {
     if !state.following {
         state.following = true;
         platform::follow(cx);
+    }
+}
+
+/// Sets or clears the application's reduced-motion override.
+///
+/// `Some(value)` sets [`App::reduce_motion`] and prevents Base's system readings
+/// from changing it, even when the value already matches. The application can
+/// still change the flag directly; system readings continue to be cached.
+///
+/// `None` resumes the last known system preference and calls
+/// [`apply_system_reduce_motion`] to refresh it through the existing platform
+/// mechanism. If no system value is known, the current flag is kept until a
+/// reading arrives. On Linux, an existing portal listener supplies updates;
+/// clearing an override does not restart that listener or force a new read.
+///
+/// This also clears an override made through a direct [`App::set_reduce_motion`]
+/// call. Under the test scheduler, explicit choices and cached readings still
+/// apply, but the platform is never queried.
+pub fn set_reduce_motion_override(preference: Option<bool>, cx: &mut App) {
+    if let Some(value) = preference {
+        cx.default_global::<SystemReduceMotion>().overridden = true;
+        cx.set_reduce_motion(value);
+    } else {
+        let current = cx.reduce_motion();
+        let state = cx.default_global::<SystemReduceMotion>();
+        state.overridden = false;
+        // Release both explicit ownership and the legacy value-comparison guard.
+        state.applied = Some(current);
+        let system = state.system;
+        apply_preference(system, cx);
+        apply_system_reduce_motion(cx);
     }
 }
 
@@ -90,10 +123,10 @@ fn apply_preference(preference: Option<bool>, cx: &mut App) {
     let Some(reduce) = preference else {
         return;
     };
-    let applied = cx
-        .try_global::<SystemReduceMotion>()
-        .and_then(|state| state.applied);
-    if cx.reduce_motion() != applied.unwrap_or(false) {
+    let state = cx.default_global::<SystemReduceMotion>();
+    state.system = Some(reduce);
+    let applied = state.applied;
+    if state.overridden || cx.reduce_motion() != applied.unwrap_or(false) {
         return;
     }
     cx.set_reduce_motion(reduce);
@@ -186,7 +219,129 @@ mod platform {
 mod tests {
     use gpui::TestAppContext;
 
-    use super::{apply_preference, apply_system_reduce_motion};
+    use super::{apply_preference, apply_system_reduce_motion, set_reduce_motion_override};
+
+    #[gpui::test]
+    fn an_explicit_same_value_override_survives_system_changes(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            for value in [false, true] {
+                set_reduce_motion_override(None, cx);
+                apply_preference(Some(value), cx);
+                set_reduce_motion_override(Some(value), cx);
+                apply_preference(Some(!value), cx);
+                assert_eq!(cx.reduce_motion(), value);
+                apply_preference(Some(value), cx);
+                apply_preference(Some(!value), cx);
+                assert_eq!(cx.reduce_motion(), value);
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_an_override_restores_the_latest_system_reading(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            apply_preference(Some(false), cx);
+            set_reduce_motion_override(Some(true), cx);
+            apply_preference(Some(true), cx);
+            apply_preference(Some(false), cx);
+            assert!(cx.reduce_motion());
+            set_reduce_motion_override(None, cx);
+            assert!(!cx.reduce_motion());
+            apply_preference(Some(true), cx);
+            assert!(cx.reduce_motion());
+
+            set_reduce_motion_override(Some(false), cx);
+            apply_preference(Some(false), cx);
+            apply_preference(Some(true), cx);
+            assert!(!cx.reduce_motion());
+            set_reduce_motion_override(None, cx);
+            assert!(cx.reduce_motion());
+            apply_preference(Some(false), cx);
+            assert!(!cx.reduce_motion());
+        });
+    }
+
+    #[gpui::test]
+    fn an_override_before_the_first_reading_is_explicit_even_when_false(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            set_reduce_motion_override(Some(false), cx);
+            apply_preference(Some(true), cx);
+            assert!(!cx.reduce_motion());
+            set_reduce_motion_override(None, cx);
+            assert!(cx.reduce_motion());
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_without_a_system_reading_keeps_the_flag_until_one_arrives(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            set_reduce_motion_override(Some(true), cx);
+            apply_preference(None, cx);
+            set_reduce_motion_override(None, cx);
+            assert!(cx.reduce_motion());
+            apply_preference(Some(false), cx);
+            assert!(!cx.reduce_motion());
+        });
+    }
+
+    #[gpui::test]
+    fn clearing_can_resume_after_a_legacy_direct_override(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            apply_preference(Some(false), cx);
+            cx.set_reduce_motion(true);
+            apply_preference(Some(false), cx);
+            assert!(cx.reduce_motion());
+            set_reduce_motion_override(None, cx);
+            assert!(!cx.reduce_motion());
+            // Direct setters retain their previous value-comparison contract.
+            cx.set_reduce_motion(true);
+            apply_preference(Some(false), cx);
+            assert!(cx.reduce_motion());
+        });
+    }
+
+    #[gpui::test]
+    fn unknown_readings_preserve_the_last_known_system_preference(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            apply_preference(Some(true), cx);
+            set_reduce_motion_override(Some(false), cx);
+            apply_preference(None, cx);
+            set_reduce_motion_override(None, cx);
+            assert!(cx.reduce_motion());
+        });
+    }
+
+    #[gpui::test]
+    fn the_application_can_change_its_explicit_override_without_yielding_ownership(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(|cx| {
+            apply_preference(Some(false), cx);
+            set_reduce_motion_override(Some(true), cx);
+            cx.set_reduce_motion(false);
+            apply_preference(Some(true), cx);
+            assert!(!cx.reduce_motion());
+            set_reduce_motion_override(None, cx);
+            assert!(cx.reduce_motion());
+        });
+    }
+
+    #[gpui::test]
+    fn repeated_clears_and_later_readings_respect_the_current_owner(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            apply_preference(Some(false), cx);
+            set_reduce_motion_override(Some(true), cx);
+            set_reduce_motion_override(None, cx);
+            set_reduce_motion_override(None, cx);
+            assert!(!cx.reduce_motion());
+            set_reduce_motion_override(Some(false), cx);
+            // A platform result arriving after the new choice must only cache.
+            apply_preference(Some(true), cx);
+            assert!(!cx.reduce_motion());
+            set_reduce_motion_override(None, cx);
+            assert!(cx.reduce_motion());
+        });
+    }
 
     #[gpui::test]
     fn a_system_preference_for_reduced_motion_sets_the_flag(cx: &mut TestAppContext) {
