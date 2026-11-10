@@ -1,6 +1,84 @@
-use gpui::{App, Div, Entity, InteractiveElement as _, IntoElement, RenderOnce, Stateful, Window};
+use gpui::{
+    App, Div, Entity, EntityId, InteractiveElement as _, IntoElement, Pixels, ShapedLine,
+    SharedString, Stateful, TextRun, TextStyle, View, ViewElement, Window, px,
+};
 
-use super::{EditorMode, InputBaseState, InputModeKind};
+use super::{EditorMode, InputBaseState, InputModeKind, element::LINE_NUMBER_RIGHT_MARGIN};
+
+/// Supplies computed line-number geometry and glyphs for a single rendered frame.
+///
+/// The element owns this renderer, never the editing state: application styling
+/// must not become retained Base data. Measurement runs before wrapping; shaping
+/// runs only for visible buffer lines after wrapping and folding are resolved.
+pub trait EditorLineNumberRenderer: 'static {
+    /// Returns the number lane width (excluding the gap) and resolved gap.
+    /// A zero digit count requests only the gap when line numbers are hidden.
+    fn measure_line_numbers(
+        &self,
+        digit_count: usize,
+        body_style: &TextStyle,
+        window: &Window,
+    ) -> (Pixels, Pixels);
+
+    /// Shapes one supported, one-based line number, without padding characters.
+    fn shape_line_number(
+        &self,
+        number: usize,
+        is_active: bool,
+        body_style: &TextStyle,
+        window: &Window,
+        cx: &App,
+    ) -> ShapedLine;
+}
+
+impl EditorLineNumberRenderer for () {
+    fn measure_line_numbers(
+        &self,
+        digit_count: usize,
+        body_style: &TextStyle,
+        window: &Window,
+    ) -> (Pixels, Pixels) {
+        if digit_count == 0 {
+            return (px(0.), LINE_NUMBER_RIGHT_MARGIN);
+        }
+        let font_size = body_style.font_size.to_pixels(window.rem_size());
+        let font_id = window.text_system().resolve_font(&body_style.font());
+        // Proportional digits can differ in width; every supported digit must fit.
+        let width = "0123456789"
+            .chars()
+            .map(|digit| window.text_system().layout_width(font_id, font_size, digit))
+            .fold(px(0.), Pixels::max)
+            * digit_count;
+        (width, LINE_NUMBER_RIGHT_MARGIN)
+    }
+
+    fn shape_line_number(
+        &self,
+        number: usize,
+        _: bool,
+        body_style: &TextStyle,
+        window: &Window,
+        _: &App,
+    ) -> ShapedLine {
+        let label: SharedString = number.to_string().into();
+        // Right alignment uses the shaped advance, so padding characters would
+        // change the label's measured width rather than provide layout spacing.
+        let run = TextRun {
+            len: label.len(),
+            font: body_style.font(),
+            color: body_style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        window.text_system().shape_line(
+            label,
+            body_style.font_size.to_pixels(window.rem_size()),
+            &[run],
+            None,
+        )
+    }
+}
 
 /// State for source-code editing.
 ///
@@ -224,22 +302,50 @@ impl EditorState {
 }
 
 /// An unstyled source-code editor.
-#[derive(IntoElement)]
-pub struct Editor {
+pub struct Editor<R = ()> {
     state: Entity<EditorState>,
+    line_number_renderer: R,
 }
 
 impl Editor {
     pub fn new(state: &Entity<EditorState>) -> Self {
         Self {
             state: state.clone(),
+            line_number_renderer: (),
         }
     }
 }
 
-impl RenderOnce for Editor {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        self.state
+impl<R: EditorLineNumberRenderer> Editor<R> {
+    /// Supplies presentation for this element's frame without changing editor state.
+    pub fn with_line_number_renderer<T: EditorLineNumberRenderer>(self, renderer: T) -> Editor<T> {
+        Editor {
+            state: self.state,
+            line_number_renderer: renderer,
+        }
+    }
+}
+
+impl<R: EditorLineNumberRenderer> IntoElement for Editor<R> {
+    type Element = ViewElement<Self>;
+
+    fn into_element(self) -> Self::Element {
+        ViewElement::new(self)
+    }
+}
+
+impl<R: EditorLineNumberRenderer> View for Editor<R> {
+    fn entity_id(&self) -> Option<EntityId> {
+        Some(self.state.entity_id())
+    }
+
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Preserve the entity's identity for invalidation and element-state scoping.
+        self.state.update(cx, |state, cx| {
+            state
+                .render_with_line_numbers(self.line_number_renderer, window, cx)
+                .into_any_element()
+        })
     }
 }
 

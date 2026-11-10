@@ -97,7 +97,7 @@ pub use diagnostics::{
     DiagnosticSummary, DiagnosticTag, RelatedInformation,
 };
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
-pub use editor::{Editor, EditorState};
+pub use editor::{Editor, EditorLineNumberRenderer, EditorState};
 pub use highlighting::{
     DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, HighlightStyleResolver,
     InputEditorStyle, InputHighlighter, InputHighlighterFactory, SharedHighlightStyleResolver,
