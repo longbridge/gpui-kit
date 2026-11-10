@@ -242,32 +242,6 @@ pub trait RopeExt {
     /// ```
     fn clip_offset(&self, offset: usize, bias: Bias) -> usize;
 
-    /// Get the byte offset where the grapheme cluster before `offset` starts.
-    ///
-    /// An `offset` inside a grapheme cluster returns the start of that cluster.
-    ///
-    /// ```
-    /// use gpui_base::input::{Rope, RopeExt};
-    ///
-    /// let rope = Rope::from("a👍🏽b");
-    /// assert_eq!(rope.previous_grapheme_boundary("a👍🏽".len()), 1);
-    /// assert_eq!(rope.previous_grapheme_boundary(0), 0);
-    /// ```
-    fn previous_grapheme_boundary(&self, offset: usize) -> usize;
-
-    /// Get the byte offset where the grapheme cluster at `offset` ends.
-    ///
-    /// An `offset` inside a grapheme cluster returns the end of that cluster.
-    ///
-    /// ```
-    /// use gpui_base::input::{Rope, RopeExt};
-    ///
-    /// let rope = Rope::from("a👍🏽b");
-    /// assert_eq!(rope.next_grapheme_boundary(1), "a👍🏽".len());
-    /// assert_eq!(rope.next_grapheme_boundary(rope.len()), rope.len());
-    /// ```
-    fn next_grapheme_boundary(&self, offset: usize) -> usize;
-
     /// Convert offset in characters to byte offset (0-based).
     ///
     /// Run in O(n) time.
@@ -464,50 +438,6 @@ impl RopeExt for Rope {
         }
     }
 
-    fn previous_grapheme_boundary(&self, offset: usize) -> usize {
-        let offset = self.clip_offset(offset, Bias::Right);
-        if offset == 0 {
-            return 0;
-        }
-        let mut cursor = GraphemeCursor::new(offset, self.len(), true);
-        let (mut chunk, mut chunk_start) = self.chunk(offset - 1);
-        loop {
-            match cursor.prev_boundary(chunk, chunk_start) {
-                Ok(boundary) => return boundary.unwrap_or(0),
-                Err(GraphemeIncomplete::PrevChunk) => {
-                    (chunk, chunk_start) = self.chunk(chunk_start - 1);
-                }
-                Err(GraphemeIncomplete::PreContext(end)) => {
-                    let (context, context_start) = self.chunk(end - 1);
-                    cursor.provide_context(context, context_start);
-                }
-                Err(_) => return self.clip_offset(offset - 1, Bias::Left),
-            }
-        }
-    }
-
-    fn next_grapheme_boundary(&self, offset: usize) -> usize {
-        let offset = self.clip_offset(offset, Bias::Left);
-        if offset >= self.len() {
-            return self.len();
-        }
-        let mut cursor = GraphemeCursor::new(offset, self.len(), true);
-        let (mut chunk, mut chunk_start) = self.chunk(offset);
-        loop {
-            match cursor.next_boundary(chunk, chunk_start) {
-                Ok(boundary) => return boundary.unwrap_or(self.len()),
-                Err(GraphemeIncomplete::NextChunk) => {
-                    (chunk, chunk_start) = self.chunk(chunk_start + chunk.len());
-                }
-                Err(GraphemeIncomplete::PreContext(end)) => {
-                    let (context, context_start) = self.chunk(end - 1);
-                    cursor.provide_context(context, context_start);
-                }
-                Err(_) => return self.clip_offset(offset + 1, Bias::Right),
-            }
-        }
-    }
-
     fn char_index_to_offset(&self, char_offset: usize) -> usize {
         self.chars().take(char_offset).map(|c| c.len_utf8()).sum()
     }
@@ -518,9 +448,55 @@ impl RopeExt for Rope {
     }
 }
 
+/// The start of the grapheme cluster before `offset`, or of the cluster `offset` is inside.
+pub(crate) fn previous_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
+    let offset = rope.clip_offset(offset, Bias::Right);
+    if offset == 0 {
+        return 0;
+    }
+    let mut cursor = GraphemeCursor::new(offset, rope.len(), true);
+    let (mut chunk, mut chunk_start) = rope.chunk(offset - 1);
+    loop {
+        match cursor.prev_boundary(chunk, chunk_start) {
+            Ok(boundary) => return boundary.unwrap_or(0),
+            Err(GraphemeIncomplete::PrevChunk) => {
+                (chunk, chunk_start) = rope.chunk(chunk_start - 1);
+            }
+            Err(GraphemeIncomplete::PreContext(end)) => {
+                let (context, context_start) = rope.chunk(end - 1);
+                cursor.provide_context(context, context_start);
+            }
+            Err(_) => return rope.clip_offset(offset - 1, Bias::Left),
+        }
+    }
+}
+
+/// The end of the grapheme cluster at `offset`, or of the cluster `offset` is inside.
+pub(crate) fn next_grapheme_boundary(rope: &Rope, offset: usize) -> usize {
+    let offset = rope.clip_offset(offset, Bias::Left);
+    if offset >= rope.len() {
+        return rope.len();
+    }
+    let mut cursor = GraphemeCursor::new(offset, rope.len(), true);
+    let (mut chunk, mut chunk_start) = rope.chunk(offset);
+    loop {
+        match cursor.next_boundary(chunk, chunk_start) {
+            Ok(boundary) => return boundary.unwrap_or(rope.len()),
+            Err(GraphemeIncomplete::NextChunk) => {
+                (chunk, chunk_start) = rope.chunk(chunk_start + chunk.len());
+            }
+            Err(GraphemeIncomplete::PreContext(end)) => {
+                let (context, context_start) = rope.chunk(end - 1);
+                cursor.provide_context(context, context_start);
+            }
+            Err(_) => return rope.clip_offset(offset + 1, Bias::Right),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Point;
+    use super::{Point, next_grapheme_boundary, previous_grapheme_boundary};
     use ropey::Rope;
     use sum_tree::Bias;
 
@@ -780,14 +756,14 @@ mod tests {
         boundaries.push(text.len());
 
         for pair in boundaries.windows(2) {
-            assert_eq!(rope.next_grapheme_boundary(pair[0]), pair[1]);
-            assert_eq!(rope.previous_grapheme_boundary(pair[1]), pair[0]);
+            assert_eq!(next_grapheme_boundary(&rope, pair[0]), pair[1]);
+            assert_eq!(previous_grapheme_boundary(&rope, pair[1]), pair[0]);
             for inside in pair[0] + 1..pair[1] {
-                assert_eq!(rope.previous_grapheme_boundary(inside), pair[0]);
+                assert_eq!(previous_grapheme_boundary(&rope, inside), pair[0]);
             }
         }
-        assert_eq!(rope.previous_grapheme_boundary(0), 0);
-        assert_eq!(rope.next_grapheme_boundary(text.len()), text.len());
+        assert_eq!(previous_grapheme_boundary(&rope, 0), 0);
+        assert_eq!(next_grapheme_boundary(&rope, text.len()), text.len());
     }
 
     #[test]

@@ -40,6 +40,7 @@ use super::{
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
+use crate::input::rope_ext::{next_grapheme_boundary, previous_grapheme_boundary};
 use crate::input::{
     InputEdit, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
 };
@@ -3987,12 +3988,13 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     pub(super) fn previous_boundary(&self, offset: usize) -> usize {
-        let offset = self.cursor_boundary(self.text.previous_grapheme_boundary(offset), Bias::Left);
+        let offset =
+            self.cursor_boundary(previous_grapheme_boundary(&self.text, offset), Bias::Left);
         self.clamp_offset_to_visible_backward(offset)
     }
 
     pub(super) fn next_boundary(&self, offset: usize) -> usize {
-        let offset = self.cursor_boundary(self.text.next_grapheme_boundary(offset), Bias::Right);
+        let offset = self.cursor_boundary(next_grapheme_boundary(&self.text, offset), Bias::Right);
         self.clamp_offset_to_visible_forward(offset)
     }
 
