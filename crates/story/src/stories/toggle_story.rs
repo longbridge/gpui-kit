@@ -15,6 +15,8 @@ pub struct ToggleStory {
     focus_handle: FocusHandle,
     single_toggle: usize,
     checked: Vec<bool>,
+    period: Option<usize>,
+    density: Option<usize>,
     size: Size,
 }
 
@@ -24,6 +26,8 @@ impl ToggleStory {
             focus_handle: cx.focus_handle(),
             single_toggle: 1,
             checked: vec![false; 12],
+            period: Some(1),
+            density: None,
             size: Size::Medium,
         })
     }
@@ -178,6 +182,56 @@ impl Render for ToggleStory {
                             .child(Toggle::new(2).label("Code").checked(self.checked[9]))
                             .on_click(cx.listener(|this, values: &Vec<bool>, _, cx| {
                                 this.checked[7..10].copy_from_slice(values);
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                section("Single selection")
+                    .description("One item at a time. Selecting the chosen item again clears it.")
+                    .w_128()
+                    .v_flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        ToggleGroup::new("period")
+                            .single()
+                            .segmented()
+                            .outline()
+                            .with_size(self.size)
+                            .child(Toggle::new(0).label("Day").checked(self.period == Some(0)))
+                            .child(Toggle::new(1).label("Week").checked(self.period == Some(1)))
+                            .child(
+                                Toggle::new(2)
+                                    .label("Month")
+                                    .checked(self.period == Some(2)),
+                            )
+                            .on_click(cx.listener(|this, values: &Vec<bool>, _, cx| {
+                                this.period = values.iter().position(|checked| *checked);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        ToggleGroup::new("density")
+                            .single()
+                            .with_size(self.size)
+                            .child(
+                                Toggle::new(0)
+                                    .label("Compact")
+                                    .checked(self.density == Some(0)),
+                            )
+                            .child(
+                                Toggle::new(1)
+                                    .label("Comfortable")
+                                    .checked(self.density == Some(1)),
+                            )
+                            .child(
+                                Toggle::new(2)
+                                    .label("Spacious")
+                                    .checked(self.density == Some(2)),
+                            )
+                            .on_click(cx.listener(|this, values: &Vec<bool>, _, cx| {
+                                this.density = values.iter().position(|checked| *checked);
                                 cx.notify();
                             })),
                     ),

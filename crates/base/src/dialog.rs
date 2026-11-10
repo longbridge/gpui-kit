@@ -6,9 +6,9 @@ use std::{
 
 use gpui::{
     AnyElement, App, ClickEvent, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
-    MouseButton, ParentElement, Pixels, RenderOnce, Role, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, Window, anchored, deferred, div, point, prelude::FluentBuilder as _,
-    px,
+    MouseButton, ParentElement, Pixels, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, anchored, deferred, div,
+    point, prelude::FluentBuilder as _, px,
 };
 use smallvec::SmallVec;
 
@@ -125,6 +125,7 @@ pub struct Dialog {
     style: StyleRefinement,
     focus: FocusHandle,
     role: Role,
+    accessibility_label: Option<SharedString>,
     layer: usize,
     keyboard: bool,
     overlay_closable: bool,
@@ -426,6 +427,7 @@ impl Dialog {
             style: StyleRefinement::default(),
             focus: cx.focus_handle(),
             role: Role::Dialog,
+            accessibility_label: None,
             layer: 0,
             keyboard: true,
             overlay_closable: true,
@@ -488,6 +490,11 @@ impl Dialog {
     }
     pub(crate) fn role(mut self, role: Role) -> Self {
         self.role = role;
+        self
+    }
+    /// Names the dialog for accessibility clients (its title, typically).
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
         self
     }
     #[doc(hidden)]
@@ -561,6 +568,9 @@ impl RenderOnce for Dialog {
                     .items_center()
                     .justify_center()
                     .role(self.role)
+                    .when_some(self.accessibility_label.clone(), |this, label| {
+                        this.aria_label(label)
+                    })
                     .track_focus(&self.focus)
                     .focus_trap(format!("dialog-{}", self.layer), &self.focus)
                     .when(self.keyboard, |this| this.key_context(CONTEXT))
@@ -650,6 +660,30 @@ mod tests {
     use super::*;
     use gpui::{Context, Render, point};
     use std::{cell::RefCell, rc::Rc};
+
+    #[gpui::test]
+    fn a_dialog_takes_an_accessible_name(cx: &mut gpui::TestAppContext) {
+        struct Named;
+        impl Render for Named {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div().child(
+                    Dialog::new(cx)
+                        .accessibility_label("Discard draft?")
+                        .popup(div().size(px(10.))),
+                )
+            }
+        }
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| Named);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let dialog = cx.update(|window, _| {
+            crate::test_support::snapshots(window)
+                .into_iter()
+                .find(|node| node.role() == Some(Role::Dialog))
+                .expect("a dialog node")
+        });
+        assert_eq!(dialog.label(), Some("Discard draft?"));
+    }
 
     #[gpui::test]
     fn close_trigger_supplies_accessible_button(cx: &mut gpui::TestAppContext) {

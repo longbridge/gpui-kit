@@ -21,6 +21,7 @@ GPUI Base primitives provide behavior without prescribing presentation. Each pag
 - [Combobox](./combobox.md) — A text input paired with keyboard-navigable suggestions and selection behavior.
 - [Date Picker](./date-picker.md) — A focus-aware date input that composes calendar behavior with a popup.
 - [Dialog](./dialog.md) — A composable modal surface with focus management, backdrop, title, and close parts.
+- [Grid Layout](./grid-layout.md) — A grid whose items the user drags and resizes, with the layout model and its arithmetic.
 - [Hover Card](./hover-card.md) — A delayed floating card associated with a pointer or keyboard trigger.
 - [Input](./input.md) — A single-line text input with selection, masking, validation, and number stepping.
 - [Textarea](./textarea.md) — A multi-line text field with fixed rows, wrapping, and auto-grow behavior.

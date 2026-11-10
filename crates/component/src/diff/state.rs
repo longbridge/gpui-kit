@@ -104,9 +104,11 @@ pub(crate) struct LayoutKey {
     line_number: bool,
     marker_lane: bool,
     soft_wrap: bool,
+    split_ratio: f32,
 }
 
 impl LayoutKey {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         rem: Pixels,
         font_size: Pixels,
@@ -115,6 +117,7 @@ impl LayoutKey {
         line_number: bool,
         marker_lane: bool,
         soft_wrap: bool,
+        split_ratio: f32,
     ) -> Self {
         Self {
             rem,
@@ -124,6 +127,7 @@ impl LayoutKey {
             line_number,
             marker_lane,
             soft_wrap,
+            split_ratio,
         }
     }
 }
@@ -642,7 +646,18 @@ impl DiffState {
             return;
         }
         self.mode = mode;
+        // A diff shown from its top stays there: the top row's anchor is the
+        // file's first line, and revealing it scrolls the header off when
+        // rows wrap to heights the list has not measured yet.
+        let top = self.list.logical_scroll_top();
+        let at_top = top.item_ix == 0 && top.offset_in_item <= px(0.);
         self.rebuild_at_anchor();
+        if at_top {
+            self.list.scroll_to(ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.),
+            });
+        }
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }

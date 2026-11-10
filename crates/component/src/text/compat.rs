@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, Element, ElementId, Entity, GlobalElementId,
+    AnyElement, AnyView, App, Bounds, ClickEvent, Element, ElementId, Entity, GlobalElementId,
     HighlightStyle, InspectorElementId, IntoElement, LayoutId, Pixels, Refineable as _, RenderOnce,
     SharedString, StyleRefinement, Styled, Window,
 };
@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use super::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
-    TableData, TextViewMotion, TextViewState, TextViewStyle,
+    TableData, TaskToggleEvent, TextViewMotion, TextViewState, TextViewStyle,
 };
 use gpui_base::{Easing, text::CodeBlock};
 
@@ -185,13 +185,22 @@ impl TextView {
         self.inner = self.inner.on_link_click(f);
         self
     }
-    /// Decides which links are drawn as links. A link the filter rejects is
-    /// drawn like the text around it and is not clickable.
-    pub fn link_filter<F>(mut self, filter: F) -> Self
+    /// Shows an application-supplied tooltip beside the pointer over a link.
+    /// The tooltip is cached until a different destination is shown.
+    pub fn link_tooltip<F>(mut self, builder: F) -> Self
     where
-        F: Fn(&SharedString) -> bool + Send + Sync + 'static,
+        F: Fn(&SharedString, &mut Window, &mut App) -> AnyView + Send + Sync + 'static,
     {
-        self.inner = self.inner.link_filter(filter);
+        self.inner = self.inner.link_tooltip(builder);
+        self
+    }
+    /// Makes Markdown task list checkboxes clickable, reporting the clicked
+    /// item's new checked state and where it and its marker are in the source.
+    pub fn on_task_toggle<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.inner = self.inner.on_task_toggle(f);
         self
     }
     /// Scrolls a container that ignores scroll requests to the line of

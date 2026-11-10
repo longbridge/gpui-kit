@@ -8,8 +8,8 @@ pub use gpui_base::{FocusableExt, RoleOverride, StyledExt, box_shadow, h_flex, v
 
 use crate::ActiveTheme as _;
 
-const FOCUS_RING_WIDTH: Pixels = px(3.);
-const FOCUS_RING_OPACITY: f32 = 0.5;
+pub(crate) const FOCUS_RING_WIDTH: Pixels = px(3.);
+pub(crate) const FOCUS_RING_OPACITY: f32 = 0.5;
 /// Gap between a borderless element's edge and a focus line drawn off it, in rem.
 const FOCUS_LINE_GAP: f32 = 0.125;
 

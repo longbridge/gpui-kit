@@ -1,4 +1,4 @@
-use crate::{StateStyle, StyledExt as _, TestSupportExt as _};
+use crate::{StateStyle, StyledExt as _, TestSupportExt as _, a11y_disabled::A11yDisabledExt as _};
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
     Refineable as _, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
@@ -269,6 +269,7 @@ impl RenderOnce for InputBase {
             })
             .children(self.children)
             .refine_style(&style)
+            .a11y_disabled(self.disabled)
     }
 }
 
