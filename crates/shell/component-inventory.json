@@ -1957,6 +1957,12 @@
     },
     {
       "source": "story",
+      "name": "layout_direction",
+      "classification": "infrastructure",
+      "explanation": "The Layout Direction story demonstrates gpui-base's global right-to-left setting across existing components rather than a component constructor."
+    },
+    {
+      "source": "story",
       "name": "list",
       "classification": "component",
       "registration": {

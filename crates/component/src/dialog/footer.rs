@@ -3,6 +3,8 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, relative,
 };
 
+use gpui_base::LogicalStyledExt as _;
+
 use crate::{
     ActiveTheme as _, StyledExt as _,
     button::Button,
@@ -48,9 +50,11 @@ impl Styled for DialogFooter {
 
 impl RenderOnce for DialogFooter {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Mirrored in RTL: the primary action stays on the end edge.
         h_flex()
+            .flex_row_dir(cx)
             .gap_2()
-            .justify_end()
+            .justify_flex_end()
             .line_height(relative(1.25))
             .rounded_b(cx.theme().radius_lg)
             .refine_style(&self.style)

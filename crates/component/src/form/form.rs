@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, App, Axis, IntoElement, ParentElement, Pixels, Rems, RenderOnce, StyleRefinement,
     Styled, Window, prelude::FluentBuilder as _, px,
 };
+use gpui_base::LogicalStyledExt as _;
 
 use crate::{
     Sizable, Size, StyledExt,
@@ -117,7 +118,7 @@ impl Sizable for Form {
 }
 
 impl RenderOnce for Form {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let props = self.props;
 
         let gap = match props.size {
@@ -142,9 +143,10 @@ impl RenderOnce for Form {
             .when_some(self.footer, |this, footer| {
                 this.child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .col_span_full()
                         .min_w_0()
-                        .justify_end()
+                        .justify_flex_end()
                         .child(footer),
                 )
             })

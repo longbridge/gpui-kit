@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use gpui_base::TestTextExt as _;
+use gpui_base::{LayoutDirection, LogicalStyledExt as _};
 
 use crate::{ActiveTheme, StyledExt};
 
@@ -211,6 +212,10 @@ impl RenderOnce for Label {
         div()
             .line_height(rems(1.25))
             .text_color(cx.theme().foreground)
+            // Start-aligned in RTL; LTR keeps the inherited alignment.
+            .when(LayoutDirection::global(cx).is_rtl(), |this| {
+                this.text_start(cx)
+            })
             .refine_style(&self.style)
             .child(
                 StyledText::new(&text).when_some(highlights, |this, hl| this.with_highlights(hl)),

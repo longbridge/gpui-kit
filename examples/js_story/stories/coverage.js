@@ -39,6 +39,7 @@ export const coveredBy = [
   { route: "input-group", registrations: ["InputGroup"] },
   { route: "kbd", registrations: ["Kbd"] },
   { route: "label", registrations: ["Label"] },
+  { route: "layout-direction", registrations: [] },
   { route: "list", registrations: ["List"] },
   { route: "menu", registrations: ["MenuBar"] },
   { route: "marker", registrations: ["Marker"] },

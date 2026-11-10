@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, App, ClickEvent, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
     StyleRefinement, Styled, Window, prelude::FluentBuilder as _,
 };
+use gpui_base::LogicalStyledExt as _;
 
 use crate::{
     StyledExt as _, WindowExt as _,
@@ -331,6 +332,7 @@ impl AlertDialog {
                 this.header(
                     DialogHeader::new().child(
                         h_flex()
+                            .flex_row_dir(cx)
                             .gap_2()
                             .items_start()
                             .when_some(self.icon, |row, icon| row.child(icon))

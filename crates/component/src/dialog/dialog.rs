@@ -9,7 +9,7 @@ use gpui::{
     StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
     prelude::FluentBuilder, px,
 };
-use gpui_base::{ElementExt as _, TextSelectionScopeId, motion::Transition};
+use gpui_base::{ElementExt as _, LogicalStyledExt as _, TextSelectionScopeId, motion::Transition};
 use rust_i18n::t;
 
 use crate::{
@@ -850,7 +850,7 @@ impl RenderOnce for Dialog {
                                             gpui_base::DialogClose::new()
                                                 .absolute()
                                                 .top(top)
-                                                .right(right)
+                                                .inset_e(right, cx)
                                                 .trigger(|button| {
                                                     Button::new("close")
                                                         .with_base(button)

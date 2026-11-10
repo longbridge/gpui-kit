@@ -3,6 +3,8 @@ use gpui::{
     Styled, div, prelude::FluentBuilder as _,
 };
 
+use gpui_base::LogicalStyledExt as _;
+
 use crate::{ActiveTheme as _, Collapsible, Selectable, StyledExt, menu::DropdownMenu};
 
 /// Header for the [`super::Sidebar`]
@@ -81,6 +83,7 @@ impl RenderOnce for SidebarHeader {
         self.base
             .id("sidebar-header")
             .h_flex()
+            .flex_row_dir(cx)
             .gap_2()
             .p_2()
             .w_full()

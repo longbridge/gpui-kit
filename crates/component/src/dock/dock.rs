@@ -114,9 +114,10 @@ impl DockSkin {
         &self,
         dock: &DockContext,
         _: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) -> impl IntoElement {
         let placement = dock.placement();
+        let physical = placement.physical(gpui_base::LayoutDirection::global(cx));
         let open = dock.is_open();
         let shared = self.shared().clone();
 
@@ -134,7 +135,7 @@ impl DockSkin {
         // Every dock's handle lives inside the dock, because `dock_frame` clips
         // to the dock's box. The left dock hugs its trailing edge; the right
         // and bottom docks hug their leading one.
-        let edge = match placement {
+        let edge = match physical {
             DockPlacement::Left => HandleEdge::Trailing,
             _ => HandleEdge::Leading,
         };

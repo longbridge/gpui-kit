@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use gpui_kit::base::LayoutDirection;
 use gpui_kit::component::{
     ActiveTheme as _, IconName, Side, Sizable as _, Theme, TitleBar, WindowExt as _,
     badge::Badge,
@@ -15,7 +16,7 @@ use gpui_kit::{
 
 use crate::{
     AppState, SelectFont, SelectRadius, SelectScrollbarMode, ToggleAppMenuBar, ToggleFpsMonitor,
-    ToggleListActiveHighlight, app_menus,
+    ToggleListActiveHighlight, ToggleRightToLeft, app_menus,
 };
 
 pub struct AppTitleBar {
@@ -169,6 +170,21 @@ impl FontSizeSelector {
         window.refresh();
     }
 
+    fn on_toggle_right_to_left(
+        &mut self,
+        _: &ToggleRightToLeft,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Layout direction is one global setting; this flips every window.
+        if LayoutDirection::global(cx).is_rtl() {
+            LayoutDirection::Ltr
+        } else {
+            LayoutDirection::Rtl
+        }
+        .set_global(cx);
+    }
+
     fn on_toggle_app_menu_bar(
         &mut self,
         _: &ToggleAppMenuBar,
@@ -189,6 +205,7 @@ impl Render for FontSizeSelector {
         let scroll_show = cx.theme().scrollbar_mode;
         let show_fps_monitor = AppState::global(cx).show_fps_monitor;
         let show_app_menu_bar = AppState::global(cx).show_app_menu_bar;
+        let rtl = LayoutDirection::global(cx).is_rtl();
 
         div()
             .id("font-size-selector")
@@ -199,6 +216,7 @@ impl Render for FontSizeSelector {
             .on_action(cx.listener(Self::on_toggle_list_active_highlight))
             .on_action(cx.listener(Self::on_toggle_fps_monitor))
             .on_action(cx.listener(Self::on_toggle_app_menu_bar))
+            .on_action(cx.listener(Self::on_toggle_right_to_left))
             .child(
                 Button::new("btn")
                     .small()
@@ -269,6 +287,7 @@ impl Render for FontSizeSelector {
                                 show_app_menu_bar,
                                 Box::new(ToggleAppMenuBar),
                             )
+                            .menu_with_check("Right to Left", rtl, Box::new(ToggleRightToLeft))
                     })
                     .anchor(Anchor::TopRight),
             )

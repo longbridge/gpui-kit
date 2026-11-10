@@ -940,6 +940,11 @@ impl Element for TextView {
             .when(self.scrollable, |this| this.size_full())
             .when_some(max_lines_cap, |this, cap| this.max_h(cap).overflow_hidden())
             .relative()
+            // Paragraphs start on the start edge; LTR keeps the inherited
+            // alignment, and the view's own style still overrides both.
+            .when(crate::LayoutDirection::global(cx).is_rtl(), |this| {
+                crate::LogicalStyledExt::text_start(this, cx)
+            })
             .text_color(foreground)
             .on_action(move |_: &crate::input::Copy, window, cx| {
                 let text = TextSelection::selected_text(window, cx).trim().to_string();

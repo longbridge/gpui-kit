@@ -6,6 +6,7 @@ use gpui::{
     prelude::FluentBuilder, px, rems,
 };
 
+use gpui_base::LogicalStyledExt as _;
 use rust_i18n::t;
 
 pub use crate::select::Caret;
@@ -264,6 +265,7 @@ where
                     empty
                 } else {
                     h_flex()
+                        .flex_row_dir(cx)
                         .justify_center()
                         .py_6()
                         .text_color(cx.theme().muted_foreground.opacity(0.6))
@@ -1026,6 +1028,7 @@ fn render_trigger_container(
         })
         .child(
             h_flex()
+                .flex_row_dir(cx)
                 .id("inner")
                 .w_full()
                 .min_w_0()

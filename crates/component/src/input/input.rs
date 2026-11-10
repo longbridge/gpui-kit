@@ -17,6 +17,7 @@ use crate::{IconName, Size};
 use crate::{RoleOverride, Selectable, StyledExt, h_flex};
 use crate::{Sizable, StyleSized};
 use gpui_base::InputBase as BaseInput;
+use gpui_base::{LayoutDirection, LogicalStyledExt as _};
 use rust_i18n::t;
 
 use super::state::{TextInputState, sync_focused_input_registry};
@@ -537,10 +538,24 @@ impl Styled for Input {
     }
 }
 
+/// The text alignment of the start edge in the global layout direction.
+fn start_text_align(cx: &App) -> TextAlign {
+    if LayoutDirection::global(cx).is_rtl() {
+        TextAlign::Right
+    } else {
+        TextAlign::Left
+    }
+}
+
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         const LINE_HEIGHT: Rems = Rems(1.25);
-        let text_align = self.style.text.text_align.unwrap_or(TextAlign::Left);
+        // Unless the caller aligns the text, it starts on the start edge.
+        let text_align = self
+            .style
+            .text
+            .text_align
+            .unwrap_or_else(|| start_text_align(cx));
         let state = self.state.clone();
         state.install_token_presentation(
             Some(self.token_renderer.unwrap_or_else(|| {
@@ -782,7 +797,7 @@ impl RenderOnce for Input {
             // controls, custom IDs and focus styling without registering the
             // editor's FocusHandle a second time.
             .role(RoleOverride::Presentational)
-            .flex()
+            .flex_row_dir(cx)
             .size_full()
             .line_height(LINE_HEIGHT)
             .when(!is_multi_line, |this| {
@@ -821,8 +836,9 @@ impl RenderOnce for Input {
                 this.child(state.clone().into_any_element())
             })
             .when(has_suffix, |this| {
-                this.pr(self.size.input_px()).child(
+                this.pe(self.size.input_px(), cx).child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .id("suffix")
                         .gap(gap_x)
                         .items_center()
@@ -1005,6 +1021,16 @@ mod tests {
             RoleOverride::Role(Role::Button)
         );
         assert_eq!(RoleOverride::from(None), RoleOverride::Presentational);
+    }
+
+    #[gpui::test]
+    fn default_text_align_follows_layout_direction(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            assert_eq!(start_text_align(cx), TextAlign::Left);
+            LayoutDirection::Rtl.set_global(cx);
+            assert_eq!(start_text_align(cx), TextAlign::Right);
+        });
     }
 
     #[gpui::test]

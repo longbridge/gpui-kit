@@ -5,7 +5,7 @@ use gpui::{
     ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, Window, canvas, deferred,
     div, prelude::FluentBuilder as _, px,
 };
-use gpui_base::{Placement, Positioner};
+use gpui_base::{LogicalStyledExt as _, Placement, Positioner};
 
 use super::handle::SurfaceHandler;
 use crate::{
@@ -132,6 +132,7 @@ impl RenderOnce for EditMenu {
                 .occlude()
                 .child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .id(id)
                         .relative()
                         .items_stretch()

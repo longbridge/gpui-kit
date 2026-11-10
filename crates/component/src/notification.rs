@@ -12,11 +12,11 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
     StatefulInteractiveElement, StyleRefinement, Styled, Subscription, SystemNotification,
     SystemNotificationResponse, WeakEntity, Window, WindowId, div, prelude::FluentBuilder, px,
-    relative,
+    relative, rems,
 };
 use gpui_base::{
-    Toast as BaseToast, ToastManager, ToastMotion, ToastOptions, ToastStack, ToastStackState,
-    ToastTransitionStatus,
+    LogicalStyledExt as _, Toast as BaseToast, ToastManager, ToastMotion, ToastOptions, ToastStack,
+    ToastStackState, ToastTransitionStatus,
 };
 
 use crate::{
@@ -408,7 +408,7 @@ impl Render for Notification {
         let action = self
             .action_builder
             .clone()
-            .map(|builder| builder(self, window, cx).small().mr_3p5());
+            .map(|builder| builder(self, window, cx).small().me(rems(0.875), cx));
 
         let transition_status = self.transition_status;
         let closing = transition_status == ToastTransitionStatus::Ending;
@@ -422,6 +422,7 @@ impl Render for Notification {
         BaseToast::new("notification")
             .transition_status(transition_status)
             .h_flex()
+            .flex_row_dir(cx)
             .group("")
             .occlude()
             .relative()
@@ -436,13 +437,19 @@ impl Render for Notification {
             .gap_3()
             .refine_style(&self.style)
             .when_some(icon, |this, icon| {
-                this.child(div().absolute().top(px(18.)).left_4().child(icon))
+                this.child(
+                    div()
+                        .absolute()
+                        .top(px(18.))
+                        .inset_s(rems(1.), cx)
+                        .child(icon),
+                )
             })
             .child(
                 v_flex()
                     .flex_1()
                     .overflow_hidden()
-                    .when(has_icon, |this| this.pl_6())
+                    .when(has_icon, |this| this.ps(rems(1.5), cx))
                     .when_some(self.title.clone(), |this, title| {
                         this.child(div().text_sm().font_semibold().child(title))
                     })
@@ -456,7 +463,7 @@ impl Render for Notification {
                 div()
                     .absolute()
                     .top_1()
-                    .right_1()
+                    .inset_e(rems(0.25), cx)
                     .invisible()
                     .group_hover("", |this| this.visible())
                     .child(
@@ -785,9 +792,13 @@ impl NotificationList {
         let settings = &cx.theme().notification;
         let (max_items, placement) = (settings.max_items, settings.placement);
 
+        let direction = gpui_base::LayoutDirection::global(cx);
+
         let mut groups: Vec<(Anchor, Vec<(NotificationId, Entity<Notification>)>)> = Vec::new();
         for (id, item, _) in self.notifications.visible(max_items) {
-            let anchor = item.read(cx).placement.unwrap_or(placement);
+            // Corners are written for LTR; `TopRight` is the top end corner.
+            let anchor =
+                gpui_base::logical_anchor(item.read(cx).placement.unwrap_or(placement), direction);
             match groups.iter_mut().find(|(a, _)| *a == anchor) {
                 Some((_, items)) => items.push((id.clone(), item.clone())),
                 None => groups.push((anchor, vec![(id.clone(), item.clone())])),

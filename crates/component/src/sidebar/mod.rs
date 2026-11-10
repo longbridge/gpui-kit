@@ -11,6 +11,7 @@ use gpui::{
     RenderOnce, SharedString, StyleRefinement, Styled, Window, div, list, prelude::FluentBuilder,
     px,
 };
+use gpui_base::LogicalStyledExt as _;
 use std::{rc::Rc, time::Duration};
 
 use crate::animation::{EffectTransition, ease_in_out_cubic};
@@ -34,6 +35,17 @@ const SIDEBAR_TRANSITION_DURATION: Duration = Duration::from_millis(200);
 /// - [`SidebarCollapsible::Icon`] collapses the sidebar to icon width.
 /// - [`SidebarCollapsible::Offcanvas`] slides the sidebar out and releases its layout width.
 /// - [`SidebarCollapsible::None`] keeps the sidebar expanded and ignores collapsed state.
+/// The physical edge a sidebar on `side` sits against.
+///
+/// [`Side::Left`] (the default) is the start edge, so in RTL it is the right.
+fn physical_side(side: Side, cx: &App) -> Side {
+    match (side, gpui_base::LayoutDirection::global(cx)) {
+        (Side::Left, gpui_base::LayoutDirection::Rtl) => Side::Right,
+        (Side::Right, gpui_base::LayoutDirection::Rtl) => Side::Left,
+        (side, _) => side,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SidebarCollapsible {
     /// Collapse the sidebar to icon width.
@@ -351,18 +363,19 @@ impl SidebarToggleButton {
 }
 
 impl RenderOnce for SidebarToggleButton {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let collapsed = self.collapsed;
         let on_click = self.on_click.clone();
+        let side = physical_side(self.side, cx);
 
         let icon = if collapsed {
-            if self.side.is_left() {
+            if side.is_left() {
                 IconName::PanelLeftOpen
             } else {
                 IconName::PanelRightOpen
             }
         } else {
-            if self.side.is_left() {
+            if side.is_left() {
                 IconName::PanelLeftClose
             } else {
                 IconName::PanelRightClose
@@ -407,8 +420,8 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
         // Determine effective expanded width from user's custom style or default.
         // Non-pixel widths still render correctly, but cannot use pixel width transitions.
         let expanded_width = sidebar_expanded_width(&self.style);
-        let layout =
-            SidebarLayout::new(self.collapsible, self.collapsed, expanded_width, self.side);
+        let side = physical_side(self.side, cx);
+        let layout = SidebarLayout::new(self.collapsible, self.collapsed, expanded_width, side);
 
         // Sidebar content renders at its target width immediately. A wrapper
         // div animates clip-width for smooth transitions without re-laying out
@@ -422,7 +435,7 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
             .bg(cx.theme().tokens.sidebar)
             .text_color(cx.theme().sidebar_foreground)
             .border_color(cx.theme().sidebar_border)
-            .map(|this| match self.side {
+            .map(|this| match side {
                 Side::Left => this.border_r_1(),
                 Side::Right => this.border_l_1(),
             })
@@ -436,6 +449,7 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
             .when_some(self.header.take(), |this, header| {
                 this.child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .id("header")
                         .pt_3()
                         .px_3()
@@ -484,6 +498,7 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
             .when_some(self.footer.take(), |this, footer| {
                 this.child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .id("footer")
                         .pb_3()
                         .px_3()

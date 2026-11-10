@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
 
@@ -833,6 +834,7 @@ impl CommandState {
         let content = match &item.content {
             Some(render) => render(window, cx),
             None => h_flex()
+                .flex_row_dir(cx)
                 .flex_1()
                 .gap_2()
                 .items_center()
@@ -867,11 +869,13 @@ impl CommandState {
             })
             .child(content)
             .map(|this| match binding {
-                Some(binding) => this.child(binding.ml_auto()),
+                Some(binding) => this.child(binding.ms(gpui::Length::Auto, cx)),
                 // The binding owns the trailing slot, so only an item without
                 // one can show its check there.
                 None => this.when(item.checked, |this| {
-                    this.child(crate::Sizable::xsmall(Icon::new(IconName::Check).ml_auto()))
+                    this.child(crate::Sizable::xsmall(
+                        Icon::new(IconName::Check).ms(gpui::Length::Auto, cx),
+                    ))
                 }),
             })
             .into_any_element()

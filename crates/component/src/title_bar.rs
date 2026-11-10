@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use gpui_base::LogicalStyledExt as _;
+
 use crate::{
     ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
 };
@@ -8,7 +10,7 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Pixels, Render, RenderOnce, Rgba,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TitlebarOptions, Window,
     WindowControlArea, WindowOptions, div, linear_color_stop, linear_gradient,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, rems,
 };
 use gpui_base::TestSupportExt as _;
 use smallvec::SmallVec;
@@ -252,7 +254,7 @@ struct WindowControls {
 }
 
 impl RenderOnce for WindowControls {
-    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
             return div().id("window-controls").test_support();
         }
@@ -276,7 +278,9 @@ impl RenderOnce for WindowControls {
         // always ours to offer.
         let supported = window.window_controls();
 
+        // In RTL the controls sit on the start (left) edge, close outermost.
         h_flex()
+            .flex_row_dir(cx)
             .id("window-controls")
             .test_support()
             .items_center()
@@ -332,12 +336,19 @@ impl RenderOnce for TitleBar {
         div().flex_shrink_0().child(
             div()
                 .id("title-bar")
-                .flex()
-                .flex_row()
+                .flex_row_dir(cx)
                 .items_center()
                 .justify_between()
                 .h(TITLE_BAR_HEIGHT)
-                .pl(TITLE_BAR_LEFT_PADDING)
+                // macOS draws its traffic lights on the left whatever the
+                // direction; elsewhere the padding is on the start edge.
+                .map(|this| {
+                    if is_macos {
+                        this.pl(TITLE_BAR_LEFT_PADDING)
+                    } else {
+                        this.ps(TITLE_BAR_LEFT_PADDING, cx)
+                    }
+                })
                 .rounded_tl(radii.top_left)
                 .rounded_tr(radii.top_right)
                 .border_b_1()
@@ -385,7 +396,7 @@ impl RenderOnce for TitleBar {
                         .flex_1()
                         .when(!is_web, |this| {
                             this.window_control_area(WindowControlArea::Drag)
-                                .when(window.is_fullscreen(), |this| this.pl_3())
+                                .when(window.is_fullscreen(), |this| this.ps(rems(0.75), cx))
                                 .when(is_linux && is_client_decorated, |this| {
                                     this.child(
                                         div()

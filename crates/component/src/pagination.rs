@@ -6,7 +6,10 @@ use gpui::{
 };
 use rust_i18n::t;
 
-use gpui_base::{Pagination as BasePagination, PaginationItem as PageItem, PaginationState};
+use gpui_base::{
+    LayoutDirection, LogicalStyledExt as _, Pagination as BasePagination,
+    PaginationItem as PageItem, PaginationState,
+};
 
 use crate::{
     Disableable, Icon, Sizable, Size, StyledExt,
@@ -114,11 +117,17 @@ impl Pagination {
         self
     }
 
-    fn render_nav_button(&self, state: &PaginationState, is_prev: bool) -> Button {
-        let (id, label, icon) = if is_prev {
-            ("prev", t!("Pagination.previous"), IconName::ChevronLeft)
+    fn render_nav_button(&self, state: &PaginationState, is_prev: bool, rtl: bool) -> Button {
+        // Previous points back toward the start edge: the right in RTL.
+        let (id, label) = if is_prev {
+            ("prev", t!("Pagination.previous"))
         } else {
-            ("next", t!("Pagination.next"), IconName::ChevronRight)
+            ("next", t!("Pagination.next"))
+        };
+        let icon = if is_prev != rtl {
+            IconName::ChevronLeft
+        } else {
+            IconName::ChevronRight
         };
 
         let target_page = if is_prev {
@@ -140,7 +149,7 @@ impl Pagination {
                         .w_full()
                         .gap_2()
                         .flex_nowrap()
-                        .when(is_prev, |this| this.flex_row_reverse())
+                        .when(is_prev != rtl, |this| this.flex_row_reverse())
                         .child(SharedString::from(label))
                         .child(Icon::new(icon)),
                 )
@@ -178,7 +187,8 @@ impl Styled for Pagination {
 }
 
 impl RenderOnce for Pagination {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let rtl = LayoutDirection::global(cx).is_rtl();
         let mut state = PaginationState::new(self.current_page, self.total_pages)
             .visible_pages(self.visible_pages)
             .disabled(self.disabled);
@@ -193,12 +203,13 @@ impl RenderOnce for Pagination {
 
         BasePagination::new(self.id.clone(), state.clone())
             .h_flex()
+            .flex_row_dir(cx)
             .px_2()
             .py_2()
             .gap_1()
             .items_center()
             .refine_style(&self.style)
-            .child(self.render_nav_button(&state, true))
+            .child(self.render_nav_button(&state, true, rtl))
             .children({
                 page_numbers.into_iter().map(|item| match item {
                     PageItem::Page(page) => {
@@ -255,7 +266,7 @@ impl RenderOnce for Pagination {
                     .into_any_element(),
                 })
             })
-            .child(self.render_nav_button(&state, false))
+            .child(self.render_nav_button(&state, false, rtl))
     }
 }
 

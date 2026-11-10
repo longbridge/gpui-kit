@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use std::{rc::Rc, time::Duration};
 
 use crate::{
@@ -629,6 +630,8 @@ impl RenderOnce for Button {
         let tooltip_show_delay = self.tooltip_show_delay;
         let hover_group = self.hover_group;
         let hover_group_held = self.hover_group_held;
+        let (border_corners, border_edges) =
+            super::logical_corners_edges(self.border_corners, self.border_edges, cx);
         let mut base = self.base;
         let children = self.children;
         let instance_style = base.style().clone();
@@ -709,23 +712,17 @@ impl RenderOnce for Button {
                     }
                 }
             })
-            .when(self.border_corners.top_left, |this| {
-                this.rounded_tl(rounding)
-            })
-            .when(self.border_corners.top_right, |this| {
-                this.rounded_tr(rounding)
-            })
-            .when(self.border_corners.bottom_left, |this| {
-                this.rounded_bl(rounding)
-            })
-            .when(self.border_corners.bottom_right, |this| {
+            .when(border_corners.top_left, |this| this.rounded_tl(rounding))
+            .when(border_corners.top_right, |this| this.rounded_tr(rounding))
+            .when(border_corners.bottom_left, |this| this.rounded_bl(rounding))
+            .when(border_corners.bottom_right, |this| {
                 this.rounded_br(rounding)
             })
             .when(self.variant.is_default() || self.outline, |this| {
-                this.when(self.border_edges.left, |this| this.border_l_1())
-                    .when(self.border_edges.right, |this| this.border_r_1())
-                    .when(self.border_edges.top, |this| this.border_t_1())
-                    .when(self.border_edges.bottom, |this| this.border_b_1())
+                this.when(border_edges.left, |this| this.border_l_1())
+                    .when(border_edges.right, |this| this.border_r_1())
+                    .when(border_edges.top, |this| this.border_t_1())
+                    .when(border_edges.bottom, |this| this.border_b_1())
             })
             .when(!self.disabled && !selected, |this| {
                 this.border_color(normal_style.border)
@@ -772,6 +769,7 @@ impl RenderOnce for Button {
         // Like an HTML `title`, the tooltip describes the button.
         let description = self.tooltip.as_ref().map(|(tooltip, _)| tooltip.clone());
         let content = h_flex()
+            .flex_row_dir(cx)
             .id("label")
             .size_full()
             .min_w_0()

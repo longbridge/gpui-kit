@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::{ActiveTheme, AxisExt, StyledExt, ThemeStyled as _};
 pub use gpui_base::slider::{SliderEvent, SliderScale, SliderState, SliderValue};
-use gpui_base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack, spring};
+use gpui_base::{
+    LogicalStyledExt as _, Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack, spring,
+};
 
 use gpui::{
     App, Axis, Background, Corners, DefiniteLength, ElementId, Entity, EntityId, Hsla,
@@ -212,7 +214,7 @@ impl RenderOnce for Slider {
                 .when(!self.disabled, |this| {
                     this.absolute()
                         .when(axis.is_horizontal(), |this| {
-                            this.top(px(-5.)).left(position).ml(-px(8.))
+                            this.top(px(-5.)).inset_s(position, cx).ms(-px(8.), cx)
                         })
                         .when(axis.is_vertical(), |this| {
                             this.bottom(position).left(px(-5.)).mb(-px(8.))
@@ -305,7 +307,8 @@ impl RenderOnce for Slider {
                                 div()
                                     .absolute()
                                     .when(axis.is_horizontal(), |this| {
-                                        this.h_full().left(bar_start).right(bar_end)
+                                        // The fill runs from the start edge: the right in RTL.
+                                        this.h_full().inset_s(bar_start, cx).inset_e(bar_end, cx)
                                     })
                                     .when(axis.is_vertical(), |this| {
                                         this.w_full().bottom(bar_start).top(bar_end)

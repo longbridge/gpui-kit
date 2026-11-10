@@ -7,6 +7,7 @@ use gpui::{
 };
 
 use crate::{ActiveTheme as _, Icon, IconName, Sizable, Size, StyledExt as _, h_flex};
+use gpui_base::LogicalStyledExt as _;
 use gpui_base::{
     Accordion as BaseAccordion, AccordionHeader as BaseAccordionHeader,
     AccordionItem as BaseAccordionItem, AccordionPanel as BaseAccordionPanel, AccordionTrigger,
@@ -294,6 +295,7 @@ impl RenderOnce for AccordionItem {
             .open(self.open)
             .disabled(self.disabled)
             .h_flex()
+            .flex_row_dir(cx)
             .justify_between()
             .gap_3()
             .font_medium()
@@ -307,6 +309,7 @@ impl RenderOnce for AccordionItem {
             .refine_style(&self.title_style)
             .child(
                 h_flex()
+                    .flex_row_dir(cx)
                     .flex_1()
                     .min_w_0()
                     .items_center()
