@@ -174,9 +174,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         (new_offset, new_affinity)
     }
 
-    /// Extend to the document edge when there is no further visual row. Plain
-    /// movement retains its column there, but selection must still reach the
-    /// remaining text on the first or last row.
+    /// Extend to the document edge when there is no further visual row.
     pub(super) fn vertical_selection_target(
         &self,
         offset: usize,
@@ -185,17 +183,27 @@ impl<M: InputModeKind> InputBaseState<M> {
         move_lines: isize,
     ) -> (usize, bool) {
         let target = self.vertical_target(offset, column_anchor, line_end_affinity, move_lines);
-        if self.last_layout.is_some() {
-            let row = |offset, affinity| {
-                self.display_map
-                    .offset_to_wrap_display_point_with_affinity(offset, affinity)
-                    .row
-            };
-            if row(offset, line_end_affinity) == row(target.0, target.1) {
-                return (if move_lines < 0 { 0 } else { self.text.len() }, false);
-            }
-        }
-        target
+        self.document_edge_past(offset, line_end_affinity, target, move_lines)
+            .map_or(target, |edge| (edge, false))
+    }
+
+    /// The start (moving up) or end (moving down) of the document when a vertical
+    /// move from `offset` to `target` stays on the same visual row.
+    fn document_edge_past(
+        &self,
+        offset: usize,
+        line_end_affinity: bool,
+        target: (usize, bool),
+        move_lines: isize,
+    ) -> Option<usize> {
+        self.last_layout.as_ref()?;
+        let row = |offset, affinity| {
+            self.display_map
+                .offset_to_wrap_display_point_with_affinity(offset, affinity)
+                .row
+        };
+        (row(offset, line_end_affinity) == row(target.0, target.1))
+            .then(|| if move_lines < 0 { 0 } else { self.text.len() })
     }
 
     /// Move every cursor through `f`, which maps each selection to a
@@ -240,11 +248,13 @@ impl<M: InputModeKind> InputBaseState<M> {
     ///
     /// When `collapse` is set, a non-empty selection first collapses to just
     /// outside its start (up) or end (down) before moving, otherwise the cursor
-    /// offset is used.
+    /// offset is used. When `reach_document_edge` is set, a move with no further
+    /// visual row goes to the start or end of the document.
     fn move_vertical(
         &mut self,
         move_lines: isize,
         collapse: bool,
+        reach_document_edge: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -281,7 +291,11 @@ impl<M: InputModeKind> InputBaseState<M> {
                 };
                 let anchor =
                     anchor.or_else(|| s.preferred_column_for_with_affinity(effective, affinity));
-                let (offset, affinity) = s.vertical_target(effective, anchor, affinity, move_lines);
+                let target = s.vertical_target(effective, anchor, affinity, move_lines);
+                let (offset, affinity) = reach_document_edge
+                    .then(|| s.document_edge_past(effective, affinity, target, move_lines))
+                    .flatten()
+                    .map_or(target, |edge| (edge, false));
                 (offset, anchor, affinity)
             },
             Some(direction),
@@ -347,7 +361,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
-        self.move_vertical(-1, true, window, cx);
+        self.move_vertical(-1, true, true, window, cx);
     }
 
     pub(super) fn down(&mut self, action: &MoveDown, window: &mut Window, cx: &mut Context<Self>) {
@@ -355,7 +369,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
-        self.move_vertical(1, true, window, cx);
+        self.move_vertical(1, true, true, window, cx);
     }
 
     pub(super) fn page_up(&mut self, _: &MovePageUp, window: &mut Window, cx: &mut Context<Self>) {
@@ -368,7 +382,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
 
         let display_lines = (self.input_bounds.size.height / last_layout.line_height) as isize;
-        self.move_vertical(-display_lines, false, window, cx);
+        self.move_vertical(-display_lines, false, false, window, cx);
     }
 
     pub(super) fn page_down(
@@ -386,7 +400,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
 
         let display_lines = (self.input_bounds.size.height / last_layout.line_height) as isize;
-        self.move_vertical(display_lines, false, window, cx);
+        self.move_vertical(display_lines, false, false, window, cx);
     }
 
     pub(super) fn home(&mut self, _: &MoveHome, window: &mut Window, cx: &mut Context<Self>) {

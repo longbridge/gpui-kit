@@ -10469,6 +10469,33 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_up_and_down_reach_the_document_edges(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_value("ab\nab\nab", window, cx);
+                state.set_selected_range(4..4, cx);
+                state.focus(window, cx);
+            });
+        });
+        let cursor =
+            |cx: &mut VisualTestContext| view.input.read_with(cx, |state, _| state.cursor());
+
+        cx.simulate_keystrokes("up");
+        assert_eq!(cursor(&mut cx), 1);
+        cx.simulate_keystrokes("up up");
+        assert_eq!(cursor(&mut cx), 0);
+        // Like Shift-Up and Shift-Down, the move keeps its column through the edge.
+        cx.simulate_keystrokes("down");
+        assert_eq!(cursor(&mut cx), 4);
+        cx.simulate_keystrokes("down");
+        assert_eq!(cursor(&mut cx), 7);
+        cx.simulate_keystrokes("down");
+        assert_eq!(cursor(&mut cx), 8);
+    }
+
+    #[gpui::test]
     fn test_multi_cursor_platform_word_selection_dispatch(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
