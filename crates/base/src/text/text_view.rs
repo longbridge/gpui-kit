@@ -106,6 +106,45 @@ pub(crate) type TableActionsFn =
 
 pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync;
 
+pub(crate) type LinkFn = dyn Fn(&Link, &App) -> Option<Link> + Send + Sync;
+
+/// A link a [`TextView`] draws, as handed to [`TextView::link`].
+///
+/// Reference links (`[text][id]`) arrive resolved to their definition. New
+/// fields may be added later, so build one with [`Link::new`] or change a
+/// received one with the setters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Link {
+    /// Where the link points; this is what a click opens or hands to
+    /// [`TextView::on_link_click`].
+    pub url: SharedString,
+    /// The Markdown link title, `[text](url "title")`.
+    pub title: Option<SharedString>,
+}
+
+impl Link {
+    /// A link to `url` with no title.
+    pub fn new(url: impl Into<SharedString>) -> Self {
+        Self {
+            url: url.into(),
+            title: None,
+        }
+    }
+
+    /// Point the link at `url`.
+    pub fn url(mut self, url: impl Into<SharedString>) -> Self {
+        self.url = url.into();
+        self
+    }
+
+    /// Set the link title.
+    pub fn title(mut self, title: impl Into<SharedString>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+}
+
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
@@ -210,6 +249,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    link_hook: Option<Arc<LinkFn>>,
     link_tooltip: Option<Arc<LinkTooltipFn>>,
     task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
     image_source: Option<Arc<ImageSourceFn>>,
@@ -262,6 +302,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_hook: None,
             link_tooltip: None,
             task_toggle_handler: None,
             image_source: None,
@@ -291,6 +332,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_hook: None,
             link_tooltip: None,
             task_toggle_handler: None,
             image_source: None,
@@ -320,6 +362,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_hook: None,
             link_tooltip: None,
             task_toggle_handler: None,
             image_source: None,
@@ -495,6 +538,32 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Replace each link before it is drawn.
+    ///
+    /// `f` receives every link, inline links, reference links (resolved to
+    /// their definition) and linked images alike, and returns the link to
+    /// draw in its place: the same link, one with a different URL or title,
+    /// or `None` to draw the text like the text around it, with no link
+    /// color or underline, and not clickable.
+    ///
+    /// `f` runs each time the text is drawn, so what it returns may follow
+    /// application state (a record that was deleted, a URL resolved later);
+    /// keep it cheap, with no I/O or locks held across frames.
+    ///
+    /// ```ignore
+    /// TextView::markdown(id, text).link(|link, cx| {
+    ///     let record = parse_record_url(&link.url)?;
+    ///     records(cx).contains(record).then(|| link.clone().url(record.web_url()))
+    /// })
+    /// ```
+    pub fn link<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&Link, &App) -> Option<Link> + Send + Sync + 'static,
+    {
+        self.link_hook = Some(Arc::new(f));
         self
     }
 
@@ -832,6 +901,7 @@ impl Element for TextView {
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.link_hook = self.link_hook.clone();
             state.link_tooltip = self.link_tooltip.clone();
             state.task_toggle_handler = self.task_toggle_handler.clone();
             state.image_source = self.image_source.clone();
