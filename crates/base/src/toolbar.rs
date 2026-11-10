@@ -26,6 +26,8 @@ use crate::{StyledExt as _, TestSupportExt as _};
 ///   wrapping around at either end (the same default as Base UI's `loopFocus`).
 ///   A vertical toolbar ([`Toolbar::axis`]) uses Up and Down instead and
 ///   reports a vertical orientation.
+///   [`Toolbar::rtl`] reverses Left/Right navigation for a mirrored horizontal
+///   layout; the caller still owns the layout and item order.
 /// - When `disabled`, the arrow keys do nothing. Hosted controls must be
 ///   disabled by their owner; the flag only suppresses the toolbar's own
 ///   navigation.
@@ -45,6 +47,7 @@ pub struct Toolbar {
     style: StyleRefinement,
     disabled: bool,
     axis: Axis,
+    rtl: bool,
     children: SmallVec<[AnyElement; 4]>,
 }
 
@@ -56,6 +59,7 @@ impl Toolbar {
             style: StyleRefinement::default(),
             disabled: false,
             axis: Axis::Horizontal,
+            rtl: false,
             children: SmallVec::new(),
             id,
         }
@@ -72,6 +76,15 @@ impl Toolbar {
     /// vertical (Up/Down). Assistive technology hears the same orientation.
     pub fn axis(mut self, axis: Axis) -> Self {
         self.axis = axis;
+        self
+    }
+
+    /// Reverses horizontal Left/Right navigation for a right-to-left layout.
+    ///
+    /// Defaults to `false`. This does not change layout, Tab order or vertical
+    /// navigation; the caller supplies the corresponding visual item order.
+    pub fn rtl(mut self, rtl: bool) -> Self {
+        self.rtl = rtl;
         self
     }
 }
@@ -119,6 +132,7 @@ fn move_focus(container: &FocusHandle, forward: bool, window: &mut Window, cx: &
 fn handle_key_down(
     disabled: bool,
     axis: Axis,
+    rtl: bool,
     container: &FocusHandle,
     event: &KeyDownEvent,
     window: &mut Window,
@@ -129,8 +143,10 @@ fn handle_key_down(
     }
 
     let forward = match (axis, event.keystroke.key.as_str()) {
-        (Axis::Horizontal, "left") | (Axis::Vertical, "up") => Some(false),
-        (Axis::Horizontal, "right") | (Axis::Vertical, "down") => Some(true),
+        (Axis::Horizontal, "left") => Some(rtl),
+        (Axis::Horizontal, "right") => Some(!rtl),
+        (Axis::Vertical, "up") => Some(false),
+        (Axis::Vertical, "down") => Some(true),
         _ => None,
     };
 
@@ -167,6 +183,7 @@ impl RenderOnce for Toolbar {
             style,
             disabled,
             axis,
+            rtl,
             children,
             ..
         } = self;
@@ -183,7 +200,7 @@ impl RenderOnce for Toolbar {
         let key_handler = {
             let focus_handle = focus_handle.clone();
             move |event: &KeyDownEvent, window: &mut Window, cx: &mut App| {
-                handle_key_down(disabled, axis, &focus_handle, event, window, cx);
+                handle_key_down(disabled, axis, rtl, &focus_handle, event, window, cx);
             }
         };
 
@@ -285,9 +302,13 @@ mod tests {
 
     #[test]
     fn test_toolbar_builder() {
-        let toolbar = Toolbar::new("toolbar").disabled(true).child(div());
+        let toolbar = Toolbar::new("toolbar")
+            .disabled(true)
+            .rtl(true)
+            .child(div());
 
         assert!(toolbar.disabled);
+        assert!(toolbar.rtl);
         assert_eq!(toolbar.children.len(), 1);
     }
 
@@ -296,6 +317,7 @@ mod tests {
         let toolbar = Toolbar::new("toolbar");
 
         assert!(!toolbar.disabled);
+        assert!(!toolbar.rtl);
         assert_eq!(toolbar.axis, Axis::Horizontal);
         assert!(toolbar.children.is_empty());
         assert_eq!(
@@ -382,6 +404,71 @@ mod tests {
         }
 
         #[gpui::test]
+        fn rtl_arrows_follow_mirrored_layout_and_skip_disabled_items(cx: &mut TestAppContext) {
+            struct Mirrored {
+                items: [FocusHandle; 4],
+                rtl: bool,
+            }
+
+            impl Render for Mirrored {
+                fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                    Toolbar::new("mirrored-toolbar")
+                        .rtl(self.rtl)
+                        .flex()
+                        .when(self.rtl, |this| this.flex_row_reverse())
+                        .children(self.items.iter().enumerate().map(|(ix, focus)| {
+                            crate::Button::new(("item", ix))
+                                .track_focus(focus)
+                                .disabled(ix == 2)
+                                // Fixed fixture geometry makes physical direction observable.
+                                .size(px(20.))
+                        }))
+                }
+            }
+
+            let (state, cx) = cx.add_window_view(|window, cx| {
+                let items = [(); 4].map(|_| cx.focus_handle().tab_stop(true));
+                items[0].focus(window, cx);
+                Mirrored { items, rtl: true }
+            });
+            let [first, second, disabled, last] =
+                state.read_with(cx, |harness, _| harness.items.clone());
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                let left = |ix| {
+                    crate::test_support::find(window, &[], &("item", ix).into())
+                        .expect("the button is observed")
+                        .bounds()
+                        .left()
+                };
+                assert!(left(0_usize) > left(1) && left(1) > left(2) && left(2) > left(3));
+            });
+
+            cx.simulate_keystrokes("left");
+            assert_focused(cx, &second, "the physically adjacent button to the left");
+            cx.simulate_keystrokes("left");
+            assert_focused(cx, &last, "last (disabled button skipped)");
+            cx.simulate_keystrokes("left");
+            assert_focused(cx, &first, "first (wrapped from the left edge)");
+            cx.simulate_keystrokes("right");
+            assert_focused(cx, &last, "last (wrapped from the right edge)");
+            cx.simulate_keystrokes("right");
+            assert_focused(cx, &second, "second (disabled button skipped in reverse)");
+            cx.update(|window, _| assert!(!disabled.is_focused(window)));
+
+            state.update(cx, |harness, cx| {
+                harness.rtl = false;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_focused(cx, &second, "second (direction change preserves focus)");
+            cx.simulate_keystrokes("right");
+            assert_focused(cx, &last, "last (updated LTR navigation skips disabled)");
+            cx.simulate_keystrokes("left");
+            assert_focused(cx, &second, "second (updated LTR navigation)");
+        }
+
+        #[gpui::test]
         fn a_vertical_toolbar_roves_with_up_and_down(cx: &mut TestAppContext) {
             struct Vertical([FocusHandle; 3]);
 
@@ -390,6 +477,7 @@ mod tests {
                     let [first, second, third] = &self.0;
                     Toolbar::new("vertical-toolbar")
                         .axis(Axis::Vertical)
+                        .rtl(true)
                         .child(div().id("first").size(px(20.)).track_focus(first))
                         .child(div().id("second").size(px(20.)).track_focus(second))
                         .child(div().id("third").size(px(20.)).track_focus(third))
@@ -709,6 +797,7 @@ mod tests {
                     let [first, second] = &self.items;
                     Toolbar::new("disabled-toolbar")
                         .disabled(true)
+                        .rtl(true)
                         .child(div().id("first").size(px(20.)).track_focus(first))
                         .child(div().id("second").size(px(20.)).track_focus(second))
                 }
