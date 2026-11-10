@@ -408,7 +408,7 @@ impl Render for Notification {
         let action = self
             .action_builder
             .clone()
-            .map(|builder| builder(self, window, cx).small().mr_3p5());
+            .map(|builder| builder(self, window, cx).small().me(rems(0.875), cx));
 
         let transition_status = self.transition_status;
         let closing = transition_status == ToastTransitionStatus::Ending;
@@ -422,6 +422,7 @@ impl Render for Notification {
         BaseToast::new("notification")
             .transition_status(transition_status)
             .h_flex()
+            .flex_row_dir(cx)
             .group("")
             .occlude()
             .relative()

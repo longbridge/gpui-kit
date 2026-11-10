@@ -508,7 +508,9 @@ impl RenderOnce for TableHead {
             .when(self.align == TextAlign::Center, |this| {
                 this.justify_center()
             })
-            .when(self.align == TextAlign::Right, |this| this.justify_end())
+            .when(self.align == TextAlign::Right, |this| {
+                this.justify_flex_end()
+            })
             .refine_style(&self.style)
             .children(self.children)
     }
@@ -599,7 +601,9 @@ impl RenderOnce for TableCell {
             .when(self.align == TextAlign::Center, |this| {
                 this.justify_center()
             })
-            .when(self.align == TextAlign::Right, |this| this.justify_end())
+            .when(self.align == TextAlign::Right, |this| {
+                this.justify_flex_end()
+            })
             .refine_style(&self.style)
             .children(self.children)
     }

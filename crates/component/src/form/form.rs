@@ -146,7 +146,7 @@ impl RenderOnce for Form {
                         .flex_row_dir(cx)
                         .col_span_full()
                         .min_w_0()
-                        .justify_end()
+                        .justify_flex_end()
                         .child(footer),
                 )
             })

@@ -108,7 +108,7 @@ impl RenderOnce for StatusBar {
                 region()
                     .flex_1()
                     .when(has_left && has_right, |this| this.justify_center())
-                    .when(has_left && !has_right, |this| this.justify_end())
+                    .when(has_left && !has_right, |this| this.justify_flex_end())
                     .children(self.children),
             )
             .when(has_right, |this| this.child(region().children(self.right)))

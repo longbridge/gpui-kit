@@ -10,6 +10,7 @@
 
 use std::time::Duration;
 
+use gpui_base::LogicalStyledExt as _;
 use gpui_base::TestSupportExt as _;
 
 use gpui::{
@@ -175,7 +176,7 @@ impl RenderOnce for InputGroup {
         }
         let control = self
             .control
-            .map(|input| render_control(input, presentation, multiline));
+            .map(|input| render_control(input, presentation, multiline, cx));
         let theme = cx.theme();
         let appearance = GroupAppearance::new(theme, focused, disabled, self.invalid);
         let radius = theme.radius;
@@ -251,6 +252,8 @@ impl RenderOnce for InputGroup {
             .children(block_start)
             .child(
                 h_flex()
+                    // Inline addons sit on the logical sides of the control.
+                    .flex_row_dir(cx)
                     .w_full()
                     .min_w_0()
                     .items_center()
@@ -273,6 +276,7 @@ fn render_control(
     mut input: Input,
     presentation: GroupPresentation,
     multiline: bool,
+    cx: &App,
 ) -> AnyElement {
     let style = std::mem::take(input.style());
     input
@@ -285,8 +289,8 @@ fn render_control(
         .min_w_0()
         .when(multiline, |this| this.min_h_16())
         .when(!multiline, |this| {
-            this.when(presentation.inline_start, |this| this.pl_2())
-                .when(presentation.inline_end, |this| this.pr_2())
+            this.when(presentation.inline_start, |this| this.ps(rems(0.5), cx))
+                .when(presentation.inline_end, |this| this.pe(rems(0.5), cx))
         })
         .refine_style(&style)
         .into_any_element()
@@ -395,6 +399,7 @@ impl InputGroupAddon {
         // lines up with the text.
         let block_px = presentation.size.input_px();
         h_flex()
+            .flex_row_dir(cx)
             .id(self.id)
             .test_support()
             .flex_none()
@@ -410,17 +415,17 @@ impl InputGroupAddon {
             .text_color(cx.theme().muted_foreground)
             .cursor_text()
             .map(|this| match self.alignment {
-                InputGroupAddonAlignment::InlineStart => this.pl_1p5(),
-                InputGroupAddonAlignment::InlineEnd => this.pr_1p5(),
+                InputGroupAddonAlignment::InlineStart => this.ps(rems(0.375), cx),
+                InputGroupAddonAlignment::InlineEnd => this.pe(rems(0.375), cx),
                 InputGroupAddonAlignment::BlockStart => this
                     .w_full()
-                    .justify_start()
+                    .justify_flex_start()
                     .px(block_px)
                     .pt_2()
                     .when(border_bottom, |this| this.pb_2()),
                 InputGroupAddonAlignment::BlockEnd => this
                     .w_full()
-                    .justify_start()
+                    .justify_flex_start()
                     .px(block_px)
                     .pb_2()
                     .when(border_top, |this| this.pt_2()),
@@ -709,6 +714,7 @@ impl Styled for InputGroupText {
 impl RenderOnce for InputGroupText {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         h_flex()
+            .flex_row_dir(cx)
             .gap_2()
             .text_sm()
             .text_color(cx.theme().muted_foreground)

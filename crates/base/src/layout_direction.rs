@@ -13,10 +13,11 @@
 //!
 //! Layout written with the logical helpers of [`LogicalStyledExt`]
 //! (`ps`/`pe`, `ms`/`me`, `border_s`/`border_e`, `rounded_s`/`rounded_e`,
-//! `inset_s`/`inset_e`, `flex_row_dir`) mirrors with it; physical helpers
-//! (`pl`, `left`, `flex_row`, …) keep their physical meaning.
+//! `inset_s`/`inset_e`, `flex_row_dir`, `justify_flex_start`/`justify_flex_end`)
+//! mirrors with it; physical helpers (`pl`, `left`, `flex_row`, `justify_start`,
+//! …) keep their physical meaning.
 
-use gpui::{AbsoluteLength, App, DefiniteLength, Global, Length, Styled};
+use gpui::{AbsoluteLength, App, DefiniteLength, Global, JustifyContent, Length, Styled};
 
 /// The horizontal direction an interface is laid out and navigated in.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
@@ -195,6 +196,24 @@ pub trait LogicalStyledExt: Styled + Sized {
         }
     }
 
+    /// Packs a row's children against the edge its first child sits on — the
+    /// start edge of a [`flex_row_dir`](Self::flex_row_dir) row.
+    ///
+    /// `justify_start` is the physical left edge even in a reversed row, so it
+    /// does not follow the layout direction; this is CSS `flex-start`.
+    fn justify_flex_start(mut self) -> Self {
+        self.style().justify_content = Some(JustifyContent::FlexStart);
+        self
+    }
+
+    /// Packs a row's children against the edge its last child sits on — the
+    /// end edge of a [`flex_row_dir`](Self::flex_row_dir) row. This is CSS
+    /// `flex-end`; `justify_end` stays on the physical right edge.
+    fn justify_flex_end(mut self) -> Self {
+        self.style().justify_content = Some(JustifyContent::FlexEnd);
+        self
+    }
+
     /// Aligns text to the start edge: `text_left` in LTR, `text_right` in RTL.
     fn text_start(self, cx: &App) -> Self {
         if LayoutDirection::global(cx).start_is_left() {
@@ -259,6 +278,36 @@ mod tests {
             assert_eq!(style.margin.left, Some(px(8.).into()));
             assert_eq!(style.border_widths.right, Some(px(1.).into()));
         });
+    }
+
+    #[gpui::test]
+    fn flex_justification_follows_row_direction(cx: &mut TestAppContext) {
+        use gpui::{
+            Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Window,
+        };
+
+        struct Row;
+        impl Render for Row {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex_row_dir(cx)
+                    .w(px(100.))
+                    .justify_flex_end()
+                    .child(div().size(px(10.)).debug_selector(|| "item".into()))
+            }
+        }
+
+        cx.update(crate::init);
+        for (direction, expected_left) in [
+            (LayoutDirection::Ltr, px(90.)),
+            (LayoutDirection::Rtl, px(0.)),
+        ] {
+            cx.update(|cx| direction.set_global(cx));
+            let (_, window) = cx.add_window_view(|_, _| Row);
+            window.update(|window, cx| window.draw(cx).clear(cx));
+            let item = window.debug_bounds("item").expect("item not rendered");
+            assert_eq!(item.left(), expected_left, "{direction:?}");
+        }
     }
 
     #[gpui::test]

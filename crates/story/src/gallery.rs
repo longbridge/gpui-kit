@@ -1,4 +1,5 @@
 use crate::*;
+use gpui_kit::base::LogicalStyledExt as _;
 use gpui_kit::component::{
     Icon, IconName, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
@@ -308,6 +309,7 @@ impl Render for Gallery {
             .overflow_x_hidden()
             .child(
                 h_flex()
+                    .flex_row_dir(cx)
                     .id("header")
                     .p_4()
                     .border_b_1()
@@ -338,6 +340,7 @@ impl Render for Gallery {
         // The sidebar slides out of the layout when collapsed and back when the
         // toggle in the status bar reopens it.
         let body = h_flex()
+            .flex_row_dir(cx)
             .size_full()
             .child(
                 Sidebar::new("gallery-sidebar")

@@ -780,11 +780,21 @@ impl RenderOnce for Tab {
         }
         let tab_bar_prefix = self.tab_bar_prefix.unwrap_or_default();
         if !tab_bar_prefix {
+            // The first tab meets the bar's start edge, so it drops that border.
             if self.ix == 0 && self.variant == TabVariant::Tab {
-                normal_style.borders.left = px(0.);
-                selected_style.borders.left = px(0.);
-                disabled_style.borders.left = px(0.);
-                hover_style.borders.left = px(0.);
+                let rtl = gpui_base::LayoutDirection::global(cx).is_rtl();
+                for style in [
+                    &mut normal_style,
+                    &mut selected_style,
+                    &mut disabled_style,
+                    &mut hover_style,
+                ] {
+                    if rtl {
+                        style.borders.right = px(0.);
+                    } else {
+                        style.borders.left = px(0.);
+                    }
+                }
             }
         }
         let tab_style = if self.disabled {
@@ -1018,12 +1028,13 @@ impl RenderOnce for Tab {
                     )
                 },
             )
-            // In the gap after the tab, on a whole pixel, level with the content.
+            // In the gap after the tab (on its end edge), on a whole pixel, level
+            // with the content.
             .when(folder && self.separator, |this| {
                 this.child(
                     div()
                         .absolute()
-                        .right(-(FOLDER_TAB_GAP / 2.))
+                        .inset_e(-(FOLDER_TAB_GAP / 2.), cx)
                         .top((height - metrics.top_padding - metrics.separator_height) / 2.)
                         .w(px(1.))
                         .h(metrics.separator_height)

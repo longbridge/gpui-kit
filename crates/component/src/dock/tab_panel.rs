@@ -404,7 +404,7 @@ impl TabGroupSkin {
                 this.child(
                     h_flex()
                         .flex_shrink_0()
-                        .mr_1()
+                        .me(rems(0.25), cx)
                         .gap_1()
                         .children(left_button)
                         .children(bottom_button),
@@ -437,7 +437,7 @@ impl TabGroupSkin {
             .child(
                 h_flex()
                     .flex_shrink_0()
-                    .ml_1()
+                    .ms(rems(0.25), cx)
                     .gap_1()
                     .child(self.render_toolbar(group, window, cx))
                     .children(right_button),
@@ -492,9 +492,9 @@ impl TabGroupSkin {
                     h_flex()
                         .items_center()
                         .top_0()
-                        // Right -1 for avoid border overlap with the first tab
-                        .right(-px(1.))
-                        .border_r_1()
+                        // Overlap the first tab by 1px so their borders don't double up.
+                        .inset_e(-px(1.), cx)
+                        .border_e(px(1.), cx)
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
@@ -551,8 +551,8 @@ impl TabGroupSkin {
                                             // Offset the label's own 12px right
                                             // padding and the tab's 4px gap so the
                                             // text-to-icon distance is also 12px.
-                                            .ml(-px(8.))
-                                            .mr_2()
+                                            .ms(-px(8.), cx)
+                                            .me(rems(0.5), cx)
                                             .tab_stop(false)
                                             .debug_selector(|| CLOSE_BUTTON_SELECTOR.to_string())
                                             .on_click({
@@ -614,9 +614,9 @@ impl TabGroupSkin {
                                 })
                                 .when(droppable, |this| {
                                     this.drag_over::<DragPanel>(|this, _, _, cx| {
-                                        this.rounded_l_none()
-                                            .border_l_2()
-                                            .border_r_0()
+                                        this.rounded_s(px(0.), cx)
+                                            .border_s(px(2.), cx)
+                                            .border_e(px(0.), cx)
                                             .border_color(cx.theme().drag_border)
                                     })
                                     .on_drop({
@@ -632,9 +632,9 @@ impl TabGroupSkin {
                                         }
                                     })
                                     .drag_over::<AnyDrag>(|this, _, _, cx| {
-                                        this.rounded_l_none()
-                                            .border_l_2()
-                                            .border_r_0()
+                                        this.rounded_s(px(0.), cx)
+                                            .border_s(px(2.), cx)
+                                            .border_e(px(0.), cx)
                                             .border_color(cx.theme().drag_border)
                                     })
                                     .on_drop({
@@ -686,8 +686,8 @@ impl TabGroupSkin {
                     h_flex()
                         .items_center()
                         .top_0()
-                        .right_0()
-                        .border_l_1()
+                        .inset_e(px(0.), cx)
+                        .border_s(px(1.), cx)
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)

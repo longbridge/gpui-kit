@@ -289,6 +289,7 @@ impl SidebarItem for SidebarMenuItem {
         let is_open = open_state
             .as_ref()
             .map_or(false, |s| !is_collapsed && *s.read(cx));
+        let rtl = gpui_base::LayoutDirection::global(cx).is_rtl();
 
         div()
             .id(id.clone())
@@ -355,11 +356,24 @@ impl SidebarItem for SidebarMenuItem {
                                         .ghost()
                                         .accessibility_label(self.caret_accessibility_label())
                                         .icon(
-                                            Icon::new(IconName::ChevronRight)
-                                                .size_4()
-                                                .when(is_open, |this| {
-                                                    this.rotate(percentage(90. / 360.))
-                                                }),
+                                            // Points toward the end edge while
+                                            // closed and turns down when open.
+                                            Icon::new(if rtl {
+                                                IconName::ChevronLeft
+                                            } else {
+                                                IconName::ChevronRight
+                                            })
+                                            .size_4()
+                                            .when(
+                                                is_open,
+                                                |this| {
+                                                    // A quarter turn toward down: clockwise
+                                                    // from right, counter-clockwise from left.
+                                                    this.rotate(percentage(
+                                                        if rtl { 270. } else { 90. } / 360.,
+                                                    ))
+                                                },
+                                            ),
                                         )
                                         .on_click({
                                             move |_, _, cx| {

@@ -86,6 +86,7 @@ impl Render for LayoutDirectionStory {
                     )
                     .child(
                         h_flex()
+                            .flex_row_dir(cx)
                             .gap_3()
                             .items_center()
                             .child(div().text_color(cx.theme().muted_foreground).child(if rtl {
@@ -179,6 +180,7 @@ impl Render for LayoutDirectionStory {
                         )
                         .child(
                             h_flex()
+                                .flex_row_dir(cx)
                                 .gap_2()
                                 .child(Button::new("rtl-save").primary().label("حفظ"))
                                 .child(Button::new("rtl-cancel").outline().label("إلغاء"))
@@ -186,7 +188,12 @@ impl Render for LayoutDirectionStory {
                                     Button::new("rtl-next")
                                         .ghost()
                                         .label("التالي")
-                                        .icon(IconName::ChevronRight),
+                                        // "Next" points toward the end edge.
+                                        .icon(if rtl {
+                                            IconName::ChevronLeft
+                                        } else {
+                                            IconName::ChevronRight
+                                        }),
                                 ),
                         ),
                 ),
