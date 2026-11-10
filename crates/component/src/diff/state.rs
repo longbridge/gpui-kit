@@ -642,7 +642,18 @@ impl DiffState {
             return;
         }
         self.mode = mode;
+        // A diff shown from its top stays there: the top row's anchor is the
+        // file's first line, and revealing it scrolls the header off when
+        // rows wrap to heights the list has not measured yet.
+        let top = self.list.logical_scroll_top();
+        let at_top = top.item_ix == 0 && top.offset_in_item <= px(0.);
         self.rebuild_at_anchor();
+        if at_top {
+            self.list.scroll_to(ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.),
+            });
+        }
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
