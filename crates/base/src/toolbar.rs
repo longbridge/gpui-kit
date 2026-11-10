@@ -6,7 +6,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StyledExt as _, TestSupportExt as _};
+use crate::{LayoutDirection, StyledExt as _, TestSupportExt as _};
 
 /// An unstyled container that groups a set of controls and owns roving
 /// keyboard focus among them.
@@ -26,8 +26,9 @@ use crate::{StyledExt as _, TestSupportExt as _};
 ///   wrapping around at either end (the same default as Base UI's `loopFocus`).
 ///   A vertical toolbar ([`Toolbar::axis`]) uses Up and Down instead and
 ///   reports a vertical orientation.
-///   [`Toolbar::rtl`] reverses Left/Right navigation for a mirrored horizontal
-///   layout; the caller still owns the layout and item order.
+///   [`Toolbar::direction`] with [`LayoutDirection::Rtl`] reverses Left/Right
+///   navigation for a mirrored horizontal layout; the caller still owns the
+///   layout and item order.
 /// - When `disabled`, the arrow keys do nothing. Hosted controls must be
 ///   disabled by their owner; the flag only suppresses the toolbar's own
 ///   navigation.
@@ -47,7 +48,7 @@ pub struct Toolbar {
     style: StyleRefinement,
     disabled: bool,
     axis: Axis,
-    rtl: bool,
+    direction: Option<LayoutDirection>,
     children: SmallVec<[AnyElement; 4]>,
 }
 
@@ -59,7 +60,7 @@ impl Toolbar {
             style: StyleRefinement::default(),
             disabled: false,
             axis: Axis::Horizontal,
-            rtl: false,
+            direction: None,
             children: SmallVec::new(),
             id,
         }
@@ -79,12 +80,13 @@ impl Toolbar {
         self
     }
 
-    /// Reverses horizontal Left/Right navigation for a right-to-left layout.
+    /// Sets the horizontal layout direction used for Left/Right navigation.
     ///
-    /// Defaults to `false`. This does not change layout, Tab order or vertical
+    /// When unset, resolves to [`LayoutDirection::Ltr`]. No application or window
+    /// direction is inherited. This does not change layout, Tab order or vertical
     /// navigation; the caller supplies the corresponding visual item order.
-    pub fn rtl(mut self, rtl: bool) -> Self {
-        self.rtl = rtl;
+    pub fn direction(mut self, direction: LayoutDirection) -> Self {
+        self.direction = Some(direction);
         self
     }
 }
@@ -132,7 +134,7 @@ fn move_focus(container: &FocusHandle, forward: bool, window: &mut Window, cx: &
 fn handle_key_down(
     disabled: bool,
     axis: Axis,
-    rtl: bool,
+    direction: LayoutDirection,
     container: &FocusHandle,
     event: &KeyDownEvent,
     window: &mut Window,
@@ -143,8 +145,8 @@ fn handle_key_down(
     }
 
     let forward = match (axis, event.keystroke.key.as_str()) {
-        (Axis::Horizontal, "left") => Some(rtl),
-        (Axis::Horizontal, "right") => Some(!rtl),
+        (Axis::Horizontal, "left") => Some(direction == LayoutDirection::Rtl),
+        (Axis::Horizontal, "right") => Some(direction == LayoutDirection::Ltr),
         (Axis::Vertical, "up") => Some(false),
         (Axis::Vertical, "down") => Some(true),
         _ => None,
@@ -183,10 +185,11 @@ impl RenderOnce for Toolbar {
             style,
             disabled,
             axis,
-            rtl,
+            direction,
             children,
             ..
         } = self;
+        let direction = direction.unwrap_or_default();
 
         // The handle must survive across frames so containment checks and the
         // key handler refer to the same dispatch-tree node; button.rs uses
@@ -200,7 +203,7 @@ impl RenderOnce for Toolbar {
         let key_handler = {
             let focus_handle = focus_handle.clone();
             move |event: &KeyDownEvent, window: &mut Window, cx: &mut App| {
-                handle_key_down(disabled, axis, rtl, &focus_handle, event, window, cx);
+                handle_key_down(disabled, axis, direction, &focus_handle, event, window, cx);
             }
         };
 
@@ -304,11 +307,11 @@ mod tests {
     fn test_toolbar_builder() {
         let toolbar = Toolbar::new("toolbar")
             .disabled(true)
-            .rtl(true)
+            .direction(LayoutDirection::Rtl)
             .child(div());
 
         assert!(toolbar.disabled);
-        assert!(toolbar.rtl);
+        assert_eq!(toolbar.direction, Some(LayoutDirection::Rtl));
         assert_eq!(toolbar.children.len(), 1);
     }
 
@@ -317,7 +320,14 @@ mod tests {
         let toolbar = Toolbar::new("toolbar");
 
         assert!(!toolbar.disabled);
-        assert!(!toolbar.rtl);
+        assert_eq!(toolbar.direction, None);
+        assert_eq!(toolbar.direction.unwrap_or_default(), LayoutDirection::Ltr);
+        assert_eq!(
+            Toolbar::new("explicit-ltr")
+                .direction(LayoutDirection::Ltr)
+                .direction,
+            Some(LayoutDirection::Ltr)
+        );
         assert_eq!(toolbar.axis, Axis::Horizontal);
         assert!(toolbar.children.is_empty());
         assert_eq!(
@@ -413,7 +423,11 @@ mod tests {
             impl Render for Mirrored {
                 fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                     Toolbar::new("mirrored-toolbar")
-                        .rtl(self.rtl)
+                        .direction(if self.rtl {
+                            LayoutDirection::Rtl
+                        } else {
+                            LayoutDirection::Ltr
+                        })
                         .flex()
                         .when(self.rtl, |this| this.flex_row_reverse())
                         .children(self.items.iter().enumerate().map(|(ix, focus)| {
@@ -477,7 +491,7 @@ mod tests {
                     let [first, second, third] = &self.0;
                     Toolbar::new("vertical-toolbar")
                         .axis(Axis::Vertical)
-                        .rtl(true)
+                        .direction(LayoutDirection::Rtl)
                         .child(div().id("first").size(px(20.)).track_focus(first))
                         .child(div().id("second").size(px(20.)).track_focus(second))
                         .child(div().id("third").size(px(20.)).track_focus(third))
@@ -797,7 +811,7 @@ mod tests {
                     let [first, second] = &self.items;
                     Toolbar::new("disabled-toolbar")
                         .disabled(true)
-                        .rtl(true)
+                        .direction(LayoutDirection::Rtl)
                         .child(div().id("first").size(px(20.)).track_focus(first))
                         .child(div().id("second").size(px(20.)).track_focus(second))
                 }
