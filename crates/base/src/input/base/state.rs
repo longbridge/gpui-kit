@@ -2383,8 +2383,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         // In multi-line mode with `submit_on_enter` enabled, a plain `Enter`
         // (without Shift) is treated as submit: propagate the action and emit
         // PressEnter without inserting a newline. `Shift+Enter` still inserts
-        // a newline.
-        let insert_newline = self.is_multi_line() && (!self.submit_on_enter || action.shift);
+        // a newline. A secondary `Enter` (Cmd/Ctrl+Enter) is always a submit
+        // gesture and never inserts a newline.
+        let insert_newline =
+            self.is_multi_line() && !action.secondary && (!self.submit_on_enter || action.shift);
 
         if insert_newline {
             if !self.selections.is_single() {
@@ -8129,6 +8131,29 @@ mod tests {
                 assert_eq!(state.value(), "a");
                 state.undo(&Undo, window, cx);
                 assert_eq!(state.value(), "");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_textarea_secondary_enter_does_not_insert_newline(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "hello", window, cx);
+                state.set_selection(0, 0);
+                state.enter(
+                    &Enter {
+                        secondary: true,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(state.value(), "hello");
             });
         });
     }
