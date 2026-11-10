@@ -185,6 +185,18 @@ impl TextView {
         self.inner = self.inner.on_link_click(f);
         self
     }
+    /// Replaces each link before it is drawn; `None` draws it as plain text.
+    /// See [`gpui_base::text::TextView::link`].
+    pub fn link<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&gpui_base::text::Link, &App) -> Option<gpui_base::text::Link>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.inner = self.inner.link(f);
+        self
+    }
     /// Shows an application-supplied tooltip beside the pointer over a link.
     /// The tooltip is cached until a different destination is shown.
     pub fn link_tooltip<F>(mut self, builder: F) -> Self
