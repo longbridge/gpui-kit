@@ -473,7 +473,7 @@ pub fn install(
 
     install_elements(&globals, runtime.clone())?;
 
-    let discard = runtime.clone();
+    let discard = runtime;
     globals.set(
         "__dock_release",
         Func::from(move |handle: EntityHandle| {

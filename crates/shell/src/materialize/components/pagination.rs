@@ -56,7 +56,7 @@ pub(in crate::materialize) fn pagination(
         SharedString::from(id.to_owned()),
         PaginationState::new(1, 1),
     );
-    if let Some(label) = behavior.accessibility_label.clone() {
+    if let Some(label) = behavior.accessibility_label {
         element = element.accessibility_label(label);
     }
     element.style().refine(&refinement);

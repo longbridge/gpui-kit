@@ -395,7 +395,6 @@ fn clickable(
     row = row.child(item);
     if let Some(callback) = handlers.click {
         let runtime = Rc::downgrade(runtime);
-        let key = key.clone();
         row = row.on_click(move |_, window, cx| {
             if let Some(runtime) = runtime.upgrade() {
                 runtime.dispatch_item_key(callback, &key, window, cx);

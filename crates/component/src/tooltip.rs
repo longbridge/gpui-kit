@@ -287,7 +287,6 @@ pub(crate) trait ManagedTooltipExt:
         })
         .on_hover({
             let trigger = trigger.clone();
-            let build_tooltip = build_tooltip.clone();
             move |hovered, window, cx| {
                 let trigger = trigger.borrow();
                 let Some(id) = trigger.id.as_ref() else {

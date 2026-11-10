@@ -2892,7 +2892,7 @@ impl<M: InputModeKind> TextElement<M> {
             styles = compose_decoration_collections(
                 styles,
                 state.extras.decoration_layers().into_iter(),
-                visible_byte_range.clone(),
+                visible_byte_range,
             )
             .unwrap_or_default();
         }
@@ -6538,10 +6538,7 @@ mod tests {
                 ..run.clone()
             },
             // this-is-test
-            TextRun {
-                len: 12,
-                ..run.clone()
-            },
+            TextRun { len: 12, ..run },
         ];
 
         #[track_caller]
@@ -6790,10 +6787,7 @@ mod tests {
                 len: 7,
                 ..run.clone()
             },
-            TextRun {
-                len: 24,
-                ..run.clone()
-            },
+            TextRun { len: 24, ..run },
         ];
 
         let bg_segments = vec![(8..12, gpui::red()), (12..18, gpui::blue())];

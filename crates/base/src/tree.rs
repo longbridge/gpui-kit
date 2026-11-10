@@ -600,7 +600,7 @@ mod tests {
     fn clones_share_state_and_ancestors_keep_nearest_first_order() {
         let leaf = TreeItem::new("leaf", "Leaf");
         let branch = TreeItem::new("branch", "Branch").child(leaf.clone());
-        let root = TreeItem::new("root", "Root").child(branch.clone());
+        let root = TreeItem::new("root", "Root").child(branch);
 
         leaf.clone().disabled(true).expanded(true);
         assert!(leaf.is_disabled());

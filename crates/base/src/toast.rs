@@ -523,7 +523,7 @@ impl RenderOnce for ToastStack {
                     cx,
                 );
                 div()
-                    .id(item_id.clone())
+                    .id(item_id)
                     .absolute()
                     .top_0()
                     .left_0()
@@ -564,7 +564,6 @@ impl RenderOnce for ToastStack {
                             }
                             bounds.size.height = collapsed_height;
                         }
-                        let hovered_state = hovered_state.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, _, _, cx| {
                             let hovered = bounds.contains(&event.position);
                             if hovered_state.replace(hovered) != hovered {

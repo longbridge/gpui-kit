@@ -11,6 +11,9 @@ edition.workspace = true
 publish = true
 version = "0.9.1"
 
+[lints]
+workspace = true
+
 [features]
 # Hosts the native view in GPUI Fast's window composition, so GPUI overlays render above the
 # page on macOS and Linux. `gpui-kit/gpui-fast` selects the backend; enable both together, a

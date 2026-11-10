@@ -688,7 +688,7 @@ impl TableDelegate for StockTableDelegate {
             .when(col.align == TextAlign::Right, |this| {
                 this.h_flex().w_full().justify_end()
             })
-            .child(col.name.clone())
+            .child(col.name)
     }
 
     fn context_menu(

@@ -2014,7 +2014,7 @@ where
             .child(self.render_leading_resize_handle(col_ix, window, cx))
             // to save the bounds of this col.
             .on_prepaint({
-                let view = cx.entity().clone();
+                let view = cx.entity();
                 move |bounds, _, cx| view.update(cx, |r, _| r.col_groups[col_ix].bounds = bounds)
             })
     }
@@ -2272,7 +2272,7 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let header_row_height = self.header_row_height();
         let layout = self.header_layout.clone();
 
@@ -2340,7 +2340,7 @@ where
         // `selected_row()` is `None` outside row mode, so a selected cell or
         // column never highlights its row.
         let is_selected = self.selected_row() == Some(row_ix);
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let row_height = self.options.size.table_row_height();
 
         if row_ix < rows_count {
@@ -2836,7 +2836,7 @@ where
             .overflow_hidden()
             .child(self.render_table_header(scrollable_cols.clone(), window, cx))
             .context_menu({
-                let view = cx.entity().clone();
+                let view = cx.entity();
                 move |this, window: &mut Window, cx: &mut Context<PopupMenu>| {
                     if let Some(row_ix) = view.read(cx).right_clicked_row {
                         view.update(cx, |menu, cx| {

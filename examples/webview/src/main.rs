@@ -28,7 +28,7 @@ impl Example {
         let address_input =
             cx.new(|cx| InputState::new(window, cx).default_value("https://gpui-kit.com"));
 
-        let url = address_input.read(cx).value().clone();
+        let url = address_input.read(cx).value();
         webview.update(cx, |view, _| {
             view.load_url(&url);
         });
@@ -44,7 +44,7 @@ impl Example {
                 &address_input,
                 |this: &mut Self, input, event: &InputEvent, cx| match event {
                     InputEvent::PressEnter { .. } => {
-                        let url = input.read(cx).value().clone();
+                        let url = input.read(cx).value();
                         this.webview.update(cx, |view, _| {
                             view.load_url(&url);
                         });
@@ -139,7 +139,7 @@ impl Render for Example {
                     .border_1()
                     .h(gpui_kit::px(400.))
                     .border_color(cx.theme().border)
-                    .child(webview.clone()),
+                    .child(webview),
             )
     }
 }

@@ -65,14 +65,11 @@ impl BaseShowcase {
         } else {
             let root = Select::new("example-select")
                 .open(open)
-                .on_open_change({
-                    let entity = entity.clone();
-                    move |next, _, cx| {
-                        _ = entity.update(cx, |this, cx| {
-                            this.select_open = next;
-                            cx.notify();
-                        });
-                    }
+                .on_open_change(move |next, _, cx| {
+                    _ = entity.update(cx, |this, cx| {
+                        this.select_open = next;
+                        cx.notify();
+                    });
                 })
                 .accessibility_label("Framework")
                 .w_56()

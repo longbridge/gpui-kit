@@ -23,9 +23,8 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Dxgi",
 ] }
 
-[lints.clippy]
-dbg_macro = "deny"
-todo = "deny"
+[lints]
+workspace = true
 
 [features]
 gpui-fast = ["gpui-kit/gpui-fast"]

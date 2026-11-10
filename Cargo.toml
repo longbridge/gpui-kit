@@ -132,6 +132,7 @@ manual_is_multiple_of = "allow"
 map_entry = "allow"
 module_inception = "allow"
 non_canonical_partial_ord_impl = "allow"
+redundant_clone = "deny"
 reversed_empty_ranges = "allow"
 single_range_in_vec_init = "allow"
 style = { level = "allow", priority = -1 }

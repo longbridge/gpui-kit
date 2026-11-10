@@ -72,7 +72,7 @@ impl Render for ClipboardStory {
                             .child(
                                 Clipboard::new("clipboard1")
                                     .value_fn({
-                                        let view = cx.entity().clone();
+                                        let view = cx.entity();
                                         move |_, cx| {
                                             SharedString::from(format!(
                                                 "masked :{}",
