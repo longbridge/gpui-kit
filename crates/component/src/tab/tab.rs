@@ -9,6 +9,7 @@ use gpui::{
     Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
     div, point, px, relative,
 };
+use gpui_base::LogicalStyledExt as _;
 
 /// Room between two [`TabVariant::Folder`] tabs, holding their separator.
 pub(super) const FOLDER_TAB_GAP: Pixels = px(4.);
@@ -900,7 +901,7 @@ impl RenderOnce for Tab {
                     })
                     .children(self.children)
                     // With the prefix's gap, 8px between icon and title, as in a Button.
-                    .when(folder && has_prefix, |this| this.pl(px(4.))),
+                    .when(folder && has_prefix, |this| this.ps(px(4.), cx)),
             })
             .bg(inner_bg)
             .rounded(inner_radius)
@@ -948,7 +949,8 @@ impl RenderOnce for Tab {
                     })
             })
             .relative()
-            .flex()
+            // Prefix, label and suffix read from the start edge.
+            .flex_row_dir(cx)
             // Wrapping would move the overflow onto a clipped second line instead
             // of letting the label shrink, so a capped tab lays out on one line.
             .map(|this| match max_width {
@@ -1215,6 +1217,26 @@ mod tests {
         assert!(
             suffix.left() > tab.center().x,
             "suffix must follow the label, not wrap below it"
+        );
+    }
+
+    #[gpui::test]
+    fn a_right_to_left_tab_puts_its_prefix_on_the_right(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            gpui_base::LayoutDirection::Rtl.set_global(cx);
+        });
+        let cx = show(cx, TabVariant::Tab, None, |tab| {
+            tab.prefix(div().size(px(16.)).debug_selector(|| "prefix".to_string()))
+                .label("Label")
+                .suffix(div().size(px(16.)).debug_selector(|| "suffix".to_string()))
+        });
+
+        let prefix = cx.debug_bounds("prefix").expect("prefix not rendered");
+        let suffix = cx.debug_bounds("suffix").expect("suffix not rendered");
+        assert!(
+            suffix.right() < prefix.left(),
+            "the suffix ends the row on the left: {suffix:?} {prefix:?}"
         );
     }
 

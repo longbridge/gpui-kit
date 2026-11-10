@@ -16,9 +16,10 @@ use gpui::{
     Anchor, AnyElement, AnyView, App, AppContext as _, Context, Div, Empty,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
     Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, rems,
 };
 use gpui_base::{
+    LogicalStyledExt as _,
     dock::{
         AnyDrag, DockPlacement, DragPanel, DropIndicator, NodeId, PaneNode, PaneRef, PanelId,
         TabGroupContext, TabGroupRenderer,
@@ -250,7 +251,11 @@ impl TabGroupSkin {
         }
 
         let is_open = area.is_dock_open(placement);
-        let icon = match (placement, is_open) {
+        // The icon shows the physical side the dock sits on.
+        let icon = match (
+            placement.physical(gpui_base::LayoutDirection::global(cx)),
+            is_open,
+        ) {
             (DockPlacement::Left, true) => IconName::PanelLeft,
             (DockPlacement::Left, false) => IconName::PanelLeftOpen,
             (DockPlacement::Right, true) => IconName::PanelRight,
@@ -384,13 +389,14 @@ impl TabGroupSkin {
         let drag = tab_drag(group, ix, cx);
 
         h_flex()
+            .flex_row_dir(cx)
             .justify_between()
             .h(px(30.))
             .py_2()
-            .pl_3()
-            .pr_2()
-            .when(left_button.is_some(), |this| this.pl_2())
-            .when(right_button.is_some(), |this| this.pr_2())
+            .ps(rems(0.75), cx)
+            .pe(rems(0.5), cx)
+            .when(left_button.is_some(), |this| this.ps(rems(0.5), cx))
+            .when(right_button.is_some(), |this| this.pe(rems(0.5), cx))
             .when_some(title_style, |this, style| {
                 this.bg(style.background).text_color(style.foreground)
             })

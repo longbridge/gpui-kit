@@ -316,7 +316,8 @@ impl Popover {
 
 impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let anchor = self.anchor;
+        // The arrow points at the physical corner the popup resolved to.
+        let anchor = gpui_base::logical_anchor(self.anchor, gpui_base::LayoutDirection::global(cx));
         let arrow_size = if self.arrow {
             window.rem_size() * 0.375
         } else {

@@ -10,7 +10,7 @@ use gpui::{
     Point, Position, Size, Style, Window, point, px,
 };
 
-use crate::Placement;
+use crate::{LayoutDirection, Placement};
 use std::{cell::Cell, rc::Rc};
 
 /// Alignment of a popup along the side it is placed on.
@@ -43,6 +43,18 @@ enum Strategy {
         align: Align,
         offset: Pixels,
     },
+}
+
+impl Align {
+    /// The physical alignment along the horizontal axis: `Start` is the
+    /// left edge in LTR and the right edge in RTL.
+    fn horizontal(self, direction: LayoutDirection) -> Self {
+        match (self, direction) {
+            (Align::Start, LayoutDirection::Rtl) => Align::End,
+            (Align::End, LayoutDirection::Rtl) => Align::Start,
+            (align, _) => align,
+        }
+    }
 }
 
 /// The bounds a popup resolved to, and the side it ended up on.
@@ -208,11 +220,30 @@ fn frame_insets(decorations: Decorations, client_inset: Pixels) -> Edges<Pixels>
 /// Side placement picks the preferred side when the popup fits, otherwise the
 /// opposite side, otherwise whichever side has more room. The result is always
 /// clamped into the viewport, keeping `margin` from each edge.
+#[cfg(test)]
 fn resolve(
     strategy: Strategy,
     popup_size: Size<Pixels>,
     viewport_size: Size<Pixels>,
     margin: Edges<Pixels>,
+) -> ResolvedPosition {
+    resolve_in(
+        strategy,
+        popup_size,
+        viewport_size,
+        margin,
+        LayoutDirection::Ltr,
+    )
+}
+
+/// [`resolve`] for a layout direction: horizontal [`Align::Start`] and
+/// [`Align::End`] follow it, while [`Placement`] sides stay physical.
+fn resolve_in(
+    strategy: Strategy,
+    popup_size: Size<Pixels>,
+    viewport_size: Size<Pixels>,
+    margin: Edges<Pixels>,
+    direction: LayoutDirection,
 ) -> ResolvedPosition {
     match strategy {
         Strategy::Corner { anchor, position } => ResolvedPosition {
@@ -231,7 +262,14 @@ fn resolve(
         } => {
             let placement =
                 resolve_placement(trigger_bounds, popup_size, viewport_size, margin, placement);
-            let origin = side_origin(trigger_bounds, popup_size, placement, align, offset);
+            let origin = side_origin(
+                trigger_bounds,
+                popup_size,
+                placement,
+                align,
+                offset,
+                direction,
+            );
             ResolvedPosition {
                 bounds: clamp(Bounds::new(origin, popup_size), viewport_size, margin),
                 placement: Some(placement),
@@ -280,8 +318,9 @@ fn side_origin(
     placement: Placement,
     align: Align,
     offset: Pixels,
+    direction: LayoutDirection,
 ) -> Point<Pixels> {
-    let aligned_x = match align {
+    let aligned_x = match align.horizontal(direction) {
         Align::Start => trigger_bounds.left(),
         Align::Center => trigger_bounds.center().x - popup_size.width.half(),
         Align::End => trigger_bounds.right() - popup_size.width,
@@ -399,11 +438,12 @@ impl Element for Positioner {
         {
             *position = tracked.get();
         }
-        let position = resolve(
+        let position = resolve_in(
             strategy,
             popup_size,
             window.viewport_size(),
             frame.map(|inset| *inset + self.margin),
+            LayoutDirection::global(cx),
         );
         if let Some(callback) = &self.on_position {
             callback(position);
@@ -538,6 +578,30 @@ mod tests {
         assert_eq!(start.bounds.left(), px(200.));
         assert_eq!(center.bounds.left(), px(230.));
         assert_eq!(end.bounds.left(), px(260.));
+    }
+
+    #[test]
+    fn rtl_aligns_start_with_the_right_edge_of_the_trigger() {
+        let strategy = |align| Strategy::Side {
+            trigger_bounds: trigger(200., 200., 100., 20.),
+            placement: Some(Placement::Bottom),
+            align,
+            offset: px(0.),
+        };
+        let popup = Size::new(px(40.), px(30.));
+        let resolve_rtl = |align| {
+            resolve_in(
+                strategy(align),
+                popup,
+                viewport(),
+                Edges::all(MARGIN),
+                LayoutDirection::Rtl,
+            )
+        };
+
+        assert_eq!(resolve_rtl(Align::Start).bounds.right(), px(300.));
+        assert_eq!(resolve_rtl(Align::Center).bounds.left(), px(230.));
+        assert_eq!(resolve_rtl(Align::End).bounds.left(), px(200.));
     }
 
     #[test]

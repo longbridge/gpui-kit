@@ -3,6 +3,7 @@ use gpui::{
     SharedString, StyleRefinement, Styled, TextAlign, Window, div, prelude::FluentBuilder as _, px,
     relative,
 };
+use gpui_base::LogicalStyledExt as _;
 use gpui_base::{
     Table as BaseTable, TableBody as BaseTableBody, TableCaption as BaseTableCaption,
     TableCell as BaseTableCell, TableHead as BaseTableHead, TableHeader as BaseTableHeader,
@@ -409,8 +410,7 @@ impl RenderOnce for TableRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         BaseTableRow::new(("table-row", self.ix), self.ix + 1)
             .w_full()
-            .flex()
-            .flex_row()
+            .flex_row_dir(cx)
             .refine_style(&self.style)
             .border_color(cx.theme().table_row_border)
             .when(self.ix > 0, |this| this.border_t_1())
@@ -492,11 +492,11 @@ impl Styled for TableHead {
 }
 
 impl RenderOnce for TableHead {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let paddings = self.size.table_cell_padding();
 
         BaseTableHead::new(("table-head", self.ix), self.ix + 1)
-            .flex()
+            .flex_row_dir(cx)
             .items_center()
             .when(self.style.size.width.is_none(), |this| {
                 this.flex_shrink_1()
@@ -583,11 +583,11 @@ impl Styled for TableCell {
 }
 
 impl RenderOnce for TableCell {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let paddings = self.size.table_cell_padding();
 
         BaseTableCell::new(("table-cell", self.ix), self.ix + 1)
-            .flex()
+            .flex_row_dir(cx)
             .items_center()
             .when(self.style.size.width.is_none(), |this| {
                 this.flex_shrink_1()

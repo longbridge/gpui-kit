@@ -194,6 +194,24 @@ pub trait LogicalStyledExt: Styled + Sized {
             self.flex().flex_row()
         }
     }
+
+    /// Aligns text to the start edge: `text_left` in LTR, `text_right` in RTL.
+    fn text_start(self, cx: &App) -> Self {
+        if LayoutDirection::global(cx).start_is_left() {
+            self.text_left()
+        } else {
+            self.text_right()
+        }
+    }
+
+    /// Aligns text to the end edge: `text_right` in LTR, `text_left` in RTL.
+    fn text_end(self, cx: &App) -> Self {
+        if LayoutDirection::global(cx).start_is_left() {
+            self.text_right()
+        } else {
+            self.text_left()
+        }
+    }
 }
 
 impl<T: Styled> LogicalStyledExt for T {}
@@ -240,6 +258,32 @@ mod tests {
             assert_eq!(style.padding.left, None);
             assert_eq!(style.margin.left, Some(px(8.).into()));
             assert_eq!(style.border_widths.right, Some(px(1.).into()));
+        });
+    }
+
+    #[gpui::test]
+    fn text_alignment_follows_global_direction(cx: &mut TestAppContext) {
+        use gpui::TextAlign;
+        cx.update(|cx| {
+            crate::init(cx);
+            assert_eq!(
+                div().text_start(cx).style().text.text_align,
+                Some(TextAlign::Left)
+            );
+            assert_eq!(
+                div().text_end(cx).style().text.text_align,
+                Some(TextAlign::Right)
+            );
+
+            LayoutDirection::Rtl.set_global(cx);
+            assert_eq!(
+                div().text_start(cx).style().text.text_align,
+                Some(TextAlign::Right)
+            );
+            assert_eq!(
+                div().text_end(cx).style().text.text_align,
+                Some(TextAlign::Left)
+            );
         });
     }
 }

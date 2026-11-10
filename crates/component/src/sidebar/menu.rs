@@ -12,6 +12,7 @@ use gpui::{
     ParentElement as _, Role, SharedString, StatefulInteractiveElement as _, StyleRefinement,
     Styled, Window, div, percentage, prelude::FluentBuilder,
 };
+use gpui_base::LogicalStyledExt as _;
 use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
 
@@ -295,6 +296,7 @@ impl SidebarItem for SidebarMenuItem {
             .w_full()
             .child(
                 h_flex()
+                    .flex_row_dir(cx)
                     .size_full()
                     .id("item")
                     .role(Role::TreeItem)
@@ -329,12 +331,14 @@ impl SidebarItem for SidebarMenuItem {
                         this.h_7()
                             .child(
                                 h_flex()
+                                    .flex_row_dir(cx)
                                     .flex_1()
                                     .gap_x_2()
                                     .justify_between()
                                     .overflow_x_hidden()
                                     .child(
                                         h_flex()
+                                            .flex_row_dir(cx)
                                             .flex_1()
                                             .overflow_x_hidden()
                                             .refine_style(&self.label_style)
@@ -420,11 +424,11 @@ impl SidebarItem for SidebarMenuItem {
                 this.child(
                     v_flex()
                         .id("submenu")
-                        .border_l_1()
+                        .border_s(gpui::px(1.), cx)
                         .border_color(cx.theme().sidebar_border)
                         .gap_1()
-                        .ml_3p5()
-                        .pl_2p5()
+                        .ms(gpui::rems(0.875), cx)
+                        .ps(gpui::rems(0.625), cx)
                         .py_0p5()
                         .children(self.children.into_iter().enumerate().map(|(ix, item)| {
                             let id = format!("{}-{}", id, ix);

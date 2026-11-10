@@ -13,7 +13,7 @@ use gpui::{
     prelude::FluentBuilder, px, rems,
 };
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
-use gpui_base::{LayoutDirection, TestSupportExt as _};
+use gpui_base::{LayoutDirection, LogicalStyledExt as _, TestSupportExt as _};
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -1388,6 +1388,7 @@ impl PopupMenu {
                 .disabled(true),
             PopupMenuItem::Label(label) => this.disabled(true).cursor_default().child(
                 h_flex()
+                    .flex_row_dir(cx)
                     .cursor_default()
                     .items_center()
                     .gap_x_1()
@@ -1408,6 +1409,7 @@ impl PopupMenu {
                 .disabled(*disabled)
                 .child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .flex_1()
                         .min_h(item_height)
                         .items_center()
@@ -1420,7 +1422,7 @@ impl PopupMenu {
                             cx,
                         ))
                         .child((render)(window, cx))
-                        .children(right_check_icon.map(|icon| icon.ml_3())),
+                        .children(right_check_icon.map(|icon| icon.ms(rems(0.75), cx))),
                 ),
             PopupMenuItem::Item {
                 icon,
@@ -1451,6 +1453,7 @@ impl PopupMenu {
                 ))
                 .child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .w_full()
                         .gap_3()
                         .items_center()
@@ -1460,6 +1463,7 @@ impl PopupMenu {
                         .when(show_link_icon, |this| {
                             this.child(
                                 h_flex()
+                                    .flex_row_dir(cx)
                                     .w_full()
                                     .justify_between()
                                     .gap_1p5()
@@ -1490,6 +1494,7 @@ impl PopupMenu {
                 .items_start()
                 .child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .min_h(item_height)
                         .size_full()
                         .items_center()
@@ -1503,6 +1508,7 @@ impl PopupMenu {
                         ))
                         .child(
                             h_flex()
+                                .flex_row_dir(cx)
                                 .flex_1()
                                 .gap_2()
                                 .items_center()

@@ -10,7 +10,10 @@ use gpui::{
     px,
 };
 
-use crate::{a11y_disabled::A11yDisabledExt as _, element_ext::ElementExt, geometry::AxisExt};
+use crate::{
+    LayoutDirection, a11y_disabled::A11yDisabledExt as _, element_ext::ElementExt,
+    geometry::AxisExt,
+};
 
 /// Events emitted by the [`SliderState`].
 pub enum SliderEvent {
@@ -378,11 +381,7 @@ impl SliderState {
         let bounds = self.bounds;
         let step = self.step;
 
-        let inner_pos = if axis.is_horizontal() {
-            position.x - bounds.left()
-        } else {
-            bounds.bottom() - position.y
-        };
+        let inner_pos = self.offset_along(axis, position, cx);
         let total_size = bounds.size.along(axis);
         let percentage = inner_pos.clamp(px(0.), total_size) / total_size;
 
@@ -430,16 +429,24 @@ impl SliderState {
     }
 
     /// Whether `position` is closer to the range start thumb than to the end thumb.
-    fn is_nearer_start(&self, axis: Axis, position: Point<Pixels>) -> bool {
+    fn is_nearer_start(&self, axis: Axis, position: Point<Pixels>, cx: &App) -> bool {
         let size = self.bounds.size.along(axis);
-        let along = if axis.is_horizontal() {
-            position.x - self.bounds.left()
-        } else {
-            self.bounds.bottom() - position.y
-        };
+        let along = self.offset_along(axis, position, cx);
         let center =
             ((self.percentage.end - self.percentage.start) / 2. + self.percentage.start) * size;
         along < center
+    }
+
+    /// How far `position` is from the minimum end: the start edge of a
+    /// horizontal slider (the right in RTL) or the bottom of a vertical one.
+    fn offset_along(&self, axis: Axis, position: Point<Pixels>, cx: &App) -> Pixels {
+        if axis.is_vertical() {
+            self.bounds.bottom() - position.y
+        } else if LayoutDirection::global(cx).is_rtl() {
+            self.bounds.right() - position.x
+        } else {
+            position.x - self.bounds.left()
+        }
     }
 
     /// Emit [`SliderEvent::Release`] if the user was actively interacting
@@ -712,7 +719,6 @@ impl RenderOnce for SliderTrack {
         let entity_id = self.state.entity_id();
         let state = self.state.read(cx);
         let is_range = state.value().is_range();
-        let percentage = state.percentage();
         // Touch: GPUI routes a finger drag to `TouchDragEvent` (claimed with
         // `prevent_default`) or to scrolling; `on_drag` below is mouse-only. Claim
         // drags that start on the track, as the scrollbar thumb does.
@@ -739,8 +745,8 @@ impl RenderOnce for SliderTrack {
                                     return;
                                 }
                                 window.prevent_default();
-                                let is_start =
-                                    is_range && state.is_nearer_start(axis, event.start_position);
+                                let is_start = is_range
+                                    && state.is_nearer_start(axis, event.start_position, cx);
                                 state.touch_drag = Some(TouchDrag {
                                     start_position: event.start_position,
                                     is_start,
@@ -786,20 +792,8 @@ impl RenderOnce for SliderTrack {
                     window.listener_for(
                         &self.state,
                         move |state, event: &MouseDownEvent, window, cx| {
-                            let is_start = if is_range {
-                                let size = state.bounds().size.along(axis);
-                                let position = if axis.is_horizontal() {
-                                    event.position.x - state.bounds().left()
-                                } else {
-                                    state.bounds().bottom() - event.position.y
-                                };
-                                let center = ((percentage.end - percentage.start) / 2.
-                                    + percentage.start)
-                                    * size;
-                                position < center
-                            } else {
-                                false
-                            };
+                            let is_start =
+                                is_range && state.is_nearer_start(axis, event.position, cx);
                             state.update_value_by_position(
                                 axis,
                                 event.position,
@@ -1236,6 +1230,27 @@ mod tests {
             state.read_with(cx, |state, _| state.value()),
             SliderValue::Single(8.)
         );
+    }
+
+    #[gpui::test]
+    fn a_right_to_left_slider_grows_from_the_right(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = sized(SliderState::new().step(25.), cx);
+        cx.update(|_, cx| crate::LayoutDirection::Rtl.set_global(cx));
+        // 30px from the left is 70px from the start edge on the right.
+        drag(&state, 30., false, cx);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.value()),
+            SliderValue::Single(75.)
+        );
+
+        state.update_in(cx, |state, window, cx| {
+            state.set_value((25., 75.), window, cx);
+        });
+        // The start thumb now sits on the right: a pointer near it moves it.
+        let nearer_start = state.read_with(cx, |state, cx| {
+            state.is_nearer_start(Axis::Horizontal, gpui::point(px(80.), px(0.)), cx)
+        });
+        assert!(nearer_start);
     }
 
     #[gpui::test]

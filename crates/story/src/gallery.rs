@@ -101,6 +101,7 @@ impl Gallery {
                 StoryContainer::panel::<InputGroupStory>(window, cx),
                 StoryContainer::panel::<KbdStory>(window, cx),
                 StoryContainer::panel::<LabelStory>(window, cx),
+                StoryContainer::panel::<LayoutDirectionStory>(window, cx),
                 StoryContainer::panel::<ListStory>(window, cx),
                 StoryContainer::panel::<MenuStory>(window, cx),
                 StoryContainer::panel::<MarkerStory>(window, cx),

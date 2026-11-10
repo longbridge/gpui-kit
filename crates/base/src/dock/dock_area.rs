@@ -17,8 +17,8 @@ use gpui::{
 };
 
 use crate::{
-    ElementExt as _, Placement, ResizablePanelEvent, ResizableState, ResizeHandleContext,
-    h_resizable, resizable::PANEL_MIN_SIZE, resizable_panel, v_resizable,
+    ElementExt as _, LogicalStyledExt as _, Placement, ResizablePanelEvent, ResizableState,
+    ResizeHandleContext, h_resizable, resizable::PANEL_MIN_SIZE, resizable_panel, v_resizable,
 };
 
 use super::{
@@ -1313,7 +1313,8 @@ impl DockArea {
             DockPlacement::Right => self.dock_size(DockPlacement::Left),
             _ => None,
         };
-        let sizing = DockSizing::new(placement)
+        // Sizing reads the pointer against the edge the dock physically sits on.
+        let sizing = DockSizing::new(placement.physical(crate::LayoutDirection::global(cx)))
             .with_area_bounds(self.bounds)
             .with_opposite_dock_size(opposite.unwrap_or(px(0.)));
         let size = sizing
@@ -1556,8 +1557,8 @@ impl Render for DockArea {
             .relative()
             .size_full()
             .overflow_hidden()
-            .flex()
-            .flex_row()
+            // Left dock on the start edge: the right edge in RTL.
+            .flex_row_dir(cx)
             .on_prepaint(move |bounds, _, cx| {
                 area.update(cx, |area, _| area.bounds = bounds);
             })

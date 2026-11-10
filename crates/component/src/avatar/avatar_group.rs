@@ -2,6 +2,7 @@ use gpui::{
     Div, InteractiveElement, Interactivity, IntoElement, ParentElement as _, RenderOnce,
     StyleRefinement, Styled, div, prelude::FluentBuilder as _,
 };
+use gpui_base::LogicalStyledExt as _;
 
 use crate::{ActiveTheme, Sizable, Size, StyledExt as _, avatar::Avatar};
 
@@ -77,10 +78,13 @@ impl RenderOnce for AvatarGroup {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let item_ml = -super::avatar_size(self.size) * 0.3;
         let avatars_len = self.avatars.len();
+        // Children go in reverse so earlier avatars paint on top; the row is
+        // reversed back so the first avatar sits on the start edge.
+        let rtl = gpui_base::LayoutDirection::global(cx).is_rtl();
 
         self.base
             .h_flex()
-            .flex_row_reverse()
+            .when(!rtl, |this| this.flex_row_reverse())
             .refine_style(&self.style)
             .children(if self.ellipsis && avatars_len > self.limit {
                 Some(
@@ -89,7 +93,7 @@ impl RenderOnce for AvatarGroup {
                         .bg(cx.theme().tokens.secondary)
                         .text_color(cx.theme().muted_foreground)
                         .with_size(self.size)
-                        .ml_1(),
+                        .ms(gpui::rems(0.25), cx),
                 )
             } else {
                 None
@@ -102,7 +106,7 @@ impl RenderOnce for AvatarGroup {
                     .rev()
                     .map(|(ix, item)| {
                         item.with_size(self.size)
-                            .when(ix > 0, |this| this.ml(item_ml))
+                            .when(ix > 0, |this| this.ms(item_ml, cx))
                     }),
             )
     }
