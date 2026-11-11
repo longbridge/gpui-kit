@@ -3219,16 +3219,23 @@ impl Paragraph {
     }
 
     fn should_render_inline_flow(&self) -> bool {
-        let has_image = self.children.iter().any(|child| child.image.is_some());
+        let images = self
+            .children
+            .iter()
+            .filter(|child| child.image.is_some())
+            .count();
         let has_text = self.children.iter().any(|child| !child.text.is_empty());
         // An editor leaf with an image always uses the flow, which reports
         // its pieces to the editor (an image-only paragraph would otherwise
         // take the plain image path, which reports nothing).
-        if has_image && self.leaf_key().is_some() {
+        if images > 0 && self.leaf_key().is_some() {
             return true;
         }
+        // Images are inline content: several of them share a line, as words
+        // do, even with nothing between them. The plain path stacks them.
         self.children.iter().any(|child| child.custom.is_some())
-            || (has_image && has_text)
+            || images > 1
+            || (images > 0 && has_text)
             || self
                 .children
                 .iter()
@@ -6699,6 +6706,30 @@ mod tests {
             panic!("expected an embedded image");
         };
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    /// Images with nothing between them share a line, as a browser draws
+    /// `<img>` inline; the plain image path stacked them one per row.
+    #[test]
+    fn a_paragraph_of_several_images_is_an_inline_flow() {
+        use crate::text::format::markdown;
+
+        let mut node_cx = NodeContext::default();
+        for (source, expected) in [
+            ("![a](a.png)", false),
+            ("![a](a.png)![b](b.png)", true),
+            (
+                "[![a](a.png)](https://a.com)[![b](b.png)](https://b.com)",
+                true,
+            ),
+            ("![a](a.png) ![b](b.png)", true),
+        ] {
+            let document = markdown::parse(source, &mut node_cx).unwrap();
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected a paragraph for {source}");
+            };
+            assert_eq!(paragraph.should_render_inline_flow(), expected, "{source}");
+        }
     }
 
     fn image_paragraph(alt: &str, url: &str) -> Paragraph {
