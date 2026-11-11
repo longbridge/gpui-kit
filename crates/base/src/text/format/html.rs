@@ -11,11 +11,11 @@ use markup5ever_rcdom::{Node, NodeData, RcDom};
 
 use crate::text::document::ParsedDocument;
 use crate::text::node::{
-    self, BlockNode, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph, Table, TableRow,
-    TextMark,
+    self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph, Span,
+    Table, TableRow, TextMark,
 };
 
-const BLOCK_ELEMENTS: [&str; 35] = [
+const BLOCK_ELEMENTS: [&str; 34] = [
     "html",
     "body",
     "head",
@@ -45,7 +45,6 @@ const BLOCK_ELEMENTS: [&str; 35] = [
     "nav",
     "ol",
     "p",
-    "pre",
     "section",
     "table",
     "ul",
@@ -654,6 +653,36 @@ fn parse_node(
                     span: None,
                 })
             }
+            local_name!("pre") => {
+                let mut code = HtmlParagraph::default();
+                for child in node.children.borrow().iter() {
+                    parse_paragraph(&mut code, child);
+                }
+                let code = code.content.take().text();
+                // A browser does not draw a line after the last line feed or
+                // `<br>`; a fenced code block's code has no final line feed.
+                let code = code.strip_suffix('\n').unwrap_or(&code);
+                if code.is_empty() {
+                    return None;
+                }
+
+                let mut children = vec![];
+                consume_paragraph(&mut children, paragraph);
+                let code_block = BlockNode::CodeBlock(CodeBlock::new(
+                    code.to_string().into(),
+                    pre_lang(node, attrs).map(Into::into),
+                    None::<Span>,
+                ));
+                if children.is_empty() {
+                    Some(code_block)
+                } else {
+                    children.push(code_block);
+                    Some(BlockNode::Root {
+                        children,
+                        span: None,
+                    })
+                }
+            }
             local_name!("style") | local_name!("script") => None,
             _ => {
                 if BLOCK_ELEMENTS.contains(&name.local.trim()) {
@@ -705,6 +734,33 @@ fn parse_node(
         | NodeData::Comment { .. }
         | NodeData::ProcessingInstruction { .. } => None,
     }
+}
+
+/// The language named by a `language-x` or `lang-x` class, on the `<code>`
+/// inside a `<pre>` or else on the `<pre>`.
+fn pre_lang(pre: &Node, pre_attrs: &RefCell<Vec<html5ever::Attribute>>) -> Option<String> {
+    fn class_lang(attrs: &RefCell<Vec<html5ever::Attribute>>) -> Option<String> {
+        attr_value(attrs, local_name!("class"))?
+            .split_whitespace()
+            .find_map(|class| {
+                class
+                    .strip_prefix("language-")
+                    .or_else(|| class.strip_prefix("lang-"))
+                    .filter(|lang| !lang.is_empty())
+                    .map(str::to_string)
+            })
+    }
+
+    pre.children
+        .borrow()
+        .iter()
+        .find_map(|child| match &child.data {
+            NodeData::Element { name, attrs, .. } if name.local == local_name!("code") => {
+                class_lang(attrs)
+            }
+            _ => None,
+        })
+        .or_else(|| class_lang(pre_attrs))
 }
 
 fn consume_children_nodes(
@@ -796,9 +852,74 @@ mod tests {
         );
     }
 
+    /// The code and language of the one code block `html` parses to.
+    fn code_block(html: &str) -> (String, Option<String>) {
+        let mut cx = NodeContext::default();
+        let document = super::parse(html, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code_block) = &document.blocks[0] else {
+            panic!("expected one code block, got {:?}", document.blocks);
+        };
+        (
+            code_block.code().to_string(),
+            code_block.lang().map(|lang| lang.to_string()),
+        )
+    }
+
+    #[test]
+    fn test_pre_is_a_code_block() {
+        assert_eq!(
+            code_block("<pre>\nname    size\na.txt     12\nb.txt   3456\n</pre>"),
+            ("name    size\na.txt     12\nb.txt   3456".to_string(), None)
+        );
+
+        let mut cx = NodeContext::default();
+        // Text around it stays in paragraphs of its own.
+        let document = super::parse("one<pre>two</pre>three", &mut cx).unwrap();
+        assert_eq!(document.to_markdown(), "one\n\n```\ntwo\n```\n\nthree");
+
+        // A Markdown HTML block takes the same path.
+        let document =
+            super::super::markdown::parse("<pre>\na  1\nbb 2\n</pre>\n", &mut cx).unwrap();
+        assert_eq!(document.to_markdown(), "```\na  1\nbb 2\n```");
+
+        // An empty `<pre>` draws nothing, as in a browser.
+        let document = super::parse("<pre>\n</pre>", &mut cx).unwrap();
+        assert!(
+            !document.to_markdown().contains("```"),
+            "{:?}",
+            document.blocks
+        );
+    }
+
+    #[test]
+    fn test_pre_lang() {
+        for (html, lang) in [
+            (
+                "<pre><code class=\"language-rust\">x</code></pre>",
+                Some("rust"),
+            ),
+            (
+                "<pre><code class=\"hljs lang-js\">x</code></pre>",
+                Some("js"),
+            ),
+            (
+                "<pre class=\"language-py\"><code>x</code></pre>",
+                Some("py"),
+            ),
+            (
+                "<pre class=\"language-py\"><code class=\"language-rust\">x</code></pre>",
+                Some("rust"),
+            ),
+            ("<pre><code class=\"language-\">x</code></pre>", None),
+            ("<pre><code class=\"rust\">x</code></pre>", None),
+            ("<pre>x</pre>", None),
+        ] {
+            assert_eq!(code_block(html).1.as_deref(), lang, "{html}");
+        }
+    }
+
     #[test]
     fn test_pre_text_stays_text() {
-        let mut cx = NodeContext::default();
         for (html, text) in [
             // Escaped markup is text, not elements.
             (
@@ -812,22 +933,22 @@ mod tests {
             ("<pre>\n\none</pre>", "\none"),
             // A comment is left out, and the line feed after it kept.
             ("<pre><!-- note -->\none</pre>", "\none"),
+            // Only the last line feed or `<br>` is dropped.
+            ("<pre>one\n</pre>", "one"),
+            ("<pre>one\n\n</pre>", "one\n"),
+            ("<pre>one\n<br></pre>", "one\n"),
+            ("<pre>one<br>\n</pre>", "one\n"),
         ] {
-            let document = super::parse(html, &mut cx).unwrap();
-            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
-                panic!("expected one paragraph, got {:?}", document.blocks);
-            };
-            assert_eq!(paragraph.text(), text, "{html}");
+            assert_eq!(code_block(html).0, text, "{html}");
         }
     }
 
     #[test]
     fn test_pre_keeps_whitespace_in_nested_elements() {
-        let mut cx = NodeContext::default();
         for (html, text) in [
             // Code in `<pre><code>` keeps its line feeds and indent.
             (
-                "<pre><code>fn main() {\n    one();\n}</code></pre>",
+                "<pre><code>fn main() {\n    one();\n}\n</code></pre>",
                 "fn main() {\n    one();\n}",
             ),
             // So does text deeper down, and the space between elements.
@@ -839,15 +960,12 @@ mod tests {
             ("<pre><code>\none</code></pre>", "\none"),
             // Escaped markup is still text.
             ("<pre><code>&lt;b&gt; &amp;amp;</code></pre>", "<b> &amp;"),
-            // Outside `<pre>`, whitespace is collapsed as before.
-            ("<p><code>one\n   two</code></p>", "one two"),
         ] {
-            let document = super::parse(html, &mut cx).unwrap();
-            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
-                panic!("expected one paragraph, got {:?}", document.blocks);
-            };
-            assert_eq!(paragraph.text(), text, "{html}");
+            assert_eq!(code_block(html).0, text, "{html}");
         }
+
+        // Outside `<pre>`, whitespace is collapsed as before.
+        assert_eq!(paragraph_text("<p><code>one\n   two</code></p>"), "one two");
     }
 
     #[test]
@@ -978,15 +1096,7 @@ mod tests {
 
     #[test]
     fn test_literal_trailing_line_feeds_are_preserved() {
-        for (html, expected) in [
-            ("<pre>one\n</pre>", "one\n"),
-            ("<pre>one\n\n</pre>", "one\n\n"),
-            ("<pre>one\n<br></pre>", "one\n"),
-            ("<pre>one<br>\n</pre>", "one\n\n"),
-            ("<textarea>one\n</textarea>", "one\n"),
-        ] {
-            assert_eq!(paragraph_text(html), expected, "{html}");
-        }
+        assert_eq!(paragraph_text("<textarea>one\n</textarea>"), "one\n");
     }
 
     #[test]
