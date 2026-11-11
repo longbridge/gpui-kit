@@ -472,6 +472,20 @@ impl Render for CloseableTabsView {
 }
 ```
 
+## Keyboard
+
+A `TabBar` is a single tab stop. `Tab` enters it on the selected tab (the first
+enabled tab when none is selected), and the next `Tab` leaves it.
+
+| Key | Action |
+| --- | --- |
+| `Left` / `Right` | Move focus to the previous / next enabled tab, wrapping at either end. In a right-to-left layout the next tab is on the left. |
+| `Home` / `End` | Move focus to the first / last enabled tab. |
+| `Enter` / `Space` | Activate the focused tab, the same as clicking it. |
+
+Moving focus does not change the selection; the selection follows activation.
+Disabled tabs are skipped.
+
 ## Notes
 
 - The `TabBar` manages the selection state of all child tabs
