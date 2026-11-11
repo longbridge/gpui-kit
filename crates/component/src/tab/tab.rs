@@ -930,6 +930,7 @@ impl RenderOnce for Tab {
             inner_content.into_any_element()
         };
 
+        let ring = cx.theme().ring;
         self.base
             .id(self.ix)
             .selected(self.selected)
@@ -957,6 +958,18 @@ impl RenderOnce for Tab {
                             .border_b(disabled_style.borders.bottom)
                             .border_color(disabled_style.border_color)
                     })
+            })
+            // Keyboard focus (the tab list roves it with the arrow keys) gets
+            // the theme ring. An inset shadow draws it inside the tab, so the
+            // bar neither shifts nor clips it as focus moves.
+            .focus_visible(|style| {
+                style.shadow(vec![gpui::BoxShadow {
+                    color: ring,
+                    offset: point(px(0.), px(0.)),
+                    blur_radius: px(0.),
+                    spread_radius: px(2.),
+                    inset: true,
+                }])
             })
             .relative()
             // Prefix, label and suffix read from the start edge.
