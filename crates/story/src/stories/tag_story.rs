@@ -190,7 +190,7 @@ impl Render for TagStory {
                 ),
             )
             .child(
-                section("Colors").w(px(640.)).child(
+                section("Colors").max_w(px(640.)).child(
                     v_flex().w_full().gap_4().child(
                         h_flex().w_full().gap_2().flex_wrap().children(
                             ColorName::all()
