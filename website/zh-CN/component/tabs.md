@@ -250,7 +250,7 @@ TabBar::new("tabs-with-max-width")
 | `suffix(element)` | 在标签后添加元素 |
 | `last_empty_space(element)` | 自定义尾部空白区域 |
 | `track_scroll(handle)` | 绑定滚动句柄，用于显式滚动到指定标签；点击标签时会将其滚入视图，并露出相邻标签的一部分 |
-| `with_menu(bool)` | 启用下拉菜单选择 |
+| `menu(bool)` | 启用下拉菜单选择 |
 | `max_width(width)` | 设置每个标签的最大宽度；超长文本自动截断 |
 
 ### TabBar 变体
@@ -268,10 +268,9 @@ TabBar::new("tabs-with-max-width")
 
 | 方法 | 说明 |
 | --- | --- |
-| `new(label)` | 创建带标签文本的 Tab |
-| `empty()` | 创建空 Tab |
-| `icon(icon)` | 创建仅图标的 Tab |
-| `id(id)` | 设置自定义 ID |
+| `new()` | 创建新的 Tab |
+| `label(label)` | 设置标签文本 |
+| `icon(icon)` | 设置标签图标 |
 | `with_variant(variant)` | 设置当前 Tab 的样式 |
 | `prefix(element)` | 在标签内容前添加元素 |
 | `suffix(element)` | 在标签内容后添加元素 |
@@ -293,4 +292,4 @@ TabBar::new("tabs-with-max-width")
 - `TabBar` 负责统一管理所有子标签的选中状态
 - 当设置了 `TabBar.on_click` 时，单个 `Tab.on_click` 通常不会生效
 - 子标签会自动继承父级 `TabBar` 的样式和尺寸
-- 标签过多时可通过 `with_menu` 或滚动支持提升可用性
+- 标签过多时可通过 `menu` 或滚动支持提升可用性
