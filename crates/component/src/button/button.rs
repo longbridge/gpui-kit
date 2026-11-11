@@ -7,6 +7,7 @@ use crate::{
     button::ButtonIcon,
     h_flex,
     select::Caret,
+    spinner::Spinner,
     styled::{FocusLine, focus_style},
     tooltip::{ManagedTooltipExt as _, Tooltip},
 };
@@ -768,6 +769,15 @@ impl RenderOnce for Button {
             .or_else(|| self.label.clone());
         // Like an HTML `title`, the tooltip describes the button.
         let description = self.tooltip.as_ref().map(|(tooltip, _)| tooltip.clone());
+        // A loading button with no icon shows the spinner where an icon would sit.
+        let icon = self.icon.or_else(|| {
+            self.loading.then(|| {
+                ButtonIcon::from(
+                    Spinner::new()
+                        .when_some(self.loading_icon.clone(), |this, icon| this.icon(icon)),
+                )
+            })
+        });
         let content = h_flex()
             .flex_row_dir(cx)
             .id("label")
@@ -784,7 +794,7 @@ impl RenderOnce for Button {
                 _ => this.gap_2(),
             })
             .refine_style(&self.content_style)
-            .when_some(self.icon, |this, icon| {
+            .when_some(icon, |this, icon| {
                 this.child(
                     icon.loading_icon(self.loading_icon)
                         .loading(self.loading)
