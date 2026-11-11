@@ -756,13 +756,16 @@ fn mathjax_root() -> Option<PathBuf> {
         let root = PathBuf::from(root);
         return root.join("js/mathjax.js").is_file().then_some(root);
     }
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     [
-        manifest_dir.join("../../docs/node_modules/mathjax-full"),
-        PathBuf::from("docs/node_modules/mathjax-full"),
+        workspace_mathjax_root(),
+        PathBuf::from("website/node_modules/mathjax-full"),
     ]
     .into_iter()
     .find(|path| path.join("js/mathjax.js").is_file())
+}
+
+fn workspace_mathjax_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../website/node_modules/mathjax-full")
 }
 
 fn svg_dimension(svg: &str, name: &str) -> Option<f32> {
@@ -1734,7 +1737,15 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
-    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
+    fn workspace_mathjax_root_is_installed_by_the_website_package() {
+        let package = workspace_mathjax_root().join("../../package.json");
+        let manifest = std::fs::read_to_string(&package)
+            .unwrap_or_else(|err| panic!("read {}: {err}", package.display()));
+        assert!(manifest.contains(r#""rehype-mathjax""#));
+    }
+
+    #[::core::prelude::v1::test]
+    #[ignore = "requires Node.js and website/node_modules/mathjax-full"]
     fn math_svg_uses_path_based_renderer() {
         let svg = render_math_svg(
             r"e^{i\pi} + 1 = 0",
@@ -1743,7 +1754,7 @@ mod tests {
             Hsla::black(),
             Hsla::white(),
         )
-        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
+        .expect("run `bun install` in website/ before running ignored MathJax tests");
 
         assert!(
             !svg.contains("<text"),
@@ -1764,7 +1775,7 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
-    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
+    #[ignore = "requires Node.js and website/node_modules/mathjax-full"]
     fn inline_math_svg_uses_pixel_dimensions_without_glyph_scaling() {
         let svg = render_math_svg(
             r"e^{i\pi} + 1 = 0",
@@ -1773,7 +1784,7 @@ mod tests {
             Hsla::black(),
             Hsla::white(),
         )
-        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
+        .expect("run `bun install` in website/ before running ignored MathJax tests");
 
         assert!(svg_width(&svg) > 0.0);
         assert!(!svg.contains("data-gpui-math-background"));
@@ -1788,7 +1799,7 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
-    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
+    #[ignore = "requires Node.js and website/node_modules/mathjax-full"]
     fn block_math_svg_rewrites_mathjax_rects_to_paths() {
         let svg = render_math_svg(
             r"\frac{\alpha + \beta}{\sqrt{\gamma}} = \sum_{i=1}^{n} i^2",
@@ -1797,7 +1808,7 @@ mod tests {
             Hsla::black(),
             Hsla::white(),
         )
-        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
+        .expect("run `bun install` in website/ before running ignored MathJax tests");
 
         assert!(!svg.contains(r#"<rect width="543""#));
         assert!(!svg.contains(r#"<rect width="2628.4""#));
@@ -1805,7 +1816,7 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
-    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
+    #[ignore = "requires Node.js and website/node_modules/mathjax-full"]
     fn block_math_svg_includes_theme_background() {
         let svg = render_math_svg(
             r"\frac{\alpha + \beta}{\sqrt{\gamma}} = \sum_{i=1}^{n} i^2",
@@ -1814,14 +1825,14 @@ mod tests {
             Hsla::black(),
             Hsla::white(),
         )
-        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
+        .expect("run `bun install` in website/ before running ignored MathJax tests");
 
         assert!(svg.contains(r#"data-gpui-math-background="true""#));
         assert!(svg.contains("fill=\"#ffffff\""));
     }
 
     #[::core::prelude::v1::test]
-    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
+    #[ignore = "requires Node.js and website/node_modules/mathjax-full"]
     fn block_math_image_exposes_intrinsic_svg_size() {
         let image = render_math_image(
             r"\frac{\alpha + \beta}{\sqrt{\gamma}} = \sum_{i=1}^{n} i^2",
@@ -1830,7 +1841,7 @@ mod tests {
             Hsla::black(),
             Hsla::white(),
         )
-        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
+        .expect("run `bun install` in website/ before running ignored MathJax tests");
 
         assert_eq!(image.image.format, ImageFormat::Svg);
         assert!(image.image.bytes.starts_with(b"<svg"));
