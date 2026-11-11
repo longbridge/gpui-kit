@@ -233,6 +233,19 @@ Input::new(&input).context_menu(|menu, window, cx| {
 })
 ```
 
+A right-click outside the selection moves the cursor to the click. A right-click inside the selection keeps the selection and the cursor, so read `context_menu_offset()` to act on the text under the pointer, as a spelling menu does:
+
+```rust
+let state = input.clone();
+Input::new(&input).context_menu(move |menu, _, cx| {
+    // The UTF-8 offset under the pointer at the right-click that opened this menu.
+    let Some(offset) = state.read(cx).context_menu_offset() else {
+        return menu;
+    };
+    menu.menu(format!("Look up the word at {offset}"), Box::new(LookUp))
+})
+```
+
 ### Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps
