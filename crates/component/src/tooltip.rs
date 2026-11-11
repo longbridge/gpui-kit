@@ -130,7 +130,7 @@ impl Render for Tooltip {
                 .gap_3()
                 .refine_style(&self.style)
                 .map(|this| {
-                    this.child(div().map(|this| match self.content {
+                    this.child(div().min_w_0().map(|this| match self.content {
                         TooltipContext::Text(ref text) => this.child(text.clone()),
                         TooltipContext::Element(ref builder) => this.child(builder(window, cx)),
                     }))
@@ -816,5 +816,75 @@ mod tests {
         draw(&mut cx);
         cx.run_until_parked();
         assert_tooltip_painted(&mut cx, 0, true);
+    }
+
+    struct TextTooltip(&'static str);
+
+    impl Render for TextTooltip {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let text = self.0;
+            div().size_full().child(
+                div()
+                    .id("trigger")
+                    .absolute()
+                    .left(px(10.))
+                    .top(px(10.))
+                    .w(px(100.))
+                    .h(px(30.))
+                    .managed_tooltip(move |_, cx| {
+                        cx.new(|_| {
+                            super::Tooltip::new(text)
+                                .max_w(px(200.))
+                                .bg(gpui::rgb(TOOLTIP_COLORS[0]))
+                        })
+                        .into()
+                    }),
+            )
+        }
+    }
+
+    fn tooltip_size(cx: &mut TestAppContext, text: &'static str) -> gpui::Size<f32> {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let view = cx.new(|_| TextTooltip(text));
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| Root::new(view.clone(), window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        draw(&mut cx);
+        cx.simulate_mouse_move(point(px(50.), px(25.)), None, Default::default());
+        wait(&mut cx);
+        cx.update(|window, _| {
+            let marker: gpui::Background = gpui::rgb(TOOLTIP_COLORS[0]).into();
+            let scale = window.scale_factor();
+            let quad = window
+                .painted_quads()
+                .into_iter()
+                .find(|quad| quad.background == marker)
+                .expect("tooltip is painted");
+            gpui::size(
+                quad.bounds.size.width.0 / scale,
+                quad.bounds.size.height.0 / scale,
+            )
+        })
+    }
+
+    #[gpui::test]
+    fn long_text_wraps_within_max_width(cx: &mut TestAppContext) {
+        let line = tooltip_size(cx, "tip");
+        let long = tooltip_size(
+            cx,
+            "Band AD_WBGT_20240621T00-20240621T23 - WBGT [time=477499] with a few more words",
+        );
+        assert_eq!(long.width, 200.);
+        assert!(
+            long.height > line.height * 2.,
+            "long text wraps onto several lines: {long:?} vs {line:?}"
+        );
     }
 }
