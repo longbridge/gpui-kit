@@ -371,8 +371,11 @@ impl RenderOnce for TitleBar {
                 }))
                 .on_mouse_down(
                     MouseButton::Left,
-                    window.listener_for(&state, |state, _, _, _| {
-                        state.should_move = true;
+                    // A control that took the press, such as a Button or a
+                    // focusable Select, prevents the default; its click must
+                    // not turn into a window move on the smallest motion.
+                    window.listener_for(&state, |state, _, window, _| {
+                        state.should_move = !window.default_prevented();
                     }),
                 )
                 .on_mouse_up(
@@ -426,7 +429,77 @@ impl RenderOnce for TitleBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Rgba, linear_color_stop, linear_gradient};
+    use gpui::{
+        AppContext as _, Modifiers, Rgba, TestAppContext, VisualTestContext, linear_color_stop,
+        linear_gradient, point, px,
+    };
+    use std::cell::Cell;
+
+    use crate::button::Button;
+
+    const BUTTON: &str = "title-bar-button";
+
+    struct BarWithButton {
+        clicks: Rc<Cell<usize>>,
+    }
+
+    impl Render for BarWithButton {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let clicks = self.clicks.clone();
+            TitleBar::new().child(div().w(px(200.)).child("App")).child(
+                Button::new("open")
+                    .label("Open")
+                    .debug_selector(|| BUTTON.to_string())
+                    .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+            )
+        }
+    }
+
+    fn open(cx: &mut TestAppContext) -> (VisualTestContext, Rc<Cell<usize>>) {
+        cx.update(crate::init);
+        let clicks = Rc::new(Cell::new(0));
+        let view = cx.new(|_| BarWithButton {
+            clicks: clicks.clone(),
+        });
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| crate::Root::new(view.clone(), window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (cx, clicks)
+    }
+
+    /// Press, move one pixel, release, as a hand often does.
+    fn click_with_drift(cx: &mut VisualTestContext, at: gpui::Point<Pixels>) {
+        let drift = point(at.x + px(1.), at.y);
+        cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(drift, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(drift, MouseButton::Left, Modifiers::default());
+    }
+
+    #[gpui::test]
+    fn a_press_on_a_control_keeps_its_click(cx: &mut TestAppContext) {
+        let (mut cx, clicks) = open(cx);
+        let at = cx
+            .debug_bounds(BUTTON)
+            .expect("the button is drawn")
+            .center();
+        click_with_drift(&mut cx, at);
+        assert_eq!(clicks.get(), 1);
+    }
+
+    /// The test platform's `start_window_move` is `unimplemented!()`, so a
+    /// press on the bar itself still reaching it shows up as this panic.
+    #[gpui::test]
+    #[should_panic(expected = "not implemented")]
+    fn a_press_on_the_bar_itself_still_moves_the_window(cx: &mut TestAppContext) {
+        let (mut cx, _) = open(cx);
+        let button = cx.debug_bounds(BUTTON).expect("the button is drawn");
+        click_with_drift(&mut cx, point(button.left() - px(100.), button.center().y));
+    }
 
     #[test]
     fn test_default_title_bar_background() {
