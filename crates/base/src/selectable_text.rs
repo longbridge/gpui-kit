@@ -68,7 +68,7 @@ impl SelectableText {
     /// Styles ranges of the text, such as the matches of a search, as
     /// [`StyledText::with_highlights`] does. The ranges are UTF-8 offsets, in
     /// order and without overlap.
-    pub fn with_highlights(
+    pub fn highlights(
         mut self,
         highlights: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
     ) -> Self {
@@ -318,9 +318,10 @@ mod tests {
                 ..Default::default()
             };
             div().size_full().child(TextSelectionLayer).child(
-                div().w(px(240.)).h(px(32.)).child(
-                    SelectableText::new("local", "alpha beta").with_highlights([(6..10, mark)]),
-                ),
+                div()
+                    .w(px(240.))
+                    .h(px(32.))
+                    .child(SelectableText::new("local", "alpha beta").highlights([(6..10, mark)])),
             )
         }
     }
