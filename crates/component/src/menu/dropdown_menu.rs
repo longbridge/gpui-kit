@@ -26,17 +26,39 @@ pub trait DropdownMenu: Styled + Selectable + InteractiveElement + IntoElement +
     ) -> DropdownMenuPopover<Self> {
         let id = self.interactivity().element_id.clone();
 
-        DropdownMenuPopover::new(id.unwrap_or(0.into()), anchor, self, f)
+        DropdownMenuPopover::new(
+            id.unwrap_or(0.into()),
+            anchor,
+            self,
+            |trigger, handle| trigger.track_focus(handle),
+            f,
+        )
     }
 }
 
-impl DropdownMenu for Button {}
+impl DropdownMenu for Button {
+    fn dropdown_menu_with_anchor(
+        mut self,
+        anchor: impl Into<Anchor>,
+        f: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> DropdownMenuPopover<Self> {
+        let id = self.interactivity().element_id.clone();
+        DropdownMenuPopover::new(
+            id.unwrap_or(0.into()),
+            anchor,
+            self,
+            |button, handle| button.menu_focus(handle),
+            f,
+        )
+    }
+}
 
 #[derive(IntoElement)]
 pub struct DropdownMenuPopover<T: Selectable + IntoElement + 'static> {
     id: ElementId,
     anchor: Anchor,
     trigger: T,
+    track_trigger_focus: fn(T, &FocusHandle) -> T,
     builder: Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>,
     on_open_change: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
 }
@@ -49,12 +71,14 @@ where
         id: ElementId,
         anchor: impl Into<Anchor>,
         trigger: T,
+        track_trigger_focus: fn(T, &FocusHandle) -> T,
         builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) -> Self {
         Self {
             id: SharedString::from(format!("dropdown-menu:{:?}", id)).into(),
             anchor: anchor.into(),
             trigger,
+            track_trigger_focus,
             builder: Rc::new(builder),
             on_open_change: None,
         }
@@ -112,7 +136,7 @@ where
         Popover::new(SharedString::from(format!("popover:{}", self.id)))
             .appearance(false)
             .overlay_closable(false)
-            .trigger(self.trigger)
+            .trigger((self.track_trigger_focus)(self.trigger, &trigger_focus))
             .anchor(self.anchor)
             .when_some(self.on_open_change, |this, callback| {
                 this.on_open_change(move |open, window, cx| callback(open, window, cx))
@@ -132,7 +156,8 @@ where
                             builder(menu, window, cx)
                         });
                         menu.update(cx, |menu, cx| {
-                            menu.set_trigger_focus(Some(trigger_focus.clone()), cx)
+                            menu.set_trigger_focus(Some(trigger_focus.clone()), cx);
+                            menu.set_previous_focus(Some(trigger_focus.clone()), cx);
                         });
                         menu_state.update(cx, |state, _| {
                             state.menu = Some(menu.clone());
@@ -175,11 +200,7 @@ where
 
 type TriggerFocusBuild = Box<dyn FnOnce(FocusHandle, &mut Window, &mut App) -> AnyElement>;
 
-/// Registers a focus handle on the trigger's dispatch node without ever
-/// focusing it, so the menu opened from the trigger can resolve its shortcut
-/// hints against the trigger's key contexts on the frame it opens. GPUI looks
-/// a handle up in the previously rendered frame; the trigger was in it when
-/// the menu was not yet.
+/// Owns the actual trigger's stable handle for focus restoration and shortcut hints.
 struct TriggerFocus {
     id: ElementId,
     build: Option<TriggerFocusBuild>,
@@ -191,7 +212,6 @@ struct TriggerFocusState {
 }
 
 struct TriggerFocusFrame {
-    focus_handle: FocusHandle,
     child: AnyElement,
 }
 
@@ -247,13 +267,7 @@ impl Element for TriggerFocus {
         let mut child = build(focus_handle.clone(), window, cx);
         let layout_id = child.request_layout(window, cx);
 
-        (
-            layout_id,
-            TriggerFocusFrame {
-                focus_handle,
-                child,
-            },
-        )
+        (layout_id, TriggerFocusFrame { child })
     }
 
     fn prepaint(
@@ -265,7 +279,6 @@ impl Element for TriggerFocus {
         window: &mut Window,
         cx: &mut App,
     ) {
-        window.set_focus_handle(&frame.focus_handle, cx);
         frame.child.prepaint(window, cx);
     }
 
@@ -431,4 +444,200 @@ mod tests {
             "the shortcut hint must be painted on the same frame as its item"
         );
     }
+    use crate::{
+        WindowExt as _,
+        input::{Input, InputState},
+        menu::PopupMenuItem,
+    };
+    use gpui::AppContext as _;
+    #[derive(Clone, Copy)]
+    enum DialogActivation {
+        Handler,
+        Element,
+        Submenu,
+        Action,
+    }
+
+    struct DialogMenuRoot {
+        input: Entity<InputState>,
+        menu: Rc<RefCell<Option<WeakEntity<PopupMenu>>>>,
+        activations: Rc<Cell<usize>>,
+        activation: DialogActivation,
+    }
+
+    fn open_editor(
+        input: &Entity<InputState>,
+        activations: &Cell<usize>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        activations.set(activations.get() + 1);
+        let dialog_input = input.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog
+                .title("Edit forward")
+                .child(Input::new(&dialog_input))
+        });
+        input.focus_handle(cx).focus(window, cx);
+    }
+
+    fn editor_item(
+        input: Entity<InputState>,
+        activations: Rc<Cell<usize>>,
+        custom: bool,
+    ) -> PopupMenuItem {
+        let item = if custom {
+            PopupMenuItem::element(|_, _| {
+                div()
+                    .debug_selector(|| "custom-editor-item".into())
+                    .child("Edit forward…")
+            })
+        } else {
+            PopupMenuItem::new("Edit forward…")
+        };
+        item.on_click(move |_, window, cx| open_editor(&input, &activations, window, cx))
+    }
+
+    impl Render for DialogMenuRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let input = self.input.clone();
+            let action_input = input.clone();
+            let menu_probe = self.menu.clone();
+            let activations = self.activations.clone();
+            let action_activations = activations.clone();
+            let activation = self.activation;
+            div()
+                .size_full()
+                .on_action(move |_: &OpenEditor, window, cx| {
+                    open_editor(&action_input, &action_activations, window, cx);
+                })
+                .child(
+                    Button::new("dialog-trigger")
+                        .label("Actions")
+                        .w(px(100.))
+                        .h(px(30.))
+                        .dropdown_menu(move |menu, window, cx| {
+                            *menu_probe.borrow_mut() = Some(cx.weak_entity());
+                            let input = input.clone();
+                            let activations = activations.clone();
+                            match activation {
+                                DialogActivation::Handler => {
+                                    menu.item(editor_item(input, activations, false))
+                                }
+                                DialogActivation::Element => {
+                                    menu.item(editor_item(input, activations, true))
+                                }
+                                DialogActivation::Action => {
+                                    menu.menu("Edit forward…", Box::new(OpenEditor))
+                                }
+                                DialogActivation::Submenu => {
+                                    menu.submenu("More", window, cx, move |menu, _, _| {
+                                        menu.item(editor_item(
+                                            input.clone(),
+                                            activations.clone(),
+                                            false,
+                                        ))
+                                    })
+                                }
+                            }
+                        }),
+                )
+                .child(Button::new("other-control").label("Other control"))
+        }
+    }
+
+    #[gpui::test]
+    fn menu_dialog_escape_restores_the_trigger_without_stealing_initial_focus(
+        cx: &mut TestAppContext,
+    ) {
+        dialog_round_trip(cx, DialogActivation::Handler, false);
+    }
+
+    #[gpui::test]
+    fn clicked_custom_menu_item_restores_the_trigger_after_dialog_escape(cx: &mut TestAppContext) {
+        dialog_round_trip(cx, DialogActivation::Element, true);
+    }
+
+    #[gpui::test]
+    fn submenu_dialog_escape_restores_the_top_level_trigger(cx: &mut TestAppContext) {
+        dialog_round_trip(cx, DialogActivation::Submenu, false);
+    }
+
+    #[gpui::test]
+    fn menu_action_keeps_its_dispatch_path_and_dialog_focus_chain(cx: &mut TestAppContext) {
+        dialog_round_trip(cx, DialogActivation::Action, false);
+    }
+
+    fn dialog_round_trip(cx: &mut TestAppContext, activation: DialogActivation, pointer: bool) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let menu = Rc::new(RefCell::new(None::<WeakEntity<PopupMenu>>));
+        let activations = Rc::new(Cell::new(0));
+        let mut input_focus = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
+            input_focus = Some(input.focus_handle(cx));
+            let view = cx.new(|_| DialogMenuRoot {
+                input,
+                menu: menu.clone(),
+                activations: activations.clone(),
+                activation,
+            });
+            crate::Root::new(view, window, cx)
+        });
+        let input_focus = input_focus.unwrap();
+        let trigger_focus = cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.focus_next(cx);
+            window.focused(cx).expect("Actions receives Tab focus")
+        });
+
+        // Exercise the real dropdown/popover and dialog layers, including the
+        // menu's release, rather than keeping a dead menu alive in the test.
+        if pointer {
+            cx.update(|window, cx| {
+                window.focus_next(cx);
+                assert_ne!(window.focused(cx).as_ref(), Some(&trigger_focus));
+            });
+            cx.simulate_click(point(px(20.), px(15.)), Default::default());
+        } else {
+            cx.simulate_keystrokes("enter");
+        }
+        assert!(menu.borrow().as_ref().unwrap().upgrade().is_some());
+        if pointer {
+            let position = cx
+                .debug_bounds("custom-editor-item")
+                .expect("the custom menu item is painted")
+                .center();
+            cx.simulate_mouse_move(position, None, Default::default());
+            cx.simulate_click(position, Default::default());
+        } else if matches!(activation, DialogActivation::Submenu) {
+            cx.simulate_keystrokes("down right enter");
+        } else {
+            cx.simulate_keystrokes("down enter");
+        }
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(window.has_active_dialog(cx));
+            assert_eq!(window.focused(cx).as_ref(), Some(&input_focus));
+        });
+        assert_eq!(activations.get(), 1);
+        assert!(menu.borrow().as_ref().unwrap().upgrade().is_none());
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(!window.has_active_dialog(cx));
+            assert_eq!(window.focused(cx).as_ref(), Some(&trigger_focus));
+        });
+        // Restoration must also leave the trigger's keyboard path usable.
+        cx.simulate_keystrokes("enter");
+        assert!(menu.borrow().as_ref().unwrap().upgrade().is_some());
+    }
+
+    actions!(dialog_menu_test, [OpenEditor]);
 }

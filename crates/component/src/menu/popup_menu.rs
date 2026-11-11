@@ -889,57 +889,57 @@ impl PopupMenu {
     }
 
     fn activate(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
-        match self.selected_index {
-            Some(index) => {
-                let item = self.menu_items.get(index);
-                if !item.is_some_and(PopupMenuItem::is_clickable) {
-                    return;
-                }
-                match item {
-                    Some(PopupMenuItem::Item {
-                        handler, action, ..
-                    }) => {
-                        if let Some(handler) = handler {
-                            handler(event, window, cx);
-                        } else if let Some(action) = action.as_ref() {
-                            self.dispatch_confirm_action(action, window, cx);
-                        }
-
-                        self.dismiss(&Cancel, window, cx)
-                    }
-                    Some(PopupMenuItem::ElementItem {
-                        handler, action, ..
-                    }) => {
-                        if let Some(handler) = handler {
-                            handler(event, window, cx);
-                        } else if let Some(action) = action.as_ref() {
-                            self.dispatch_confirm_action(action, window, cx);
-                        }
-                        self.dismiss(&Cancel, window, cx)
-                    }
-                    Some(PopupMenuItem::Submenu {
-                        disabled: false, ..
-                    }) => {
-                        self._select_submenu(window, cx);
-                    }
-                    _ => {}
-                }
+        let Some(index) = self.selected_index else {
+            return;
+        };
+        if !self
+            .menu_items
+            .get(index)
+            .is_some_and(PopupMenuItem::is_clickable)
+        {
+            return;
+        }
+        if matches!(
+            self.menu_items.get(index),
+            Some(PopupMenuItem::Submenu { .. })
+        ) {
+            self._select_submenu(window, cx);
+            return;
+        }
+        let Some(
+            PopupMenuItem::Item {
+                handler, action, ..
             }
-            _ => {}
-        }
-    }
+            | PopupMenuItem::ElementItem {
+                handler, action, ..
+            },
+        ) = self.menu_items.get(index)
+        else {
+            return;
+        };
+        let handler = handler.clone();
+        let action = action.as_ref().map(|action| action.boxed_clone());
+        let action_focus = self
+            .resolved_action_context(cx)
+            .or_else(|| self.trigger_focus_handle.clone())
+            .unwrap_or_else(|| self.focus_handle.clone());
 
-    fn dispatch_confirm_action(
-        &self,
-        action: &Box<dyn Action>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(context) = self.resolved_action_context(cx) {
-            context.focus(window, cx);
-        }
-
-        window.dispatch_action(action.boxed_clone(), cx);
+        let event = event.clone();
+        self.dismiss(&Cancel, window, cx);
+        // DismissEvent subscribers (including the dropdown's popover) restore
+        // focus before activation. Otherwise a dialog opened by the item would
+        // remember this short-lived menu as its opener. Defer within the same
+        // effect flush, without keeping the menu entity alive. Actions retain
+        // the explicit action context or the persistent trigger's dispatch
+        // path: a submenu's own node can disappear during dismissal. Do not
+        // use the restored focus, which may belong to an unrelated control.
+        window.defer(cx, move |window, cx| {
+            if let Some(handler) = handler {
+                handler(&event, window, cx);
+            } else if let Some(action) = action {
+                action_focus.dispatch_action(action.as_ref(), window, cx);
+            }
+        });
     }
 
     fn resolved_action_context(&self, cx: &App) -> Option<FocusHandle> {
