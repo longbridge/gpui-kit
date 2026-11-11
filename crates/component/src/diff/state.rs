@@ -674,6 +674,41 @@ impl DiffState {
         cx.notify();
     }
 
+    /// Collapses the given files to their headers, or expands them, without
+    /// emitting a user event. One rebuild covers the whole change; calling
+    /// [`Self::set_file_collapsed`] per file rebuilds the rows each time,
+    /// which freezes a view of thousands of files.
+    pub fn set_files_collapsed(
+        &mut self,
+        paths: impl IntoIterator<Item = SharedString>,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+        for path in paths {
+            let Some(ix) = self.file_ix(&path) else {
+                continue;
+            };
+            let path = self.files[ix].path().clone();
+            changed |= if collapsed {
+                self.collapsed.insert(path)
+            } else {
+                self.collapsed.remove(&path)
+            };
+        }
+        if changed {
+            self.rebuild_at_anchor();
+            cx.notify();
+        }
+    }
+
+    /// Collapses every file to its header, or expands them all, in one
+    /// rebuild like [`Self::set_files_collapsed`].
+    pub fn set_all_files_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        let paths: Vec<SharedString> = self.files.iter().map(|file| file.path().clone()).collect();
+        self.set_files_collapsed(paths, collapsed, cx);
+    }
+
     /// Collapses the file at `path` to its header, or expands it, without
     /// emitting a user event.
     pub fn set_file_collapsed(&mut self, path: &str, collapsed: bool, cx: &mut Context<Self>) {
