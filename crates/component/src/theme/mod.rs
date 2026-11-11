@@ -142,6 +142,17 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
         })
 }
 
+/// Windows reveals auto-hidden scrollbars on hover and otherwise always shows
+/// them; macOS reveals auto-hidden ones only while scrolling.
+fn system_scrollbar_mode(auto_hide: bool, is_windows: bool) -> ScrollbarMode {
+    match (auto_hide, is_windows) {
+        (true, true) => ScrollbarMode::Hover,
+        (true, false) => ScrollbarMode::Scrolling,
+        (false, true) => ScrollbarMode::Always,
+        (false, false) => ScrollbarMode::Hover,
+    }
+}
+
 /// The global theme configuration.
 ///
 /// Construct with [`Theme::default`] and assign fields; new fields may be
@@ -373,11 +384,10 @@ impl Theme {
 
     /// Sync the Scrollbar showing behavior with the system
     pub fn sync_scrollbar_appearance(cx: &mut App) {
-        let mode = if cx.should_auto_hide_scrollbars() {
-            ScrollbarMode::Scrolling
-        } else {
-            ScrollbarMode::Hover
-        };
+        let mode = system_scrollbar_mode(
+            cx.should_auto_hide_scrollbars(),
+            cfg!(target_os = "windows"),
+        );
         Self::set_scrollbar_mode(mode, cx);
     }
 
@@ -686,7 +696,7 @@ impl Theme {
 mod semantic_token_tests {
     use gpui::{Hsla, IsZero as _, px};
 
-    use super::{RADIUS_FULL, Theme};
+    use super::{RADIUS_FULL, ScrollbarMode, Theme, system_scrollbar_mode};
 
     #[test]
     fn semantic_colors_are_a_live_projection_of_legacy_fields() {
@@ -756,6 +766,14 @@ mod semantic_token_tests {
         // square theme has to reach it or the thumb stays a pill.
         theme.radius = px(0.);
         assert!(theme.base_theme().tokens.radius.md.is_zero());
+    }
+
+    #[test]
+    fn system_scrollbar_mode_follows_the_platform_convention() {
+        assert_eq!(system_scrollbar_mode(true, true), ScrollbarMode::Hover);
+        assert_eq!(system_scrollbar_mode(false, true), ScrollbarMode::Always);
+        assert_eq!(system_scrollbar_mode(true, false), ScrollbarMode::Scrolling);
+        assert_eq!(system_scrollbar_mode(false, false), ScrollbarMode::Hover);
     }
 
     #[test]
