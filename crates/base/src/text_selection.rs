@@ -573,7 +573,12 @@ fn carets_for_multi_click(
     if run.text.len() != run.layout.len() {
         return None;
     }
-    let offset = run.layout.index_for_position(position).ok()?;
+    let offset = match run.layout.index_for_position(position) {
+        Ok(offset) => offset,
+        // Beside a line, as after a short last one: three clicks still mean that line.
+        Err(nearest) if click_count >= 3 => nearest,
+        Err(_) => return None,
+    };
     unit_carets(run, offset, click_count)
 }
 
@@ -3998,6 +4003,28 @@ mod tests {
         let projection = project_ranges(Some(plain_snapshot(anchor.origin, cursor.origin)), &[run]);
 
         assert_eq!(projection.ranges(), &[Some(6..10)]);
+    }
+
+    #[gpui::test]
+    fn triple_click_beside_a_short_line_selects_that_line(cx: &mut TestAppContext) {
+        let (text, layout) = laid_out_runs(&["a long first line\nend"], cx)
+            .pop()
+            .unwrap();
+        let run = text_run(0, text, layout.clone());
+        // Right of "end", inside the run: the first line is wider.
+        let beside = layout.position_for_index(21).unwrap() + point(px(20.), px(2.));
+        assert!(run.bounds.contains(&beside));
+        assert!(layout.index_for_position(beside).is_err());
+
+        let (anchor, cursor) =
+            carets_for_multi_click(std::slice::from_ref(&run), beside, 3).unwrap();
+        let states = project_ranges(
+            Some(plain_snapshot(anchor.origin, cursor.origin)),
+            std::slice::from_ref(&run),
+        );
+        assert_eq!(states.ranges(), &[Some(18..21)]);
+        // Two clicks beside the text still select nothing.
+        assert!(carets_for_multi_click(&[run], beside, 2).is_none());
     }
 
     #[gpui::test]
