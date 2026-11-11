@@ -111,7 +111,12 @@ impl ButtonCustomVariant {
         }
     }
 
-    /// Set background color, default is transparent.
+    /// Set the base color, default is transparent.
+    ///
+    /// At rest the button fills with this color at 20% opacity, the tint the
+    /// danger, warning, success and info buttons use by default. An outline
+    /// button also draws its border in it. The [`hover`](Self::hover) and
+    /// [`active`](Self::active) colors are painted as given.
     pub fn color(mut self, color: Hsla) -> Self {
         self.color = color;
         self

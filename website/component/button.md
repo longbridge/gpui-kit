@@ -311,6 +311,8 @@ ButtonGroup::new("toggle-group")
 
 ## Custom Variant
 
+At rest, a custom button fills with its `color` at 20% opacity, like the danger, warning, success and info buttons. It paints `hover` and `active` as given, so give them the same color at a higher opacity.
+
 ```rust
 use gpui_kit::component::{
     ActiveTheme as _, Colorize as _,
@@ -319,9 +321,9 @@ use gpui_kit::component::{
 
 let custom = ButtonCustomVariant::new(cx)
     .color(cx.theme().magenta)
-    .foreground(cx.theme().primary_foreground)
-    .hover(cx.theme().magenta.opacity(0.1))
-    .active(cx.theme().magenta);
+    .foreground(cx.theme().magenta)
+    .hover(cx.theme().magenta.opacity(0.3))
+    .active(cx.theme().magenta.opacity(0.4));
 
 Button::new("custom-btn")
     .custom(custom)
