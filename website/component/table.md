@@ -147,6 +147,7 @@ TableCell::new()
 
 - `new()` - Create a new instance
 - `TableRow::hover(f)` - Style a row while the pointer is over it
+- `TableRow::id(id)` - Give a row a stable identity when rows can reorder (by default a row is identified by its position)
 - Implements `Styled`, `ParentElement`, `RenderOnce`
 
 ## Table vs DataTable
