@@ -3232,6 +3232,11 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selections.iter().all(|sel| sel.is_empty()) {
+            // Nothing selected here: let Root copy the window's text selection.
+            cx.propagate();
+            return;
+        }
         if !self.is_copyable() {
             return;
         }
