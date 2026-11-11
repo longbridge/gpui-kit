@@ -400,7 +400,7 @@ impl IntoElement for TooltipPositioner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{AppContext as _, point, size};
+    use gpui::{point, size};
 
     fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<Pixels> {
         Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
