@@ -103,9 +103,10 @@ Table::new()
 Since all components implement `Styled`, you can apply any GPUI style:
 
 ```rust
-// Custom row hover
+// Custom row background and hover
 TableRow::new()
     .bg(cx.theme().table_even)
+    .hover(|this| this.bg(cx.theme().table_hover))
     .child(/* ... */)
 
 // Custom cell padding
@@ -145,6 +146,7 @@ TableCell::new()
 ### TableHeader / TableBody / TableFooter / TableRow / TableCaption
 
 - `new()` - Create a new instance
+- `TableRow::hover(f)` - Style a row while the pointer is over it
 - Implements `Styled`, `ParentElement`, `RenderOnce`
 
 ## Table vs DataTable
