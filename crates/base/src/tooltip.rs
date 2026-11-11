@@ -1,10 +1,10 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, AnyView, App, Bounds, Context, Div, ElementId, Global, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, RenderOnce, Role, Stateful,
-    StatefulInteractiveElement, Styled, Task, Window, deferred, div, prelude::FluentBuilder as _,
-    px,
+    AnyElement, AnyTooltip, AnyView, App, AppContext as _, Bounds, Context, Div, ElementId,
+    EmptyView, Global, InteractiveElement, IntoElement, ParentElement, Pixels, Render, RenderOnce,
+    Role, Stateful, StatefulInteractiveElement, Styled, Task, Window, canvas, deferred, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{Placement, Positioner};
@@ -189,6 +189,10 @@ pub struct TooltipOverlay {
     show_task: Option<Task<()>>,
     hide_task: Option<Task<()>>,
     renderer: TooltipRenderer,
+    /// An empty GPUI tooltip that holds the window's one tooltip place while
+    /// this overlay shows one, so a native `.tooltip()` around the trigger
+    /// does not show as well.
+    native_placeholder: Option<AnyView>,
 }
 
 impl TooltipOverlay {
@@ -204,6 +208,7 @@ impl TooltipOverlay {
             show_task: None,
             hide_task: None,
             renderer: Rc::new(|view, _, _, _| div().child(view).into_any_element()),
+            native_placeholder: None,
         }
     }
 
@@ -323,13 +328,32 @@ impl Render for TooltipOverlay {
             },
         };
         let rendered = (self.renderer)(view, transition, window, cx);
+        let placeholder = self
+            .native_placeholder
+            .get_or_insert_with(|| cx.new(|_| EmptyView).into())
+            .clone();
         deferred(
-            TooltipPositioner::new(content.trigger_bounds)
-                .offset(content.offset)
-                .when_some(content.preferred_placement, |this, placement| {
-                    this.placement(placement)
-                })
-                .child(rendered),
+            div()
+                .child(
+                    TooltipPositioner::new(content.trigger_bounds)
+                        .offset(content.offset)
+                        .when_some(content.preferred_placement, |this, placement| {
+                            this.placement(placement)
+                        })
+                        .child(rendered),
+                )
+                // GPUI draws only the last tooltip requested in a frame, and
+                // this layer is prepainted after the content and its popups.
+                .child(canvas(
+                    move |_, window, _| {
+                        window.set_tooltip(AnyTooltip {
+                            view: placeholder,
+                            mouse_position: window.mouse_position(),
+                            check_visible_and_update: Rc::new(|_, _, _| true),
+                        });
+                    },
+                    |_, _, _, _| {},
+                )),
         )
         .with_priority(TOOLTIP_PRIORITY)
         .into_any_element()
@@ -376,7 +400,7 @@ impl IntoElement for TooltipPositioner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{AppContext as _, point, size};
+    use gpui::{point, size};
 
     fn bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<Pixels> {
         Bounds::new(point(px(x), px(y)), size(px(width), px(height)))

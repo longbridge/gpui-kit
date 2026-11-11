@@ -504,6 +504,71 @@ mod tests {
         assert_tooltip_painted(cx, 1 - index, false);
     }
 
+    /// A managed trigger inside an element that has a native GPUI tooltip.
+    struct NestedInNative;
+
+    impl Render for NestedInNative {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("native")
+                    .absolute()
+                    .left(px(0.))
+                    .top(px(0.))
+                    .w(px(300.))
+                    .h(px(100.))
+                    .tooltip(|_, cx| {
+                        cx.new(|_| super::Tooltip::new("outer").bg(gpui::rgb(TOOLTIP_COLORS[0])))
+                            .into()
+                    })
+                    .child(
+                        div()
+                            .id("managed")
+                            .absolute()
+                            .left(px(10.))
+                            .top(px(10.))
+                            .w(px(100.))
+                            .h(px(30.))
+                            .managed_tooltip(|_, cx| {
+                                cx.new(|_| {
+                                    super::Tooltip::new("inner").bg(gpui::rgb(TOOLTIP_COLORS[1]))
+                                })
+                                .into()
+                            }),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_managed_tooltip_hides_the_native_tooltip_around_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let view = cx.new(|_| NestedInNative);
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| Root::new(view.clone(), window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        draw(&mut cx);
+
+        let outside_the_trigger = point(px(200.), px(50.));
+        let on_the_trigger = point(px(50.), px(25.));
+        for (at, shown) in [
+            (outside_the_trigger, 0),
+            (on_the_trigger, 1),
+            (outside_the_trigger, 0),
+        ] {
+            cx.simulate_mouse_move(at, None, Default::default());
+            wait(&mut cx);
+            assert_tooltip_shown(&mut cx, shown);
+        }
+    }
+
     #[gpui::test]
     fn tooltips_switch_in_both_directions(cx: &mut TestAppContext) {
         let (mut cx, probe) = open_adjacent_triggers(cx);
