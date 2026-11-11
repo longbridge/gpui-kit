@@ -2651,20 +2651,16 @@ impl WindowSelectionState {
             self.update_participant_auto_scroll(position, cx);
             return;
         }
-        // The content mask is the nearest clipping viewport established by a
-        // scrollable ancestor. It remains stable as the participant itself
-        // moves, so selection keeps scrolling the same related region even
-        // after the anchor text has moved out of view.
-        let visible_bounds = registration.hitbox.content_mask.bounds;
-        // Keeps the synthesized wheel event hit-testing inside the mask.
+        // Keeps the synthesized wheel event hit-testing inside the viewport.
         const HIT_TEST_INSET: Pixels = px(1.);
-        // A collapsed mask leaves an empty clamp range below — stop.
-        if visible_bounds.size.width < HIT_TEST_INSET * 2.
-            || visible_bounds.size.height < HIT_TEST_INSET * 2.
-        {
+        // No text is hidden in either direction, or the viewport leaves an
+        // empty clamp range below — stop.
+        let Some(visible_bounds) = self.auto_scroll_viewport(&registration).filter(|bounds| {
+            bounds.size.width >= HIT_TEST_INSET * 2. && bounds.size.height >= HIT_TEST_INSET * 2.
+        }) else {
             self.stop_anchor_auto_scroll(cx);
             return;
-        }
+        };
         let delta = AutoScroll::compute_delta(position.y, visible_bounds);
         let event_position = point(
             position.x.clamp(
@@ -2715,6 +2711,43 @@ impl WindowSelectionState {
                 });
             });
         });
+    }
+
+    /// The viewport a drag scrolls: between the nearest edges above and below
+    /// `anchor` that cut selectable text off. A clip that hides no text, such as
+    /// a rounded card around the anchor, is not an edge. A side with no hidden
+    /// text has no edge, so the pointer never reaches it and nothing scrolls
+    /// that way. `None` when no text is hidden at all.
+    ///
+    /// The edges stay where they are while the content scrolls, so a drag keeps
+    /// scrolling the same region after the anchor has moved out of view.
+    fn auto_scroll_viewport(&self, anchor: &TextSelectionRegistration) -> Option<Bounds<Pixels>> {
+        // Farther than any pointer position, for a side with no edge.
+        const NO_EDGE: Pixels = px(1e7);
+        let anchor_mask = anchor.hitbox.content_mask.bounds;
+        let mut top = None::<Pixels>;
+        let mut bottom = None::<Pixels>;
+        for participant in self.participants.borrow().values() {
+            let registration = &participant.registration;
+            if registration.scope != self.active_scope {
+                continue;
+            }
+            let mask = registration.hitbox.content_mask.bounds;
+            if registration.bounds.top() < mask.top() && mask.top() <= anchor_mask.top() {
+                top = Some(top.map_or(mask.top(), |top| top.max(mask.top())));
+            }
+            if registration.bounds.bottom() > mask.bottom() && mask.bottom() >= anchor_mask.bottom()
+            {
+                bottom = Some(bottom.map_or(mask.bottom(), |bottom| bottom.min(mask.bottom())));
+            }
+        }
+        if top.is_none() && bottom.is_none() {
+            return None;
+        }
+        Some(Bounds::from_corners(
+            point(anchor_mask.left(), top.unwrap_or(-NO_EDGE)),
+            point(anchor_mask.right(), bottom.unwrap_or(NO_EDGE)),
+        ))
     }
 
     /// Drives the anchor participant's own scrolling, measured against the
@@ -4749,6 +4782,67 @@ mod tests {
                     state.update_in_window(point(px(1.), px(50.)), window, cx);
                     assert!(!state.auto_scroll.is_active());
                     assert!(state.auto_scroll.last_drag_position.is_none());
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn drag_auto_scroll_starts_at_the_edge_that_hides_text(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, cx| WindowSelectionView {
+            selection: TextSelectionHandle::new("unused", cx),
+        });
+        let registration = |bounds: Bounds<Pixels>, mask: Bounds<Pixels>| {
+            TextSelectionRegistration::new(
+                Hitbox {
+                    id: HitboxId::placeholder(),
+                    bounds,
+                    content_mask: ContentMask { bounds: mask },
+                    behavior: HitboxBehavior::Normal,
+                },
+                bounds,
+            )
+            .with_text_bounds(vec![bounds])
+        };
+        window
+            .update(cx, |_, window, cx| {
+                let state = cx.new(|_| WindowSelectionState::default());
+                let card = FakeParticipant::new("card", cx);
+                let below = FakeParticipant::new("below", cx);
+                // A card clips its own text and hides none of it.
+                let card_bounds = Bounds::new(point(px(0.), px(40.)), size(px(100.), px(20.)));
+                state.update(cx, |state, cx| {
+                    state.register_participant(
+                        card.selection.clone(),
+                        registration(card_bounds, card_bounds),
+                        cx,
+                    );
+                    state.begin(point(px(1.), px(45.)), false, cx);
+
+                    // Nothing is hidden: leaving the card scrolls nothing.
+                    state.update_in_window(point(px(1.), px(70.)), window, cx);
+                    assert!(!state.auto_scroll.is_active());
+
+                    // The viewport ends at 200 and cuts the text below the card.
+                    let cut = Bounds::new(point(px(0.), px(190.)), size(px(100.), px(20.)));
+                    let seen = Bounds::new(point(px(0.), px(190.)), size(px(100.), px(10.)));
+                    state.register_participant(
+                        below.selection.clone(),
+                        registration(cut, seen),
+                        cx,
+                    );
+                    state.update_in_window(point(px(1.), px(70.)), window, cx);
+                    assert!(!state.auto_scroll.is_active());
+                    state.update_in_window(point(px(1.), px(195.)), window, cx);
+                    assert!(state.auto_scroll.is_active());
+                    assert_eq!(
+                        state.auto_scroll.last_drag_position,
+                        Some(point(px(1.), px(195.)))
+                    );
+                    // Back inside the viewport, the scroll stops.
+                    state.update_in_window(point(px(1.), px(70.)), window, cx);
+                    assert!(!state.auto_scroll.is_active());
+                    state.clear(cx);
                 });
             })
             .unwrap();
