@@ -20,20 +20,32 @@ pub const TEXT_GAP: f32 = 2.;
 /// [`TEXT_GAP`].
 pub const TEXT_HEIGHT: f32 = TEXT_SIZE + TEXT_GAP;
 
-fn shape_label(
+fn label_run(
     text: &SharedString,
-    font_size: Pixels,
     color: Hsla,
-    window: &mut Window,
-) -> ShapedLine {
-    let text_run = TextRun {
+    font_weight: FontWeight,
+    window: &Window,
+) -> TextRun {
+    let mut font = window.text_style().font();
+    font.weight = font_weight;
+    TextRun {
         len: text.len(),
-        font: window.text_style().font(),
+        font,
         color,
         background_color: None,
         underline: None,
         strikethrough: None,
-    };
+    }
+}
+
+fn shape_label(
+    text: &SharedString,
+    font_size: Pixels,
+    font_weight: FontWeight,
+    color: Hsla,
+    window: &mut Window,
+) -> ShapedLine {
+    let text_run = label_run(text, color, font_weight, window);
     window
         .text_system()
         .shape_line(text.clone(), font_size, &[text_run], None)
@@ -46,9 +58,11 @@ pub fn measure_text_width(text: &SharedString, font_size: Pixels, window: &mut W
     if text.is_empty() {
         return 0.;
     }
+    let font_weight = window.text_style().font_weight;
     shape_label(
         text,
         font_size,
+        font_weight,
         Hsla {
             h: 0.,
             s: 0.,
@@ -173,13 +187,13 @@ impl PlotLabel {
             origin,
             color,
             font_size,
-            font_weight: _,
+            font_weight,
             align,
         } in self.0.iter()
         {
             let origin = origin_point(origin.x, origin.y, bounds.origin);
 
-            let line = shape_label(text, *font_size, *color, window);
+            let line = shape_label(text, *font_size, *font_weight, *color, window);
             let origin = match align {
                 TextAlign::Left => origin,
                 TextAlign::Right => origin - point(line.width(), px(0.)),
@@ -187,5 +201,42 @@ impl PlotLabel {
             };
             let _ = line.paint(origin, *font_size, *align, None, window, cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Context, IntoElement, Render, TestAppContext, div};
+
+    struct Empty;
+
+    impl Render for Empty {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    #[gpui::test]
+    fn a_label_is_shaped_at_its_own_weight(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, _| Empty);
+        window
+            .update(cx, |_, window, _| {
+                let text = SharedString::from("14:30");
+                let color = Hsla::default();
+                assert_eq!(
+                    label_run(&text, color, FontWeight::BOLD, window)
+                        .font
+                        .weight,
+                    FontWeight::BOLD
+                );
+                assert_eq!(
+                    label_run(&text, color, FontWeight::NORMAL, window)
+                        .font
+                        .weight,
+                    FontWeight::NORMAL
+                );
+            })
+            .unwrap();
     }
 }
