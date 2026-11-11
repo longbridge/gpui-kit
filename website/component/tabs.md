@@ -423,7 +423,7 @@ impl Render for TabsWithContent {
 
 ### Tabs with Close Buttons
 
-While the basic Tab component doesn't include closeable functionality, you can create closeable tabs using suffix elements:
+While the basic Tab component doesn't include closeable functionality, you can create closeable tabs using suffix elements. The close button's click must stop propagation, or it also reaches the tab, and `TabBar::on_click` selects the closed tab's index:
 
 ```rust
 struct CloseableTabsView {
@@ -463,6 +463,8 @@ impl Render for CloseableTabsView {
                                     .ghost()
                                     .xsmall()
                                     .on_click(cx.listener(move |view, _, _, cx| {
+                                        // Keep the click from also selecting the tab.
+                                        cx.stop_propagation();
                                         view.close_tab(index, cx);
                                     }))
                             )
