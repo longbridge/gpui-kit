@@ -248,6 +248,7 @@ impl WindowState {
         }
 
         let mut rendered: Vec<(usize, Dialog)> = Vec::with_capacity(active_dialogs.len());
+        let mut stack_depth = 0;
 
         for (index, active_dialog) in active_dialogs.iter().enumerate() {
             let mut dialog = Dialog::new(cx);
@@ -262,6 +263,11 @@ impl WindowState {
             dialog.selection_scope = active_dialog.selection_scope;
 
             dialog.layer_ix = index;
+            // A dialog that is leaving must not push the next one down.
+            dialog.stack_depth = stack_depth;
+            if !active_dialog.closing {
+                stack_depth += 1;
+            }
             dialog.id = active_dialog.id;
 
             // Refreshed every frame so closing decides in one step whether an
