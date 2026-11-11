@@ -141,7 +141,7 @@ impl Render for DescriptionListStory {
                 },
             ))
             .child(
-                div().w(px(720.)).child(
+                div().w_full().max_w(px(720.)).child(
                     DescriptionList::new()
                         .columns(3)
                         .layout(self.layout)
