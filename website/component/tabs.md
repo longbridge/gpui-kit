@@ -273,9 +273,8 @@ impl Render for ScrollableTabsView {
 TabBar::new("custom-tabs")
     .child(
         Tab::new().label("Custom Tab")
-            .id("custom-id")
             .prefix(IconName::Star)
-            .suffix(IconName::X)
+            .suffix(IconName::Close)
             .on_click(|_, _, _| {
                 println!("Custom tab clicked");
             })
@@ -297,7 +296,7 @@ TabBar::new("custom-tabs")
 | `suffix(element)`           | Add element after the tabs                         |
 | `last_empty_space(element)` | Custom element for empty space at the end          |
 | `track_scroll(handle)`      | Track scrolling with a handle to reveal a tab explicitly; clicking a tab scrolls it into view with part of the next tab showing |
-| `with_menu(bool)`           | Enable dropdown menu for tab selection             |
+| `menu(bool)`                | Enable dropdown menu for tab selection             |
 | `max_width(width)`      | Set maximum width of each tab; truncates           |
 
 ### TabBar Variants
@@ -315,10 +314,9 @@ TabBar::new("custom-tabs")
 
 | Method                  | Description                                    |
 | ----------------------- | ---------------------------------------------- |
-| `new(label)`            | Create a new tab with a label                  |
-| `empty()`               | Create an empty tab                            |
-| `icon(icon)`            | Create a tab with only an icon                 |
-| `id(id)`                | Set custom ID for the tab                      |
+| `new()`                 | Create a new tab                               |
+| `label(label)`          | Set the tab label                              |
+| `icon(icon)`            | Set the tab icon                               |
 | `with_variant(variant)` | Set the tab variant                            |
 | `pill()`                | Use pill variant                               |
 | `outline()`             | Use outline variant                            |
@@ -358,7 +356,7 @@ Both `TabBar` and `Tab` implement `Sizable` trait:
 ### Custom Tab Content
 
 ```rust
-Tab::empty()
+Tab::new()
     .child(
         h_flex()
             .items_center()
@@ -459,7 +457,7 @@ impl Render for CloseableTabsView {
                         Tab::new().label(tab_name.clone())
                             .suffix(
                                 Button::new(format!("close-{}", index))
-                                    .icon(IconName::X)
+                                    .icon(IconName::Close)
                                     .ghost()
                                     .xsmall()
                                     .on_click(cx.listener(move |view, _, _, cx| {
@@ -477,6 +475,6 @@ impl Render for CloseableTabsView {
 - The `TabBar` manages the selection state of all child tabs
 - Individual tab `on_click` handlers are ignored when `TabBar.on_click` is set
 - Tabs automatically inherit the variant and size from their parent `TabBar`
-- The `with_menu` option adds a dropdown for tab selection when there are many tabs
+- The `menu` option adds a dropdown for tab selection when there are many tabs
 - Scrolling is automatically enabled when tabs overflow the container width
 - The dock system provides advanced closeable tab functionality for complex layouts
