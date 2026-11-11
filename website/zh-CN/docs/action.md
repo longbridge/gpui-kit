@@ -231,7 +231,7 @@ GPUI 从获得 Focus 的元素经过各级祖先组成 **Dispatch Path**。路�
 
 ### 追踪一次快捷键
 
-假设获得 Focus 的元素位于 `Chat` 内，而 `Chat` 位于 `Workspace` 内。`KeyBinding::new("secondary-enter", SendMessage, Some("Chat"))` 只在当前 Focus Path 中有 `Chat` 时才有资格匹配。GPUI 选出匹配的 binding，再沿该路径派发 `SendMessage`。`Chat` 的 bubble handler 会先于 `Workspace` 的 handler 运行。如果路径上的元素都没有处理这个 Action，全局 `cx.on_action` handler 可以接收它。Context 负责选择 **binding**，不会自行选定 handler。绑定竞争与 predicate 写法见 [KeyBinding](./keybinding)。
+假设获得 Focus 的元素位于 `Chat` 内，而 `Chat` 位于 `Workspace` 内。`KeyBinding::new("ctrl-enter", SendMessage, Some("Chat"))` 只在当前 Focus Path 中有 `Chat` 时才有资格匹配。GPUI 选出匹配的 binding，再沿该路径派发 `SendMessage`。`Chat` 的 bubble handler 会先于 `Workspace` 的 handler 运行。如果路径上的元素都没有处理这个 Action，全局 `cx.on_action` handler 可以接收它。Context 负责选择 **binding**，不会自行选定 handler。绑定竞争与 predicate 写法见 [KeyBinding](./keybinding)。
 
 点击触发命令时，`window.dispatch_action(Box::new(SendMessage), cx)` 使用调用时捕获的 Focus。确保预期路径已获得 Focus，或通过保留的 `FocusHandle` 派发。如果不需要共享命令路由，按钮 callback 也可以直接调用 owner 的方法。
 
@@ -323,6 +323,6 @@ GPUI Kit 的 Command palette 和 Popup Menu 也使用这种方式：选中项提
 ## 用 Tree story 练习
 
 1. **跟踪路径。** 运行 `cargo run -p gpui-component-story -- Tree`，选中一行并按 Enter。在 `tree_story.rs` 中找出 binding、context 和 handler。哪个组件持有选中项？哪个 entity 持有命令 handler？
-2. **更换输入。** 在自己的分支中，临时将 Tree story 的 binding 从 `"enter"` 改成 `"secondary-r"`。重新运行 Story Gallery，确认新按键仍调用同一个 `Rename` handler，而 Enter 不再调用。实验后还原源码。
+2. **更换输入。** 在自己的分支中，临时将 Tree story 的 binding 从 `"enter"` 改成 `"ctrl-r"`。重新运行 Story Gallery，确认新按键仍调用同一个 `Rename` handler，而 Enter 不再调用。实验后还原源码。
 3. **预测传播。** 在一个小视图的子级和父级都挂上 `Rename` handler。子级仅在没有选中项时调用 `cx.propagate()`。先预测两种情况下各有哪些 handler 运行，再用可见输出验证。handler 直接返回而不调用 `cx.propagate()`，就会消费 Action。
 4. **添加目标。** 用 `#[action(namespace = story, no_json)]` 给必须携带行 ID 的操作建模。从行 callback 派发，把状态修改保留在 owner 的 handler 中。与从当前选中项读取目标的 `Rename` 比较。

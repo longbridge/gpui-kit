@@ -771,6 +771,10 @@ impl RenderOnce for AttachmentMedia {
         let has_source = source.is_some();
         let failed_media = status.is_failed() && !has_source;
         let corner_radii = self.style.corner_radii.clone();
+        let image_id: ElementId = match self.id.clone() {
+            Some(id) => (id, "image").into(),
+            None => "attachment-image".into(),
+        };
         let ring_id: ElementId = match self.id {
             Some(id) => (id, "progress").into(),
             None => "attachment-progress".into(),
@@ -853,7 +857,10 @@ impl RenderOnce for AttachmentMedia {
                 // gpui clips rectangularly, so the slot's `overflow_hidden` cannot
                 // round the image: it carries the slot's radius itself, including
                 // a caller's `.rounded()` refinement.
+                // gpui keeps an animated image's current frame in element state,
+                // so without an id it stays on the first frame.
                 let mut image = img(source)
+                    .id(image_id)
                     .absolute()
                     .inset_0()
                     .size_full()

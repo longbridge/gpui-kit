@@ -282,6 +282,8 @@ ButtonGroup::new("toggle-group")
 
 ## 自定义变体
 
+自定义按钮在静止状态下以 `color` 的 20% 不透明度填充，与 danger、warning、success 和 info 按钮相同。`hover` 和 `active` 按原样绘制，因此请为它们设置同一颜色的更高不透明度。
+
 ```rust
 use gpui_kit::component::{
     ActiveTheme as _, Colorize as _,
@@ -290,9 +292,9 @@ use gpui_kit::component::{
 
 let custom = ButtonCustomVariant::new(cx)
     .color(cx.theme().magenta)
-    .foreground(cx.theme().primary_foreground)
-    .hover(cx.theme().magenta.opacity(0.1))
-    .active(cx.theme().magenta);
+    .foreground(cx.theme().magenta)
+    .hover(cx.theme().magenta.opacity(0.3))
+    .active(cx.theme().magenta.opacity(0.4));
 
 Button::new("custom-btn")
     .custom(custom)
