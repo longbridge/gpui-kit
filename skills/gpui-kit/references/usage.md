@@ -131,7 +131,7 @@ Input::new(&input)
 Input::new(&input).cleanable(true)           // clear button
 Input::new(&input).disabled(true)
 Input::new(&input).prefix(Icon::new(IconName::Search).small())
-Input::new(&input).suffix(Button::new("b").ghost().icon(IconName::X).xsmall())
+Input::new(&input).suffix(Button::new("b").ghost().icon(IconName::Close).xsmall())
 Input::new(&input).content_type(InputContentType::Password)
 Input::new(&input).mask_toggle()             // password reveal toggle
 Input::new(&input).appearance(false)         // remove default border/bg
