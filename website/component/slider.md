@@ -155,6 +155,13 @@ Slider::new(&slider_state)
     .accessibility_label("Corner radius")
 ```
 
+A slider is a tab stop, and its thumb shows the ring while the slider has focus. The [keyboard shortcuts](#keyboard-shortcuts) work from there. Pass `tab_stop` / `tab_index` to change its place in the tab order.
+
+```rust
+Slider::new(&slider_state)
+    .tab_stop(false)
+```
+
 ### Custom Styling
 
 ```rust
@@ -215,7 +222,7 @@ let range_value: SliderValue = (10.0..90.0).into();
 | Event                  | Description                                                     |
 | ---------------------- | --------------------------------------------------------------- |
 | `Change(SliderValue)`  | Emitted continuously while the slider value is being changed    |
-| `Release(SliderValue)` | Emitted once when the user releases the slider after interaction |
+| `Release(SliderValue)` | Emitted once when the user releases the slider after a drag or click, and after each step from the keyboard or an assistive technology |
 
 ### Styling
 
@@ -451,9 +458,11 @@ impl Render for TemperatureControl {
 | ------------- | ------------------------------ |
 | `←` / `↓`     | Decrease value by step         |
 | `→` / `↑`     | Increase value by step         |
-| `Page Down`   | Decrease by larger amount      |
-| `Page Up`     | Increase by larger amount      |
+| `Page Down`   | Decrease value by ten steps    |
+| `Page Up`     | Increase value by ten steps    |
 | `Home`        | Set to minimum value           |
 | `End`         | Set to maximum value           |
 | `Tab`         | Move focus to next element     |
 | `Shift + Tab` | Move focus to previous element |
+
+The keys work while the slider has focus. On a range slider they move the end thumb. Each key press emits `Change`, then `Release`. In a right-to-left layout, `←` and `→` swap on a horizontal slider.

@@ -4,10 +4,10 @@ use std::ops::Range;
 use gpui::{
     AccessibleAction, Along, AnyElement, App, AppContext as _, Axis, Bounds, Context, Div,
     DragMoveEvent, Empty, Entity, EntityId, EventEmitter, FocusHandle, HitboxBehavior,
-    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, Orientation, ParentElement,
-    Pixels, Point, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Styled, TouchDragEvent, TouchPhase, Window, div, prelude::FluentBuilder as _,
-    px,
+    InteractiveElement, IntoElement, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent,
+    Orientation, ParentElement, Pixels, Point, Render, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, StyleRefinement, Styled, TouchDragEvent, TouchPhase, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -19,7 +19,8 @@ use crate::{
 pub enum SliderEvent {
     /// Emitted continuously while the slider value is being changed by the user.
     Change(SliderValue),
-    /// Emitted once when the user releases the slider after a drag or click.
+    /// Emitted once when the user releases the slider after a drag or click, and after
+    /// each step from the keyboard or an assistive technology.
     Release(SliderValue),
 }
 
@@ -405,10 +406,11 @@ impl SliderState {
         cx.notify();
     }
 
-    /// Moves the end thumb or, with `start`, a range's start thumb by `delta`, as an
-    /// assistive technology's Increment and Decrement do, and emits
-    /// [`SliderEvent::Change`] if it moved. The thumb lands on the step grid counted from
-    /// `min` and stops at the other thumb and at the slider's ends.
+    /// Moves the end thumb or, with `start`, a range's start thumb by `delta`, as a key and
+    /// an assistive technology's Increment and Decrement do, and emits
+    /// [`SliderEvent::Change`] then [`SliderEvent::Release`] if it moved. The thumb lands
+    /// on the step grid counted from `min` and stops at the other thumb and at the
+    /// slider's ends.
     #[doc(hidden)]
     pub fn step_thumb(
         &mut self,
@@ -425,6 +427,8 @@ impl SliderState {
         if value != self.value {
             self.set_value(value, window, cx);
             cx.emit(SliderEvent::Change(value));
+            // A step is a whole gesture: no pointer release follows it.
+            cx.emit(SliderEvent::Release(value));
         }
     }
 
@@ -458,6 +462,34 @@ impl SliderState {
         }
         self.dragging = false;
         cx.emit(SliderEvent::Release(self.value));
+    }
+}
+
+/// Steps Page Up and Page Down move the thumb.
+const PAGE_STEPS: f32 = 10.;
+
+/// How far a key moves the thumb: an arrow `step`, Page Up and Page Down ten of them, Home
+/// and End the whole `range`. `None` for any other key and for a key held with a modifier.
+fn key_delta(keystroke: &Keystroke, axis: Axis, rtl: bool, step: f32, range: f32) -> Option<f32> {
+    if keystroke.modifiers.modified() {
+        return None;
+    }
+    // A horizontal slider grows to the left in a right-to-left layout.
+    let toward_end = if axis.is_horizontal() && rtl {
+        -step
+    } else {
+        step
+    };
+    match keystroke.key.as_str() {
+        "right" => Some(toward_end),
+        "left" => Some(-toward_end),
+        "up" => Some(step),
+        "down" => Some(-step),
+        "pageup" => Some(step * PAGE_STEPS),
+        "pagedown" => Some(-step * PAGE_STEPS),
+        "home" => Some(-range),
+        "end" => Some(range),
+        _ => None,
     }
 }
 
@@ -588,7 +620,9 @@ impl Slider {
     }
 
     /// Makes the slider's accessibility node itself focusable with `focus`,
-    /// so keyboard focus and assistive technology land on the slider.
+    /// so keyboard focus and assistive technology land on the slider. While
+    /// it has focus, the arrow keys move the end thumb a step, Page Up and
+    /// Page Down ten steps, and Home and End to the slider's ends.
     pub fn track_focus(mut self, focus: &FocusHandle) -> Self {
         self.focus = Some(focus.clone());
         self
@@ -647,6 +681,23 @@ impl RenderOnce for Slider {
                     move |_, window, cx| {
                         state.update(cx, |state, cx| {
                             state.step_thumb(false, -state.accessibility_step(), window, cx);
+                        });
+                    }
+                })
+                // Keys reach the slider only while its `track_focus` handle has focus.
+                .on_key_down({
+                    let state = slider_state.clone();
+                    move |event: &KeyDownEvent, window, cx| {
+                        let rtl = LayoutDirection::global(cx).is_rtl();
+                        state.update(cx, |state, cx| {
+                            let step = state.accessibility_step();
+                            let range = state.max - state.min;
+                            let Some(delta) = key_delta(&event.keystroke, axis, rtl, step, range)
+                            else {
+                                return;
+                            };
+                            state.step_thumb(false, delta, window, cx);
+                            cx.stop_propagation();
                         });
                     }
                 })
@@ -1095,6 +1146,95 @@ mod tests {
     }
 
     #[test]
+    fn keys_map_to_steps() {
+        let key = |key: &'static str, axis, rtl| {
+            key_delta(&Keystroke::parse(key).unwrap(), axis, rtl, 5., 100.)
+        };
+        for axis in [Axis::Horizontal, Axis::Vertical] {
+            assert_eq!(key("right", axis, false), Some(5.));
+            assert_eq!(key("left", axis, false), Some(-5.));
+            assert_eq!(key("up", axis, false), Some(5.));
+            assert_eq!(key("down", axis, false), Some(-5.));
+            assert_eq!(key("pageup", axis, false), Some(50.));
+            assert_eq!(key("pagedown", axis, false), Some(-50.));
+            assert_eq!(key("home", axis, false), Some(-100.));
+            assert_eq!(key("end", axis, false), Some(100.));
+            assert_eq!(key("a", axis, false), None);
+            assert_eq!(key("ctrl-right", axis, false), None);
+            assert_eq!(key("shift-home", axis, false), None);
+        }
+        // Right to left turns only a horizontal slider's left and right.
+        assert_eq!(key("right", Axis::Horizontal, true), Some(-5.));
+        assert_eq!(key("left", Axis::Horizontal, true), Some(5.));
+        assert_eq!(key("up", Axis::Horizontal, true), Some(5.));
+        assert_eq!(key("right", Axis::Vertical, true), Some(5.));
+    }
+
+    #[gpui::test]
+    fn a_focused_slider_steps_on_keys_and_reports_each_step(cx: &mut gpui::TestAppContext) {
+        struct Focusable {
+            state: Entity<SliderState>,
+            focus: FocusHandle,
+            disabled: bool,
+        }
+
+        impl Render for Focusable {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                Slider::new(&self.state)
+                    .track_focus(&self.focus)
+                    .disabled(self.disabled)
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|_, cx| Focusable {
+            state: cx.new(|_| SliderState::new().step(5.).default_value(50.)),
+            focus: cx.focus_handle(),
+            disabled: false,
+        });
+        let state = view.read_with(cx, |view, _| view.state.clone());
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|window, cx| {
+            let events = events.clone();
+            cx.subscribe(&state, move |_, event: &SliderEvent, _| {
+                events.borrow_mut().push(match event {
+                    SliderEvent::Change(value) => ("change", value.end()),
+                    SliderEvent::Release(value) => ("release", value.end()),
+                });
+            })
+            .detach();
+            view.read(cx).focus.clone().focus(window, cx);
+            window.draw(cx).clear(cx);
+        });
+
+        for (key, value) in [
+            ("right", 55.),
+            ("left", 50.),
+            ("up", 55.),
+            ("down", 50.),
+            ("pageup", 100.),
+            ("pagedown", 50.),
+            ("home", 0.),
+            ("end", 100.),
+        ] {
+            cx.simulate_keystrokes(key);
+            assert_eq!(
+                std::mem::take(&mut *events.borrow_mut()),
+                [("change", value), ("release", value)],
+                "{key}"
+            );
+        }
+        // At its end, with a modifier, or disabled, a key reports nothing.
+        cx.simulate_keystrokes("end ctrl-left");
+        view.update(cx, |view, cx| {
+            view.disabled = true;
+            cx.notify();
+        });
+        cx.simulate_keystrokes("home");
+        assert!(events.borrow().is_empty());
+        assert_eq!(state.read_with(cx, |state, _| state.value().end()), 100.);
+    }
+
+    #[test]
     fn min_can_be_set_above_the_default_max_before_max() {
         let state = SliderState::new().min(150.).max(200.).default_value(175.);
         assert_eq!(state.value(), SliderValue::Single(175.));
@@ -1287,14 +1427,16 @@ mod tests {
     }
 
     #[gpui::test]
-    fn an_accessibility_step_reports_a_change(cx: &mut gpui::TestAppContext) {
+    fn an_accessibility_step_reports_a_change_then_a_release(cx: &mut gpui::TestAppContext) {
         let (state, cx) = sized(SliderState::new().default_value(99.), cx);
-        let changes = std::rc::Rc::new(std::cell::Cell::new(0));
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         cx.update(|_, cx| {
-            let changes = changes.clone();
+            let events = events.clone();
             cx.subscribe(&state, move |_, event: &SliderEvent, _| {
-                assert!(matches!(event, SliderEvent::Change(_)));
-                changes.set(changes.get() + 1);
+                events.borrow_mut().push(match event {
+                    SliderEvent::Change(value) => ("change", value.end()),
+                    SliderEvent::Release(value) => ("release", value.end()),
+                });
             })
             .detach();
         });
@@ -1304,13 +1446,13 @@ mod tests {
             })
         };
         step(1., cx);
-        assert_eq!(changes.get(), 1);
+        assert_eq!(&*events.borrow(), &[("change", 100.), ("release", 100.)]);
         assert_eq!(state.read_with(cx, |state, _| state.value().end()), 100.);
         // At its end the step changes nothing and reports nothing.
         step(1., cx);
-        assert_eq!(changes.get(), 1);
+        assert_eq!(events.borrow().len(), 2);
         step(-1., cx);
-        assert_eq!(changes.get(), 2);
+        assert_eq!(events.borrow()[2..], [("change", 99.), ("release", 99.)]);
     }
 
     #[gpui::test]
