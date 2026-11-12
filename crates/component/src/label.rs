@@ -1,12 +1,13 @@
-use std::ops::Range;
+use std::{ops::Range, panic::Location};
 
 use gpui::{
-    App, HighlightStyle, IntoElement, ParentElement, RenderOnce, SharedString, StyleRefinement,
-    Styled, StyledText, Window, div, prelude::FluentBuilder, rems,
+    App, ElementId, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, StyledText,
+    Window, div, prelude::FluentBuilder, rems,
 };
 
-use gpui_base::TestTextExt as _;
 use gpui_base::{LayoutDirection, LogicalStyledExt as _};
+use gpui_base::{TestSupportExt as _, TestTextExt as _};
 
 use crate::{ActiveTheme, StyledExt};
 
@@ -52,8 +53,13 @@ impl From<SharedString> for HighlightsMatch {
 }
 
 /// A text label element with optional secondary text, masking, and highlighting capabilities.
+///
+/// A label is exposed to assistive technology as a `Label` node whose value is
+/// its text, so a screen reader can read it. A masked or empty label has no
+/// node.
 #[derive(IntoElement)]
 pub struct Label {
+    id: ElementId,
     style: StyleRefinement,
     label: SharedString,
     secondary: Option<SharedString>,
@@ -63,15 +69,34 @@ pub struct Label {
 
 impl Label {
     /// Create a new label with the main label.
+    ///
+    /// The label's id defaults to this call site, which is unique wherever one
+    /// line builds one label. See [`Label::id`] for labels built in a loop.
+    #[track_caller]
     pub fn new(label: impl Into<SharedString>) -> Self {
         let label: SharedString = label.into();
         Self {
+            id: ElementId::CodeLocation(*Location::caller()),
             style: Default::default(),
             label,
             secondary: None,
             masked: false,
             highlights_text: None,
         }
+    }
+
+    /// Set the label's element id, replacing the default taken from where
+    /// [`Label::new`] was called.
+    ///
+    /// Pass one where a single `Label::new` renders several labels as
+    /// siblings, such as in a loop: they share the default id, so assistive
+    /// technology gets only the first of them, and GPUI's debug builds panic
+    /// on the duplicate while it is connected. The id must be unique among
+    /// those siblings. Labels under parents that have their own ids, like the
+    /// rows of a `List`, are already distinct.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
     }
 
     /// Set the secondary text for the label,
@@ -208,8 +233,17 @@ impl RenderOnce for Label {
         };
 
         let highlights = self.measure_highlights(text.len(), cx);
+        // Plain text is not in the accessibility tree, so the label carries
+        // it. A masked label keeps its text out of the tree.
+        let accessible_text = (!self.masked && !text.is_empty()).then(|| text.clone());
 
         div()
+            .id(self.id)
+            .test_support()
+            .when_some(accessible_text, |this, text| {
+                // A `Label` node is named by its value, not its label.
+                this.role(gpui::Role::Label).aria_value(text)
+            })
             .line_height(rems(1.25))
             .text_color(cx.theme().foreground)
             // Start-aligned in RTL; LTR keeps the inherited alignment.

@@ -169,6 +169,7 @@ The following controls expose useful semantics from their actual state:
 | Tab, tab list | Tab and TabList roles; tabs report selection and, when supplied, position in the set. |
 | Slider, Progress | Name, numeric value and range; Slider handles accessible Increment and Decrement. Indeterminate Progress omits its value. |
 | Table | Table, row, header and cell roles with indices and optional counts. Name the Table root. |
+| Label | Label role with its text as the value. Masked and empty labels have no node. Give labels built in a loop their own `.id(...)`. |
 
 For a labeled button, the visible label is the accessible name by default. Name an icon-only button explicitly:
 

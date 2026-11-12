@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
-    SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
+    App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, HighlightStyle,
+    Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
+    Point, SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
 };
 
 use crate::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
@@ -62,6 +62,17 @@ impl SelectableText {
     /// Sets the text style the run is laid out and painted with.
     pub fn text_style(mut self, style: TextStyleRefinement) -> Self {
         self.text_style = Some(style);
+        self
+    }
+
+    /// Styles ranges of the text, such as the matches of a search, as
+    /// [`StyledText::with_highlights`] does. The ranges are UTF-8 offsets, in
+    /// order and without overlap.
+    pub fn highlights(
+        mut self,
+        highlights: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
+    ) -> Self {
+        self.styled_text = self.styled_text.with_highlights(highlights);
         self
     }
 
@@ -272,6 +283,52 @@ mod tests {
     #[gpui::test]
     fn local_handle_participates_in_window_selection(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| SelectableTextTestView);
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        cx.simulate_mouse_down(
+            gpui::point(px(1.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            gpui::point(px(220.), px(12.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            gpui::point(px(220.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
+        });
+    }
+
+    struct HighlightedTestView;
+
+    impl Render for HighlightedTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let mark = gpui::HighlightStyle {
+                background_color: Some(gpui::red()),
+                font_weight: Some(gpui::FontWeight::BOLD),
+                ..Default::default()
+            };
+            div().size_full().child(TextSelectionLayer).child(
+                div()
+                    .w(px(240.))
+                    .h(px(32.))
+                    .child(SelectableText::new("local", "alpha beta").highlights([(6..10, mark)])),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn highlighted_text_selects_and_copies_as_plain_text(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| HighlightedTestView);
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });

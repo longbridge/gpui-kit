@@ -612,4 +612,49 @@ mod tests {
             }
         }
     }
+    struct BottomBarDemo {
+        bar: Rc<Cell<Option<gpui::Bounds<gpui::Pixels>>>>,
+    }
+
+    impl Render for BottomBarDemo {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let bar = self.bar.clone();
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_1().w_full())
+                .child(
+                    div().h(px(40.)).w_full().child(
+                        gpui::canvas(move |bounds, _, _| bar.set(Some(bounds)), |_, _, _, _| {})
+                            .size_full(),
+                    ),
+                )
+        }
+    }
+
+    /// #3857: a `size_full` view inside `Root` fills the window height, so a
+    /// bar at the end of a column sits at the window's bottom edge.
+    #[gpui::test]
+    fn size_full_view_fills_window_height(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let bar = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let bar = bar.clone();
+            move |window, cx| {
+                let view = cx.new(|_| BottomBarDemo { bar });
+                Root::new(view, window, cx)
+            }
+        });
+        let viewport = cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.viewport_size()
+        });
+        let bounds = bar.get().expect("bar painted");
+        assert_eq!(
+            bounds.bottom(),
+            viewport.height,
+            "bar at {bounds:?}, viewport {viewport:?}"
+        );
+    }
 }

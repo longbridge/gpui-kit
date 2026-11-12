@@ -1,7 +1,7 @@
 use gpui::{
-    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce,
-    SharedString, StyleRefinement, Styled, TextAlign, Window, div, prelude::FluentBuilder as _, px,
-    relative,
+    AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, Pixels,
+    RenderOnce, SharedString, StyleRefinement, Styled, TextAlign, Window, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use gpui_base::LogicalStyledExt as _;
 use gpui_base::{
@@ -135,6 +135,23 @@ mod tests {
         assert_eq!(
             named.accessibility_label.as_deref(),
             Some("Recent invoices")
+        );
+    }
+
+    #[test]
+    fn stores_a_row_hover_style() {
+        assert!(TableRow::new().hover_style.is_none());
+
+        let row = TableRow::new().hover(|this| this.opacity(0.5));
+        assert_eq!(row.hover_style.and_then(|style| style.opacity), Some(0.5));
+    }
+
+    #[test]
+    fn stores_an_explicit_row_id() {
+        assert_eq!(TableRow::new().id, None);
+        assert_eq!(
+            TableRow::new().id("alice").id,
+            Some(ElementId::from("alice"))
         );
     }
 }
@@ -355,8 +372,10 @@ impl RenderOnce for TableFooter {
 /// A row in a [`Table`].
 #[derive(IntoElement)]
 pub struct TableRow {
+    id: Option<ElementId>,
     ix: usize,
     style: StyleRefinement,
+    hover_style: Option<Box<StyleRefinement>>,
     children: Vec<AnyChildElement>,
     size: Size,
 }
@@ -364,11 +383,28 @@ pub struct TableRow {
 impl TableRow {
     pub fn new() -> Self {
         Self {
+            id: None,
             ix: 0,
             style: StyleRefinement::default(),
+            hover_style: None,
             children: Vec::new(),
             size: Size::default(),
         }
+    }
+
+    /// Apply the given style to the row while the pointer is over it, such as
+    /// `.hover(|this| this.bg(cx.theme().table_hover))`.
+    pub fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.hover_style = Some(Box::new(f(StyleRefinement::default())));
+        self
+    }
+
+    /// Set a stable identity for the row. Without one a row is identified by
+    /// its position, so element state inside it (an open popover, a tooltip)
+    /// stays at that position when the rows reorder.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = Some(id.into());
+        self
     }
 
     pub fn child(mut self, child: impl ChildElement + 'static) -> Self {
@@ -408,12 +444,14 @@ impl ChildElement for TableRow {
 
 impl RenderOnce for TableRow {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        BaseTableRow::new(("table-row", self.ix), self.ix + 1)
+        let id = self.id.unwrap_or_else(|| ("table-row", self.ix).into());
+        BaseTableRow::new(id, self.ix + 1)
             .w_full()
             .flex_row_dir(cx)
             .refine_style(&self.style)
             .border_color(cx.theme().table_row_border)
             .when(self.ix > 0, |this| this.border_t_1())
+            .when_some(self.hover_style, |this, style| this.hover(move |_| *style))
             .children(
                 self.children
                     .into_iter()

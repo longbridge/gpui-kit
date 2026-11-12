@@ -100,6 +100,7 @@ Table::new()
 ```rust
 TableRow::new()
     .bg(cx.theme().table_even)
+    .hover(|this| this.bg(cx.theme().table_hover))
     .child(/* ... */)
 
 TableCell::new()
@@ -137,6 +138,7 @@ TableCell::new()
 ### TableHeader / TableBody / TableFooter / TableRow / TableCaption
 
 - `new()` - 创建实例
+- `TableRow::hover(f)` - 指针悬停在行上时应用的样式
 - 实现了 `Styled`、`ParentElement`、`RenderOnce`
 
 ## Table 和 DataTable 的区别

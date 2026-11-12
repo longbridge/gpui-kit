@@ -250,6 +250,11 @@ Button::new("btn")
     .icon(IconName::Save)
     .label("Saving")
     .loading(true) // Icon will be replaced with Spinner
+
+// With no icon, a Spinner is shown before the label during loading
+Button::new("btn")
+    .label("Saving")
+    .loading(true) // Spinner is added before the label
 ```
 
 ### With a dropdown caret icon

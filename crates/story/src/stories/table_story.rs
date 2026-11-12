@@ -84,6 +84,7 @@ impl Render for TableStory {
             ),
             ("INV007", "Unpaid", "Credit Card", "$300.00", "2024-04-15"),
         ];
+        let hover = cx.theme().table_hover;
 
         v_flex()
             .size_full()
@@ -109,6 +110,7 @@ impl Render for TableStory {
                         .child(TableBody::new().children(invoices.iter().map(
                             |(invoice, status, method, amount, date)| {
                                 TableRow::new()
+                                    .hover(|this| this.bg(hover))
                                     .child(TableCell::new().w(px(150.)).child(invoice.to_string()))
                                     .child(TableCell::new().child(status_tag(status)))
                                     .child(TableCell::new().child(method.to_string()))
@@ -152,6 +154,7 @@ impl Render for TableStory {
                                 |(ix, (invoice, _, method, amount, date))| {
                                     TableRow::new()
                                         .when(ix % 2 != 0, |this| this.bg(cx.theme().table_even))
+                                        .hover(|this| this.bg(hover))
                                         .child(
                                             TableCell::new().w(px(100.)).child(invoice.to_string()),
                                         )

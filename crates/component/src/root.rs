@@ -793,3 +793,57 @@ impl RenderOnce for WindowStateLayers {
             .children(WindowState::notification_layer(&root, window, cx))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use gpui::{
+        AppContext as _, Bounds, Context, IntoElement, ParentElement as _, Pixels, Render,
+        Styled as _, TestAppContext, Window, canvas, div, px, size,
+    };
+    use std::{cell::Cell, rc::Rc};
+
+    struct BottomBarDemo {
+        bar: Rc<Cell<Option<Bounds<Pixels>>>>,
+    }
+
+    impl Render for BottomBarDemo {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let bar = self.bar.clone();
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_1().w_full())
+                .child(div().h(px(40.)).w_full().child(
+                    canvas(move |bounds, _, _| bar.set(Some(bounds)), |_, _, _, _| {}).size_full(),
+                ))
+        }
+    }
+
+    /// #3857: with every component layer installed (window border, overlay
+    /// layers), a `size_full` view still fills the window height.
+    #[gpui::test]
+    fn size_full_view_fills_window_height(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let bar = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view({
+            let bar = bar.clone();
+            move |window, cx| {
+                let view = cx.new(|_| BottomBarDemo { bar });
+                crate::Root::new(view, window, cx)
+            }
+        });
+        cx.simulate_resize(size(px(800.), px(600.)));
+        cx.run_until_parked();
+        let viewport = cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.viewport_size()
+        });
+        let bounds = bar.get().expect("bar painted");
+        assert_eq!(
+            bounds.bottom(),
+            viewport.height,
+            "bar {bounds:?}, viewport {viewport:?}"
+        );
+    }
+}
