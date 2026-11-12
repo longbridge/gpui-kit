@@ -1385,8 +1385,9 @@ struct WindowSelectionState {
     touch: TouchSelection,
     /// The hitboxes of the controls that act on the selection, by element. A
     /// control drawn from an earlier frame (a cached view) keeps its hitbox,
-    /// and one no longer drawn never hits again, so nothing is dropped per
-    /// frame. See [`crate::ElementExt::text_selection_control`].
+    /// and one no longer drawn never hits again. GPUI cannot tell the two
+    /// apart, so an entry stays for the window's lifetime: one per element
+    /// id. See [`crate::ElementExt::text_selection_control`].
     controls: HashMap<GlobalElementId, Hitbox>,
     /// This entity, so that touch changes can notify observers from paths that
     /// only hold an [`App`].
@@ -2026,11 +2027,11 @@ impl WindowSelectionState {
     /// Whether a press at `position` acts on the selection instead of
     /// replacing it: one on a touch handle, the edit menu or a control.
     fn keeps_selection_at(&self, position: Point<Pixels>, window: &Window) -> bool {
+        // the bounds first: each hit test walks the frame's hitboxes
         self.touch.covers(position)
-            || self
-                .controls
-                .values()
-                .any(|hitbox| hitbox.is_hovered_at(position, window))
+            || self.controls.values().any(|hitbox| {
+                hitbox.bounds.contains(&position) && hitbox.is_hovered_at(position, window)
+            })
     }
 
     /// Whether `bounds` are where `participant` painted its handles last.

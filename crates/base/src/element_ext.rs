@@ -19,6 +19,9 @@ pub trait ElementExt: ParentElement + Sized {
     /// neither clears the selection nor starts a new one, so its click still
     /// finds the selection. `id` must be unique among this element's
     /// children. Works inside a cached view.
+    ///
+    /// The window remembers each control it has drawn until it closes, so
+    /// mark the row of buttons, not each row of a long list.
     fn text_selection_control(self, id: impl Into<ElementId>) -> Self {
         self.child(crate::text_selection::text_selection_control(id.into()))
     }
