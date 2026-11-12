@@ -1579,6 +1579,83 @@ mod tests {
         );
     }
 
+    /// Triple clicks the second row of the first paragraph of `markdown`,
+    /// laid out 160px wide, and returns the selected text.
+    fn triple_click_second_row(markdown: &'static str, cx: &mut TestAppContext) -> String {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| InlinePluginTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+            width: px(160.),
+            font_size: px(16.),
+            source_format: false,
+            prepared_size: None,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let regions = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        let first_top = regions[0].top();
+        let second_row = regions
+            .iter()
+            .filter(|region| region.top() > first_top + px(4.))
+            .min_by(|a, b| a.top().partial_cmp(&b.top()).unwrap())
+            .copied()
+            .expect("the paragraph wraps");
+        let position = second_row.center();
+        cx.simulate_event(MouseDownEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 3,
+            first_mouse: false,
+        });
+        cx.simulate_event(MouseUpEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 3,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+            .trim()
+            .to_string()
+    }
+
+    #[gpui::test]
+    fn triple_click_selects_a_wrapped_paragraph_with_inline_code(cx: &mut TestAppContext) {
+        assert_eq!(
+            triple_click_second_row(
+                "Call `foo` now, then keep typing until this paragraph wraps onto a few rows.\n\nNext paragraph.",
+                cx,
+            ),
+            "Call foo now, then keep typing until this paragraph wraps onto a few rows."
+        );
+    }
+
+    #[gpui::test]
+    fn triple_click_selects_a_wrapped_paragraph_with_several_inline_nodes(cx: &mut TestAppContext) {
+        assert_eq!(
+            triple_click_second_row(
+                "Call `foo` and **bold** then `bar` with $x$ until this paragraph wraps onto rows.\n\nNext paragraph.",
+                cx,
+            ),
+            "Call foo and bold then bar with x² until this paragraph wraps onto rows."
+        );
+    }
+
+    #[gpui::test]
+    fn triple_click_selects_a_wrapped_plain_paragraph(cx: &mut TestAppContext) {
+        assert_eq!(
+            triple_click_second_row(
+                "Plain words keep going until this paragraph wraps onto a few rows.\n\nNext paragraph.",
+                cx,
+            ),
+            "Plain words keep going until this paragraph wraps onto a few rows."
+        );
+    }
+
     #[gpui::test]
     fn double_click_on_formula_selects_only_that_object(cx: &mut TestAppContext) {
         cx.update(crate::init);
