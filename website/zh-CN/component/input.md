@@ -217,6 +217,19 @@ Input::new(&input).context_menu(|menu, window, cx| {
 })
 ```
 
+在选区外右键会把光标移到点击位置；在选区内右键会保留选区和光标。要处理指针下的文字（例如拼写建议菜单），读取 `context_menu_offset()`：
+
+```rust
+let state = input.clone();
+Input::new(&input).context_menu(move |menu, _, cx| {
+    // 打开此菜单的那次右键点击时，指针下的 UTF-8 偏移。
+    let Some(offset) = state.read(cx).context_menu_offset() else {
+        return menu;
+    };
+    menu.menu(format!("Look up the word at {offset}"), Box::new(LookUp))
+})
+```
+
 ### 触摸选择
 
 在触摸屏上，长按会选中手指下的单词，手指按住不放时选区跟随手指移动。抬起手指后，选区上方会出现编辑菜单，列出当前可用的命令——`剪切`、`复制`、`粘贴` 和 `全选`——并在选区两端各显示一个拖动 handle。拖动 handle 会移动对应的一端，另一端保持不动；多行输入框在手指到达边缘时会自动滚动。长按空白处或空输入框时会放置光标，菜单只提供 `粘贴` 和 `全选`。
