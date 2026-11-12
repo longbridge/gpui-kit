@@ -1383,6 +1383,11 @@ struct WindowSelectionState {
     /// bounces stretch and snap back on every tick.
     auto_scroll_stall: (Option<(Bounds<Pixels>, Point<Pixels>)>, u8),
     touch: TouchSelection,
+    /// The hitboxes of the controls that act on the selection, by element. A
+    /// control drawn from an earlier frame (a cached view) keeps its hitbox,
+    /// and one no longer drawn never hits again, so nothing is dropped per
+    /// frame. See [`crate::ElementExt::text_selection_control`].
+    controls: HashMap<GlobalElementId, Hitbox>,
     /// This entity, so that touch changes can notify observers from paths that
     /// only hold an [`App`].
     entity_id: Option<EntityId>,
@@ -2016,6 +2021,16 @@ impl WindowSelectionState {
     /// Records where the menu is painted this frame.
     fn register_touch_ui(&mut self, bounds: Bounds<Pixels>) {
         self.touch.ui_bounds.push(bounds);
+    }
+
+    /// Whether a press at `position` acts on the selection instead of
+    /// replacing it: one on a touch handle, the edit menu or a control.
+    fn keeps_selection_at(&self, position: Point<Pixels>, window: &Window) -> bool {
+        self.touch.covers(position)
+            || self
+                .controls
+                .values()
+                .any(|hitbox| hitbox.is_hovered_at(position, window))
     }
 
     /// Whether `bounds` are where `participant` painted its handles last.
@@ -2889,11 +2904,13 @@ impl TextSelection {
     /// selection scope do not match. A containing control can yield a long press
     /// to the window's text selection before claiming the gesture itself.
     /// Call during pointer dispatch with the event's position, so the hitboxes
-    /// reflect the point being queried. Touch-selection controls do not match.
+    /// reflect the point being queried. Touch-selection controls and the
+    /// controls marked with [`crate::ElementExt::text_selection_control`] do
+    /// not match.
     pub fn is_selectable_at(position: Point<Pixels>, window: &Window, cx: &mut App) -> bool {
         live_text_selection_state(window, cx).is_some_and(|state| {
             state.update(cx, |state, cx| {
-                !state.touch.covers(position)
+                !state.keeps_selection_at(position, window)
                     && state.endpoint(position, Some(window), cx).inside_text
             })
         })
@@ -3036,6 +3053,83 @@ impl TextSelection {
 /// Mount one as the root's first child. Its stable `"window-text-selection"`
 /// element identity retains the window-local selection entity across frames.
 pub struct TextSelectionLayer;
+
+pub(crate) fn text_selection_control(id: ElementId) -> impl IntoElement {
+    TextSelectionControl { id }
+}
+
+/// Covers its parent with a hitbox registered as a selection control.
+struct TextSelectionControl {
+    id: ElementId,
+}
+
+impl IntoElement for TextSelectionControl {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for TextSelectionControl {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        // Without an inset, an absolute child starts after the padding but is
+        // still sized to the padding box, overhanging the far edges.
+        let mut style = Style::default();
+        style.position = gpui::Position::Absolute;
+        style.inset.top = px(0.).into();
+        style.inset.left = px(0.).into();
+        style.size = gpui::size(gpui::relative(1.).into(), gpui::relative(1.).into());
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        // `Normal`: the control under it is still hovered and clicked.
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        if let (Some(id), Some(state)) = (id, WindowSelectionState::existing(window, cx)) {
+            state.update(cx, |state, _| {
+                state.controls.insert(id.clone(), hitbox);
+            });
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
+}
 
 pub(crate) fn text_selection_scope(
     scope: TextSelectionScopeId,
@@ -3309,9 +3403,9 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         let Some(state) = mouse_down_state.upgrade() else {
             return;
         };
-        // A press on a handle or on the edit menu acts on the selection; it
-        // must not clear it.
-        if state.read(cx).touch.covers(event.position) {
+        // A press on a handle, the edit menu or a control acts on the
+        // selection; it must not clear it.
+        if state.read(cx).keeps_selection_at(event.position, window) {
             return;
         }
         if phase.capture() {
@@ -3375,7 +3469,9 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         };
         if event.phase == TouchPhase::Started {
             if window.default_prevented()
-                || state.read(cx).touch.covers(event.start_position)
+                || state
+                    .read(cx)
+                    .keeps_selection_at(event.start_position, window)
                 || !state.update(cx, |state, cx| {
                     state
                         .endpoint(event.start_position, Some(window), cx)
