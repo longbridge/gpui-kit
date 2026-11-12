@@ -58,6 +58,7 @@ struct ListOptions {
     scrollbar_visible: bool,
     search_placeholder: Option<SharedString>,
     max_height: Option<Length>,
+    items_min_height: Option<Length>,
     paddings: EdgesRefinement<DefiniteLength>,
 }
 
@@ -68,6 +69,7 @@ impl Default for ListOptions {
             size: Size::default(),
             scrollbar_visible: true,
             max_height: None,
+            items_min_height: None,
             search_placeholder: None,
             paddings: EdgesRefinement::default(),
         }
@@ -554,6 +556,7 @@ where
             .relative()
             .size_full()
             .when_some(self.options.max_height, |this, h| this.max_h(h))
+            .when_some(self.options.items_min_height, |this, h| this.min_h(h))
             .overflow_hidden()
             .when(items_count == 0, |this| {
                 this.child(self.delegate.render_empty(window, cx))
@@ -774,6 +777,11 @@ where
         self.options.search_placeholder = Some(placeholder.into());
         self
     }
+
+    pub(crate) fn items_min_h(mut self, min_h: impl Into<Length>) -> Self {
+        self.options.items_min_height = Some(min_h.into());
+        self
+    }
 }
 
 impl<D> Styled for List<D>
@@ -822,8 +830,8 @@ where
 #[cfg(test)]
 mod measurement_tests {
     use super::*;
-    use crate::list::ListItem;
-    use gpui::{Element, TestAppContext};
+    use crate::{ElementExt as _, list::ListItem};
+    use gpui::{Element, Pixels, TestAppContext};
 
     struct Delegate {
         counts: Vec<usize>,
@@ -900,6 +908,54 @@ mod measurement_tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         wheel(cx, 2.);
         assert!(state.read_with(cx, |state, _| state.scroll_handle.offset().y) > end);
+    }
+
+    struct HeightProbe {
+        list: Entity<ListState<Delegate>>,
+        items_min_h: Option<Pixels>,
+        height: std::rc::Rc<std::cell::Cell<Pixels>>,
+    }
+
+    impl Render for HeightProbe {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let height = self.height.clone();
+            div().w(px(240.)).child(
+                div()
+                    .on_prepaint(move |bounds, _, _| height.set(bounds.size.height))
+                    .child(
+                        List::new(&self.list)
+                            .max_h(px(200.))
+                            .when_some(self.items_min_h, |list, min_h| list.items_min_h(min_h)),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn items_min_h_keeps_the_list_height_when_items_shrink(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for (items_min_h, expected_short) in [(None, px(36.)), (Some(px(200.)), px(200.))] {
+            let height = std::rc::Rc::new(std::cell::Cell::new(px(0.)));
+            let (view, cx) = cx.add_window_view({
+                let height = height.clone();
+                move |window, cx| HeightProbe {
+                    list: cx.new(|cx| ListState::new(Delegate { counts: vec![40] }, window, cx)),
+                    items_min_h,
+                    height,
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(height.get(), px(200.), "a long list stops at max_h");
+
+            view.update(cx, |view, cx| {
+                view.list.update(cx, |list, cx| {
+                    list.delegate.counts = vec![1];
+                    cx.notify();
+                })
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(height.get(), expected_short);
+        }
     }
 
     #[gpui::test]

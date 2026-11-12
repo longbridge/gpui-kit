@@ -79,6 +79,7 @@ struct ComboboxOptions {
     search_placeholder: Option<SharedString>,
     menu_width: Length,
     menu_max_h: Length,
+    menu_min_h: Option<Length>,
     disabled: bool,
     appearance: bool,
     focus_ring_enabled: bool,
@@ -96,6 +97,7 @@ impl Default for ComboboxOptions {
             search_placeholder: None,
             menu_width: Length::Auto,
             menu_max_h: rems(20.).into(),
+            menu_min_h: None,
             disabled: false,
             appearance: true,
             focus_ring_enabled: true,
@@ -721,6 +723,7 @@ where
                             self.state.search_placeholder.clone(),
                             self.state.size,
                             self.state.menu_max_h,
+                            self.state.menu_min_h,
                             bounds,
                             footer_el,
                             dismiss_handler,
@@ -806,6 +809,15 @@ where
     /// Set the maximum height of the dropdown menu.
     pub fn menu_max_h(mut self, max_h: impl Into<Length>) -> Self {
         self.options.menu_max_h = max_h.into();
+        self
+    }
+
+    /// Set the minimum height of the dropdown menu, default: none.
+    ///
+    /// Set it to the same value as [`Self::menu_max_h`] to keep the menu one
+    /// height while a search filters it, so a menu opened upwards does not move.
+    pub fn menu_min_h(mut self, min_h: impl Into<Length>) -> Self {
+        self.options.menu_min_h = Some(min_h.into());
         self
     }
 
@@ -940,6 +952,7 @@ where
             this.state.search_placeholder = opts.search_placeholder;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
+            this.state.menu_min_h = opts.menu_min_h;
             this.state.disabled = opts.disabled;
             this.state.appearance = opts.appearance;
             this.focus_ring_enabled = opts.focus_ring_enabled;
@@ -1058,6 +1071,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
     search_placeholder: Option<SharedString>,
     size: Size,
     menu_max_h: Length,
+    menu_min_h: Option<Length>,
     bounds: Bounds<Pixels>,
     footer_el: Option<AnyElement>,
     dismiss_handler: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
@@ -1082,6 +1096,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
                     })
                     .with_size(size)
                     .max_h(menu_max_h)
+                    .when_some(menu_min_h, |this, min_h| this.items_min_h(min_h))
                     .paddings(Edges::all(DROPDOWN_LIST_PADDING)),
             )
             .when(has_footer, |this| {

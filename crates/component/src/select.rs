@@ -89,6 +89,7 @@ struct SelectOptions {
     search_placeholder: Option<SharedString>,
     menu_width: Length,
     menu_max_h: Length,
+    menu_min_h: Option<Length>,
     scroll_bounce: Option<bool>,
     disabled: bool,
     appearance: bool,
@@ -107,6 +108,7 @@ impl Default for SelectOptions {
             title_prefix: None,
             menu_width: Length::Auto,
             menu_max_h: rems(20.).into(),
+            menu_min_h: None,
             scroll_bounce: None,
             disabled: false,
             appearance: true,
@@ -657,6 +659,9 @@ where
                                         )
                                         .with_size(self.state.size)
                                         .max_h(self.state.menu_max_h)
+                                        .when_some(self.state.menu_min_h, |list, min_h| {
+                                            list.items_min_h(min_h)
+                                        })
                                         .when_some(self.state.scroll_bounce, |list, on| {
                                             list.scroll_bounce(on)
                                         })
@@ -703,6 +708,15 @@ where
     /// Set the max height of the dropdown menu, default: 20rem.
     pub fn menu_max_h(mut self, max_h: impl Into<Length>) -> Self {
         self.options.menu_max_h = max_h.into();
+        self
+    }
+
+    /// Set the min height of the dropdown menu, default: none.
+    ///
+    /// Set it to the same value as [`Self::menu_max_h`] to keep the menu one
+    /// height while a search filters it, so a menu opened upwards does not move.
+    pub fn menu_min_h(mut self, min_h: impl Into<Length>) -> Self {
+        self.options.menu_min_h = Some(min_h.into());
         self
     }
 
@@ -862,6 +876,7 @@ where
             this.state.search_placeholder = opts.search_placeholder;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
+            this.state.menu_min_h = opts.menu_min_h;
             this.state.scroll_bounce = opts.scroll_bounce;
             this.state.disabled = opts.disabled;
             this.state.appearance = opts.appearance;

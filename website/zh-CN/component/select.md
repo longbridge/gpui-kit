@@ -186,6 +186,7 @@ Select::new(&state)
     .w(px(320.))
     .menu_width(px(400.))
     .menu_max_h(rems(10.))
+    .menu_min_h(rems(10.))
     .appearance(false)
     .title_prefix("Country: ")
 ```
