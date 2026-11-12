@@ -71,7 +71,9 @@ impl ComponentMaterializer for LabelMaterializer {
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<LabelOp>().cloned())
             .collect::<Vec<_>>();
-        let mut component = Label::new(text.0.clone());
+        // Every label a script describes is built here, so each takes its
+        // element's id; the call-site default would be the same for all.
+        let mut component = Label::new(text.0.clone()).id(request.element_id().clone());
         for operation in operations {
             component = match operation {
                 LabelOp::Secondary(value) => component.secondary(value),

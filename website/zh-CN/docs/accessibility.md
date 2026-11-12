@@ -169,6 +169,7 @@ fn main() {
 | Tab、tab list | Tab 与 TabList role；Tab 报告选中状态，也可报告它在集合中的位置。 |
 | Slider、Progress | 名称、数值和范围；Slider 处理无障碍 Increment、Decrement 操作。不确定进度的 Progress 不报告数值。 |
 | Table | Table、row、header、cell role、索引及可选的计数。应给 Table 根节点命名。 |
+| Label | Label role，文本作为节点的值。掩码或空的 Label 不产生节点。循环中创建的 Label 应各自设置 `.id(...)`。 |
 
 带文字的按钮默认用可见文字作为无障碍名称。纯图标按钮应显式命名：
 
