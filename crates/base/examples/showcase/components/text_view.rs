@@ -50,7 +50,11 @@ impl BaseShowcase {
             })
     }
 
-    fn text_view_document(&self, palette: ExamplePalette, style: TextViewStyle) -> impl IntoElement {
+    fn text_view_document(
+        &self,
+        palette: ExamplePalette,
+        style: TextViewStyle,
+    ) -> impl IntoElement {
         div()
             .id("text-view-example")
             .debug_selector(|| "text-view-example".into())
