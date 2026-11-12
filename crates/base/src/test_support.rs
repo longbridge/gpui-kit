@@ -3,15 +3,18 @@
 //! Native accessibility properties are read automatically. Applications register
 //! identified GPUI elements with `.test_support()`, without supplying test-only state.
 use gpui::{
-    App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, Pixels, SharedString, Visibility, Window, px,
+    App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, ImageSource,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, Pixels, RenderImage,
+    SharedString, SharedUri, Visibility, Window, px,
 };
+use image::{Frame, RgbaImage};
 use smallvec::SmallVec;
 use std::{
     cell::RefCell,
     collections::HashMap,
     fmt,
     rc::{Rc, Weak},
+    sync::Arc,
 };
 
 /// Owned facts from the last paint of an observed element.
@@ -734,4 +737,39 @@ impl<E: Element + InteractiveElement> InteractiveElement for ObservedText<E> {
 impl<E: Element + gpui::StatefulInteractiveElement> gpui::StatefulInteractiveElement
     for ObservedText<E>
 {
+}
+
+/// A solid-color decoded image, for UI tests that exercise image rendering.
+///
+/// Images normally decode on background tasks through GPUI's asset system,
+/// which a `#[gpui_kit::test]` app drives at unpredictable times: a text view
+/// holding an image measures its placeholder until the decode lands, so
+/// layout-sensitive assertions race the decoder. Hand the returned image to a
+/// view through [`image_override`] instead: a `Custom` image source resolves
+/// synchronously on every layout, so its size is stable from the first frame.
+pub fn solid_image(width: u32, height: u32, rgba: [u8; 4]) -> Arc<RenderImage> {
+    let buffer = RgbaImage::from_pixel(width, height, image::Rgba(rgba));
+    Arc::new(gpui::RenderImage::new(SmallVec::from_buf([Frame::new(
+        buffer,
+    )])))
+}
+
+/// An image-source override that hands `image` to every URI synchronously.
+///
+/// Pair it with [`crate::TextViewDefaults::image_source`] so a test's images
+/// render and measure deterministically:
+///
+/// ```ignore
+/// let image = test_support::solid_image(200, 60, [190, 40, 40, 255]);
+/// let view = TextView::new(&state).image_source(test_support::image_override(image));
+/// ```
+pub fn image_override(
+    image: Arc<RenderImage>,
+) -> impl Fn(&SharedUri) -> ImageSource + Send + Sync + 'static {
+    move |_| {
+        ImageSource::Custom(Arc::new({
+            let image = image.clone();
+            move |_, _| Some(Ok(image.clone()))
+        }))
+    }
 }
