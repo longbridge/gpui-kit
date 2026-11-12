@@ -69,6 +69,38 @@ fn collapsed_files_keep_their_header_and_survive_replacement(cx: &mut TestAppCon
 }
 
 #[gpui::test]
+fn all_files_collapse_and_expand_together(cx: &mut TestAppContext) {
+    let state = cx.new(|cx| DiffState::new(DiffFile::parse(PATCH).unwrap(), cx));
+    let (events, _subscription) = record_events(cx, &state);
+    state.update(cx, |state, cx| {
+        state.set_all_files_collapsed(true, cx);
+        assert!(state.is_file_collapsed("first.txt"));
+        assert!(state.is_file_collapsed("second.txt"));
+        assert_eq!(code_rows(state, 0) + code_rows(state, 1), 0);
+        assert!(matches!(state.rows()[0], DisplayRow::File(0)));
+        assert!(matches!(state.rows()[1], DisplayRow::File(1)));
+
+        state.set_all_files_collapsed(false, cx);
+        assert!(!state.is_file_collapsed("first.txt"));
+        assert!(!state.is_file_collapsed("second.txt"));
+        assert!(code_rows(state, 0) > 0);
+
+        // A mixed state still collapses in one step.
+        state.set_file_collapsed("first.txt", true, cx);
+        state.set_all_files_collapsed(true, cx);
+        assert!(state.is_file_collapsed("second.txt"));
+
+        // A subset collapses together; unknown paths are skipped.
+        state.set_all_files_collapsed(false, cx);
+        state.set_files_collapsed(["second.txt".into(), "missing.txt".into()], true, cx);
+        assert!(!state.is_file_collapsed("first.txt"));
+        assert!(state.is_file_collapsed("second.txt"));
+    });
+    // Programmatic changes stay silent, like `set_file_collapsed`.
+    assert!(events.borrow().is_empty());
+}
+
+#[gpui::test]
 fn folds_expand_by_direction_and_short_ranges_stay_visible(cx: &mut TestAppContext) {
     let original = (1..=60)
         .map(|line| format!("line {line}\n"))
