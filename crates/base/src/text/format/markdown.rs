@@ -254,20 +254,126 @@ fn parse_inline_children(
     children: &[Node],
     cx: &mut NodeContext,
 ) -> String {
-    let mut text = String::new();
     for group in inline_groups(children) {
         match group {
             InlineGroup::Node(child) => {
-                text.push_str(&parse_paragraph(source, paragraph, child, cx));
+                parse_paragraph(source, paragraph, child, cx);
             }
             InlineGroup::Marked(mark, nodes) => {
-                text.push_str(&merge_children_with_mark(
-                    source, paragraph, nodes, mark, cx,
-                ));
+                merge_children_with_mark(source, paragraph, nodes, mark, cx);
             }
         }
     }
+    normalize_inline_boundaries(paragraph)
+}
+
+/// Drops a text node's leading white space when the previous rendered
+/// character is white space or a line break, so a run folded inside its node
+/// stays one space across a dropped HTML comment, and nothing follows a
+/// `<br>` or a hard break indented by the space the line ending became
+/// (#3710). Returns the paragraph's rendered text.
+///
+/// The source mapping shifts with the trim: the removed white space's
+/// segments and marks drop or shrink with it, so selection and copy still
+/// land on the source the surviving characters were drawn from.
+fn normalize_inline_boundaries(paragraph: &mut Paragraph) -> String {
+    let mut at_line_start = true;
+    let mut previous_white_space = false;
+    let mut text = String::new();
+
+    for node in &mut paragraph.children {
+        if node.custom.is_some() || node.image.is_some() {
+            // Unknown rendered width: keep the white space around it.
+            at_line_start = false;
+            previous_white_space = false;
+            continue;
+        }
+        if node.text == "\n" && node.marks.is_empty() {
+            // A rendered line break, from `<br>` or a hard break. White
+            // space held before it is trailing and goes with the line.
+            at_line_start = true;
+            previous_white_space = false;
+            text.push('\n');
+            continue;
+        }
+        let leading = node.text.len() - node.text.trim_start_matches([' ', '\t']).len();
+        if leading > 0 && (at_line_start || previous_white_space) {
+            trim_leading_white_space(node, leading);
+        }
+        if node.text.is_empty() {
+            continue;
+        }
+        at_line_start = false;
+        previous_white_space = node.text.ends_with([' ', '\t']);
+        text.push_str(&node.text);
+    }
+
+    paragraph
+        .children
+        .retain(|node| node.custom.is_some() || node.image.is_some() || !node.text.is_empty());
     text
+}
+
+/// Removes the first `count` bytes of white space from the node's text,
+/// shifting its marks and source segments over the removed range.
+fn trim_leading_white_space(node: &mut InlineNode, count: usize) {
+    let old_text = std::mem::take(&mut node.text);
+    node.text = old_text[count..].into();
+
+    for (range, _) in &mut node.marks {
+        let start = range.start.saturating_sub(count).min(node.text.len());
+        let end = range.end.saturating_sub(count).min(node.text.len());
+        *range = start..end.max(start);
+    }
+    node.marks.retain(|(range, _)| range.start < range.end);
+
+    for segment in &mut node.source_segments {
+        if segment.rendered.end <= count {
+            // Wholly inside the dropped white space.
+            segment.rendered = 0..0;
+            continue;
+        }
+        let rendered_end = segment.rendered.end - count;
+        if segment.rendered.start >= count {
+            // Wholly after it: the source stays, the bytes shift.
+            segment.rendered = (segment.rendered.start - count)..rendered_end;
+        } else if segment.linear {
+            // Straddling the cut. Linear segments map byte for byte, so the
+            // dropped bytes also drop from the source; a merged run keeps
+            // drawing the survivors from the bytes they came from.
+            segment.source.start += count;
+            segment.rendered = 0..rendered_end;
+        } else {
+            // A non-linear segment straddling the cut has no exact mapping
+            // for its survivors; drop it rather than guess.
+            segment.rendered = 0..0;
+        }
+    }
+    node.source_segments.retain(|segment| {
+        segment.rendered.start < segment.rendered.end && segment.source.start < segment.source.end
+    });
+}
+
+/// Folds each run of spaces and tabs in drawn text to a single space, the
+/// way `white-space: normal` renders it (#3710). Line endings have already
+/// become spaces here; white space inside inline code never reaches this
+/// path, and runs at a line break are dropped by
+/// `normalize_inline_boundaries`.
+fn collapse_white_space(text: &str) -> String {
+    let mut collapsed = String::with_capacity(text.len());
+    let mut in_white_space = false;
+    for ch in text.chars() {
+        if matches!(ch, ' ' | '\t') {
+            if !in_white_space {
+                collapsed.push(' ');
+                in_white_space = true;
+            }
+        } else {
+            collapsed.push(ch);
+            in_white_space = false;
+        }
+    }
+    collapsed
 }
 
 fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
@@ -786,7 +892,13 @@ fn parse_paragraph(
             // so a CRLF document still carries its carriage return here. Take
             // the CR with the newline: dropping only the newline would strand
             // the CR in the middle of the reflowed line.
-            text = val.value.replace("\r\n", " ").replace(['\n', '\r'], " ");
+            //
+            // Runs of spaces and tabs then fold to one space, the way
+            // `white-space: normal` draws them (#3710); the source mapping
+            // re-aligns over the folded bytes on its own. Leading runs at a
+            // line break — after `<br>` or a hard break — are dropped by
+            // `normalize_inline_boundaries`, which sees the nodes whole.
+            text = collapse_white_space(&val.value.replace("\r\n", " ").replace(['\n', '\r'], " "));
             paragraph.push(mapped_inline(source, text.clone(), node, cx))
         }
         Node::Emphasis(val) => {
@@ -1995,6 +2107,68 @@ mod tests {
         assert_eq!(select_rendered_range(source, 1..3), 1..6);
     }
 
+    /// The three shapes of #3710, drawn the way a browser draws
+    /// CommonMark's HTML: a run of spaces folds to one, a dropped comment
+    /// leaves one, and nothing follows a `<br>` indented by the space its
+    /// line ending became.
+    #[test]
+    fn white_space_folds_like_html() {
+        let mut cx = NodeContext::default();
+        let document = parse(
+            "two  spaces\n\nText <!-- note --> after.\n\nline one<br>\nline two",
+            &mut cx,
+        )
+        .unwrap();
+        let paragraphs: Vec<String> = document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                BlockNode::Paragraph(paragraph) => Some(
+                    paragraph
+                        .children
+                        .iter()
+                        .map(|node| node.text.as_ref())
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            paragraphs,
+            ["two spaces", "Text after.", "line one\nline two"]
+        );
+    }
+
+    #[test]
+    fn selected_source_range_survives_a_folded_space_run() {
+        let source = "two  spaces";
+        // Rendered "two spaces" is ten bytes: the second source space folds
+        // away, so the drawn space maps to the first source space, and the
+        // run after it maps to the run after it.
+        assert_eq!(select_rendered_range(source, 0..4), 0..4);
+        assert_eq!(select_rendered_range(source, 3..4), 3..4);
+        assert_eq!(select_rendered_range(source, 4..5), 5..6);
+        assert_eq!(select_rendered_range(source, 4..10), 5..11);
+    }
+
+    #[test]
+    fn selected_source_range_survives_a_dropped_comment() {
+        let source = "Text <!-- note --> after.";
+        // Rendered "Text after.": the comment drops out and the space after
+        // it folds, so "after." maps past the whole comment.
+        assert_eq!(select_rendered_range(source, 0..4), 0..4);
+        assert_eq!(select_rendered_range(source, 5..11), 19..25);
+    }
+
+    #[test]
+    fn selected_source_range_drops_the_space_after_a_break() {
+        let source = "line one<br>\nline two";
+        // Rendered "line one\nline two" is seventeen bytes: "line two"
+        // starts at ten, flush against the break.
+        assert_eq!(selected_rendered_range(source, 9..17), Some(13..21));
+        assert_eq!(selected_rendered_range(source, 10..17), Some(14..21));
+    }
+
     #[test]
     fn selected_source_range_includes_a_trailing_inline_image() {
         let source = "before ![alt](image.png)";
@@ -2640,7 +2814,9 @@ mod tests {
         let source = "a <strong>b *c* <em>d</em></strong> e <b>f</b> <i>g</i> <del>h</del> <br> <strong>unclosed";
         let mut cx = NodeContext::default();
         let document = parse(source, &mut cx).unwrap();
-        assert_eq!(document.text(), "a b c d e f g h \n unclosed\n");
+        // The space between the break and the next run is at a line start, so
+        // it folds away (#3710).
+        assert_eq!(document.text(), "a b c d e f g h \nunclosed\n");
         let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
             panic!()
         };
