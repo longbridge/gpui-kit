@@ -2747,9 +2747,7 @@ where
                 .child(
                     Scrollbar::vertical(&self.vertical_scroll_handle)
                         .viewport_from_layout()
-                        .when_some(self.options.scrollbar_mode.right, |this, mode| {
-                            this.mode(mode)
-                        })
+                        .when_some(self.options.scrollbar_mode, |this, mode| this.mode(mode))
                         .max_fps(60),
                 ),
         )
@@ -2769,9 +2767,7 @@ where
             .child(
                 Scrollbar::horizontal(&self.horizontal_scroll_handle)
                     .viewport_from_layout()
-                    .when_some(self.options.scrollbar_mode.bottom, |this, mode| {
-                        this.mode(mode)
-                    }),
+                    .when_some(self.options.scrollbar_mode, |this, mode| this.mode(mode)),
             )
     }
 }

@@ -413,7 +413,7 @@ DataTable::new(&state)
     .bordered(true)
     .fixed_cols_border(true)
     .scrollbar_visible(true, true)
-    .scrollbar_mode(None, Some(ScrollbarMode::Always))
+    .scrollbar_mode(ScrollbarMode::Always)
 ```
 
 ## 键盘快捷键
