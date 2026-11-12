@@ -29,6 +29,8 @@ backgrund = "backgrund"
 wtach = "wtach"
 netwrok = "netwrok"
 workspce = "workspce"
+# A deliberately misspelled word that the IME autocorrect test fixes.
+teh = "teh"
 
 [files]
 extend-exclude = ["crates/story/src/fixtures/"]
