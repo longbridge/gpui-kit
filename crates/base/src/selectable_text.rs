@@ -3,7 +3,7 @@ use std::ops::Range;
 use gpui::{
     App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, HighlightStyle,
     Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
-    Point, SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
+    Point, SharedString, StyledText, Subscription, TextStyleRefinement, Window, transparent_black,
 };
 
 use crate::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
@@ -108,6 +108,13 @@ impl SelectableText {
     }
 }
 
+/// What a run that owns its selection keeps between frames.
+struct OwnedSelection {
+    handle: TextSelectionHandle,
+    // A drag changes the selection without a frame of its own.
+    _refresh: Subscription,
+}
+
 fn selection_quad_bounds(
     start: Point<Pixels>,
     end: Point<Pixels>,
@@ -168,10 +175,16 @@ impl Element for SelectableText {
         let handle = self.handle.clone().unwrap_or_else(|| {
             window.with_element_state(
                 global_id.expect("SelectableText must have a stable element id"),
-                |retained: Option<TextSelectionHandle>, _| {
-                    let handle =
-                        retained.unwrap_or_else(|| TextSelectionHandle::new(self.text.clone(), cx));
-                    (handle.clone(), handle)
+                |retained: Option<OwnedSelection>, window| {
+                    let retained = retained.unwrap_or_else(|| {
+                        let handle = TextSelectionHandle::new(self.text.clone(), cx);
+                        let refresh = handle.refresh_window_on_change(window, cx);
+                        OwnedSelection {
+                            handle,
+                            _refresh: refresh,
+                        }
+                    });
+                    (retained.handle.clone(), retained)
                 },
             )
         });
@@ -352,6 +365,72 @@ mod tests {
             let _ = window.draw(cx);
             assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
         });
+    }
+
+    struct CachedText {
+        renders: Rc<Cell<usize>>,
+    }
+
+    impl Render for CachedText {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            SelectableText::new("local", "alpha beta")
+        }
+    }
+
+    struct CachedTextParent {
+        text: gpui::Entity<CachedText>,
+    }
+
+    impl Render for CachedTextParent {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(TextSelectionLayer).child(
+                gpui::AnyView::from(self.text.clone())
+                    .cached(gpui::StyleRefinement::default().w(px(240.)).h(px(32.))),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_drag_redraws_the_text_before_the_button_is_released(cx: &mut TestAppContext) {
+        let renders = Rc::new(Cell::new(0));
+        let (_, cx) = cx.add_window_view({
+            let renders = renders.clone();
+            move |_, cx| CachedTextParent {
+                text: gpui::AppContext::new(cx, |_| CachedText { renders }),
+            }
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        let before = renders.get();
+        draw(cx);
+        assert_eq!(
+            renders.get(),
+            before,
+            "the text is cached while nothing changes"
+        );
+
+        cx.simulate_mouse_down(
+            gpui::point(px(1.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        draw(cx);
+        let pressed = renders.get();
+        cx.simulate_mouse_move(
+            gpui::point(px(220.), px(12.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        draw(cx);
+        assert!(
+            renders.get() > pressed,
+            "the selection is drawn as the pointer moves"
+        );
     }
 
     struct CopyCallbackTestView {
