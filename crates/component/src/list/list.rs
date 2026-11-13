@@ -58,6 +58,7 @@ struct ListOptions {
     scrollbar_visible: bool,
     search_placeholder: Option<SharedString>,
     max_height: Option<Length>,
+    record_items_height: bool,
     hold_items_height: bool,
     paddings: EdgesRefinement<DefiniteLength>,
 }
@@ -69,6 +70,7 @@ impl Default for ListOptions {
             size: Size::default(),
             scrollbar_visible: true,
             max_height: None,
+            record_items_height: false,
             hold_items_height: false,
             search_placeholder: None,
             paddings: EdgesRefinement::default(),
@@ -555,9 +557,13 @@ where
         let rows_cache = self.rows_cache.clone();
         let scrollbar_visible = self.options.scrollbar_visible;
         let scroll_handle = self.scroll_handle.clone();
-        let hold_items_height = self.options.hold_items_height;
+        let record_items_height = self.options.record_items_height;
         let held_items_height = self.held_items_height.clone();
-        let items_min_height = hold_items_height.then(|| held_items_height.get()).flatten();
+        let items_min_height = self
+            .options
+            .hold_items_height
+            .then(|| held_items_height.get())
+            .flatten();
         let item_to_measure_index = rows_cache
             .position_of(&self.item_to_measure_index)
             .or_else(|| rows_cache.first_entry_position())
@@ -569,7 +575,7 @@ where
             .size_full()
             .when_some(self.options.max_height, |this, h| this.max_h(h))
             .when_some(items_min_height, |this, h| this.min_h(h))
-            .when(hold_items_height, |this| {
+            .when(record_items_height, |this| {
                 this.on_prepaint(move |bounds, _, _| {
                     if held_items_height.get().is_none() && bounds.size.height > px(0.) {
                         held_items_height.set(Some(bounds.size.height));
@@ -797,12 +803,14 @@ where
         self
     }
 
-    /// Keep the items area at the height it had on its first paint, so a
-    /// search that filters items does not shrink (and move) a popup menu.
+    /// Record the items area height on its first paint and, while `hold` is
+    /// true, keep the area at least that tall, so a search that filters items
+    /// does not shrink (and move) a popup menu opened above its trigger.
     ///
     /// Reset with [`ListState::reset_held_items_height`].
-    pub(crate) fn hold_items_height(mut self) -> Self {
-        self.options.hold_items_height = true;
+    pub(crate) fn hold_items_height(mut self, hold: bool) -> Self {
+        self.options.record_items_height = true;
+        self.options.hold_items_height = hold;
         self
     }
 }
@@ -948,7 +956,7 @@ mod measurement_tests {
                     .child(
                         List::new(&self.list)
                             .max_h(px(200.))
-                            .when(self.hold, |list| list.hold_items_height()),
+                            .hold_items_height(self.hold),
                     ),
             )
         }
@@ -963,7 +971,7 @@ mod measurement_tests {
                 let height = height.clone();
                 move |window, cx| HeightProbe {
                     list: cx.new(|cx| ListState::new(Delegate { counts: vec![40] }, window, cx)),
-                    hold,
+                    hold: false,
                     height,
                 }
             });
@@ -971,6 +979,7 @@ mod measurement_tests {
             assert_eq!(height.get(), px(200.), "a long list stops at max_h");
 
             view.update(cx, |view, cx| {
+                view.hold = hold;
                 view.list.update(cx, |list, cx| {
                     list.delegate.counts = vec![1];
                     cx.notify();

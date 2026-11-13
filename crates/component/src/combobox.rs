@@ -20,6 +20,7 @@ use crate::{
     searchable_list::{
         SearchableListAdapter, SearchableListChange, SearchableListDelegate, SearchableListItem,
         SearchableListState,
+        state::{MenuSide, menu_popup},
     },
     sizing::DROPDOWN_LIST_PADDING,
     v_flex,
@@ -555,6 +556,7 @@ where
 
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         if self.state.open && !open {
+            self.state.menu_side.reset();
             // Deferred: `set_open` may run inside a list update.
             let list = self.state.list.downgrade();
             cx.defer(move |cx| {
@@ -728,6 +730,7 @@ where
                             self.state.search_placeholder.clone(),
                             self.state.size,
                             self.state.menu_max_h,
+                            &self.state.menu_side,
                             bounds,
                             footer_el,
                             dismiss_handler,
@@ -1065,6 +1068,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
     search_placeholder: Option<SharedString>,
     size: Size,
     menu_max_h: Length,
+    menu_side: &MenuSide,
     bounds: Bounds<Pixels>,
     footer_el: Option<AnyElement>,
     dismiss_handler: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
@@ -1072,7 +1076,8 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
 ) -> AnyElement {
     let has_footer = footer_el.is_some();
 
-    crate::popover::dropdown_popup(
+    menu_popup(
+        menu_side,
         id,
         bounds,
         v_flex()
@@ -1089,7 +1094,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
                     })
                     .with_size(size)
                     .max_h(menu_max_h)
-                    .hold_items_height()
+                    .hold_items_height(menu_side.is_above())
                     .paddings(Edges::all(DROPDOWN_LIST_PADDING)),
             )
             .when(has_footer, |this| {

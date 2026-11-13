@@ -1,13 +1,46 @@
+use std::{cell::Cell, rc::Rc};
+
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle, Focusable as _, Length,
-    Pixels, StyleRefinement, Subscription, Window,
+    AnyElement, App, AppContext as _, Bounds, Context, ElementId, Entity, FocusHandle,
+    Focusable as _, IntoElement, Length, Pixels, StyleRefinement, Styled, Subscription, Window,
+    prelude::FluentBuilder as _,
 };
 
-use gpui_base::DeferredPopover;
+use gpui_base::{DeferredPopover, Placement, Positioner};
 
 use crate::{IndexPath, Size, list::ListState, searchable_list::adapter::SearchableListAdapter};
 
 use super::delegate::{SearchableListDelegate, SearchableListItem};
+
+#[derive(Clone, Default)]
+pub(crate) struct MenuSide(Rc<Cell<Option<Placement>>>);
+
+impl MenuSide {
+    pub(crate) fn is_above(&self) -> bool {
+        self.0.get() == Some(Placement::Top)
+    }
+
+    pub(crate) fn reset(&self) {
+        self.0.set(None);
+    }
+}
+
+pub(crate) fn menu_popup(
+    menu_side: &MenuSide,
+    id: impl Into<ElementId>,
+    bounds: Bounds<Pixels>,
+    surface: impl IntoElement + Styled + 'static,
+    cx: &App,
+) -> Positioner {
+    let side = menu_side.0.clone();
+    crate::popover::dropdown_popup(id, bounds, surface, cx)
+        .when_some(side.get(), |popup, placement| popup.placement(placement))
+        .on_position(move |position| {
+            if side.get().is_none() {
+                side.set(position.placement);
+            }
+        })
+}
 
 /// Shared infrastructure for all searchable-list-based components (`SelectState`, `ComboBoxState`).
 ///
@@ -35,6 +68,7 @@ where
     pub(crate) search_placeholder: Option<gpui::SharedString>,
     pub(crate) menu_width: Length,
     pub(crate) menu_max_h: Length,
+    pub(crate) menu_side: MenuSide,
     pub(crate) scroll_bounce: Option<bool>,
     pub(crate) disabled: bool,
     pub(crate) appearance: bool,
@@ -123,6 +157,7 @@ where
             search_placeholder: None,
             menu_width: Length::Auto,
             menu_max_h: gpui::rems(20.).into(),
+            menu_side: MenuSide::default(),
             scroll_bounce: None,
             disabled: false,
             appearance: true,
