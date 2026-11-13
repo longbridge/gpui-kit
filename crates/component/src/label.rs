@@ -259,11 +259,11 @@ impl RenderOnce for Label {
 }
 
 /// `text` with every occurrence of the search `query` drawn in the theme's
-/// `list_highlight` color, matched the way searchable lists filter: by
-/// case-insensitive substring.
+/// `list_highlight_foreground` color, matched the way searchable lists filter:
+/// by case-insensitive substring.
 pub(crate) fn highlight_matches(text: SharedString, query: &str, cx: &App) -> StyledText {
     let style = HighlightStyle {
-        color: Some(cx.theme().list_highlight),
+        color: Some(cx.theme().list_highlight_foreground),
         ..Default::default()
     };
     let highlights = match_ranges(&text, query)

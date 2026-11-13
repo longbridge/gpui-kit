@@ -471,7 +471,7 @@ pub struct ThemeConfigColors {
     pub list_hover: Option<SharedString>,
     /// Text color for the part of a list row that matches the search query.
     #[serde(rename = "list.highlight.foreground")]
-    pub list_highlight: Option<SharedString>,
+    pub list_highlight_foreground: Option<SharedString>,
     /// Muted backgrounds such as Skeleton and Switch.
     #[serde(rename = "muted.background")]
     pub muted: Option<SharedString>,
@@ -988,7 +988,7 @@ impl ThemeColor {
         apply_background_color!(list_even, fallback = tokens.list);
         apply_background_color!(list_head, fallback = tokens.list);
         apply_background_color!(list_hover, fallback = self.accent.opacity(0.6));
-        apply_color!(list_highlight, fallback = self.blue);
+        apply_color!(list_highlight_foreground, fallback = self.blue);
         apply_background_color!(popover, fallback = tokens.background);
         apply_color!(popover_foreground, fallback = self.foreground);
         apply_background_color!(progress_bar, fallback = tokens.primary);
@@ -1262,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_config_reads_the_list_highlight_color() {
+    fn test_apply_config_reads_the_list_highlight_foreground_color() {
         let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
             "name": "Highlight",
             "mode": "light",
@@ -1274,10 +1274,13 @@ mod tests {
 
         let mut theme = Theme::default();
         theme.apply_config(&std::rc::Rc::new(config));
-        assert_eq!(theme.list_highlight, try_parse_color("#ff8800").unwrap());
+        assert_eq!(
+            theme.list_highlight_foreground,
+            try_parse_color("#ff8800").unwrap()
+        );
 
         theme.apply_config(&std::rc::Rc::new(ThemeConfig::default()));
-        assert_eq!(theme.list_highlight, theme.blue);
+        assert_eq!(theme.list_highlight_foreground, theme.blue);
     }
 
     #[test]
