@@ -297,6 +297,16 @@ fn normalize_inline_boundaries(paragraph: &mut Paragraph) -> String {
             continue;
         }
         let leading = node.text.len() - node.text.trim_start_matches([' ', '\t']).len();
+        // Inline code keeps its white space, so the fold stops where a code
+        // mark begins: `` x `  y` `` keeps the span's leading spaces even
+        // though the run before it ends with one (#3710 review).
+        let code_start = node
+            .marks
+            .iter()
+            .filter(|(range, mark)| mark.code && range.end > 0)
+            .map(|(range, _)| range.start)
+            .min();
+        let leading = leading.min(code_start.unwrap_or(leading));
         if leading > 0 && (at_line_start || previous_white_space) {
             trim_leading_white_space(node, leading);
         }
@@ -2137,6 +2147,30 @@ mod tests {
             paragraphs,
             ["two spaces", "Text after.", "line one\nline two"]
         );
+    }
+
+    /// A code span keeps its white space, so a fold that starts when the run
+    /// before the span ends with a space must not reach into the span
+    /// (follow-up to #3710, from the review of #3949).
+    #[test]
+    fn white_space_folds_do_not_reach_into_a_code_span() {
+        for (source, expected) in [
+            ("x `  y`", "x   y"),
+            ("`  y` x", "  y x"),
+            ("x *`  y`*", "x   y"),
+        ] {
+            let mut cx = NodeContext::default();
+            let document = parse(source, &mut cx).unwrap();
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected paragraph");
+            };
+            let text: String = paragraph
+                .children
+                .iter()
+                .map(|node| node.text.as_ref())
+                .collect();
+            assert_eq!(text, expected, "source {source:?}");
+        }
     }
 
     #[test]
