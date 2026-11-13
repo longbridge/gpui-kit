@@ -105,7 +105,9 @@ Combobox::new(&state)
 
 ### Implementing `SearchableListItem`
 
-Built-in implementations exist for `String`, `SharedString`, and `&'static str`. For custom types implement the trait:
+Built-in implementations exist for `String`, `SharedString`, and `&'static str`. For custom types implement the trait.
+
+With `.highlight_matches(true)` on the `Combobox`, rows render through `render_highlighted(query, ..)`, whose default draws `title()` with the matched text in the theme's primary color. Override it as well as `render` to keep a custom row highlighted. Highlighting is off by default.
 
 ```rust
 #[derive(Clone)]

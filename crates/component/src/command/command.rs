@@ -62,6 +62,7 @@ pub struct Command {
     entries: Vec<CommandEntry>,
     searchable: bool,
     filterable: bool,
+    highlight_matches: bool,
     on_query: Option<Rc<OnQuery>>,
     on_select: Option<Rc<OnIndex>>,
     on_confirm: Option<Rc<OnIndex>>,
@@ -77,6 +78,7 @@ impl Command {
             entries: Vec::new(),
             searchable: true,
             filterable: true,
+            highlight_matches: false,
             on_query: None,
             on_select: None,
             on_confirm: None,
@@ -124,6 +126,14 @@ impl Command {
     /// highlight back to the first item instead of a local textual match.
     pub fn filterable(mut self, filterable: bool) -> Self {
         self.filterable = filterable;
+        self
+    }
+
+    /// Highlight the part of each item's label that matches the query, default
+    /// is `false`. Has no effect with `filterable(false)` or on rows built with
+    /// `child`.
+    pub fn highlight_matches(mut self, highlight: bool) -> Self {
+        self.highlight_matches = highlight;
         self
     }
 
@@ -253,6 +263,7 @@ impl RenderOnce for Command {
             entries: self.entries,
             searchable: self.searchable,
             filterable: self.filterable,
+            highlight_matches: self.highlight_matches,
             on_query: self.on_query,
             on_select: self.on_select,
             on_confirm: self.on_confirm,

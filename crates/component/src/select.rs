@@ -88,6 +88,7 @@ struct SelectOptions {
     accessibility_label: Option<SharedString>,
     title_prefix: Option<SharedString>,
     search_placeholder: Option<SharedString>,
+    highlight_matches: bool,
     menu_width: Length,
     menu_max_h: Length,
     scroll_bounce: Option<bool>,
@@ -113,6 +114,7 @@ impl Default for SelectOptions {
             appearance: true,
             focus_ring_enabled: true,
             search_placeholder: None,
+            highlight_matches: false,
         }
     }
 }
@@ -561,6 +563,7 @@ where
         self.state.list.update(cx, |list, cx| {
             list.set_searchable(searchable, cx);
             list.delegate_mut().size = self.state.size;
+            list.delegate_mut().highlight_matches = self.state.highlight_matches;
         });
 
         div().size_full().relative().child(
@@ -753,6 +756,15 @@ where
         self
     }
 
+    /// Highlight the part of each row that matches the search query, default is `false`.
+    ///
+    /// Rows render with [`SearchableListItem::render_highlighted`]; the default
+    /// highlights the matched text of `title()` in the theme's primary color.
+    pub fn highlight_matches(mut self, highlight: bool) -> Self {
+        self.options.highlight_matches = highlight;
+        self
+    }
+
     /// Set the placeholder text for the search input.
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
@@ -872,6 +884,7 @@ where
             this.state.cleanable = opts.cleanable;
             this.state.placeholder = opts.placeholder;
             this.state.search_placeholder = opts.search_placeholder;
+            this.state.highlight_matches = opts.highlight_matches;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
             this.state.scroll_bounce = opts.scroll_bounce;
