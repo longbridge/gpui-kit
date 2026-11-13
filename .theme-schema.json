@@ -294,6 +294,10 @@
           "description": "Hover background color for ListItem.",
           "type": ["string", "null"]
         },
+        "list.highlight.foreground": {
+          "description": "Text color for the part of a list row that matches the search query.",
+          "type": ["string", "null"]
+        },
         "muted.background": {
           "description": "Muted backgrounds such as Skeleton and Switch.",
           "type": ["string", "null"]

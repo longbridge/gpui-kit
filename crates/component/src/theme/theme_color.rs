@@ -193,6 +193,8 @@ pub struct ThemeColor {
     pub list_head: Hsla,
     /// Hover background color for ListItem.
     pub list_hover: Hsla,
+    /// Text color for the part of a list row that matches the search query.
+    pub list_highlight_foreground: Hsla,
     /// Muted backgrounds such as Skeleton and Switch.
     pub muted: Hsla,
     /// Muted text color, as used in disabled text.
@@ -472,6 +474,7 @@ define_theme_tokens! {
     list_even,
     list_head,
     list_hover,
+    list_highlight_foreground,
     muted,
     muted_foreground,
     popover,
