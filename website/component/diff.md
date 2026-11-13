@@ -306,8 +306,9 @@ Diff::new(&self.diff)
   of scrolling horizontally.
 - `split_ratio` gives the original column that share of the width in Split
   mode (0.5 by default, clamped to 0.1–0.9), for example from a divider the
-  application lets users drag. Without soft wrap, neither column gets narrower
-  than its longest line.
+  application lets users drag. Without soft wrap, each column keeps its share
+  and clips its long lines, and the code of both columns scrolls horizontally
+  together while the line numbers stay in place.
 
 Syntax language is detected from each file's path; `DiffFile::with_language`
 overrides it with a highlighter language name such as `rust`. Enable the

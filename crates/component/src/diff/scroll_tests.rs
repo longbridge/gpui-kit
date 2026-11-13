@@ -132,3 +132,55 @@ fn a_mode_switch_at_the_top_keeps_the_file_header_in_view(cx: &mut TestAppContex
         "the file header stays in view"
     );
 }
+
+#[cfg(feature = "test-support")]
+fn source_lefts(cx: &mut VisualTestContext) -> Vec<gpui::Pixels> {
+    cx.update(|window, _| {
+        gpui_base::test_support::find_all(window, &[], &gpui::ElementId::from("source"))
+            .into_iter()
+            .map(|source| source.bounds().left())
+            .collect()
+    })
+}
+
+#[cfg(feature = "test-support")]
+#[gpui::test]
+fn split_columns_keep_half_the_viewport_beside_a_long_line(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let original = format!("{}\nshared\n", "long ".repeat(200));
+    let modified = "short\nshared\n";
+    let state = cx.new(|cx| {
+        let mut state = DiffState::new([fixture::modified("long.txt", &original, modified)], cx);
+        state.set_mode(super::DiffMode::Split, cx);
+        state
+    });
+    let (_, cx) = cx.add_window_view({
+        let state = state.clone();
+        move |_, _| Host { state }
+    });
+    for _ in 0..3 {
+        draw(cx);
+    }
+    let before = source_lefts(cx);
+    assert_eq!(before.len(), 4, "two sides of two lines");
+    assert!(
+        before.iter().all(|left| *left < px(400.)),
+        "both columns start inside the 400px viewport: {before:?}"
+    );
+
+    cx.simulate_event(ScrollEvent {
+        position: point(px(100.), px(60.)),
+        delta: ScrollDelta::Pixels(point(px(-200.), px(0.))),
+        ..Default::default()
+    });
+    for _ in 0..2 {
+        draw(cx);
+    }
+    let offset = cx.update(|_, cx| state.read(cx).horizontal_scroll().offset().x);
+    assert!(offset < px(0.), "the long line scrolls: {offset:?}");
+    assert_eq!(
+        source_lefts(cx),
+        before,
+        "the columns stay in place while their code scrolls"
+    );
+}
