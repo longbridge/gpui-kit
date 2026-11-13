@@ -3904,6 +3904,60 @@ mod tests {
     }
 
     #[gpui::test]
+    fn link_tooltip_shows_on_one_of_two_renderings_of_a_document(cx: &mut TestAppContext) {
+        struct Preview;
+        impl Render for Preview {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .debug_selector(|| "link-destination-preview".into())
+                    .child("/tmp/report.json")
+            }
+        }
+        struct Twice {
+            view: Entity<TextViewState>,
+        }
+        impl Render for Twice {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .child(
+                        TextView::new(&self.view)
+                            .link_tooltip(|_, _, cx| cx.new(|_| Preview).into()),
+                    )
+                    .child(
+                        TextView::new(&self.view)
+                            .link_tooltip(|_, _, cx| cx.new(|_| Preview).into()),
+                    )
+            }
+        }
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| Twice {
+            view: cx.new(|cx| {
+                TextViewState::markdown("[preview destination](file:///tmp/report.json)", cx)
+            }),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let bounds = root.read_with(cx, |root, cx| {
+            root.view.read(cx).selection_adapter.text_bounds()[0]
+        });
+        let start = point(bounds.left() + px(2.), bounds.center().y);
+        cx.update(|window, cx| window.simulate_mouse_move(start, cx));
+        cx.run_until_parked();
+        let mut requested = 0;
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            requested = cx.update(|window, cx| window.simulate_next_frame(cx));
+            cx.run_until_parked();
+        }
+        assert_eq!(requested, 0, "a settled hover stops redrawing");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds("link-destination-preview").is_some(),
+            "the hovered rendering shows its destination"
+        );
+    }
+
+    #[gpui::test]
     fn link_tooltip_follows_the_pointer_and_clears_on_exit(cx: &mut TestAppContext) {
         struct Preview;
         impl Render for Preview {

@@ -138,7 +138,10 @@ pub struct TextViewState {
     pub(super) link_hook: Option<std::sync::Arc<LinkFn>>,
     pub(super) link_tooltip: Option<std::sync::Arc<super::text_view::LinkTooltipFn>>,
     pub(super) hovered_link_tooltip: Option<(SharedString, gpui::AnyView)>,
-    pub(super) link_tooltip_target: Option<(usize, SharedString)>,
+    /// The link under the pointer and the rendering it is in. Two renderings
+    /// of one document share a paragraph's state, so its key alone does not
+    /// tell them apart; their bounds do.
+    pub(super) link_tooltip_target: Option<((usize, Bounds<gpui::Pixels>), SharedString)>,
     pub(super) task_toggle_handler: Option<std::sync::Arc<TaskToggleHandlerFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 

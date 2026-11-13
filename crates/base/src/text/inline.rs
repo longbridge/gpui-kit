@@ -915,7 +915,7 @@ impl Inline {
         else {
             return;
         };
-        let target = (state_key(&self.state), link.url.clone());
+        let target = ((state_key(&self.state), hitbox.bounds), link.url.clone());
         if view.read(cx).link_tooltip_target.as_ref() != Some(&target) {
             return;
         }
@@ -1318,7 +1318,7 @@ impl Element for Inline {
         if self.link_tooltip
             && let Some(view) = GlobalState::global(cx).text_view_state()
         {
-            let key = state_key(&self.state);
+            let key = (state_key(&self.state), hitbox.bounds);
             let target = hovered_link.as_ref().and_then(|range| {
                 self.links
                     .iter()
