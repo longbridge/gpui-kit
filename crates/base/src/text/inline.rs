@@ -1,5 +1,6 @@
 mod selection_paint;
 
+use super::state::ParagraphRows;
 #[cfg(target_family = "wasm")]
 use async_channel::bounded;
 use gpui::Corners;
@@ -371,6 +372,9 @@ pub(super) struct Inline {
     text_style: Option<TextStyle>,
     paint_origin: Option<Point<Pixels>>,
     selection_bounds: Option<Bounds<Pixels>>,
+    /// What a triple click selects, when the text is one row of a wrapped
+    /// inline flow: the whole paragraph, as its first and last rows.
+    paragraph_rows: Option<ParagraphRows>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     /// Range highlight backgrounds, painted behind the text.
     range_backgrounds: Vec<(Range<usize>, Hsla)>,
@@ -761,6 +765,7 @@ impl Inline {
             text_style: None,
             paint_origin: None,
             selection_bounds: None,
+            paragraph_rows: None,
             selection_source: None,
             range_backgrounds: Vec::new(),
             reveal: None,
@@ -794,6 +799,11 @@ impl Inline {
 
     pub(super) fn selection_bounds(mut self, bounds: Bounds<Pixels>) -> Self {
         self.selection_bounds = Some(bounds);
+        self
+    }
+
+    pub(super) fn paragraph_rows(mut self, rows: ParagraphRows) -> Self {
+        self.paragraph_rows = Some(rows);
         self
     }
 
@@ -1399,6 +1409,9 @@ impl Element for Inline {
                 let text = self.text.clone();
                 let text_view_state = GlobalState::global(cx).text_view_state();
                 let line_bounds = self.selection_bounds;
+                let paragraph_rows = self
+                    .paragraph_rows
+                    .or_else(|| line_bounds.map(ParagraphRows::single));
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.bubble()
                         || !hitbox.is_hovered(window)
@@ -1408,13 +1421,11 @@ impl Element for Inline {
                     }
 
                     if event.click_count == 3
-                        && let Some(line_bounds) = line_bounds
+                        && let Some(rows) = paragraph_rows
                     {
                         GlobalState::suppress_text_selection(cx);
                         if let Some(view) = &text_view_state {
-                            view.update(cx, |state, cx| {
-                                state.set_multi_click_line(line_bounds, cx)
-                            });
+                            view.update(cx, |state, cx| state.set_multi_click_line(rows, cx));
                         }
                         cx.notify(current_view);
                         return;

@@ -956,14 +956,21 @@ impl TextViewState {
         }
     }
 
-    pub(crate) fn set_multi_click_line(&mut self, bounds: Bounds<Pixels>, cx: &mut App) {
+    /// Selects every inline in `rows.bounds`, as a triple click on a
+    /// paragraph laid out as an inline flow does: from the start of its first
+    /// row to the end of its last row.
+    pub(crate) fn set_multi_click_line(&mut self, rows: ParagraphRows, cx: &mut App) {
+        let bounds = rows.bounds;
         self.set_multi_click_selection(
             bounds.center(),
             TextViewMultiClickKind::Line,
             String::new(),
             (
-                caret_line_box(bounds.origin, bounds.size.height),
-                caret_line_box(bounds.top_right(), bounds.size.height),
+                caret_line_box(bounds.origin, rows.first_row_height),
+                caret_line_box(
+                    gpui::point(bounds.right(), bounds.bottom() - rows.last_row_height),
+                    rows.last_row_height,
+                ),
             ),
             cx,
         );
@@ -1049,6 +1056,26 @@ impl TextViewState {
                 ..selection
             }
         })
+    }
+}
+
+/// The rows a triple click selects as one paragraph: their union, and the
+/// heights of the first and last rows for the selection's carets.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ParagraphRows {
+    pub(crate) bounds: Bounds<Pixels>,
+    pub(crate) first_row_height: Pixels,
+    pub(crate) last_row_height: Pixels,
+}
+
+impl ParagraphRows {
+    /// One row on its own.
+    pub(crate) fn single(bounds: Bounds<Pixels>) -> Self {
+        Self {
+            bounds,
+            first_row_height: bounds.size.height,
+            last_row_height: bounds.size.height,
+        }
     }
 }
 
