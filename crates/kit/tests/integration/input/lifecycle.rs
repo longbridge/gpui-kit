@@ -22,6 +22,7 @@ pub(super) struct Fields {
     disabled: bool,
     revision: usize,
     focus_events: [[usize; 2]; 3],
+    changes: [usize; 3],
     _subscriptions: Vec<Subscription>,
 }
 
@@ -38,10 +39,15 @@ impl Fields {
         }
     }
 
+    pub(super) fn changes(&self, ix: usize) -> usize {
+        self.changes[ix]
+    }
+
     fn record_focus(&mut self, ix: usize, event: &InputEvent) {
         match event {
             InputEvent::Focus => self.focus_events[ix][0] += 1,
             InputEvent::Blur => self.focus_events[ix][1] += 1,
+            InputEvent::Change => self.changes[ix] += 1,
             _ => {}
         }
     }
@@ -115,6 +121,7 @@ pub(super) fn mount(
                 disabled: false,
                 revision: 0,
                 focus_events: [[0; 2]; 3],
+                changes: [0; 3],
                 _subscriptions: Vec::new(),
             })
         });

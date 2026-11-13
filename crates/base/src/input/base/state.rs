@@ -4688,9 +4688,17 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             .map(|range| self.range_to_utf16(&range.into()))
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.ime_marked_range = None;
         self.undo_manager.commit_transaction();
+        // Unmarking keeps the preedit as committed text, which marked edits
+        // never reported. Android keyboards compose every word and often end
+        // with only this call (hiding the keyboard, moving the caret).
+        if self.ime_original_text.as_ref() == Some(&self.text) {
+            self.ime_original_text = None;
+        } else if self.ime_original_text.is_some() && self.emit_events {
+            self.emit_change(cx);
+        }
     }
 
     /// Replace text in range.
