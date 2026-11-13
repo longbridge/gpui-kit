@@ -338,6 +338,16 @@ impl CommandState {
         }
     }
 
+    /// The query the rows highlight in their labels: the one the palette
+    /// filtered by, or none when the host filters.
+    fn highlighted_query(&self) -> &str {
+        if self.model.searchable && self.model.filterable {
+            self.applied_query.trim()
+        } else {
+            ""
+        }
+    }
+
     fn item_at(&self, matched_ix: usize) -> Option<&CommandItem> {
         let matched = self.matched.get(matched_ix)?;
 
@@ -841,7 +851,13 @@ impl CommandState {
                 .when_some(item.icon.clone(), |this, icon| {
                     this.child(icon.size_4().text_color(icon_color))
                 })
-                .when_some(item.label_text().cloned(), |this, label| this.child(label))
+                .when_some(item.label_text().cloned(), |this, label| {
+                    this.child(crate::label::highlight_matches(
+                        label,
+                        self.highlighted_query(),
+                        cx,
+                    ))
+                })
                 .into_any_element(),
         };
 
@@ -1590,6 +1606,38 @@ mod tests {
                     0,
                 );
                 assert!(matches!(state.rows.first(), Some(CommandRow::Heading(_))));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn rows_highlight_the_query_the_palette_filtered_by(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| command_state(window, cx, suggestion_entries()));
+            state.update(cx, |state, cx| {
+                assert_eq!(state.highlighted_query(), "");
+                state.set_query(" cal ", window, cx);
+                assert_eq!(state.highlighted_query(), "cal");
+            });
+
+            let host_filtered = cx.new(|cx| {
+                let mut state = CommandState::new(window, cx);
+                state.install_model(
+                    CommandModel {
+                        entries: suggestion_entries(),
+                        filterable: false,
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                state
+            });
+            host_filtered.update(cx, |state, cx| {
+                state.set_query("cal", window, cx);
+                assert_eq!(state.highlighted_query(), "");
             });
         });
     }

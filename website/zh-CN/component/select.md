@@ -96,6 +96,8 @@ Select::new(&state)
     .icon(IconName::Search)
 ```
 
+输入搜索词时，每一行会高亮标题中与之匹配的部分。自行实现 `render` 的选项会完整绘制自己的行，因此不显示高亮。
+
 ### 自定义 SelectItem
 
 如果你希望选项携带更复杂的数据结构，或者希望 `selected_value` 返回自定义类型，可以自己实现 `SelectItem`。

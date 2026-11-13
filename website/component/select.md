@@ -99,6 +99,8 @@ Select::new(&state)
     .icon(IconName::Search) // Shows search icon
 ```
 
+While a query is typed, each row highlights the part of its title that matches it. An item with its own `render` draws its whole row, so it shows no highlight.
+
 ### Impl SelectItem
 
 By default, we have implmemented `SelectItem` for common types like `String`, `SharedString` and `&'static str`. You can also create your own item types by implementing the `SelectItem` trait.

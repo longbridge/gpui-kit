@@ -1,4 +1,7 @@
-use gpui::{AnyElement, App, Context, IntoElement, ParentElement as _, Styled as _, Window, div};
+use gpui::{
+    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Window,
+    div,
+};
 
 use crate::{
     ActiveTheme, Disableable as _, Icon, IconName, IndexPath, Sizable as _, Size, StyleSized as _,
@@ -6,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    delegate::{SearchableListDelegate, SearchableListItem as _},
+    delegate::{SearchableListDelegate, SearchableListItem as _, with_search_query},
     item::SearchableListItemElement,
 };
 
@@ -23,6 +26,8 @@ pub(crate) struct SearchableListAdapter<D: SearchableListDelegate + 'static> {
     /// selection change. `render_item` reads this directly so it never touches the parent entity
     /// (which would panic — the `ListState` entity is already locked during render).
     pub(crate) selection_snapshot: Vec<(IndexPath, D::Item)>,
+    /// The last search query, which the default item rows highlight.
+    query: SharedString,
     /// Called when the user confirms an item (click or Enter).
     on_confirm:
         Box<dyn Fn(Option<IndexPath>, bool, &mut Window, &mut Context<ListState<Self>>) + 'static>,
@@ -47,6 +52,7 @@ impl<D: SearchableListDelegate + 'static> SearchableListAdapter<D> {
             delegate,
             selected_index: None,
             selection_snapshot: Vec::new(),
+            query: SharedString::default(),
             on_confirm: Box::new(on_confirm),
             on_cancel: Box::new(on_cancel),
             on_render_empty: Box::new(on_render_empty),
@@ -132,7 +138,9 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
         let content = div()
             .min_w_0()
             .truncate()
-            .child(item.render(window, cx).into_any_element());
+            .child(with_search_query(&self.query, || {
+                item.render(window, cx).into_any_element()
+            }));
 
         Some(
             SearchableListItemElement::new(ix.row)
@@ -168,6 +176,7 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
         window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> gpui::Task<()> {
+        self.query = SharedString::from(query.to_string());
         self.delegate.perform_search(query, window, cx)
     }
 
@@ -186,5 +195,81 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
         cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
         (self.on_render_empty)(window, cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use gpui::{AppContext as _, IntoElement as _, SharedString, TestAppContext, Window, div};
+
+    use super::SearchableListAdapter;
+    use crate::{
+        IndexPath,
+        list::{ListDelegate as _, ListState},
+        searchable_list::{SearchableListItem, delegate::search_query},
+    };
+
+    #[derive(Clone)]
+    struct RecordingItem {
+        title: SharedString,
+        rendered_with: Rc<RefCell<Vec<SharedString>>>,
+    }
+
+    impl SearchableListItem for RecordingItem {
+        type Value = SharedString;
+
+        fn title(&self) -> SharedString {
+            self.title.clone()
+        }
+
+        fn render(&self, _: &mut Window, _: &mut gpui::App) -> impl gpui::IntoElement {
+            self.rendered_with.borrow_mut().push(search_query());
+            self.title.clone()
+        }
+
+        fn value(&self) -> &SharedString {
+            &self.title
+        }
+    }
+
+    #[gpui::test]
+    fn rows_render_with_the_current_search_query(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        let rendered_with = Rc::new(RefCell::new(Vec::new()));
+
+        cx.update(|window, cx| {
+            let items = vec![RecordingItem {
+                title: "Rust".into(),
+                rendered_with: rendered_with.clone(),
+            }];
+            let list = cx.new(|cx| {
+                let adapter = SearchableListAdapter::new(
+                    items,
+                    |_, _, _, _| {},
+                    |_, _, _| {},
+                    |_, _| div().into_any_element(),
+                );
+                ListState::new(adapter, window, cx).searchable(true)
+            });
+            let render_row = |window: &mut Window, cx: &mut gpui::App| {
+                list.update(cx, |list, cx| {
+                    _ = list
+                        .delegate_mut()
+                        .render_item(IndexPath::new(0), window, cx);
+                });
+            };
+
+            render_row(window, cx);
+            list.update(cx, |list, cx| list.set_query(" ru ", window, cx));
+            render_row(window, cx);
+            list.update(cx, |list, cx| list.set_query("", window, cx));
+            render_row(window, cx);
+        });
+
+        assert_eq!(*rendered_with.borrow(), ["", "ru", ""]);
+        assert_eq!(search_query(), "");
     }
 }

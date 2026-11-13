@@ -105,7 +105,9 @@ Combobox::new(&state)
 
 ### 实现 `SearchableListItem`
 
-`String`、`SharedString` 和 `&'static str` 已内置实现了 `SearchableListItem`。自定义类型需手动实现该 trait：
+`String`、`SharedString` 和 `&'static str` 已内置实现了 `SearchableListItem`。自定义类型需手动实现该 trait。
+
+默认的 `render` 绘制 `title()`，并高亮其中与搜索词匹配的部分。重写 `render` 可以绘制更丰富的行，此时不再显示高亮。
 
 ```rust
 #[derive(Clone)]
