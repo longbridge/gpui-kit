@@ -1,4 +1,4 @@
-use crate::input::{EditorMode, TextareaMode};
+use crate::input::{EditorMode, TextareaExtras, TextareaMode};
 use std::{collections::BTreeMap, ops::Range};
 
 use gpui::{App, Context, HighlightStyle, Hsla, Pixels, WeakEntity};
@@ -875,10 +875,19 @@ fn normalize<T: TrackedDecoration>(text: &Rope, decorations: Vec<T>) -> Vec<T> {
         .collect()
 }
 
+impl TextareaExtras {
+    pub(crate) fn adjust_for_edit(&mut self, edited_range: &Range<usize>, inserted_len: usize) {
+        self.decorations.retain_mut(|decoration| {
+            decoration.range = adjust_range_for_edit(&decoration.range, edited_range, inserted_len);
+            !decoration.range.is_empty()
+        });
+    }
+}
+
 impl InputBaseState<TextareaMode> {
     /// Replace the textarea's text decorations, as UTF-8 byte ranges into
-    /// [`Self::value`]. They don't follow edits: set them again after the text
-    /// changes. Decorations are not rendered while the input is masked.
+    /// [`Self::value`]. Ranges follow later edits like an editor's decoration
+    /// collections, and one whose text is deleted is dropped.
     pub fn set_decorations(&mut self, decorations: Vec<TextDecoration>, cx: &mut Context<Self>) {
         let decorations = normalize(&self.text, decorations);
         if self.extras.decorations != decorations {
@@ -886,7 +895,7 @@ impl InputBaseState<TextareaMode> {
             cx.notify();
         }
     }
-    /// The textarea's text decorations, as last set.
+    /// The textarea's text decorations, as last set and moved by edits since.
     pub fn decorations(&self) -> &[TextDecoration] {
         &self.extras.decorations
     }
@@ -1031,7 +1040,7 @@ mod tests {
     use super::*;
 
     #[gpui::test]
-    fn textarea_decorations_are_normalized_and_rendered(cx: &mut gpui::TestAppContext) {
+    fn textarea_decorations_follow_edits_and_render(cx: &mut gpui::TestAppContext) {
         use crate::input::InputExtras as _;
 
         cx.update(crate::init);
@@ -1042,24 +1051,49 @@ mod tests {
             font_weight: Some(gpui::FontWeight::BOLD),
             ..Default::default()
         };
+        let ranges = |cx: &mut gpui::VisualTestContext| {
+            state.read_with(cx, |state, _| {
+                state
+                    .decorations()
+                    .iter()
+                    .map(|decoration| decoration.range.clone())
+                    .collect::<Vec<_>>()
+            })
+        };
         state.update(cx, |state, cx| {
             state.set_decorations(
                 vec![
                     TextDecoration::new(2..4, bold),
+                    TextDecoration::new(7..12, bold),
                     TextDecoration::new(100..200, bold),
                 ],
                 cx,
             );
         });
-        state.read_with(cx, |state, _| {
-            assert_eq!(state.decorations().len(), 1);
-            assert_eq!(state.decorations()[0].range, 1..4);
-            assert_eq!(state.extras.decoration_layers().len(), 1);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(ranges(cx), vec![1..4, 7..12]);
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_selected_range(0..0, cx);
+                state.insert("ab", window, cx);
+                state.set_selected_range(5..5, cx);
+                state.insert("x", window, cx);
+                state.set_selected_range(9..14, cx);
+                state.replace("", window, cx);
+            })
         });
-        state.update(cx, |state, cx| state.set_decorations(vec![], cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "abhéxllod");
+        assert_eq!(ranges(cx), vec![3..7, 9..10]);
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| state.set_value("", window, cx));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(ranges(cx).is_empty());
         state.read_with(cx, |state, _| {
-            assert!(state.decorations().is_empty());
-            assert!(state.extras.decoration_layers().is_empty());
+            assert!(state.extras.decoration_layers().is_empty())
         });
     }
 
