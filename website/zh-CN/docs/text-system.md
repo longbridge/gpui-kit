@@ -154,9 +154,9 @@ div()
 
 GPUI Kit 的 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/text/compat.rs) 能渲染带样式 run、选择与可选滚动的 Markdown 或 HTML；解析、布局和选择行为由 Base 承担。富文档可用 `TextView::markdown("article", source)`。[Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 在 [`prepaint`](./element#prepaint) 中塑形可见行，此时已知最终宽度与输入几何；光标和指针映射使用同一份塑形布局。普通标签不需要自行实现这些工作。
 
-`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` 检查窗口坐标中的一点是否命中当前选择作用域内已注册的可选择文字。应在指针事件分发期间传入事件的位置，让 hitbox 对应所查询的点。查询使用当前帧的文字几何与 hitbox，不启动或改变选区；空白处、非当前作用域的文字、触摸选择控件和选区控件都不命中。外层控件可在认领长按前查询，让窗口级选词优先处理。`ContextMenu` 已自动采用这一规则：长按可选择文字会选词，长按空白处则打开对象菜单。
+`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` 检查窗口坐标中的一点是否命中当前选择作用域内已注册的可选择文字。应在指针事件分发期间传入事件的位置，让 hitbox 对应所查询的点。查询使用当前帧的文字几何与 hitbox，不启动或改变选区；空白处、非当前作用域的文字、触摸选择控件和标记了 `keep_text_selection` 的元素都不命中。外层控件可在认领长按前查询，让窗口级选词优先处理。`ContextMenu` 已自动采用这一规则：长按可选择文字会选词，长按空白处则打开对象菜单。
 
-在窗口任意位置按下鼠标，都会在元素处理之前清除选区，因此作用于选区的按钮（复制、评论、暂存所选行）在点击执行时已经找不到选区。用 `ElementExt::text_selection_control(id)` 标记这类控件：按下它既不清除选区，也不开始新的选区。它用 hitbox 覆盖该元素，因此控件前方的弹出层仍会接收按下事件；控件从缓存视图绘制时也照常生效。`id` 在该元素的子元素中必须唯一。窗口会保留每个绘制过的控件直到关闭，因此应标记一组按钮，而不是长列表中的每一行。
+在窗口任意位置按下鼠标，都会在元素处理之前清除选区，因此作用于选区的按钮（复制、评论、暂存所选行）在点击执行时已经找不到选区。用 `ElementExt::keep_text_selection(id)` 标记这类控件：按下它既不清除选区，也不开始新的选区。它用 hitbox 覆盖该元素，因此控件前方的弹出层仍会接收按下事件；控件从缓存视图绘制时也照常生效。`id` 在该元素的子元素中必须唯一。窗口会保留每个这样标记过的元素直到关闭，因此应标记一组按钮，而不是长列表中的每一行。
 
 ```rust
 use gpui_kit::base::ElementExt;
@@ -165,7 +165,7 @@ use gpui_kit::*;
 
 h_flex()
     .gap_2()
-    .text_selection_control("selection-actions")
+    .keep_text_selection("selection-actions")
     .child(Button::new("copy").label("Copy").on_click(copy_selection))
 ```
 

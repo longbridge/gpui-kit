@@ -1383,12 +1383,12 @@ struct WindowSelectionState {
     /// bounces stretch and snap back on every tick.
     auto_scroll_stall: (Option<(Bounds<Pixels>, Point<Pixels>)>, u8),
     touch: TouchSelection,
-    /// The hitboxes of the controls that act on the selection, by element. A
-    /// control drawn from an earlier frame (a cached view) keeps its hitbox,
-    /// and one no longer drawn never hits again. GPUI cannot tell the two
-    /// apart, so an entry stays for the window's lifetime: one per element
-    /// id. See [`crate::ElementExt::text_selection_control`].
-    controls: HashMap<GlobalElementId, Hitbox>,
+    /// The hitboxes where a press keeps the selection, by element (see
+    /// [`crate::ElementExt::keep_text_selection`]). One drawn from an earlier
+    /// frame (a cached view) keeps its hitbox, and one no longer drawn never
+    /// hits again. GPUI cannot tell the two apart, so an entry stays for the
+    /// window's lifetime: one per element id.
+    keep_regions: HashMap<GlobalElementId, Hitbox>,
     /// This entity, so that touch changes can notify observers from paths that
     /// only hold an [`App`].
     entity_id: Option<EntityId>,
@@ -2025,11 +2025,12 @@ impl WindowSelectionState {
     }
 
     /// Whether a press at `position` acts on the selection instead of
-    /// replacing it: one on a touch handle, the edit menu or a control.
+    /// replacing it: one on a touch handle, the edit menu or an element
+    /// marked with [`crate::ElementExt::keep_text_selection`].
     fn keeps_selection_at(&self, position: Point<Pixels>, window: &Window) -> bool {
         // the bounds first: each hit test walks the frame's hitboxes
         self.touch.covers(position)
-            || self.controls.values().any(|hitbox| {
+            || self.keep_regions.values().any(|hitbox| {
                 hitbox.bounds.contains(&position) && hitbox.is_hovered_at(position, window)
             })
     }
@@ -2906,8 +2907,8 @@ impl TextSelection {
     /// to the window's text selection before claiming the gesture itself.
     /// Call during pointer dispatch with the event's position, so the hitboxes
     /// reflect the point being queried. Touch-selection controls and the
-    /// controls marked with [`crate::ElementExt::text_selection_control`] do
-    /// not match.
+    /// elements marked with [`crate::ElementExt::keep_text_selection`] do not
+    /// match.
     pub fn is_selectable_at(position: Point<Pixels>, window: &Window, cx: &mut App) -> bool {
         live_text_selection_state(window, cx).is_some_and(|state| {
             state.update(cx, |state, cx| {
@@ -3055,16 +3056,16 @@ impl TextSelection {
 /// element identity retains the window-local selection entity across frames.
 pub struct TextSelectionLayer;
 
-pub(crate) fn text_selection_control(id: ElementId) -> impl IntoElement {
-    TextSelectionControl { id }
+pub(crate) fn keep_text_selection(id: ElementId) -> impl IntoElement {
+    KeepTextSelection { id }
 }
 
-/// Covers its parent with a hitbox registered as a selection control.
-struct TextSelectionControl {
+/// Covers its parent with a hitbox where a press keeps the selection.
+struct KeepTextSelection {
     id: ElementId,
 }
 
-impl IntoElement for TextSelectionControl {
+impl IntoElement for KeepTextSelection {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -3072,7 +3073,7 @@ impl IntoElement for TextSelectionControl {
     }
 }
 
-impl Element for TextSelectionControl {
+impl Element for KeepTextSelection {
     type RequestLayoutState = ();
     type PrepaintState = ();
 
@@ -3110,11 +3111,11 @@ impl Element for TextSelectionControl {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        // `Normal`: the control under it is still hovered and clicked.
+        // `Normal`: the element under it is still hovered and clicked.
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         if let (Some(id), Some(state)) = (id, WindowSelectionState::existing(window, cx)) {
             state.update(cx, |state, _| {
-                state.controls.insert(id.clone(), hitbox);
+                state.keep_regions.insert(id.clone(), hitbox);
             });
         }
     }

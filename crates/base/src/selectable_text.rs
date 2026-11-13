@@ -515,10 +515,7 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             use crate::ElementExt as _;
             self.renders.set(self.renders.get() + 1);
-            div()
-                .w(px(60.))
-                .h(px(20.))
-                .text_selection_control("control")
+            div().w(px(60.)).h(px(20.)).keep_text_selection("control")
         }
     }
 
@@ -580,7 +577,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_press_on_a_selection_control_keeps_the_selection(cx: &mut TestAppContext) {
+    fn a_press_on_an_element_marked_keep_text_selection_keeps_it(cx: &mut TestAppContext) {
         for cached in [false, true] {
             let renders = Rc::new(Cell::new(0));
             let (view, cx) = cx.add_window_view(|_, cx| ControlTestView {

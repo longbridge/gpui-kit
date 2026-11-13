@@ -154,9 +154,9 @@ div()
 
 GPUI Kit's [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/text/compat.rs) renders Markdown or HTML with styled runs, selection, and optional scrolling; it delegates parsing, layout, and selection behavior to Base. Use `TextView::markdown("article", source)` for a rich document. [Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) shapes visible lines in [`prepaint`](./element#prepaint), where the resolved width and input geometry are known; its caret and pointer mapping use the same shaped layout. A plain label needs neither implementation.
 
-`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` checks whether a window-coordinate point hits registered selectable text in the active selection scope. Call it during pointer dispatch with the event's position, so the hitboxes reflect the queried point. It uses the current frame's text geometry and hitboxes without starting or changing a selection; blank space, text outside the active scope, touch-selection controls, and selection controls do not match. A containing control can use this query before claiming a long press so window-level word selection keeps priority. `ContextMenu` does this automatically: long-pressing selectable text selects it, while long-pressing blank space opens the object's menu.
+`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` checks whether a window-coordinate point hits registered selectable text in the active selection scope. Call it during pointer dispatch with the event's position, so the hitboxes reflect the queried point. It uses the current frame's text geometry and hitboxes without starting or changing a selection; blank space, text outside the active scope, touch-selection controls, and elements marked with `keep_text_selection` do not match. A containing control can use this query before claiming a long press so window-level word selection keeps priority. `ContextMenu` does this automatically: long-pressing selectable text selects it, while long-pressing blank space opens the object's menu.
 
-A press anywhere in the window clears the selection before any element handles it, so a button that acts on the selection (Copy, Comment, Stage lines) would find it gone by the time its click runs. Mark such a control with `ElementExt::text_selection_control(id)`: pressing it neither clears the selection nor starts a new one. It covers the element with a hitbox, so a popup in front of the control still takes the press, and it keeps working when the control is drawn from a cached view. `id` must be unique among the element's children. The window keeps each control it has drawn until it closes, so mark a row of buttons rather than every row of a long list.
+A press anywhere in the window clears the selection before any element handles it, so a button that acts on the selection (Copy, Comment, Stage lines) would find it gone by the time its click runs. Mark such a control with `ElementExt::keep_text_selection(id)`: pressing it neither clears the selection nor starts a new one. It covers the element with a hitbox, so a popup in front of the control still takes the press, and it keeps working when the control is drawn from a cached view. `id` must be unique among the element's children. The window keeps each element marked this way until it closes, so mark a row of buttons rather than every row of a long list.
 
 ```rust
 use gpui_kit::base::ElementExt;
@@ -165,7 +165,7 @@ use gpui_kit::*;
 
 h_flex()
     .gap_2()
-    .text_selection_control("selection-actions")
+    .keep_text_selection("selection-actions")
     .child(Button::new("copy").label("Copy").on_click(copy_selection))
 ```
 
