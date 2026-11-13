@@ -318,8 +318,9 @@ impl Diff {
         self
     }
     /// Gives the original column this share of the width in split mode,
-    /// clamped to 0.1..=0.9. Default is 0.5. Without soft wrap, neither column
-    /// gets narrower than its longest line.
+    /// clamped to 0.1..=0.9. Default is 0.5. Without soft wrap, each column
+    /// keeps its share and clips its long lines, and the code of both columns
+    /// scrolls horizontally together.
     pub fn split_ratio(mut self, ratio: f32) -> Self {
         self.split_ratio = if ratio.is_finite() {
             ratio.clamp(0.1, 0.9)
@@ -570,16 +571,19 @@ fn render_diff(
     }
     state.sync_annotations(&props.annotations.items);
     let viewport_width = state.viewport().width;
-    let (content_width, column_width, modified_width) = if mode == DiffMode::Split {
-        // Each column keeps room for its longest line; the ratio divides
-        // whatever the viewport adds beyond that.
-        let half = state.content_width() / 2.;
-        let original = (viewport_width * props.split_ratio).max(half);
-        let modified = (viewport_width * (1. - props.split_ratio)).max(half);
-        (original + modified, original, modified)
+    let (content_width, column_width, modified_width, split_offset) = if mode == DiffMode::Split {
+        let original = viewport_width * props.split_ratio;
+        let modified = viewport_width * (1. - props.split_ratio);
+        let overflow = (state.content_width() / 2. - original.min(modified)).max(px(0.));
+        let offset = (!soft_wrap).then(|| {
+            (-state.horizontal_scroll().offset().x)
+                .max(px(0.))
+                .min(overflow)
+        });
+        (original + modified + overflow, original, modified, offset)
     } else {
         let width = state.content_width().max(viewport_width);
-        (width, width, width)
+        (width, width, width, None)
     };
     let code = Rc::new(CodePresentation {
         files: state.files().to_vec(),
@@ -588,6 +592,7 @@ fn render_diff(
         content_width,
         column_width,
         modified_width,
+        split_offset,
         font_size,
         row_height,
         gutter_width,
@@ -838,6 +843,7 @@ struct CodePresentation {
     column_width: Pixels,
     /// The modified column in split mode.
     modified_width: Pixels,
+    split_offset: Option<Pixels>,
     font_size: Pixels,
     row_height: Pixels,
     gutter_width: Pixels,
@@ -989,6 +995,9 @@ fn render_row(
                 h_flex()
                     .items_stretch()
                     .w_full()
+                    .when_some(code.split_offset, |this, offset| {
+                        this.relative().left(offset)
+                    })
                     .child(render_cell(
                         *file,
                         DiffSide::Original,
@@ -1727,6 +1736,9 @@ fn code_line(
     } else {
         source_line.chunk_ranges().collect()
     };
+    let split_offset = code
+        .split_offset
+        .filter(|_| code.mode == DiffMode::Split && !document.is_single_column());
     // A block container gives wrapped text a definite width to break at.
     let text = div()
         .map(|this| {
@@ -1817,6 +1829,49 @@ fn code_line(
                 this.child(render(marker, window, cx))
             })
     });
+    let source = div()
+        .id("source")
+        .test_support()
+        .map(|this| {
+            if code.soft_wrap {
+                this.flex_1().min_w_0()
+            } else {
+                this.flex_shrink_0()
+            }
+        })
+        .when_some(split_offset, |this, offset| this.relative().left(-offset))
+        .role(gpui::accesskit::Role::Label)
+        .aria_label(source_line.text().clone())
+        .aria_description(
+            t!(
+                if changed {
+                    if side == DiffSide::Original {
+                        "Diff.RemovedLine"
+                    } else {
+                        "Diff.AddedLine"
+                    }
+                } else {
+                    "Diff.SourceLine"
+                },
+                side = side_label(text_side),
+                line = position.line()
+            )
+            .to_string(),
+        )
+        .when_some(code.on_line_click.clone(), |this, handler| {
+            let position = position.clone();
+            this.on_click(move |event, window, cx| {
+                // A drag selects text; only a stationary press is a click.
+                if let ClickEvent::Mouse(mouse) = event {
+                    let moved = mouse.up.position - mouse.down.position;
+                    if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
+                        return;
+                    }
+                }
+                handler(&position, event, window, cx)
+            })
+        })
+        .child(text);
     h_flex()
         .id("line-row")
         .group("diff-line")
@@ -1862,50 +1917,20 @@ fn code_line(
         })
         .children(marker_lane)
         .child(indicator)
-        .child(
-            div()
-                .id("source")
-                .test_support()
-                .map(|this| {
-                    if code.soft_wrap {
-                        this.flex_1().min_w_0()
-                    } else {
-                        this.flex_shrink_0()
-                    }
-                })
-                .role(gpui::accesskit::Role::Label)
-                .aria_label(source_line.text().clone())
-                .aria_description(
-                    t!(
-                        if changed {
-                            if side == DiffSide::Original {
-                                "Diff.RemovedLine"
-                            } else {
-                                "Diff.AddedLine"
-                            }
-                        } else {
-                            "Diff.SourceLine"
-                        },
-                        side = side_label(text_side),
-                        line = position.line()
-                    )
-                    .to_string(),
+        .map(|this| {
+            if split_offset.is_some() {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(source),
                 )
-                .when_some(code.on_line_click.clone(), |this, handler| {
-                    let position = position.clone();
-                    this.on_click(move |event, window, cx| {
-                        // A drag selects text; only a stationary press is a click.
-                        if let ClickEvent::Mouse(mouse) = event {
-                            let moved = mouse.up.position - mouse.down.position;
-                            if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
-                                return;
-                            }
-                        }
-                        handler(&position, event, window, cx)
-                    })
-                })
-                .child(text),
-        )
+            } else {
+                this.child(source)
+            }
+        })
         .children(add_button)
         .into_any_element()
 }
