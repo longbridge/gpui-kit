@@ -12,9 +12,9 @@ use std::{
 use web_time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, EntityId, FocusHandle, IntoElement, KeyBinding,
-    ListState, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
-    prelude::FluentBuilder as _, px,
+    App, AppContext as _, Bounds, Context, CursorStyle, EntityId, FocusHandle, IntoElement,
+    KeyBinding, ListState, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _,
+    Task, Window, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -118,6 +118,9 @@ pub struct TextViewState {
     bounds: Bounds<Pixels>,
 
     pub(super) selectable: bool,
+    /// The cursor set on the [`super::TextView`] itself; when set, it replaces
+    /// the I-beam over selectable text except mid-drag.
+    pub(super) hover_cursor: Option<CursorStyle>,
     pub(super) selection_format: SelectionFormat,
     pub(super) scrollable: bool,
     pub(super) max_lines: Option<usize>,
@@ -227,6 +230,7 @@ impl TextViewState {
             selected_text_override: None,
             select_all: false,
             selectable: false,
+            hover_cursor: None,
             selection_format: SelectionFormat::default(),
             scrollable: false,
             max_lines: None,
@@ -1034,6 +1038,12 @@ impl TextViewState {
 
     pub(crate) fn is_selectable(&self) -> bool {
         self.selectable
+    }
+
+    /// Whether selectable text should show the I-beam now: always, unless the
+    /// [`super::TextView`] sets its own cursor, then only mid-drag.
+    pub(crate) fn shows_text_cursor(&self) -> bool {
+        self.hover_cursor.is_none() || self.is_selecting
     }
 
     pub(crate) fn is_all_selected(&self) -> bool {
