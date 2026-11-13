@@ -52,7 +52,7 @@ fn item_with_height(keyword: &'static str, height: f32) -> SettingItem {
         div()
             .h(px(height))
             .child("Setting")
-            .debug_selector(move || selector.clone())
+            .debug_selector(move || selector)
     })
     .keywords([keyword])
 }

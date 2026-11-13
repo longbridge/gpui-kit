@@ -190,10 +190,7 @@ fn style_attrs(css_text: &str) -> HashMap<String, String> {
     for decl in css_text.split(';') {
         let mut parts = decl.splitn(2, ':');
         if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
-            styles.insert(
-                key.trim().to_lowercase().to_string(),
-                value.trim().to_string(),
-            );
+            styles.insert(key.trim().to_lowercase(), value.trim().to_string());
         }
     }
 

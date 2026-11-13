@@ -1118,7 +1118,7 @@ impl SyntaxHighlighter {
                         last_highlight_name.unwrap_or(highlight_name),
                     ));
                 } else {
-                    highlights.push(HighlightItem::new(node_range, highlight_name.clone()));
+                    highlights.push(HighlightItem::new(node_range, highlight_name));
                 }
             }
         }

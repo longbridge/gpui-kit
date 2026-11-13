@@ -1165,7 +1165,10 @@ mod tests {
     #[test]
     fn system_tag_is_stable_and_namespaced() {
         let by_type = NotificationId::from(TypeId::of::<FooKind>());
-        assert_eq!(by_type.system_tag(), by_type.clone().system_tag());
+        assert_eq!(
+            by_type.system_tag(),
+            NotificationId::from(TypeId::of::<FooKind>()).system_tag()
+        );
         assert!(by_type.system_tag().starts_with(SYSTEM_TAG_PREFIX));
 
         let key1 = NotificationId::from((TypeId::of::<FooKind>(), ElementId::from(1usize)));
