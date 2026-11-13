@@ -71,6 +71,9 @@ pub struct ThemeConfig {
     /// The border radius for large elements like Dialogs and Notifications, default is 8.
     #[serde(rename = "radius.lg")]
     pub radius_lg: Option<usize>,
+    /// The corner radius of client-decorated windows, default is 0.
+    #[serde(rename = "window.radius")]
+    pub window_radius: Option<usize>,
     /// Set shadows in the theme, for example the Input and Button, default is true.
     #[serde(rename = "shadow")]
     pub shadow: Option<bool>,
@@ -1084,7 +1087,7 @@ impl Theme {
                 appearance: config.mode,
                 style: style.clone(),
             });
-            self.highlight_theme = highlight_theme.clone();
+            self.highlight_theme = highlight_theme;
         }
 
         let default_colors = if config.mode.is_dark() {
@@ -1110,6 +1113,9 @@ impl Theme {
         }
         if let Some(radius_lg) = config.radius_lg {
             self.radius_lg = px(radius_lg as f32);
+        }
+        if let Some(window_radius) = config.window_radius {
+            self.window_radius = px(window_radius as f32);
         }
         if let Some(shadow) = config.shadow {
             self.shadow = shadow;
@@ -1200,6 +1206,20 @@ mod tests {
         assert_eq!(theme.primary, try_parse_color("#7c3aed").unwrap());
         assert_eq!(theme.radius, px(7.));
         assert_eq!(theme.semantic_tokens().spacing, Default::default());
+    }
+
+    #[test]
+    fn test_apply_config_reads_the_window_radius() {
+        let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Rounded",
+            "mode": "dark",
+            "window.radius": 10
+        }))
+        .unwrap();
+        let mut theme = Theme::default();
+        assert_eq!(theme.window_radius, px(0.));
+        theme.apply_config(&std::rc::Rc::new(config));
+        assert_eq!(theme.window_radius, px(10.));
     }
 
     #[test]

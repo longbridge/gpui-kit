@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
-    SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
+    App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, HighlightStyle,
+    Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
+    Point, SharedString, StyledText, Subscription, TextStyleRefinement, Window, transparent_black,
 };
 
 use crate::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
@@ -65,6 +65,17 @@ impl SelectableText {
         self
     }
 
+    /// Styles ranges of the text, such as the matches of a search, as
+    /// [`StyledText::with_highlights`] does. The ranges are UTF-8 offsets, in
+    /// order and without overlap.
+    pub fn highlights(
+        mut self,
+        highlights: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
+    ) -> Self {
+        self.styled_text = self.styled_text.with_highlights(highlights);
+        self
+    }
+
     /// Overrides the selection background, which defaults to the theme's
     /// `colors.selection` token.
     pub fn selection_color(mut self, color: Hsla) -> Self {
@@ -95,6 +106,13 @@ impl SelectableText {
             });
         }
     }
+}
+
+/// What a run that owns its selection keeps between frames.
+struct OwnedSelection {
+    handle: TextSelectionHandle,
+    // A drag changes the selection without a frame of its own.
+    _refresh: Subscription,
 }
 
 fn selection_quad_bounds(
@@ -157,10 +175,16 @@ impl Element for SelectableText {
         let handle = self.handle.clone().unwrap_or_else(|| {
             window.with_element_state(
                 global_id.expect("SelectableText must have a stable element id"),
-                |retained: Option<TextSelectionHandle>, _| {
-                    let handle =
-                        retained.unwrap_or_else(|| TextSelectionHandle::new(self.text.clone(), cx));
-                    (handle.clone(), handle)
+                |retained: Option<OwnedSelection>, window| {
+                    let retained = retained.unwrap_or_else(|| {
+                        let handle = TextSelectionHandle::new(self.text.clone(), cx);
+                        let refresh = handle.refresh_window_on_change(window, cx);
+                        OwnedSelection {
+                            handle,
+                            _refresh: refresh,
+                        }
+                    });
+                    (retained.handle.clone(), retained)
                 },
             )
         });
@@ -241,8 +265,8 @@ mod tests {
     use std::{cell::Cell, rc::Rc};
 
     use gpui::{
-        Bounds, Context, IntoElement, Modifiers, MouseButton, ParentElement as _, Render,
-        Styled as _, TestAppContext, Window, div, point, px, size,
+        AppContext as _, Bounds, Context, IntoElement, Modifiers, MouseButton, ParentElement as _,
+        Render, Styled as _, TestAppContext, Window, div, point, px, size,
     };
 
     use super::SelectableText;
@@ -295,6 +319,118 @@ mod tests {
             let _ = window.draw(cx);
             assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
         });
+    }
+
+    struct HighlightedTestView;
+
+    impl Render for HighlightedTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let mark = gpui::HighlightStyle {
+                background_color: Some(gpui::red()),
+                font_weight: Some(gpui::FontWeight::BOLD),
+                ..Default::default()
+            };
+            div().size_full().child(TextSelectionLayer).child(
+                div()
+                    .w(px(240.))
+                    .h(px(32.))
+                    .child(SelectableText::new("local", "alpha beta").highlights([(6..10, mark)])),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn highlighted_text_selects_and_copies_as_plain_text(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| HighlightedTestView);
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        cx.simulate_mouse_down(
+            gpui::point(px(1.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            gpui::point(px(220.), px(12.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            gpui::point(px(220.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
+        });
+    }
+
+    struct CachedText {
+        renders: Rc<Cell<usize>>,
+    }
+
+    impl Render for CachedText {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            SelectableText::new("local", "alpha beta")
+        }
+    }
+
+    struct CachedTextParent {
+        text: gpui::Entity<CachedText>,
+    }
+
+    impl Render for CachedTextParent {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(TextSelectionLayer).child(
+                gpui::AnyView::from(self.text.clone())
+                    .cached(gpui::StyleRefinement::default().w(px(240.)).h(px(32.))),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_drag_redraws_the_text_before_the_button_is_released(cx: &mut TestAppContext) {
+        let renders = Rc::new(Cell::new(0));
+        let (_, cx) = cx.add_window_view({
+            let renders = renders.clone();
+            move |_, cx| CachedTextParent {
+                text: gpui::AppContext::new(cx, |_| CachedText { renders }),
+            }
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+        let before = renders.get();
+        draw(cx);
+        assert_eq!(
+            renders.get(),
+            before,
+            "the text is cached while nothing changes"
+        );
+
+        cx.simulate_mouse_down(
+            gpui::point(px(1.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        draw(cx);
+        let pressed = renders.get();
+        cx.simulate_mouse_move(
+            gpui::point(px(220.), px(12.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        draw(cx);
+        assert!(
+            renders.get() > pressed,
+            "the selection is drawn as the pointer moves"
+        );
     }
 
     struct CopyCallbackTestView {
@@ -362,5 +498,109 @@ mod tests {
                 Bounds::from_corners(point(px(10.), px(80.)), point(px(30.), px(100.))),
             ]
         );
+    }
+
+    /// A selectable line, and under it a control that acts on the selection,
+    /// drawn by a view of its own: cached when `cached`.
+    struct ControlTestView {
+        control: gpui::Entity<ControlView>,
+        cached: bool,
+    }
+
+    struct ControlView {
+        renders: Rc<Cell<usize>>,
+    }
+
+    impl Render for ControlView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            use crate::ElementExt as _;
+            self.renders.set(self.renders.get() + 1);
+            div().w(px(60.)).h(px(20.)).keep_text_selection("control")
+        }
+    }
+
+    impl Render for ControlTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let control = gpui::AnyView::from(self.control.clone());
+            let control = if self.cached {
+                control
+                    .cached(gpui::StyleRefinement::default().w(px(60.)).h(px(20.)))
+                    .into_any_element()
+            } else {
+                control.into_any_element()
+            };
+            div()
+                .size_full()
+                .child(TextSelectionLayer)
+                .child(
+                    div()
+                        .w(px(240.))
+                        .h(px(32.))
+                        .child(SelectableText::new("local", "alpha beta")),
+                )
+                .child(control)
+        }
+    }
+
+    fn press(position: gpui::Point<gpui::Pixels>, cx: &mut gpui::VisualTestContext) {
+        cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::default());
+    }
+
+    fn select_line(cx: &mut gpui::VisualTestContext) {
+        cx.simulate_mouse_down(
+            point(px(1.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(px(220.), px(12.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            point(px(220.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
+        });
+    }
+
+    fn selected(cx: &mut gpui::VisualTestContext) -> String {
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            TextSelection::selected_text(window, cx)
+        })
+    }
+
+    #[gpui::test]
+    fn a_press_on_an_element_marked_keep_text_selection_keeps_it(cx: &mut TestAppContext) {
+        for cached in [false, true] {
+            let renders = Rc::new(Cell::new(0));
+            let (view, cx) = cx.add_window_view(|_, cx| ControlTestView {
+                control: cx.new(|_| ControlView {
+                    renders: renders.clone(),
+                }),
+                cached,
+            });
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            select_line(cx);
+            // drawn again: a cached control is replayed, not drawn
+            let drawn = renders.get();
+            view.update(cx, |_, cx| cx.notify());
+            assert_eq!(selected(cx), "alpha beta");
+            assert_eq!(renders.get() == drawn, cached);
+
+            press(point(px(30.), px(42.)), cx);
+            assert_eq!(selected(cx), "alpha beta", "cached: {cached}");
+            // beside the control, the press clears it as before
+            press(point(px(120.), px(42.)), cx);
+            assert_eq!(selected(cx), "", "cached: {cached}");
+        }
     }
 }

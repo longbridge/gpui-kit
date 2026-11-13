@@ -688,7 +688,7 @@ impl RenderOnce for DatePicker {
         let display_title = state
             .date_time()
             .format(&state.display_format())
-            .unwrap_or(placeholder.clone());
+            .unwrap_or(placeholder);
 
         let (bg, fg) = input_style(self.disabled, cx);
 

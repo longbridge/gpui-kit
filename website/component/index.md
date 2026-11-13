@@ -84,6 +84,7 @@ collapsed: false
 - [Settings](settings) - Settings UI
 - [DataTable](data-table) - High-performance data tables
 - [Dock](dock) - Production-ready dock layouts with tabs, splits, and persistent state
+- [GridLayout](grid-layout) - Draggable, resizable grid for dashboards and widget boards
 - [Tabs](tabs) - Tabbed interface
 - [Tree](tree) - Hierarchical tree data display
 - [VirtualList](virtual-list) - Virtualized list for large datasets

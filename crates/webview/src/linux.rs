@@ -244,8 +244,9 @@ impl NativeWebViewSurface {
     }
 
     pub(crate) fn release(self, webview: std::rc::Rc<wry::WebView>) {
-        // Entity destruction can occur while App is borrowed. Destroy Wry's X11 windows before
-        // removing the surface window that contains them.
+        detach_from_surface(&webview);
+        // Entity destruction can occur while App is borrowed. Drop this reference to Wry's view
+        // (other handles may keep it alive), then remove the surface window.
         self.cx
             .clone()
             .spawn(async move |cx| {
@@ -261,4 +262,48 @@ impl NativeWebViewSurface {
             })
             .detach();
     }
+}
+
+/// Move Wry's X11 window out of the composition surface window, unmapped, before the surface
+/// is removed.
+///
+/// GPUI removes the surface window through its own X11 connection, which also destroys every
+/// window inside it. GTK sends its requests for Wry's windows through another connection, so
+/// requests it makes after that (destroying them when the webview is dropped, possibly later
+/// through a `WebViewHandle`) name windows that no longer exist, and GDK aborts the process on
+/// that X11 error. Outside the surface, Wry's windows stay valid until Wry destroys them.
+#[cfg(feature = "gpui-fast")]
+fn detach_from_surface(webview: &wry::WebView) {
+    use gdkx11::{X11Display, X11Window};
+    use gtk::{glib::translate::ToGlibPtr as _, prelude::*};
+    use wry::WebViewExtUnix as _;
+    use x11::xlib;
+
+    // Wry builds its GTK window on its own X11 window (foreign to GDK), a child of the surface.
+    let Some(container) = webview
+        .webview()
+        .toplevel()
+        .and_then(|toplevel| toplevel.window())
+        .and_then(|window| window.downcast::<X11Window>().ok())
+        .map(|window| window.xid())
+    else {
+        return;
+    };
+    let Some(display) =
+        gtk::gdk::Display::default().and_then(|display| display.downcast::<X11Display>().ok())
+    else {
+        return;
+    };
+    // SAFETY: `display` is a live GdkX11Display; its Xlib connection lives as long as it.
+    let xdisplay = unsafe { gdkx11::ffi::gdk_x11_display_get_xdisplay(display.to_glib_none().0) };
+    display.error_trap_push();
+    // SAFETY: A valid Xlib connection and window; errors are caught by the trap.
+    unsafe {
+        let root = xlib::XDefaultRootWindow(xdisplay);
+        xlib::XUnmapWindow(xdisplay, container);
+        xlib::XReparentWindow(xdisplay, container, root, 0, 0);
+    }
+    // Wait until the server has moved it, so GPUI's removal of the surface comes after.
+    display.upcast_ref::<gtk::gdk::Display>().sync();
+    display.error_trap_pop_ignored();
 }

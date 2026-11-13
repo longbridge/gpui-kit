@@ -114,8 +114,11 @@ Column::new("price", "Price")
     .text_right()
     .sortable()
 
-Column::new("actions", "Actions")
+Column::new("name", "Name")
     .fixed(ColumnFixed::Left)
+
+Column::new("actions", "Actions")
+    .fixed(ColumnFixed::Right)
     .resizable(false)
     .movable(false)
 ```
@@ -124,7 +127,7 @@ Column::new("actions", "Actions")
 
 - `sortable()` 开启排序
 - `width()` 设置宽度
-- `fixed(ColumnFixed::Left)` 固定到左侧
+- `fixed(ColumnFixed::Left)` 固定到左侧，`fixed(ColumnFixed::Right)` 固定到右侧；左侧固定列须排在最前，右侧固定列须排在最后
 - `resizable(false)` 禁止调整列宽
 - `movable(false)` 禁止拖动列顺序
 - `text_right()` / `text_center()` 设置对齐
@@ -223,6 +226,21 @@ impl TableDelegate for MyTableDelegate {
     }
 }
 ```
+
+## 无障碍
+
+屏幕阅读器读不到 `render_td` 绘制的文本。通过 `cell_label` 返回每个单元格的文本，屏幕阅读器才能读出单元格内容：
+
+```rust
+impl TableDelegate for MyTableDelegate {
+    fn cell_label(&self, row_ix: usize, col_ix: usize, _: &App) -> Option<SharedString> {
+        let row = self.data.get(row_ix)?;
+        Some(row.get_field_value(self.columns.get(col_ix)?.key.as_ref()).into())
+    }
+}
+```
+
+每一行的名称默认由其单元格的标签以逗号连接而成（例如 "Alice, Active, 80%"）。如需其他名称，可重写 `row_label`；返回 `None` 则不为该行命名。
 
 ## 选择模式
 
@@ -395,6 +413,7 @@ DataTable::new(&state)
     .bordered(true)
     .fixed_cols_border(true)
     .scrollbar_visible(true, true)
+    .scrollbar_mode(ScrollbarMode::Always)
 ```
 
 ## 键盘快捷键
@@ -407,12 +426,12 @@ DataTable::new(&state)
 - `PageUp/PageDown` 按页移动
 - `Escape` 清除选中
 
+两种模式下，Tab 和 Shift+Tab 都会把焦点移出表格：整个表格只占一个 Tab 停靠点。
+
 ### 单元格选择模式
 
 - `↑/↓` 在当前列中上下移动
 - `←/→` 在当前行中左右移动
-- `Tab` 移动到下一个单元格
-- `Shift+Tab` 移动到上一个单元格
 - `Escape` 清除选中
 
 ## API 参考
@@ -456,6 +475,7 @@ DataTable::new(&state)
 - `text_right()`
 - `text_center()`
 - `fixed(ColumnFixed)`
+- `fixed_left()` / `fixed_right()`
 - `resizable(bool)`
 - `movable(bool)`
 - `selectable(bool)`

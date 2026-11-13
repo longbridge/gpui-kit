@@ -22,8 +22,9 @@ use crate::{
     async_util::{Receiver, Sender, unbounded},
     input::{self, SelectAll},
     text::{
-        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TextViewStyle,
+        CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, LinkFn, MarkdownExtensions,
+        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TaskToggleHandlerFn,
+        TextViewStyle,
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
@@ -131,6 +132,11 @@ pub struct TextViewState {
     pub(super) table_actions: Option<std::sync::Arc<TableActionsFn>>,
     pub(super) image_source: Option<std::sync::Arc<super::text_view::ImageSourceFn>>,
     pub(super) link_click_handler: Option<std::sync::Arc<LinkClickHandlerFn>>,
+    pub(super) link_hook: Option<std::sync::Arc<LinkFn>>,
+    pub(super) link_tooltip: Option<std::sync::Arc<super::text_view::LinkTooltipFn>>,
+    pub(super) hovered_link_tooltip: Option<(SharedString, gpui::AnyView)>,
+    pub(super) link_tooltip_target: Option<(usize, SharedString)>,
+    pub(super) task_toggle_handler: Option<std::sync::Arc<TaskToggleHandlerFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 
     pub(super) is_selecting: bool,
@@ -236,6 +242,11 @@ impl TextViewState {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_hook: None,
+            link_tooltip: None,
+            hovered_link_tooltip: None,
+            link_tooltip_target: None,
+            task_toggle_handler: None,
             image_source: None,
             markdown_extensions: Arc::default(),
             is_selecting: false,
@@ -945,14 +956,21 @@ impl TextViewState {
         }
     }
 
-    pub(crate) fn set_multi_click_line(&mut self, bounds: Bounds<Pixels>, cx: &mut App) {
+    /// Selects every inline in `rows.bounds`, as a triple click on a
+    /// paragraph laid out as an inline flow does: from the start of its first
+    /// row to the end of its last row.
+    pub(crate) fn set_multi_click_line(&mut self, rows: ParagraphRows, cx: &mut App) {
+        let bounds = rows.bounds;
         self.set_multi_click_selection(
             bounds.center(),
             TextViewMultiClickKind::Line,
             String::new(),
             (
-                caret_line_box(bounds.origin, bounds.size.height),
-                caret_line_box(bounds.top_right(), bounds.size.height),
+                caret_line_box(bounds.origin, rows.first_row_height),
+                caret_line_box(
+                    gpui::point(bounds.right(), bounds.bottom() - rows.last_row_height),
+                    rows.last_row_height,
+                ),
             ),
             cx,
         );
@@ -1038,6 +1056,26 @@ impl TextViewState {
                 ..selection
             }
         })
+    }
+}
+
+/// The rows a triple click selects as one paragraph: their union, and the
+/// heights of the first and last rows for the selection's carets.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ParagraphRows {
+    pub(crate) bounds: Bounds<Pixels>,
+    pub(crate) first_row_height: Pixels,
+    pub(crate) last_row_height: Pixels,
+}
+
+impl ParagraphRows {
+    /// One row on its own.
+    pub(crate) fn single(bounds: Bounds<Pixels>) -> Self {
+        Self {
+            bounds,
+            first_row_height: bounds.size.height,
+            last_row_height: bounds.size.height,
+        }
     }
 }
 
@@ -1135,10 +1173,13 @@ impl Render for TextViewState {
             code_block_highlighter: self.code_block_highlighter.clone(),
             table_actions: self.table_actions.clone(),
             link_click_handler: self.link_click_handler.clone(),
+            link_hook: self.link_hook.clone(),
+            task_toggle_handler: self.task_toggle_handler.clone(),
             image_source: self.image_source.clone(),
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,
             range_highlights: self.range_highlights.clone(),
+            foregrounds: Default::default(),
             reveal,
             body_font_size,
         };

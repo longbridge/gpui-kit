@@ -120,7 +120,7 @@ export default class Releases extends View {
         .expect("load application");
     let mounted = Rc::new(std::cell::RefCell::new(None));
     let mounted_for_window = mounted.clone();
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         let view = runtime_for_window
             .mount_application(&loaded, window, cx)

@@ -242,7 +242,7 @@ fn descendant_id(window: &mut Window, path: &[ElementId]) -> GlobalElementId {
 thread_local! { static TEXTS: RefCell<HashMap<WindowKey, Vec<TextSnapshot>>> = RefCell::new(HashMap::new()); }
 
 fn window_key(window: &Window) -> WindowKey {
-    std::sync::Arc::as_ptr(window.text_system()) as usize
+    std::rc::Rc::as_ptr(window.text_system()) as usize
 }
 
 /// Forgets the text of the previous frame. Root calls it as it renders.
@@ -312,8 +312,7 @@ pub fn find(window: &Window, scope: &[ElementId], id: &ElementId) -> Option<Elem
 pub fn find_all(window: &Window, scope: &[ElementId], id: &ElementId) -> Vec<ElementSnapshot> {
     let mut matches: Vec<_> = REGISTRY.with(|registry| {
         let registry = registry.borrow();
-        let Some(entries) = registry.get(&(std::sync::Arc::as_ptr(window.text_system()) as usize))
-        else {
+        let Some(entries) = registry.get(&window_key(window)) else {
             return Vec::new();
         };
         entries
@@ -336,7 +335,7 @@ pub fn snapshots(window: &Window) -> Vec<ElementSnapshot> {
     REGISTRY.with(|registry| {
         registry
             .borrow()
-            .get(&(std::sync::Arc::as_ptr(window.text_system()) as usize))
+            .get(&window_key(window))
             .map(|entries| {
                 entries
                     .values()
@@ -510,7 +509,7 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
             window.with_element_state(global_id, |state: Option<Rc<Registration>>, window| {
                 let registration = state.unwrap_or_else(|| {
                     Rc::new(Registration {
-                        window: std::sync::Arc::as_ptr(window.text_system()) as usize,
+                        window: window_key(window),
                         global_id: global_id.clone(),
                         facts: RefCell::new(facts.clone()),
                         semantic_owner: RefCell::new(None),

@@ -507,6 +507,12 @@ impl TextWrapper {
         }
     }
 
+    /// Whether the text has been shaped once, which happens at the first layout.
+    #[inline]
+    pub(crate) fn is_prepared(&self) -> bool {
+        self._initialized
+    }
+
     #[inline]
     pub(crate) fn set_default_text(&mut self, text: &Rope) {
         self.text = text.clone();

@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, StyleRefinement, Styled, Window,
     div, prelude::FluentBuilder, px, relative,
 };
+use gpui_base::LogicalStyledExt as _;
 
 use crate::{ActiveTheme, Icon, Sizable, Size, StyledExt, ThemeStyled as _, h_flex, white};
 
@@ -126,7 +127,7 @@ impl RenderOnce for Badge {
                         .text_color(white())
                         .text_size(text_size)
                         .map(|this| match self.variant {
-                            BadgeVariant::Dot => this.top_0().right_0().size(px(6.)),
+                            BadgeVariant::Dot => this.top_0().inset_e(px(0.), cx).size(px(6.)),
                             BadgeVariant::Number => {
                                 let count = if self.count > self.max {
                                     format!("{}+", self.max)
@@ -143,7 +144,7 @@ impl RenderOnce for Badge {
                                 };
 
                                 this.top(top)
-                                    .right(left)
+                                    .inset_e(left, cx)
                                     .py_0p5()
                                     .px_0p5()
                                     .min_w_3p5()
@@ -152,7 +153,7 @@ impl RenderOnce for Badge {
                                     .child(count)
                             }
                             BadgeVariant::Icon(icon) => this
-                                .right_0()
+                                .inset_e(px(0.), cx)
                                 .bottom_0()
                                 .size(size)
                                 .border_1()

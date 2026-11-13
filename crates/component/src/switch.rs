@@ -7,7 +7,9 @@ use gpui::{
     RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
     px,
 };
-use gpui_base::{Switch as BaseSwitch, SwitchThumb, SwitchTrack, spring};
+use gpui_base::{
+    LayoutDirection, LogicalStyledExt as _, Switch as BaseSwitch, SwitchThumb, SwitchTrack, spring,
+};
 use std::{rc::Rc, time::Duration};
 
 /// A Switch element that can be toggled on or off.
@@ -35,7 +37,7 @@ impl Switch {
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id: ElementId = id.into();
         Self {
-            id: id.clone(),
+            id,
             style: StyleRefinement::default(),
             checked: false,
             disabled: false,
@@ -225,6 +227,7 @@ impl RenderOnce for Switch {
             cx,
         );
 
+        let rtl = LayoutDirection::global(cx).is_rtl();
         div().refine_style(&self.style).child(
             BaseSwitch::new(self.id.clone())
                 .checked(checked)
@@ -246,7 +249,11 @@ impl RenderOnce for Switch {
                 .h_flex()
                 .gap_2()
                 .items_start()
-                .when(self.label_side.is_left(), |this| this.flex_row_reverse())
+                // `label_side` is logical: Right means after the track, which
+                // is its left in a right-to-left layout.
+                .when(self.label_side.is_left() != rtl, |this| {
+                    this.flex_row_reverse()
+                })
                 .child(
                     // Switch Bar
                     SwitchTrack::new((self.id.clone(), "track"))
@@ -259,7 +266,8 @@ impl RenderOnce for Switch {
                         .h(bg_height)
                         .flex_shrink_0()
                         .rounded(radius)
-                        .flex()
+                        // The thumb rests on the start edge and travels to the end.
+                        .flex_row_dir(cx)
                         .items_center()
                         // The thumb inset is a 1px border plus 1px padding,
                         // not a 2px border: the focus ring tints the border
@@ -287,7 +295,7 @@ impl RenderOnce for Switch {
                             SwitchThumb::new(checked)
                                 .rounded(radius)
                                 .size(bar_width)
-                                .left(thumb_x)
+                                .inset_s(thumb_x, cx)
                                 .bg(toggle_bg),
                         ),
                 )

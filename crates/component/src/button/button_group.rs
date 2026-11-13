@@ -6,6 +6,7 @@ use gpui::{
     RenderOnce, StatefulInteractiveElement as _, StyleRefinement, Styled, div,
     prelude::FluentBuilder as _,
 };
+use gpui_base::LogicalStyledExt as _;
 use std::{cell::Cell, rc::Rc};
 
 use crate::{
@@ -150,7 +151,7 @@ impl ButtonVariants for ButtonGroup {
 }
 
 impl RenderOnce for ButtonGroup {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let children_len = self.children.len();
         let mut selected_ixs: Vec<usize> = Vec::new();
         let state = Rc::new(Cell::new(None));
@@ -167,7 +168,7 @@ impl RenderOnce for ButtonGroup {
             .id(self.id)
             .flex()
             .when(vertical, |this| this.flex_col().justify_center())
-            .when(!vertical, |this| this.items_center())
+            .when(!vertical, |this| this.flex_row_dir(cx).items_center())
             .refine_style(&self.style)
             .children(
                 self.children

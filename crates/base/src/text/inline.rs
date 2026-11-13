@@ -1,3 +1,6 @@
+mod selection_paint;
+
+use super::state::ParagraphRows;
 #[cfg(target_family = "wasm")]
 use async_channel::bounded;
 use gpui::Corners;
@@ -16,11 +19,11 @@ use std::{
 };
 
 use gpui::{
-    App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId,
+    AnyTooltip, App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId,
     ForegroundExecutor, Global, GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior,
     Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, StyledText, Task,
-    TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, quad, size,
+    TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, size,
 };
 
 use crate::{
@@ -130,6 +133,11 @@ impl From<HighlightStyle> for InlineHighlight {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static COMBINED_HIGHLIGHT_INPUTS: Cell<usize> = const { Cell::new(0) };
+}
+
 /// Merges two highlight lists over one text into non-overlapping ranges,
 /// cutting at every endpoint of every input range. Same sweep as
 /// [`gpui::combine_highlights`], for [`InlineHighlight`] payloads.
@@ -140,6 +148,8 @@ pub(super) fn combine_highlights(
     let mut endpoints = Vec::new();
     let mut highlights = Vec::new();
     for (range, highlight) in a.into_iter().chain(b) {
+        #[cfg(test)]
+        COMBINED_HIGHLIGHT_INPUTS.with(|inputs| inputs.set(inputs.get() + 1));
         if !range.is_empty() {
             let id = highlights.len();
             endpoints.push((range.start, id, true));
@@ -167,6 +177,48 @@ pub(super) fn combine_highlights(
         }
     }
     combined
+}
+
+/// Layers host foregrounds after mark/link styling, independent of where a
+/// mark starts. `combine_highlights` folds active spans in start order, so a
+/// mark beginning inside an already active foreground must not win its color.
+pub(super) fn foreground_highlights(
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    text: &str,
+    offset: usize,
+    foregrounds: &[(Range<usize>, Hsla)],
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    let ranges: Vec<_> = foregrounds
+        .iter()
+        .filter_map(|(range, color)| {
+            let start = range.start.saturating_sub(offset).min(text.len());
+            let end = range.end.saturating_sub(offset).min(text.len());
+            (start < end && text.is_char_boundary(start) && text.is_char_boundary(end))
+                .then_some((start..end, *color))
+        })
+        .collect();
+    if ranges.is_empty() {
+        return highlights;
+    }
+    let mut highlights = combine_highlights(
+        highlights,
+        ranges.iter().map(|(range, color)| {
+            (
+                range.clone(),
+                HighlightStyle {
+                    color: Some(*color),
+                    ..Default::default()
+                }
+                .into(),
+            )
+        }),
+    );
+    for (range, highlight) in &mut highlights {
+        if let Some((_, color)) = ranges.iter().rev().find(|(r, _)| r.contains(&range.start)) {
+            highlight.style.color = Some(*color);
+        }
+    }
+    highlights
 }
 
 /// Layers a streamed fade-in over `highlights`: text inside each fade range
@@ -320,12 +372,16 @@ pub(super) struct Inline {
     text_style: Option<TextStyle>,
     paint_origin: Option<Point<Pixels>>,
     selection_bounds: Option<Bounds<Pixels>>,
+    /// What a triple click selects, when the text is one row of a wrapped
+    /// inline flow: the whole paragraph, as its first and last rows.
+    paragraph_rows: Option<ParagraphRows>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     /// Range highlight backgrounds, painted behind the text.
     range_backgrounds: Vec<(Range<usize>, Hsla)>,
     /// The start of a pending reveal, when it is in this text.
     reveal: Option<RevealAt>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    link_tooltip: bool,
     /// What this frame's layout was shaped with, to hand the shaped text to
     /// the next frame (see [`RetainedLayout`]).
     retained_key: Option<(Vec<TextRun>, TextStyle)>,
@@ -345,6 +401,7 @@ pub(crate) struct InlineState {
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
+    pub(super) selection_rows: Option<Box<selection_paint::Rows>>,
     /// Set only through the editor host API (`Paragraph::with_leaf_key`):
     /// the leaf reports its geometry to the collector installed by
     /// `editor_host::collect_leaf_geometry`. `None` for every plain `TextView`.
@@ -708,10 +765,12 @@ impl Inline {
             text_style: None,
             paint_origin: None,
             selection_bounds: None,
+            paragraph_rows: None,
             selection_source: None,
             range_backgrounds: Vec::new(),
             reveal: None,
             link_click_handler,
+            link_tooltip: false,
             retained_key: None,
             handed_over: false,
             editor_piece: None,
@@ -740,6 +799,11 @@ impl Inline {
 
     pub(super) fn selection_bounds(mut self, bounds: Bounds<Pixels>) -> Self {
         self.selection_bounds = Some(bounds);
+        self
+    }
+
+    pub(super) fn paragraph_rows(mut self, rows: ParagraphRows) -> Self {
+        self.paragraph_rows = Some(rows);
         self
     }
 
@@ -828,6 +892,62 @@ impl Inline {
         }
 
         None
+    }
+
+    fn prepaint_link_tooltip(&mut self, hitbox: &Hitbox, window: &mut Window, cx: &mut App) {
+        let Some(view) = GlobalState::global(cx).text_view_state() else {
+            return;
+        };
+        let Some(builder) = view.read(cx).link_tooltip.clone() else {
+            return;
+        };
+        self.link_tooltip = !self.links.is_empty();
+        // Hit testing is unavailable during prepaint, as with native GPUI tooltips.
+        let position = window.mouse_position();
+        if !self.link_tooltip
+            || window.last_input_was_keyboard()
+            || !hitbox.bounds.contains(&position)
+            || !hitbox.content_mask.bounds.contains(&position)
+        {
+            return;
+        }
+        let Some(link) = Self::link_for_position(self.styled_text.layout(), &self.links, position)
+        else {
+            return;
+        };
+        let target = (state_key(&self.state), link.url.clone());
+        if view.read(cx).link_tooltip_target.as_ref() != Some(&target) {
+            return;
+        }
+        let cached = view
+            .read(cx)
+            .hovered_link_tooltip
+            .as_ref()
+            .filter(|(url, _)| *url == link.url)
+            .map(|(_, tooltip)| tooltip.clone());
+        let tooltip = match cached {
+            Some(tooltip) => tooltip,
+            None => {
+                let tooltip = builder(&link.url, window, cx);
+                view.update(cx, |state, _| {
+                    state.hovered_link_tooltip = Some((link.url.clone(), tooltip.clone()));
+                });
+                tooltip
+            }
+        };
+        let bounds = hitbox.bounds.intersect(&hitbox.content_mask.bounds);
+        let layout = self.styled_text.layout().clone();
+        let links = self.links.clone();
+        window.set_tooltip(AnyTooltip {
+            view: tooltip,
+            mouse_position: position,
+            check_visible_and_update: Rc::new(move |_, window, _| {
+                let position = window.mouse_position();
+                !window.last_input_was_keyboard()
+                    && bounds.contains(&position)
+                    && Self::link_for_position(&layout, &links, position).is_some()
+            }),
+        });
     }
 
     /// Get the range of the link at given mouse position.
@@ -1012,80 +1132,6 @@ impl Inline {
         ))
     }
 
-    /// Paint the selection background.
-    fn paint_selection(
-        selection: &Selection,
-        text_layout: &TextLayout,
-        bounds: &Bounds<Pixels>,
-        window: &mut Window,
-        color: gpui::Hsla,
-    ) {
-        let mut start = selection.start;
-        let mut end = selection.end;
-        if end < start {
-            std::mem::swap(&mut start, &mut end);
-        }
-        let Some(start_position) = text_layout.position_for_index(start) else {
-            return;
-        };
-        let Some(end_position) = text_layout.position_for_index(end) else {
-            return;
-        };
-
-        let line_height = text_layout.line_height();
-        if start_position.y == end_position.y {
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    start_position,
-                    point(end_position.x, end_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-        } else {
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    start_position,
-                    point(bounds.right(), start_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-
-            if end_position.y > start_position.y + line_height {
-                window.paint_quad(quad(
-                    Bounds::from_corners(
-                        point(bounds.left(), start_position.y + line_height),
-                        point(bounds.right(), end_position.y),
-                    ),
-                    px(0.),
-                    color,
-                    Edges::default(),
-                    gpui::transparent_black(),
-                    BorderStyle::default(),
-                ));
-            }
-
-            window.paint_quad(quad(
-                Bounds::from_corners(
-                    point(bounds.left(), end_position.y),
-                    point(end_position.x, end_position.y + line_height),
-                ),
-                px(0.),
-                color,
-                Edges::default(),
-                gpui::transparent_black(),
-                BorderStyle::default(),
-            ));
-        }
-    }
-
     /// Paint each range highlight behind the text of its range.
     fn paint_range_highlights(&self, text_layout: &TextLayout, window: &mut Window) {
         let glyphs = glyph_boxes(
@@ -1194,6 +1240,7 @@ impl Element for Inline {
         self.request_reveal(window);
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        self.prepaint_link_tooltip(&hitbox, window, cx);
         self.retain_styled_text(cx);
         hitbox
     }
@@ -1265,13 +1312,48 @@ impl Element for Inline {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
         }
 
-        if let Some(selection) = &state.selection {
+        if self.link_tooltip
+            && let Some(view) = GlobalState::global(cx).text_view_state()
+        {
+            let key = state_key(&self.state);
+            let target = hovered_link.as_ref().and_then(|range| {
+                self.links
+                    .iter()
+                    .find(|(candidate, _)| candidate == range)
+                    .map(|(_, link)| (key, link.url.clone()))
+            });
+            let changed = view.update(cx, |state, _| {
+                let owns_target = state
+                    .link_tooltip_target
+                    .as_ref()
+                    .is_some_and(|(owner, _)| *owner == key);
+                if (target.is_some() || owns_target) && state.link_tooltip_target != target {
+                    state.link_tooltip_target = target;
+                    true
+                } else {
+                    false
+                }
+            });
+            if changed {
+                cx.notify(current_view);
+                window.request_animation_frame();
+            }
+        }
+
+        if let Some(selection) = state.selection {
             let color = GlobalState::global(cx)
                 .text_view_state()
                 .map(|state| state.read(cx).text_view_style.selection())
                 .unwrap_or_else(|| crate::Theme::global(cx).tokens.colors.selection);
-            Self::paint_selection(selection, &text_layout, &bounds, window, color);
-            if let Some((start, end)) = Self::selection_edges(selection, &text_layout)
+            selection_paint::visit(
+                &text_layout,
+                window.text_style().text_align,
+                selection.start.min(selection.end)..selection.start.max(selection.end),
+                window.content_mask().bounds,
+                &mut state.selection_rows,
+                |rect| window.paint_quad(gpui::fill(rect, color)),
+            );
+            if let Some((start, end)) = Self::selection_edges(&selection, &text_layout)
                 && let Some(text_view_state) = GlobalState::global(cx).text_view_state()
             {
                 text_view_state
@@ -1279,6 +1361,8 @@ impl Element for Inline {
                     .selection_adapter
                     .register_selection_edges(start, end);
             }
+        } else {
+            state.selection_rows = None;
         }
 
         _ = text_layout.paint_foreground(window, cx);
@@ -1325,6 +1409,9 @@ impl Element for Inline {
                 let text = self.text.clone();
                 let text_view_state = GlobalState::global(cx).text_view_state();
                 let line_bounds = self.selection_bounds;
+                let paragraph_rows = self
+                    .paragraph_rows
+                    .or_else(|| line_bounds.map(ParagraphRows::single));
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.bubble()
                         || !hitbox.is_hovered(window)
@@ -1334,13 +1421,11 @@ impl Element for Inline {
                     }
 
                     if event.click_count == 3
-                        && let Some(line_bounds) = line_bounds
+                        && let Some(rows) = paragraph_rows
                     {
                         GlobalState::suppress_text_selection(cx);
                         if let Some(view) = &text_view_state {
-                            view.update(cx, |state, cx| {
-                                state.set_multi_click_line(line_bounds, cx)
-                            });
+                            view.update(cx, |state, cx| state.set_multi_click_line(rows, cx));
                         }
                         cx.notify(current_view);
                         return;
@@ -1407,15 +1492,22 @@ impl Element for Inline {
                 let hitbox = hitbox.clone();
                 let text_layout = text_layout.clone();
                 let links = self.links.clone();
+                let link_tooltip = self.link_tooltip;
                 let mut hovered_link = hovered_link;
                 move |event: &MouseMoveEvent, phase, window, cx| {
-                    if !phase.bubble() || !hitbox.is_hovered(window) {
+                    if !phase.bubble() {
+                        return;
+                    }
+                    if !hitbox.is_hovered(window) {
+                        if link_tooltip && hovered_link.take().is_some() {
+                            cx.notify(current_view);
+                        }
                         return;
                     }
 
                     let updated =
                         Self::link_range_for_position(&text_layout, &links, event.position);
-                    if hovered_link != updated {
+                    if hovered_link != updated || (link_tooltip && updated.is_some()) {
                         hovered_link = updated;
                         cx.notify(current_view);
                     }
@@ -2056,7 +2148,14 @@ mod range_highlight_tests {
             let origin = point(px(7.), px(11.));
             element.prepaint_at(origin, window, cx);
             let glyphs = glyph_boxes(&layout, align, layout.bounds().size.width);
-            range_boxes(&glyphs, range)
+            let expected = range_boxes(&glyphs, range.clone());
+            let mut selection_boxes = Vec::new();
+            selection_paint::visit(&layout, align, range, layout.bounds(), &mut None, |rect| {
+                let row = ((rect.top() - origin.y) / layout.line_height()).round() as usize;
+                selection_boxes.push((row, rect.left() - origin.x, rect.right() - origin.x));
+            });
+            assert_eq!(selection_boxes, expected);
+            expected
                 .into_iter()
                 .map(|(row, left, right)| (left, right, row))
                 .collect()
@@ -2137,6 +2236,17 @@ mod range_highlight_tests {
         assert_eq!(across.len(), 2, "{across:?}");
         assert_eq!(across[0].1, rows[0].1);
         assert_eq!((across[1].0, across[1].2), (px(0.), 1));
+    }
+
+    #[test]
+    fn selection_preserves_spaces_and_skips_empty_rows() {
+        let text = "aa  \n\nbbbbb";
+        let rows = boxes(text, 200., TextAlign::Left, 0..text.len());
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].2, 2);
+        let letters = boxes(text, 200., TextAlign::Left, 0..2);
+        assert_eq!(rows[0].1, letters[0].1 * 2.);
+        assert!(boxes(text, 200., TextAlign::Left, 4..6).is_empty());
     }
 
     #[test]

@@ -96,6 +96,8 @@ Select::new(&state)
     .icon(IconName::Search)
 ```
 
+设置 `.highlight_matches(true)` 可高亮每一行中与搜索词匹配的部分（默认关闭）。行通过 `SelectItem::render_highlighted` 渲染；自定义行的选项需同时重写它和 `render`。
+
 ### 自定义 SelectItem
 
 如果你希望选项携带更复杂的数据结构，或者希望 `selected_value` 返回自定义类型，可以自己实现 `SelectItem`。

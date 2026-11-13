@@ -27,6 +27,10 @@ pub struct Button {
     semantic_styles: ButtonStyles,
     selected: bool,
     disabled: bool,
+    hover_style: Option<StyleRefinement>,
+    active_style: Option<StyleRefinement>,
+    group_hover_style: Option<(SharedString, StyleRefinement)>,
+    group_active_style: Option<(SharedString, StyleRefinement)>,
     children: SmallVec<[AnyElement; 2]>,
     on_click: Option<ClickHandler>,
     accessibility_label: Option<SharedString>,
@@ -47,6 +51,10 @@ impl Button {
             semantic_styles: ButtonStyles::default(),
             selected: false,
             disabled: false,
+            hover_style: None,
+            active_style: None,
+            group_hover_style: None,
+            group_active_style: None,
             children: SmallVec::new(),
             on_click: None,
             accessibility_label: None,
@@ -63,9 +71,17 @@ impl Button {
     /// Disabled buttons are skipped during Tab traversal. If this button already
     /// owns focus when it becomes disabled, it retains the focus binding until
     /// focus moves away, so keyboard traversal can continue in either direction.
+    ///
+    /// While disabled, the `hover`, `active`, `group_hover` and `group_active`
+    /// styles are not applied; use [`ButtonStyles::disabled`] for its look.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
+    }
+
+    /// Whether the button is disabled.
+    pub fn is_disabled(&self) -> bool {
+        self.disabled
     }
 
     /// Sets the application-controlled selected presentation state.
@@ -207,9 +223,37 @@ impl InteractiveElement for Button {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }
+
+    fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.hover_style = Some(f(StyleRefinement::default()));
+        self
+    }
+
+    fn group_hover(
+        mut self,
+        group_name: impl Into<SharedString>,
+        f: impl FnOnce(StyleRefinement) -> StyleRefinement,
+    ) -> Self {
+        self.group_hover_style = Some((group_name.into(), f(StyleRefinement::default())));
+        self
+    }
 }
 
-impl StatefulInteractiveElement for Button {}
+impl StatefulInteractiveElement for Button {
+    fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.active_style = Some(f(StyleRefinement::default()));
+        self
+    }
+
+    fn group_active(
+        mut self,
+        group_name: impl Into<SharedString>,
+        f: impl FnOnce(StyleRefinement) -> StyleRefinement,
+    ) -> Self {
+        self.group_active_style = Some((group_name.into(), f(StyleRefinement::default())));
+        self
+    }
+}
 
 impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -217,6 +261,13 @@ impl RenderOnce for Button {
         let disabled = self.disabled;
         let style = self.resolved_style();
         let on_click = self.on_click;
+        let pointer_style = move |style: StyleRefinement| {
+            if disabled {
+                StyleRefinement::default()
+            } else {
+                style
+            }
+        };
 
         self.base
             // Centering is part of Button's control geometry. Without a flex
@@ -264,6 +315,18 @@ impl RenderOnce for Button {
                     })
                 },
             )
+            .when_some(self.hover_style, |this, style| {
+                this.hover(|_| pointer_style(style))
+            })
+            .when_some(self.active_style, |this, style| {
+                this.active(|_| pointer_style(style))
+            })
+            .when_some(self.group_hover_style, |this, (group, style)| {
+                this.group_hover(group, |_| pointer_style(style))
+            })
+            .when_some(self.group_active_style, |this, (group, style)| {
+                this.group_active(group, |_| pointer_style(style))
+            })
             .children(self.children)
             .refine_style(&style)
             .a11y_disabled(disabled)
@@ -581,6 +644,79 @@ mod tests {
             .styles(|styles| styles.disabled(|style| style.opacity(0.5)))
             .disabled(true);
         assert_eq!(semantic_only.resolved_style().opacity, Some(0.5));
+    }
+
+    #[gpui::test]
+    fn disabled_button_ignores_hover_and_active_styles(cx: &mut TestAppContext) {
+        struct PointerProbe {
+            disabled: bool,
+            text_color: Rc<Cell<Option<gpui::Hsla>>>,
+        }
+
+        impl Render for PointerProbe {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let text_color = self.text_color.clone();
+                Button::new("pointer-probe")
+                    .size(px(40.))
+                    .text_color(gpui::red())
+                    .hover(|style| style.text_color(gpui::green()))
+                    .active(|style| style.text_color(gpui::blue()))
+                    .disabled(self.disabled)
+                    .child(
+                        canvas(
+                            |_, _, _| {},
+                            move |_, _, window, _| text_color.set(Some(window.text_style().color)),
+                        )
+                        .size_full(),
+                    )
+            }
+        }
+
+        let text_color = Rc::new(Cell::new(None));
+        let (view, cx) = cx.add_window_view({
+            let text_color = text_color.clone();
+            move |_, _| PointerProbe {
+                disabled: true,
+                text_color,
+            }
+        });
+        let redraw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+        let position = point(px(10.), px(10.));
+        redraw(cx);
+
+        cx.simulate_mouse_move(position, None, Modifiers::default());
+        redraw(cx);
+        assert_eq!(
+            text_color.get(),
+            Some(gpui::red()),
+            "disabled ignores hover"
+        );
+
+        cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::default());
+        redraw(cx);
+        assert_eq!(
+            text_color.get(),
+            Some(gpui::red()),
+            "disabled ignores active"
+        );
+        cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::default());
+
+        view.update(cx, |this, cx| {
+            this.disabled = false;
+            cx.notify();
+        });
+        redraw(cx);
+        assert_eq!(text_color.get(), Some(gpui::green()), "enabled shows hover");
+
+        cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::default());
+        redraw(cx);
+        assert_eq!(text_color.get(), Some(gpui::blue()), "enabled shows active");
+    }
+
+    #[test]
+    fn is_disabled_reports_the_disabled_state() {
+        assert!(!Button::new("enabled").is_disabled());
+        assert!(Button::new("disabled").disabled(true).is_disabled());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use instant::Duration;
-use std::ops::Range;
+use std::{cell::Cell, ops::Range, rc::Rc};
 
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
 use crate::input::InputState;
@@ -10,12 +10,12 @@ use crate::{
     scroll::Scrollbar,
     v_flex,
 };
-use crate::{Icon, IndexPath, Selectable, Sizable, StyledExt};
+use crate::{ElementExt as _, Icon, IndexPath, Selectable, Sizable, StyledExt};
 use crate::{VirtualListScrollHandle, list::ListDelegate, v_virtual_list};
 use gpui::{
     App, AvailableSpace, ClickEvent, Context, DefiniteLength, EdgesRefinement, EventEmitter,
-    ListSizingBehavior, RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Subscription, px, size,
+    ListSizingBehavior, Pixels, RenderOnce, Role, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, StyleRefinement, Subscription, px, size,
 };
 use gpui::{
     AppContext, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
@@ -58,6 +58,8 @@ struct ListOptions {
     scrollbar_visible: bool,
     search_placeholder: Option<SharedString>,
     max_height: Option<Length>,
+    record_items_height: bool,
+    hold_items_height: bool,
     paddings: EdgesRefinement<DefiniteLength>,
 }
 
@@ -68,6 +70,8 @@ impl Default for ListOptions {
             size: Size::default(),
             scrollbar_visible: true,
             max_height: None,
+            record_items_height: false,
+            hold_items_height: false,
             search_placeholder: None,
             paddings: EdgesRefinement::default(),
         }
@@ -90,6 +94,8 @@ pub struct ListState<D: ListDelegate> {
     deferred_scroll_to_index: Option<(IndexPath, ScrollStrategy)>,
     mouse_right_clicked_index: Option<IndexPath>,
     reset_on_cancel: bool,
+    /// Items height recorded on the first paint while `hold_items_height` is on.
+    held_items_height: Rc<Cell<Option<Pixels>>>,
     searchable: bool,
     selectable: bool,
     _search_task: Task<()>,
@@ -123,10 +129,17 @@ where
             mouse_right_clicked_index: None,
             scroll_handle: VirtualListScrollHandle::new(),
             reset_on_cancel: true,
+            held_items_height: Rc::default(),
             _search_task: Task::ready(()),
             _load_more_task: Task::ready(()),
             _query_input_subscription,
         }
+    }
+
+    /// Forget the items height held by [`List::hold_items_height`], so the
+    /// next paint records it again. Call it when a popup menu is closed.
+    pub(crate) fn reset_held_items_height(&self) {
+        self.held_items_height.set(None);
     }
 
     /// Sets whether the list is searchable, default is `false`.
@@ -544,6 +557,13 @@ where
         let rows_cache = self.rows_cache.clone();
         let scrollbar_visible = self.options.scrollbar_visible;
         let scroll_handle = self.scroll_handle.clone();
+        let record_items_height = self.options.record_items_height;
+        let held_items_height = self.held_items_height.clone();
+        let items_min_height = self
+            .options
+            .hold_items_height
+            .then(|| held_items_height.get())
+            .flatten();
         let item_to_measure_index = rows_cache
             .position_of(&self.item_to_measure_index)
             .or_else(|| rows_cache.first_entry_position())
@@ -554,6 +574,14 @@ where
             .relative()
             .size_full()
             .when_some(self.options.max_height, |this, h| this.max_h(h))
+            .when_some(items_min_height, |this, h| this.min_h(h))
+            .when(record_items_height, |this| {
+                this.on_prepaint(move |bounds, _, _| {
+                    if held_items_height.get().is_none() && bounds.size.height > px(0.) {
+                        held_items_height.set(Some(bounds.size.height));
+                    }
+                })
+            })
             .overflow_hidden()
             .when(items_count == 0, |this| {
                 this.child(self.delegate.render_empty(window, cx))
@@ -774,6 +802,17 @@ where
         self.options.search_placeholder = Some(placeholder.into());
         self
     }
+
+    /// Record the items area height on its first paint and, while `hold` is
+    /// true, keep the area at least that tall, so a search that filters items
+    /// does not shrink (and move) a popup menu opened above its trigger.
+    ///
+    /// Reset with [`ListState::reset_held_items_height`].
+    pub(crate) fn hold_items_height(mut self, hold: bool) -> Self {
+        self.options.record_items_height = true;
+        self.options.hold_items_height = hold;
+        self
+    }
 }
 
 impl<D> Styled for List<D>
@@ -900,6 +939,66 @@ mod measurement_tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         wheel(cx, 2.);
         assert!(state.read_with(cx, |state, _| state.scroll_handle.offset().y) > end);
+    }
+
+    struct HeightProbe {
+        list: Entity<ListState<Delegate>>,
+        hold: bool,
+        height: std::rc::Rc<std::cell::Cell<Pixels>>,
+    }
+
+    impl Render for HeightProbe {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let height = self.height.clone();
+            div().w(px(240.)).child(
+                div()
+                    .on_prepaint(move |bounds, _, _| height.set(bounds.size.height))
+                    .child(
+                        List::new(&self.list)
+                            .max_h(px(200.))
+                            .hold_items_height(self.hold),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn hold_items_height_keeps_the_list_height_when_items_shrink(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for (hold, expected_short) in [(false, px(36.)), (true, px(200.))] {
+            let height = std::rc::Rc::new(std::cell::Cell::new(px(0.)));
+            let (view, cx) = cx.add_window_view({
+                let height = height.clone();
+                move |window, cx| HeightProbe {
+                    list: cx.new(|cx| ListState::new(Delegate { counts: vec![40] }, window, cx)),
+                    hold: false,
+                    height,
+                }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(height.get(), px(200.), "a long list stops at max_h");
+
+            view.update(cx, |view, cx| {
+                view.hold = hold;
+                view.list.update(cx, |list, cx| {
+                    list.delegate.counts = vec![1];
+                    cx.notify();
+                })
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(height.get(), expected_short);
+
+            if hold {
+                view.update(cx, |view, cx| {
+                    view.list.update(cx, |list, cx| {
+                        list.reset_held_items_height();
+                        cx.notify();
+                    })
+                });
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                assert_eq!(height.get(), px(36.), "reset releases the held height");
+            }
+        }
     }
 
     #[gpui::test]

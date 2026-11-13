@@ -193,7 +193,7 @@ pub(super) struct InlineObject {
     object: MeasuredInlineObject,
     selected: Arc<Mutex<bool>>,
     selection_bounds: Bounds<Pixels>,
-    line_bounds: Bounds<Pixels>,
+    line_bounds: super::state::ParagraphRows,
     content: AnyElement,
     content_measured: bool,
     link: Option<super::node::LinkMark>,
@@ -218,7 +218,7 @@ impl InlineObject {
         object: MeasuredInlineObject,
         selected: Arc<Mutex<bool>>,
         selection_bounds: Bounds<Pixels>,
-        line_bounds: Bounds<Pixels>,
+        line_bounds: super::state::ParagraphRows,
     ) -> Self {
         let (content, content_measured) = object.element();
         Self {
@@ -530,7 +530,7 @@ mod tests {
                 measured,
                 Arc::default(),
                 Bounds::default(),
-                Bounds::default(),
+                crate::text::state::ParagraphRows::single(Bounds::default()),
             );
             let mut accessible = gpui::accesskit::Node::new(Role::Unknown);
             object.write_a11y_info(&mut accessible);

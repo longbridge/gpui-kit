@@ -130,7 +130,7 @@ impl Render for Tooltip {
                 .gap_3()
                 .refine_style(&self.style)
                 .map(|this| {
-                    this.child(div().map(|this| match self.content {
+                    this.child(div().min_w_0().map(|this| match self.content {
                         TooltipContext::Text(ref text) => this.child(text.clone()),
                         TooltipContext::Element(ref builder) => this.child(builder(window, cx)),
                     }))
@@ -287,7 +287,6 @@ pub(crate) trait ManagedTooltipExt:
         })
         .on_hover({
             let trigger = trigger.clone();
-            let build_tooltip = build_tooltip.clone();
             move |hovered, window, cx| {
                 let trigger = trigger.borrow();
                 let Some(id) = trigger.id.as_ref() else {
@@ -503,6 +502,71 @@ mod tests {
     fn assert_tooltip_shown(cx: &mut VisualTestContext, index: usize) {
         assert_tooltip_painted(cx, index, true);
         assert_tooltip_painted(cx, 1 - index, false);
+    }
+
+    /// A managed trigger inside an element that has a native GPUI tooltip.
+    struct NestedInNative;
+
+    impl Render for NestedInNative {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("native")
+                    .absolute()
+                    .left(px(0.))
+                    .top(px(0.))
+                    .w(px(300.))
+                    .h(px(100.))
+                    .tooltip(|_, cx| {
+                        cx.new(|_| super::Tooltip::new("outer").bg(gpui::rgb(TOOLTIP_COLORS[0])))
+                            .into()
+                    })
+                    .child(
+                        div()
+                            .id("managed")
+                            .absolute()
+                            .left(px(10.))
+                            .top(px(10.))
+                            .w(px(100.))
+                            .h(px(30.))
+                            .managed_tooltip(|_, cx| {
+                                cx.new(|_| {
+                                    super::Tooltip::new("inner").bg(gpui::rgb(TOOLTIP_COLORS[1]))
+                                })
+                                .into()
+                            }),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_managed_tooltip_hides_the_native_tooltip_around_it(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let view = cx.new(|_| NestedInNative);
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| Root::new(view.clone(), window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        draw(&mut cx);
+
+        let outside_the_trigger = point(px(200.), px(50.));
+        let on_the_trigger = point(px(50.), px(25.));
+        for (at, shown) in [
+            (outside_the_trigger, 0),
+            (on_the_trigger, 1),
+            (outside_the_trigger, 0),
+        ] {
+            cx.simulate_mouse_move(at, None, Default::default());
+            wait(&mut cx);
+            assert_tooltip_shown(&mut cx, shown);
+        }
     }
 
     #[gpui::test]
@@ -817,5 +881,75 @@ mod tests {
         draw(&mut cx);
         cx.run_until_parked();
         assert_tooltip_painted(&mut cx, 0, true);
+    }
+
+    struct TextTooltip(&'static str);
+
+    impl Render for TextTooltip {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let text = self.0;
+            div().size_full().child(
+                div()
+                    .id("trigger")
+                    .absolute()
+                    .left(px(10.))
+                    .top(px(10.))
+                    .w(px(100.))
+                    .h(px(30.))
+                    .managed_tooltip(move |_, cx| {
+                        cx.new(|_| {
+                            super::Tooltip::new(text)
+                                .max_w(px(200.))
+                                .bg(gpui::rgb(TOOLTIP_COLORS[0]))
+                        })
+                        .into()
+                    }),
+            )
+        }
+    }
+
+    fn tooltip_size(cx: &mut TestAppContext, text: &'static str) -> gpui::Size<f32> {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let view = cx.new(|_| TextTooltip(text));
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| Root::new(view.clone(), window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        draw(&mut cx);
+        cx.simulate_mouse_move(point(px(50.), px(25.)), None, Default::default());
+        wait(&mut cx);
+        cx.update(|window, _| {
+            let marker: gpui::Background = gpui::rgb(TOOLTIP_COLORS[0]).into();
+            let scale = window.scale_factor();
+            let quad = window
+                .painted_quads()
+                .into_iter()
+                .find(|quad| quad.background == marker)
+                .expect("tooltip is painted");
+            gpui::size(
+                quad.bounds.size.width.0 / scale,
+                quad.bounds.size.height.0 / scale,
+            )
+        })
+    }
+
+    #[gpui::test]
+    fn long_text_wraps_within_max_width(cx: &mut TestAppContext) {
+        let line = tooltip_size(cx, "tip");
+        let long = tooltip_size(
+            cx,
+            "Band AD_WBGT_20240621T00-20240621T23 - WBGT [time=477499] with a few more words",
+        );
+        assert_eq!(long.width, 200.);
+        assert!(
+            long.height > line.height * 2.,
+            "long text wraps onto several lines: {long:?} vs {line:?}"
+        );
     }
 }

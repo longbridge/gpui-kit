@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use std::{rc::Rc, time::Duration};
 
 use crate::{
@@ -6,6 +7,7 @@ use crate::{
     button::ButtonIcon,
     h_flex,
     select::Caret,
+    spinner::Spinner,
     styled::{FocusLine, focus_style},
     tooltip::{ManagedTooltipExt as _, Tooltip},
 };
@@ -110,7 +112,12 @@ impl ButtonCustomVariant {
         }
     }
 
-    /// Set background color, default is transparent.
+    /// Set the base color, default is transparent.
+    ///
+    /// At rest the button fills with this color at 20% opacity, the tint the
+    /// danger, warning, success and info buttons use by default. An outline
+    /// button also draws its border in it. The [`hover`](Self::hover) and
+    /// [`active`](Self::active) colors are painted as given.
     pub fn color(mut self, color: Hsla) -> Self {
         self.color = color;
         self
@@ -629,6 +636,8 @@ impl RenderOnce for Button {
         let tooltip_show_delay = self.tooltip_show_delay;
         let hover_group = self.hover_group;
         let hover_group_held = self.hover_group_held;
+        let (border_corners, border_edges) =
+            super::logical_corners_edges(self.border_corners, self.border_edges, cx);
         let mut base = self.base;
         let children = self.children;
         let instance_style = base.style().clone();
@@ -709,23 +718,17 @@ impl RenderOnce for Button {
                     }
                 }
             })
-            .when(self.border_corners.top_left, |this| {
-                this.rounded_tl(rounding)
-            })
-            .when(self.border_corners.top_right, |this| {
-                this.rounded_tr(rounding)
-            })
-            .when(self.border_corners.bottom_left, |this| {
-                this.rounded_bl(rounding)
-            })
-            .when(self.border_corners.bottom_right, |this| {
+            .when(border_corners.top_left, |this| this.rounded_tl(rounding))
+            .when(border_corners.top_right, |this| this.rounded_tr(rounding))
+            .when(border_corners.bottom_left, |this| this.rounded_bl(rounding))
+            .when(border_corners.bottom_right, |this| {
                 this.rounded_br(rounding)
             })
             .when(self.variant.is_default() || self.outline, |this| {
-                this.when(self.border_edges.left, |this| this.border_l_1())
-                    .when(self.border_edges.right, |this| this.border_r_1())
-                    .when(self.border_edges.top, |this| this.border_t_1())
-                    .when(self.border_edges.bottom, |this| this.border_b_1())
+                this.when(border_edges.left, |this| this.border_l_1())
+                    .when(border_edges.right, |this| this.border_r_1())
+                    .when(border_edges.top, |this| this.border_t_1())
+                    .when(border_edges.bottom, |this| this.border_b_1())
             })
             .when(!self.disabled && !selected, |this| {
                 this.border_color(normal_style.border)
@@ -771,7 +774,17 @@ impl RenderOnce for Button {
             .or_else(|| self.label.clone());
         // Like an HTML `title`, the tooltip describes the button.
         let description = self.tooltip.as_ref().map(|(tooltip, _)| tooltip.clone());
+        // A loading button with no icon shows the spinner where an icon would sit.
+        let icon = self.icon.or_else(|| {
+            self.loading.then(|| {
+                ButtonIcon::from(
+                    Spinner::new()
+                        .when_some(self.loading_icon.clone(), |this, icon| this.icon(icon)),
+                )
+            })
+        });
         let content = h_flex()
+            .flex_row_dir(cx)
             .id("label")
             .size_full()
             .min_w_0()
@@ -786,7 +799,7 @@ impl RenderOnce for Button {
                 _ => this.gap_2(),
             })
             .refine_style(&self.content_style)
-            .when_some(self.icon, |this, icon| {
+            .when_some(icon, |this, icon| {
                 this.child(
                     icon.loading_icon(self.loading_icon)
                         .loading(self.loading)
@@ -860,14 +873,17 @@ impl RenderOnce for Button {
         // background changes nothing.
         .when(loading && !disabled, |this| this.opacity(0.8))
         .when(!disabled, |this| {
-            this.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            this.on_any_mouse_down(move |event, window, cx| {
+                // A press with any mouse button must not focus the button.
+                window.prevent_default();
+                if event.button != MouseButton::Left {
+                    return;
+                }
+
                 if loading {
                     cx.stop_propagation();
                     return;
                 }
-
-                // Avoid focus on mouse down.
-                window.prevent_default();
 
                 // Pressing a button must not start the window-level text selection.
                 crate::global_state::GlobalState::suppress_text_selection(cx);
@@ -1532,6 +1548,77 @@ mod tests {
 
         assert_eq!(clicks.get(), 3);
         assert_eq!(keyboard_clicks.get(), 2);
+    }
+
+    /// Issue #1959: a right or middle press focused the button and left its focus
+    /// ring showing. The press must still reach the parent, where a context menu
+    /// listens.
+    #[gpui::test]
+    fn non_left_press_does_not_focus_button(cx: &mut gpui::TestAppContext) {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{Context, Modifiers, MouseDownEvent, MouseUpEvent, Render, point};
+
+        struct Harness {
+            focus_handle: FocusHandle,
+            parent_presses: Rc<Cell<usize>>,
+        }
+
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let parent_presses = self.parent_presses.clone();
+                div()
+                    .size(px(100.))
+                    .on_mouse_down(MouseButton::Right, move |_, _, _| {
+                        parent_presses.set(parent_presses.get() + 1)
+                    })
+                    .on_mouse_down(MouseButton::Middle, {
+                        let parent_presses = self.parent_presses.clone();
+                        move |_, _, _| parent_presses.set(parent_presses.get() + 1)
+                    })
+                    .child(
+                        Button::new("non-left")
+                            .size_full()
+                            .track_focus(&self.focus_handle),
+                    )
+            }
+        }
+
+        cx.update(crate::init);
+        let parent_presses = Rc::new(Cell::new(0));
+        let (view, cx) = cx.add_window_view({
+            let parent_presses = parent_presses.clone();
+            move |_, cx| Harness {
+                focus_handle: cx.focus_handle(),
+                parent_presses,
+            }
+        });
+        let focus_handle = cx.update(|_, cx| view.read(cx).focus_handle.clone());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let position = point(px(10.), px(10.));
+        for button in [MouseButton::Right, MouseButton::Middle] {
+            cx.simulate_event(MouseDownEvent {
+                button,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            });
+            cx.simulate_event(MouseUpEvent {
+                button,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            });
+            cx.update(|window, _| {
+                assert!(
+                    !focus_handle.is_focused(window),
+                    "a {button:?} press must not focus the button"
+                )
+            });
+        }
+        assert_eq!(parent_presses.get(), 2);
     }
 
     /// A button keeps the application's focus handle, so focus the application

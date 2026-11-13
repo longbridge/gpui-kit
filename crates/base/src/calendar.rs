@@ -1,7 +1,7 @@
 use crate::TestSupportExt as _;
 use std::rc::Rc;
 
-use crate::{h_flex, styled::StyledExt as _, v_flex};
+use crate::{LogicalStyledExt as _, h_flex, styled::StyledExt as _, v_flex};
 use chrono::{Datelike, Local, NaiveDate, Weekday};
 use gpui::{
     AnyElement, App, Context, ElementId, Empty, Entity, EventEmitter, FocusHandle,
@@ -637,27 +637,32 @@ impl RenderOnce for Calendar {
         self.state
             .update(cx, |s, cx| s.set_number_of_months(count, window, cx));
         let view = self.state.read(cx).view();
-        let mut header = h_flex().items_center().justify_between().child({
-            let st = CalendarItemState::new(CalendarItemKind::Previous).disabled(
-                view.is_month() || (view.is_year() && !self.state.read(cx).has_prev_year_page()),
-            );
-            let mut item =
-                CalendarItem::new("calendar-prev", st).with_label((self.label)(st.kind(), 0));
-            if !st.is_disabled() {
-                let entity = self.state.clone();
-                item = item.on_click(move |_, _window, cx| {
-                    entity.update(cx, |s, cx| {
-                        if s.view().is_day() {
-                            s.prev_month();
-                        } else {
-                            s.prev_year_page();
-                        }
-                        cx.notify();
-                    })
-                });
-            }
-            (self.item)(item, st, window, cx)
-        });
+        let mut header = h_flex()
+            .flex_row_dir(cx)
+            .items_center()
+            .justify_between()
+            .child({
+                let st = CalendarItemState::new(CalendarItemKind::Previous).disabled(
+                    view.is_month()
+                        || (view.is_year() && !self.state.read(cx).has_prev_year_page()),
+                );
+                let mut item =
+                    CalendarItem::new("calendar-prev", st).with_label((self.label)(st.kind(), 0));
+                if !st.is_disabled() {
+                    let entity = self.state.clone();
+                    item = item.on_click(move |_, _window, cx| {
+                        entity.update(cx, |s, cx| {
+                            if s.view().is_day() {
+                                s.prev_month();
+                            } else {
+                                s.prev_year_page();
+                            }
+                            cx.notify();
+                        })
+                    });
+                }
+                (self.item)(item, st, window, cx)
+            });
         if count == 1 {
             let (month, year) = {
                 let s = self.state.read(cx);
@@ -729,7 +734,7 @@ impl RenderOnce for Calendar {
         });
 
         let mut body = match picker_grid_layout(view) {
-            None => h_flex().justify_around(),
+            None => h_flex().flex_row_dir(cx).justify_around(),
             Some((columns, horizontal_gap)) => {
                 div().grid().grid_cols(columns).gap_x(px(horizontal_gap))
             }
@@ -739,7 +744,7 @@ impl RenderOnce for Calendar {
                 let (year, month_number) = self.state.read(cx).offset_year_month(offset);
                 let weeks = days_in_month(year, month_number, self.first_day_of_week);
                 let mut month = v_flex();
-                let mut header_row = h_flex();
+                let mut header_row = h_flex().flex_row_dir(cx);
                 for weekday in 0..7 {
                     let st = CalendarItemState::new(CalendarItemKind::Weekday)
                         .muted(true)
@@ -754,7 +759,7 @@ impl RenderOnce for Calendar {
                 }
                 month = month.child(header_row);
                 for (week_index, week) in weeks.iter().enumerate() {
-                    let mut week_row = h_flex();
+                    let mut week_row = h_flex().flex_row_dir(cx);
                     for date in week {
                         let date = *date;
                         let st = {

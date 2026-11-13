@@ -55,7 +55,7 @@ pub(in crate::materialize) fn avatar(
     // `Avatar` is `Styled` and `InteractiveElement` but not stateful, so a
     // hover or active style has no element state to key off. Said rather than
     // dropped, as everywhere else.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!("state styles on an Avatar are ignored; put them on the element around it");
     }
 

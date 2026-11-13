@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -250,11 +251,11 @@ impl RenderOnce for Field {
         let has_label = self.label_indent;
 
         #[inline]
-        fn wrap_div(layout: Axis) -> Div {
+        fn wrap_div(layout: Axis, cx: &App) -> Div {
             if layout.is_vertical() {
                 v_flex()
             } else {
-                h_flex()
+                h_flex().flex_row_dir(cx)
             }
         }
 
@@ -284,7 +285,7 @@ impl RenderOnce for Field {
             .when(!self.visible, |this| this.hidden())
             .child(
                 // This warp for aligning the Label + Input
-                wrap_div(layout)
+                wrap_div(layout, cx)
                     .id(self.id)
                     .gap(inner_gap)
                     .when_some(self.align_items, |this, align| {
@@ -310,6 +311,7 @@ impl RenderOnce for Field {
                                 .when_some(self.label, |this, builder| {
                                     this.child(
                                         h_flex()
+                                            .flex_row_dir(cx)
                                             .gap_1()
                                             .child(
                                                 div()
@@ -329,7 +331,7 @@ impl RenderOnce for Field {
             )
             .child(
                 // Other
-                wrap_div(layout)
+                wrap_div(layout, cx)
                     .gap(inner_gap)
                     .when(has_label && layout.is_horizontal(), |this| {
                         this.child(

@@ -22,6 +22,16 @@ export const stories = [
     api: "Carousel",
   }),
   pendingStory({
+    id: "grid-layout",
+    title: "GridLayout",
+    group: "Layout & advanced",
+    rustStory: "GridLayoutStory",
+    description: "A grid whose items are dragged and resized into place.",
+    states: ["arranged", "dragging", "resizing", "locked item"],
+    availability: "pending",
+    api: "GridLayout",
+  }),
+  pendingStory({
     id: "chart",
     title: "Chart",
     group: "Layout & advanced",
@@ -90,5 +100,15 @@ export const stories = [
     states: ["vertical", "horizontal", "masked"],
     availability: "pending",
     api: "Scrollbar",
+  }),
+  pendingStory({
+    id: "layout-direction",
+    title: "Layout Direction",
+    group: "Layout & advanced",
+    rustStory: "LayoutDirectionStory",
+    description: "Global right-to-left layout direction.",
+    states: ["left to right", "right to left"],
+    availability: "infrastructure",
+    api: "LayoutDirection",
   }),
 ];

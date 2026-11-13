@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
@@ -417,7 +418,7 @@ impl RenderOnce for Attachment {
 
         let card = div()
             .relative()
-            .flex()
+            .flex_row_dir(cx)
             .flex_none()
             .max_w_full()
             .min_w_0()
@@ -449,11 +450,11 @@ impl RenderOnce for Attachment {
                     .items_center()
                     .h(metrics.height)
                     .gap(metrics.gap)
-                    .pl(metrics.padding_start)
-                    .pr(metrics.padding_end)
+                    .ps(metrics.padding_start, cx)
+                    .pe(metrics.padding_end, cx)
                     .when(has_content, |this| this.w(metrics.chip_width))
                     .when(!has_content && !has_media, |this| {
-                        this.pl(metrics.padding_end)
+                        this.ps(metrics.padding_end, cx)
                     }),
                 // An image tile: a square the media fills edge to edge.
                 Axis::Vertical if flush => this.size(metrics.height),
@@ -505,13 +506,13 @@ impl RenderOnce for Attachment {
             .min_w_0()
             .group(REMOVE_GROUP)
             .pt(REMOVE_OVERHANG)
-            .pr(REMOVE_OVERHANG)
+            .pe(REMOVE_OVERHANG, cx)
             .child(card)
             .child(
                 div()
                     .absolute()
                     .top_0()
-                    .right_0()
+                    .inset_e(px(0.), cx)
                     .when(!is_mobile(), |this| {
                         this.invisible()
                             .group_hover(REMOVE_GROUP, |this| this.visible())
@@ -770,6 +771,10 @@ impl RenderOnce for AttachmentMedia {
         let has_source = source.is_some();
         let failed_media = status.is_failed() && !has_source;
         let corner_radii = self.style.corner_radii.clone();
+        let image_id: ElementId = match self.id.clone() {
+            Some(id) => (id, "image").into(),
+            None => "attachment-image".into(),
+        };
         let ring_id: ElementId = match self.id {
             Some(id) => (id, "progress").into(),
             None => "attachment-progress".into(),
@@ -852,7 +857,10 @@ impl RenderOnce for AttachmentMedia {
                 // gpui clips rectangularly, so the slot's `overflow_hidden` cannot
                 // round the image: it carries the slot's radius itself, including
                 // a caller's `.rounded()` refinement.
+                // gpui keeps an animated image's current frame in element state,
+                // so without an id it stays on the first frame.
                 let mut image = img(source)
+                    .id(image_id)
                     .absolute()
                     .inset_0()
                     .size_full()
@@ -1201,15 +1209,15 @@ impl Styled for AttachmentActions {
 }
 
 impl RenderOnce for AttachmentActions {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         div()
             .relative()
-            .flex()
+            .flex_row_dir(cx)
             .flex_shrink_0()
             .items_center()
             .gap_1()
             .when(self.vertical_layout, |this| {
-                this.absolute().top_3().right_3()
+                this.absolute().top_3().inset_e(rems(0.75), cx)
             })
             // The actions cluster owns its presses: an action (or the gap
             // between actions) must not also arm the whole-card click layer

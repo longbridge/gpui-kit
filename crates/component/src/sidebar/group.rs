@@ -3,6 +3,7 @@ use gpui::{
     App, ElementId, IntoElement, ParentElement, SharedString, Styled as _, Window, div,
     prelude::FluentBuilder as _,
 };
+use gpui_base::LogicalStyledExt as _;
 
 /// A group of items in the [`super::Sidebar`].
 #[derive(Clone)]
@@ -62,6 +63,7 @@ impl<E: SidebarItem> SidebarItem for SidebarGroup<E> {
             .when(!self.collapsed, |this| {
                 this.child(
                     h_flex()
+                        .flex_row_dir(cx)
                         .flex_shrink_0()
                         .px_2()
                         .rounded(cx.theme().radius)

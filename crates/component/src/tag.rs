@@ -1,8 +1,7 @@
 use crate::{ColorName, Sizable, Size, StyledExt, theme::ActiveTheme as _};
 use gpui::{
-    AbsoluteLength, AnyElement, App, Hsla, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative, rems,
-    transparent_white,
+    AbsoluteLength, AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, StyleRefinement,
+    Styled, Window, div, prelude::FluentBuilder as _, relative, rems, transparent_white,
 };
 
 /// The variant of the Tag.
@@ -266,7 +265,6 @@ impl RenderOnce for Tag {
             .text_color(fg)
             .border_color(border)
             .rounded(rounded)
-            .hover(|this| this.opacity(0.9))
             .refine_style(&self.style)
             .children(self.children)
     }

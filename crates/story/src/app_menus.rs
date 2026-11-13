@@ -22,7 +22,6 @@ pub fn init(title: impl Into<SharedString>, cx: &mut App) -> Entity<AppMenuBar> 
 
     // Observe theme changes to update the menu to refresh the checked state
     cx.observe_global::<Theme>({
-        let title = title.clone();
         let app_menu_bar = app_menu_bar.clone();
         move |cx| {
             update_app_menu(title.clone(), app_menu_bar.clone(), cx);

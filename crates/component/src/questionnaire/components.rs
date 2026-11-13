@@ -854,7 +854,7 @@ impl RenderOnce for QuestionnaireChoice {
         let colors = cx.theme().semantic_tokens().colors;
         let radius = cx.theme().semantic_tokens().radius;
         let indicator_background = cx.theme().input_background();
-        let mono_font = cx.theme().semantic_tokens().typography.mono.clone();
+        let mono_font = cx.theme().semantic_tokens().typography.mono;
         let size = resolve_size(self.size, &self.state, cx);
         let metrics = QuestionnaireMetrics::new(size, cx);
         let indicator_offset = center_on_answer_line(metrics.indicator_size, size, cx);

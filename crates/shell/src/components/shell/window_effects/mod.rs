@@ -132,7 +132,7 @@ impl ComponentMaterializer for Materializer {
         );
         let reporter = request.resolve_callback(&trigger.reporter)?;
         let effects = reporter.window_effects();
-        let factory_reporter = reporter.clone();
+        let factory_reporter = reporter;
         let operations = request
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<Op>().cloned())

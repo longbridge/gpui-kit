@@ -254,20 +254,126 @@ fn parse_inline_children(
     children: &[Node],
     cx: &mut NodeContext,
 ) -> String {
-    let mut text = String::new();
     for group in inline_groups(children) {
         match group {
             InlineGroup::Node(child) => {
-                text.push_str(&parse_paragraph(source, paragraph, child, cx));
+                parse_paragraph(source, paragraph, child, cx);
             }
             InlineGroup::Marked(mark, nodes) => {
-                text.push_str(&merge_children_with_mark(
-                    source, paragraph, nodes, mark, cx,
-                ));
+                merge_children_with_mark(source, paragraph, nodes, mark, cx);
             }
         }
     }
+    normalize_inline_boundaries(paragraph)
+}
+
+/// Drops a text node's leading white space when the previous rendered
+/// character is white space or a line break, so a run folded inside its node
+/// stays one space across a dropped HTML comment, and nothing follows a
+/// `<br>` or a hard break indented by the space the line ending became
+/// (#3710). Returns the paragraph's rendered text.
+///
+/// The source mapping shifts with the trim: the removed white space's
+/// segments and marks drop or shrink with it, so selection and copy still
+/// land on the source the surviving characters were drawn from.
+fn normalize_inline_boundaries(paragraph: &mut Paragraph) -> String {
+    let mut at_line_start = true;
+    let mut previous_white_space = false;
+    let mut text = String::new();
+
+    for node in &mut paragraph.children {
+        if node.custom.is_some() || node.image.is_some() {
+            // Unknown rendered width: keep the white space around it.
+            at_line_start = false;
+            previous_white_space = false;
+            continue;
+        }
+        if node.text == "\n" && node.marks.is_empty() {
+            // A rendered line break, from `<br>` or a hard break. White
+            // space held before it is trailing and goes with the line.
+            at_line_start = true;
+            previous_white_space = false;
+            text.push('\n');
+            continue;
+        }
+        let leading = node.text.len() - node.text.trim_start_matches([' ', '\t']).len();
+        if leading > 0 && (at_line_start || previous_white_space) {
+            trim_leading_white_space(node, leading);
+        }
+        if node.text.is_empty() {
+            continue;
+        }
+        at_line_start = false;
+        previous_white_space = node.text.ends_with([' ', '\t']);
+        text.push_str(&node.text);
+    }
+
+    paragraph
+        .children
+        .retain(|node| node.custom.is_some() || node.image.is_some() || !node.text.is_empty());
     text
+}
+
+/// Removes the first `count` bytes of white space from the node's text,
+/// shifting its marks and source segments over the removed range.
+fn trim_leading_white_space(node: &mut InlineNode, count: usize) {
+    let old_text = std::mem::take(&mut node.text);
+    node.text = old_text[count..].into();
+
+    for (range, _) in &mut node.marks {
+        let start = range.start.saturating_sub(count).min(node.text.len());
+        let end = range.end.saturating_sub(count).min(node.text.len());
+        *range = start..end.max(start);
+    }
+    node.marks.retain(|(range, _)| range.start < range.end);
+
+    for segment in &mut node.source_segments {
+        if segment.rendered.end <= count {
+            // Wholly inside the dropped white space.
+            segment.rendered = 0..0;
+            continue;
+        }
+        let rendered_end = segment.rendered.end - count;
+        if segment.rendered.start >= count {
+            // Wholly after it: the source stays, the bytes shift.
+            segment.rendered = (segment.rendered.start - count)..rendered_end;
+        } else if segment.linear {
+            // Straddling the cut. Linear segments map byte for byte, so the
+            // dropped bytes also drop from the source; a merged run keeps
+            // drawing the survivors from the bytes they came from.
+            segment.source.start += count;
+            segment.rendered = 0..rendered_end;
+        } else {
+            // A non-linear segment straddling the cut has no exact mapping
+            // for its survivors; drop it rather than guess.
+            segment.rendered = 0..0;
+        }
+    }
+    node.source_segments.retain(|segment| {
+        segment.rendered.start < segment.rendered.end && segment.source.start < segment.source.end
+    });
+}
+
+/// Folds each run of spaces and tabs in drawn text to a single space, the
+/// way `white-space: normal` renders it (#3710). Line endings have already
+/// become spaces here; white space inside inline code never reaches this
+/// path, and runs at a line break are dropped by
+/// `normalize_inline_boundaries`.
+fn collapse_white_space(text: &str) -> String {
+    let mut collapsed = String::with_capacity(text.len());
+    let mut in_white_space = false;
+    for ch in text.chars() {
+        if matches!(ch, ' ' | '\t') {
+            if !in_white_space {
+                collapsed.push(' ');
+                in_white_space = true;
+            }
+        } else {
+            collapsed.push(ch);
+            in_white_space = false;
+        }
+    }
+    collapsed
 }
 
 fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
@@ -786,7 +892,13 @@ fn parse_paragraph(
             // so a CRLF document still carries its carriage return here. Take
             // the CR with the newline: dropping only the newline would strand
             // the CR in the middle of the reflowed line.
-            text = val.value.replace("\r\n", " ").replace(['\n', '\r'], " ");
+            //
+            // Runs of spaces and tabs then fold to one space, the way
+            // `white-space: normal` draws them (#3710); the source mapping
+            // re-aligns over the folded bytes on its own. Leading runs at a
+            // line break — after `<br>` or a hard break — are dropped by
+            // `normalize_inline_boundaries`, which sees the nodes whole.
+            text = collapse_white_space(&val.value.replace("\r\n", " ").replace(['\n', '\r'], " "));
             paragraph.push(mapped_inline(source, text.clone(), node, cx))
         }
         Node::Emphasis(val) => {
@@ -990,15 +1102,116 @@ fn ast_to_document(source: &str, root: mdast::Node, cx: &mut NodeContext) -> Par
         _ => panic!("expected root node"),
     };
 
+    let has_surfaces = cx.markdown_extensions.has_block_surfaces();
     let blocks = root
         .children
         .into_iter()
-        .map(|c| ast_to_node(source, c, cx))
+        .map(|node| match node {
+            Node::Blockquote(quote) if has_surfaces => blockquote_to_node(source, quote, cx),
+            node => ast_to_node(source, node, cx),
+        })
         .collect();
     ParsedDocument {
         source: source.to_string().into(),
         blocks: Arc::new(blocks),
     }
+}
+
+/// A top-level blockquote, which is a block surface when it opens with the
+/// marker of a registered one.
+fn blockquote_to_node(
+    source: &str,
+    mut quote: mdast::Blockquote,
+    cx: &mut NodeContext,
+) -> BlockNode {
+    let Some(name) = take_surface_marker(source, &mut quote, cx) else {
+        return ast_to_node(source, Node::Blockquote(quote), cx);
+    };
+    let children = quote
+        .children
+        .into_iter()
+        .map(|child| ast_to_node(source, child, cx))
+        .collect();
+    BlockNode::Surface {
+        name,
+        children,
+        span: new_span(quote.position, cx),
+    }
+}
+
+/// Removes the marker line that names a registered block surface from the
+/// start of `quote`, and returns that name.
+///
+/// As in a GitHub alert, the marker `[!name]` is alone on the first line of
+/// the first paragraph, and the lines after it are that paragraph's text. The
+/// name matches ASCII-case-insensitively.
+fn take_surface_marker(
+    source: &str,
+    quote: &mut mdast::Blockquote,
+    cx: &NodeContext,
+) -> Option<SharedString> {
+    let Some(Node::Paragraph(paragraph)) = quote.children.first_mut() else {
+        return None;
+    };
+    let Some(Node::Text(text)) = paragraph.children.first_mut() else {
+        return None;
+    };
+    let (line, rest) = match text.value.split_once('\n') {
+        Some((line, rest)) => (line.strip_suffix('\r').unwrap_or(line), Some(rest)),
+        None => (text.value.as_str(), None),
+    };
+    // An escaped `\[` or a character reference reads as the same text, but
+    // writes a literal, so the marker must appear as is in the source. The
+    // text of an escape starts after its backslash.
+    let start = text.position.as_ref()?.start.offset;
+    if source.get(..start)?.ends_with('\\') || !source.get(start..)?.starts_with(line) {
+        return None;
+    }
+    let name = line.strip_prefix("[!")?.strip_suffix(']')?;
+    let name = cx.markdown_extensions.block_surface_name(name)?;
+    match rest {
+        // The next line goes on in this text, which starts after the line's
+        // blockquote marker in the source.
+        Some(rest) => {
+            let rest = rest.to_string();
+            let position = text.position.as_mut()?;
+            let line_start =
+                source[position.start.offset..].find('\n')? + position.start.offset + 1;
+            let content = source[line_start..].trim_start_matches([' ', '\t']);
+            let content = content.strip_prefix('>').unwrap_or(content);
+            let content = content.trim_start_matches([' ', '\t']);
+            let offset = source.len() - content.len();
+            position.start = Point::new(position.start.line + 1, offset - line_start + 1, offset);
+            text.value = rest;
+            if text.value.is_empty() {
+                paragraph.children.remove(0);
+            }
+        }
+        // The marker ends the paragraph or a hard break ends its line.
+        None => match paragraph.children.get(1) {
+            None => {
+                paragraph.children.clear();
+            }
+            Some(Node::Break(_)) => {
+                paragraph.children.drain(..2);
+            }
+            Some(_) => return None,
+        },
+    }
+    // The paragraph starts where its first remaining child does.
+    match paragraph.children.first() {
+        Some(first) => {
+            if let Some(start) = first.position().map(|first| first.start.clone())
+                && let Some(position) = paragraph.position.as_mut()
+            {
+                position.start = start;
+            }
+        }
+        None => {
+            quote.children.remove(0);
+        }
+    }
+    Some(name)
 }
 
 fn new_span(pos: Option<markdown::unist::Position>, cx: &NodeContext) -> Option<Span> {
@@ -1007,6 +1220,30 @@ fn new_span(pos: Option<markdown::unist::Position>, cx: &NodeContext) -> Option<
     Some(Span {
         start: cx.offset + pos.start.offset,
         end: cx.offset + pos.end.offset,
+    })
+}
+
+/// The `[ ]` / `[x]` marker of a task list item, which mdast does not keep.
+///
+/// The marker opens the item's first paragraph. Before it in the item come
+/// only the list marker, whitespace, line prefixes and link reference
+/// definitions, so it is the first `[` after the definitions.
+fn task_marker_span(source: &str, item: &mdast::ListItem, cx: &NodeContext) -> Option<Span> {
+    item.checked?;
+    let mut from = item.position.as_ref()?.start.offset;
+    for definition in item
+        .children
+        .iter()
+        .take_while(|child| !matches!(child, Node::Paragraph(_)))
+    {
+        from = definition.position()?.end.offset;
+    }
+    let bytes = source.as_bytes();
+    let open = from + bytes.get(from..)?.iter().position(|&byte| byte == b'[')?;
+    let close = open + bytes[open..].iter().position(|&byte| byte == b']')?;
+    Some(Span {
+        start: cx.offset + open,
+        end: cx.offset + close + 1,
     })
 }
 
@@ -1054,6 +1291,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             }
         }
         Node::ListItem(val) => {
+            let task_marker = task_marker_span(source, &val, cx);
             let children = val
                 .children
                 .into_iter()
@@ -1063,6 +1301,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 children,
                 spread: val.spread,
                 checked: val.checked,
+                task_marker,
                 span: new_span(val.position, cx),
             }
         }
@@ -1767,6 +2006,49 @@ mod tests {
         }
     }
 
+    fn task_markers(block: &BlockNode, markers: &mut Vec<Range<usize>>) {
+        match block {
+            BlockNode::ListItem {
+                children,
+                task_marker,
+                ..
+            } => {
+                markers.extend(task_marker.map(|span| span.start..span.end));
+                children
+                    .iter()
+                    .for_each(|child| task_markers(child, markers));
+            }
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. } => children
+                .iter()
+                .for_each(|child| task_markers(child, markers)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn task_marker_is_the_bracketed_check_wherever_the_item_text_starts() {
+        for (source, marker) in [
+            // The item text opens with a `[` of its own.
+            ("- [ ] [link](https://example.com)", "[ ]"),
+            ("> - [x] quoted", "[x]"),
+            ("- [X]\n  on the next line", "[X]"),
+            (
+                "- [a]: https://example.com\n  [ ] after a definition",
+                "[ ]",
+            ),
+        ] {
+            let document = parse(source, &mut NodeContext::default()).unwrap();
+            let mut markers = Vec::new();
+            for block in document.blocks.iter() {
+                task_markers(block, &mut markers);
+            }
+            let start = source.rfind(marker).unwrap();
+            assert_eq!(markers, vec![start..start + marker.len()], "{source:?}");
+        }
+    }
+
     #[test]
     fn selected_source_range_maps_fenced_code_nested_in_a_blockquote() {
         let source = "> ```\n> one\n> two\n> ```";
@@ -1823,6 +2105,68 @@ mod tests {
         let source = "a\\\\  \nb";
         assert_eq!(select_rendered_range(source, 2..3), 3..6);
         assert_eq!(select_rendered_range(source, 1..3), 1..6);
+    }
+
+    /// The three shapes of #3710, drawn the way a browser draws
+    /// CommonMark's HTML: a run of spaces folds to one, a dropped comment
+    /// leaves one, and nothing follows a `<br>` indented by the space its
+    /// line ending became.
+    #[test]
+    fn white_space_folds_like_html() {
+        let mut cx = NodeContext::default();
+        let document = parse(
+            "two  spaces\n\nText <!-- note --> after.\n\nline one<br>\nline two",
+            &mut cx,
+        )
+        .unwrap();
+        let paragraphs: Vec<String> = document
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                BlockNode::Paragraph(paragraph) => Some(
+                    paragraph
+                        .children
+                        .iter()
+                        .map(|node| node.text.as_ref())
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            paragraphs,
+            ["two spaces", "Text after.", "line one\nline two"]
+        );
+    }
+
+    #[test]
+    fn selected_source_range_survives_a_folded_space_run() {
+        let source = "two  spaces";
+        // Rendered "two spaces" is ten bytes: the second source space folds
+        // away, so the drawn space maps to the first source space, and the
+        // run after it maps to the run after it.
+        assert_eq!(select_rendered_range(source, 0..4), 0..4);
+        assert_eq!(select_rendered_range(source, 3..4), 3..4);
+        assert_eq!(select_rendered_range(source, 4..5), 5..6);
+        assert_eq!(select_rendered_range(source, 4..10), 5..11);
+    }
+
+    #[test]
+    fn selected_source_range_survives_a_dropped_comment() {
+        let source = "Text <!-- note --> after.";
+        // Rendered "Text after.": the comment drops out and the space after
+        // it folds, so "after." maps past the whole comment.
+        assert_eq!(select_rendered_range(source, 0..4), 0..4);
+        assert_eq!(select_rendered_range(source, 5..11), 19..25);
+    }
+
+    #[test]
+    fn selected_source_range_drops_the_space_after_a_break() {
+        let source = "line one<br>\nline two";
+        // Rendered "line one\nline two" is seventeen bytes: "line two"
+        // starts at ten, flush against the break.
+        assert_eq!(selected_rendered_range(source, 9..17), Some(13..21));
+        assert_eq!(selected_rendered_range(source, 10..17), Some(14..21));
     }
 
     #[test]
@@ -2470,7 +2814,9 @@ mod tests {
         let source = "a <strong>b *c* <em>d</em></strong> e <b>f</b> <i>g</i> <del>h</del> <br> <strong>unclosed";
         let mut cx = NodeContext::default();
         let document = parse(source, &mut cx).unwrap();
-        assert_eq!(document.text(), "a b c d e f g h \n unclosed\n");
+        // The space between the break and the next run is at a line start, so
+        // it folds away (#3710).
+        assert_eq!(document.text(), "a b c d e f g h \nunclosed\n");
         let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
             panic!()
         };

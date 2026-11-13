@@ -9,6 +9,7 @@ use gpui::{
     Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
     div, point, px, relative,
 };
+use gpui_base::LogicalStyledExt as _;
 
 /// Room between two [`TabVariant::Folder`] tabs, holding their separator.
 pub(super) const FOLDER_TAB_GAP: Pixels = px(4.);
@@ -779,11 +780,21 @@ impl RenderOnce for Tab {
         }
         let tab_bar_prefix = self.tab_bar_prefix.unwrap_or_default();
         if !tab_bar_prefix {
+            // The first tab meets the bar's start edge, so it drops that border.
             if self.ix == 0 && self.variant == TabVariant::Tab {
-                normal_style.borders.left = px(0.);
-                selected_style.borders.left = px(0.);
-                disabled_style.borders.left = px(0.);
-                hover_style.borders.left = px(0.);
+                let rtl = gpui_base::LayoutDirection::global(cx).is_rtl();
+                for style in [
+                    &mut normal_style,
+                    &mut selected_style,
+                    &mut disabled_style,
+                    &mut hover_style,
+                ] {
+                    if rtl {
+                        style.borders.right = px(0.);
+                    } else {
+                        style.borders.left = px(0.);
+                    }
+                }
             }
         }
         let tab_style = if self.disabled {
@@ -872,8 +883,11 @@ impl RenderOnce for Tab {
                 None => this.flex_shrink_0(),
             })
             .map(|this| match self.icon {
+                // `flex_1()` above zeroes the basis, so `w` alone collapses the
+                // box to the icon; `min_w` holds the width it asks for.
                 Some(icon) => this
                     .w(inner_height * 1.25)
+                    .min_w(inner_height * 1.25)
                     .child(icon.map(|this| match self.size {
                         Size::XSmall => this.size_2p5(),
                         Size::Small => this.size_3p5(),
@@ -897,7 +911,7 @@ impl RenderOnce for Tab {
                     })
                     .children(self.children)
                     // With the prefix's gap, 8px between icon and title, as in a Button.
-                    .when(folder && has_prefix, |this| this.pl(px(4.))),
+                    .when(folder && has_prefix, |this| this.ps(px(4.), cx)),
             })
             .bg(inner_bg)
             .rounded(inner_radius)
@@ -916,6 +930,7 @@ impl RenderOnce for Tab {
             inner_content.into_any_element()
         };
 
+        let ring = cx.theme().ring;
         self.base
             .id(self.ix)
             .selected(self.selected)
@@ -944,8 +959,21 @@ impl RenderOnce for Tab {
                             .border_color(disabled_style.border_color)
                     })
             })
+            // Keyboard focus (the tab list roves it with the arrow keys) gets
+            // the theme ring. An inset shadow draws it inside the tab, so the
+            // bar neither shifts nor clips it as focus moves.
+            .focus_visible(|style| {
+                style.shadow(vec![gpui::BoxShadow {
+                    color: ring,
+                    offset: point(px(0.), px(0.)),
+                    blur_radius: px(0.),
+                    spread_radius: px(2.),
+                    inset: true,
+                }])
+            })
             .relative()
-            .flex()
+            // Prefix, label and suffix read from the start edge.
+            .flex_row_dir(cx)
             // Wrapping would move the overflow onto a clipped second line instead
             // of letting the label shrink, so a capped tab lays out on one line.
             .map(|this| match max_width {
@@ -1013,12 +1041,13 @@ impl RenderOnce for Tab {
                     )
                 },
             )
-            // In the gap after the tab, on a whole pixel, level with the content.
+            // In the gap after the tab (on its end edge), on a whole pixel, level
+            // with the content.
             .when(folder && self.separator, |this| {
                 this.child(
                     div()
                         .absolute()
-                        .right(-(FOLDER_TAB_GAP / 2.))
+                        .inset_e(-(FOLDER_TAB_GAP / 2.), cx)
                         .top((height - metrics.top_padding - metrics.separator_height) / 2.)
                         .w(px(1.))
                         .h(metrics.separator_height)
@@ -1215,6 +1244,26 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn a_right_to_left_tab_puts_its_prefix_on_the_right(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            gpui_base::LayoutDirection::Rtl.set_global(cx);
+        });
+        let cx = show(cx, TabVariant::Tab, None, |tab| {
+            tab.prefix(div().size(px(16.)).debug_selector(|| "prefix".to_string()))
+                .label("Label")
+                .suffix(div().size(px(16.)).debug_selector(|| "suffix".to_string()))
+        });
+
+        let prefix = cx.debug_bounds("prefix").expect("prefix not rendered");
+        let suffix = cx.debug_bounds("suffix").expect("suffix not rendered");
+        assert!(
+            suffix.right() < prefix.left(),
+            "the suffix ends the row on the left: {suffix:?} {prefix:?}"
+        );
+    }
+
     /// Icon-only tabs are sized to a square by construction, so the cap has to
     /// leave them alone however narrow it is.
     #[gpui::test]
@@ -1238,5 +1287,24 @@ mod tests {
             uncapped,
             "an icon-only tab must ignore max_width"
         );
+    }
+
+    /// An icon-only tab keeps the room its content box asks for, so the icon has
+    /// space on both sides instead of the tabs packing icon against icon.
+    #[gpui::test]
+    fn icon_only_tabs_keep_their_width(cx: &mut TestAppContext) {
+        let build: fn(Tab) -> Tab = |tab| tab.icon(Icon::new(IconName::BookOpen));
+        for variant in VARIANTS {
+            let width = show(cx, variant, None, build)
+                .debug_bounds("tab")
+                .expect("tab not rendered")
+                .size
+                .width;
+            let content = variant.inner_height(Size::default()) * 1.25;
+            assert!(
+                width >= content,
+                "{variant:?}: icon-only tab is {width:?}, narrower than its {content:?} content"
+            );
+        }
     }
 }

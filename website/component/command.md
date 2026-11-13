@@ -250,7 +250,9 @@ still present, and remeasures rows.
 Command uses a case-insensitive substring match against each item's label and
 keywords. Empty queries match every item. A group whose items all filter out
 hides its heading; a separator left leading, trailing, or adjacent to another
-separator is omitted.
+separator is omitted. With `.highlight_matches(true)`, each row highlights the
+part of its label that matches the query (off by default). Rows built with
+`child`, and palettes with `filterable(false)`, show no highlight.
 
 ```rust
 CommandItem::new().label("Profile")

@@ -119,6 +119,23 @@ Label::new("Small").text_sm()
 Label::new("Extra Small").text_xs()
 ```
 
+### Accessibility
+
+A label is exposed to screen readers as a `Label` node whose value is its text, secondary text included. A masked label, or one with no text, has no node, so hidden text stays out of the accessibility tree.
+
+Each label's id defaults to the line that calls `Label::new`. When one line builds several sibling labels, give each its own id. Otherwise a screen reader gets only the first of them, and GPUI's debug builds panic on the duplicate id while assistive technology is connected:
+
+```rust
+v_flex().children(
+    names
+        .iter()
+        .enumerate()
+        .map(|(ix, name)| Label::new(name.clone()).id(("name", ix))),
+)
+```
+
+Labels inside parents that have their own ids, such as the rows of a `List`, are already distinct.
+
 ## API Reference
 
 ### Label
@@ -126,6 +143,7 @@ Label::new("Extra Small").text_xs()
 | Method              | Description                                                   |
 | ------------------- | ------------------------------------------------------------- |
 | `new(text)`         | Create a new label with text                                  |
+| `id(id)`            | Set the element id, for labels built in a loop                |
 | `secondary(text)`   | Add secondary text (usually for optional/required indicators) |
 | `masked(bool)`      | Show/hide text with bullet characters                         |
 | `highlights(match)` | Highlight matching text                                       |

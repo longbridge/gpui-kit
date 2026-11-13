@@ -4,9 +4,12 @@ use std::{rc::Rc, time::Duration};
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, ClickEvent, DefiniteLength, DismissEvent, Edges,
     EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, ParentElement, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px, rems,
 };
-use gpui_base::{ElementExt as _, Sheet as BaseSheet, TextSelectionScopeId, actions::Cancel};
+use gpui_base::{
+    ElementExt as _, LayoutDirection, LogicalStyledExt as _, Sheet as BaseSheet,
+    TextSelectionScopeId, actions::Cancel,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +24,18 @@ use crate::{
 };
 
 pub(crate) fn init(_: &mut App) {}
+
+/// The physical side a sheet opened at `placement` slides in from.
+///
+/// Left and right are written for left-to-right layout, so `Right` (the
+/// default) is the end edge: in RTL the sheet slides in from the left.
+pub(crate) fn physical_placement(placement: Placement, direction: LayoutDirection) -> Placement {
+    match (placement, direction) {
+        (Placement::Left, LayoutDirection::Rtl) => Placement::Right,
+        (Placement::Right, LayoutDirection::Rtl) => Placement::Left,
+        (placement, _) => placement,
+    }
+}
 
 /// The settings for sheets.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -198,9 +213,10 @@ impl RenderOnce for Sheet {
             .child(
                 // TitleBar
                 h_flex()
+                    .flex_row_dir(cx)
                     .justify_between()
-                    .pl_4()
-                    .pr_3()
+                    .ps(rems(1.), cx)
+                    .pe(rems(0.75), cx)
                     .py_2()
                     .w_full()
                     .font_semibold()
@@ -210,6 +226,7 @@ impl RenderOnce for Sheet {
                             .small()
                             .ghost()
                             .icon(IconName::Close)
+                            .accessibility_label("Close")
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(Cancel), cx);
                             }),
@@ -221,8 +238,8 @@ impl RenderOnce for Sheet {
                     v_flex()
                         .size_full()
                         .overflow_y_scrollbar()
-                        .pl(paddings.left)
-                        .pr(paddings.right)
+                        .ps(paddings.left, cx)
+                        .pe(paddings.right, cx)
                         .children(self.children),
                 ),
             )
@@ -264,5 +281,25 @@ impl RenderOnce for Sheet {
             .on_close(move |event, window, cx| (self.on_close)(event, window, cx))
             .overlay(overlay)
             .surface(surface)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rtl_mirrors_left_and_right_sheets() {
+        let rtl = LayoutDirection::Rtl;
+        assert_eq!(physical_placement(Placement::Right, rtl), Placement::Left);
+        assert_eq!(physical_placement(Placement::Left, rtl), Placement::Right);
+        assert_eq!(
+            physical_placement(Placement::Bottom, rtl),
+            Placement::Bottom
+        );
+        assert_eq!(
+            physical_placement(Placement::Right, LayoutDirection::Ltr),
+            Placement::Right
+        );
     }
 }

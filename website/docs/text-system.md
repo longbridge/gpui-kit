@@ -154,7 +154,20 @@ div()
 
 GPUI Kit's [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/text/compat.rs) renders Markdown or HTML with styled runs, selection, and optional scrolling; it delegates parsing, layout, and selection behavior to Base. Use `TextView::markdown("article", source)` for a rich document. [Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) shapes visible lines in [`prepaint`](./element#prepaint), where the resolved width and input geometry are known; its caret and pointer mapping use the same shaped layout. A plain label needs neither implementation.
 
-`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` checks whether a window-coordinate point hits registered selectable text in the active selection scope. Call it during pointer dispatch with the event's position, so the hitboxes reflect the queried point. It uses the current frame's text geometry and hitboxes without starting or changing a selection; blank space, text outside the active scope, and touch-selection controls do not match. A containing control can use this query before claiming a long press so window-level word selection keeps priority. `ContextMenu` does this automatically: long-pressing selectable text selects it, while long-pressing blank space opens the object's menu.
+`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` checks whether a window-coordinate point hits registered selectable text in the active selection scope. Call it during pointer dispatch with the event's position, so the hitboxes reflect the queried point. It uses the current frame's text geometry and hitboxes without starting or changing a selection; blank space, text outside the active scope, touch-selection controls, and elements marked with `keep_text_selection` do not match. A containing control can use this query before claiming a long press so window-level word selection keeps priority. `ContextMenu` does this automatically: long-pressing selectable text selects it, while long-pressing blank space opens the object's menu.
+
+A press anywhere in the window clears the selection before any element handles it, so a button that acts on the selection (Copy, Comment, Stage lines) would find it gone by the time its click runs. Mark such a control with `ElementExt::keep_text_selection(id)`: pressing it neither clears the selection nor starts a new one. It covers the element with a hitbox, so a popup in front of the control still takes the press, and it keeps working when the control is drawn from a cached view. `id` must be unique among the element's children. The window keeps each element marked this way until it closes, so mark a row of buttons rather than every row of a long list.
+
+```rust
+use gpui_kit::base::ElementExt;
+use gpui_kit::component::{button::Button, h_flex};
+use gpui_kit::*;
+
+h_flex()
+    .gap_2()
+    .keep_text_selection("selection-actions")
+    .child(Button::new("copy").label("Copy").on_click(copy_selection))
+```
 
 ## Font resolution and metrics
 
@@ -232,3 +245,24 @@ For a chart label, ask whether its width changes the chart's requested size. If 
 `WindowTextSystem` caches line layouts in current- and previous-frame caches and shares font resolution and metrics through `TextSystem`. The shared system also caches glyph raster bounds; painting uses glyph rendering parameters that include font, size, scale factor, and subpixel position. A cache key includes text, resolved font runs, size, and width constraints. Repeated identical inputs can reuse layout; changing text, font, features, size, forced width, or wrap width may require a new layout. Paint colors and backgrounds live in decoration runs, separate from glyph positions; changing only those need not reshape glyphs. These frame caches are not a promise that a layout remains cached indefinitely. For a known set of fonts, `TextSystem::prewarm_fonts(&fonts)` can prepare platform font caches on a background executor; ordinary shaping fills missing entries on demand. Reuse the window's text system and do not retain frame-local `&mut Window` references.
 
 For large virtualized editors or documents, shape only visible content and avoid measuring every row on every redraw. GPUI Kit's [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) can virtualize scrollable blocks, while [Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) shapes its visible lines. If a profiler shows repeated materialization of long line text, `try_layout_line_by_hash` probes the cache without building a contiguous string, and `shape_line_by_hash` builds one only on a miss. With the latter API, `ShapedLine.text` is an empty placeholder even on a miss; keep the original text separately if needed. The caller must guarantee that the same hash implies identical text, and pass its UTF-8 byte length as `text_len`. Prefer the ordinary API until that cost is measured.
+
+## Foregrounds for external editors
+
+An external editor can pass current presentation colors through
+`RenderContext::with_foreground_ranges(leaf_key, ranges)`. This applies to
+keyed paragraph leaves, including headings and table cells. Ranges use the
+leaf's rendered UTF-8 bytes, with one U+FFFC (three bytes) for each image or
+custom inline object, matching `LeafGeometry`.
+
+Host ranges override mark and link glyph colors; the last supplied range wins
+overlaps. Font weight, code styling, decorations and link activation remain
+intact. Uncovered text keeps its ordinary foreground inheritance. Text ranges
+are clipped to each fragment; empty/reversed ranges and boundaries inside a
+UTF-8 character are ignored. A custom object inherits a color only if its entire
+placeholder is covered; images are unchanged.
+
+Colors live in the rendering context, not `InlineNode` or the document's mark
+cache. Supply colors from the current theme/surface on each render. Calling the
+builder again for a key replaces its ranges; an empty list restores ordinary
+inheritance without rebuilding the paragraph. Background decorations remain a
+separate `collect_leaf_geometry` input.

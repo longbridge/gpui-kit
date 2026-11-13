@@ -1,10 +1,9 @@
 use crate::input::InputState;
 use std::rc::Rc;
 
-use gpui::Focusable;
 use gpui::{
     AnyElement, App, Entity, EventEmitter, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    MouseButton, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _,
 };
 
@@ -103,6 +102,7 @@ pub struct NumberInput {
     on_step: Option<StepHandler>,
     decrement_button: Option<ButtonDecorator>,
     increment_button: Option<ButtonDecorator>,
+    stepper: bool,
     input: Option<AnyElement>,
     controls_right: bool,
     accessibility_label: Option<SharedString>,
@@ -165,6 +165,7 @@ impl NumberInput {
             on_step: None,
             decrement_button: None,
             increment_button: None,
+            stepper: true,
             input: None,
             controls_right: false,
             accessibility_label: None,
@@ -193,6 +194,15 @@ impl NumberInput {
     /// Decorate the built-in increment button with application-owned content and styles.
     pub fn increment_button(mut self, decorate: impl FnOnce(Button) -> Button + 'static) -> Self {
         self.increment_button = Some(Box::new(decorate));
+        self
+    }
+
+    /// Set whether the increment and decrement buttons are rendered.
+    ///
+    /// The buttons are rendered by default. Up and Down keys continue to step
+    /// the value when they are omitted.
+    pub fn stepper(mut self, stepper: bool) -> Self {
+        self.stepper = stepper;
         self
     }
 
@@ -245,41 +255,49 @@ impl RenderOnce for NumberInput {
         });
         self.state.update(cx, |state, _| state.ensure_number_mask());
         let value = self.state.read(cx).value().parse::<f64>().ok();
-        let decrement_button = self.decrement_button.map_or_else(
-            || Button::new("decrement"),
-            |decorate| decorate(Button::new("decrement")),
-        );
-        let increment_button = self.increment_button.map_or_else(
-            || Button::new("increment"),
-            |decorate| decorate(Button::new("increment")),
-        );
+        let decrement_button = self.stepper.then(|| {
+            self.decrement_button.map_or_else(
+                || Button::new("decrement"),
+                |decorate| decorate(Button::new("decrement")),
+            )
+        });
+        let increment_button = self.stepper.then(|| {
+            self.increment_button.map_or_else(
+                || Button::new("increment"),
+                |decorate| decorate(Button::new("increment")),
+            )
+        });
         let text = NumberInputText::new().children(self.input);
 
-        // Stepping is driven from the focused editor, so the buttons never take
-        // focus themselves; otherwise every press would pull the focus ring off
-        // the frame and hand it straight back.
-        let decrement_button = decrement_button
-            .when(controls_right, |this| this.flex_1().min_h_0())
-            .when(!controls_right, |this| this.flex_none())
-            .focusable(false)
-            .disabled(disabled)
-            .on_click({
-                let on_step = on_step.clone();
-                move |_, window, cx| {
-                    on_step(StepAction::Decrement, window, cx);
-                }
-            });
-        let increment_button = increment_button
-            .when(controls_right, |this| this.flex_1().min_h_0())
-            .when(!controls_right, |this| this.flex_none())
-            .focusable(false)
-            .disabled(disabled)
-            .on_click({
-                let on_step = on_step.clone();
-                move |_, window, cx| {
-                    on_step(StepAction::Increment, window, cx);
-                }
-            });
+        let decrement_button = decrement_button.map(|button| {
+            // Stepping is driven from the focused editor, so the buttons never
+            // take focus themselves; otherwise every press would pull the focus
+            // ring off the frame and hand it straight back.
+            button
+                .when(controls_right, |this| this.flex_1().min_h_0())
+                .when(!controls_right, |this| this.flex_none())
+                .focusable(false)
+                .disabled(disabled)
+                .on_click({
+                    let on_step = on_step.clone();
+                    move |_, window, cx| {
+                        on_step(StepAction::Decrement, window, cx);
+                    }
+                })
+        });
+        let increment_button = increment_button.map(|button| {
+            button
+                .when(controls_right, |this| this.flex_1().min_h_0())
+                .when(!controls_right, |this| this.flex_none())
+                .focusable(false)
+                .disabled(disabled)
+                .on_click({
+                    let on_step = on_step.clone();
+                    move |_, window, cx| {
+                        on_step(StepAction::Increment, window, cx);
+                    }
+                })
+        });
 
         let content = if controls_right {
             div()
@@ -287,13 +305,16 @@ impl RenderOnce for NumberInput {
                 .items_center()
                 .size_full()
                 .child(text.children(self.children))
-                .child(
-                    div()
-                        .h_full()
-                        .flex()
-                        .flex_col()
-                        .child(increment_button)
-                        .child(decrement_button),
+                .when_some(
+                    self.stepper.then(|| {
+                        div()
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .when_some(increment_button, |this, button| this.child(button))
+                            .when_some(decrement_button, |this, button| this.child(button))
+                    }),
+                    |this, buttons| this.child(buttons),
                 )
                 .into_any_element()
         } else {
@@ -301,14 +322,26 @@ impl RenderOnce for NumberInput {
                 .flex()
                 .items_center()
                 .size_full()
-                .child(decrement_button)
+                .when_some(decrement_button, |this, button| this.child(button))
                 .child(text.children(self.children))
-                .child(increment_button)
+                .when_some(increment_button, |this, button| this.child(button))
                 .into_any_element()
         };
 
         InputBase::new(("number-input", self.state.entity_id()))
-            .track_focus(&self.state.focus_handle(cx))
+            // The editor rendered below owns the state's focus handle. Tracking it
+            // here as well would make two painted elements claim accessibility
+            // focus in one frame (#3873); the key context above still receives
+            // the editor's Up and Down, so clicks on the frame hand focus over.
+            .on_mouse_down(MouseButton::Left, {
+                let state = self.state.clone();
+                move |_, window, cx| {
+                    if !window.default_prevented() {
+                        state.update(cx, |state, cx| state.focus(window, cx));
+                        window.prevent_default();
+                    }
+                }
+            })
             .flex()
             .items_center()
             .disabled(disabled)
@@ -390,6 +423,7 @@ mod tests {
     use super::*;
 
     use crate::theme::Theme;
+    use gpui::Focusable as _;
     use gpui::{
         AppContext as _, Context, Entity, Modifiers, MouseButton, Render, TestAppContext,
         VisualTestContext, point, px,

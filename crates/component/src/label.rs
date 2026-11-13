@@ -1,11 +1,13 @@
-use std::ops::Range;
+use std::{ops::Range, panic::Location};
 
 use gpui::{
-    App, HighlightStyle, IntoElement, ParentElement, RenderOnce, SharedString, StyleRefinement,
-    Styled, StyledText, Window, div, prelude::FluentBuilder, rems,
+    App, ElementId, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, StyledText,
+    Window, div, prelude::FluentBuilder, rems,
 };
 
-use gpui_base::TestTextExt as _;
+use gpui_base::{LayoutDirection, LogicalStyledExt as _};
+use gpui_base::{TestSupportExt as _, TestTextExt as _};
 
 use crate::{ActiveTheme, StyledExt};
 
@@ -51,8 +53,13 @@ impl From<SharedString> for HighlightsMatch {
 }
 
 /// A text label element with optional secondary text, masking, and highlighting capabilities.
+///
+/// A label is exposed to assistive technology as a `Label` node whose value is
+/// its text, so a screen reader can read it. A masked or empty label has no
+/// node.
 #[derive(IntoElement)]
 pub struct Label {
+    id: ElementId,
     style: StyleRefinement,
     label: SharedString,
     secondary: Option<SharedString>,
@@ -62,15 +69,34 @@ pub struct Label {
 
 impl Label {
     /// Create a new label with the main label.
+    ///
+    /// The label's id defaults to this call site, which is unique wherever one
+    /// line builds one label. See [`Label::id`] for labels built in a loop.
+    #[track_caller]
     pub fn new(label: impl Into<SharedString>) -> Self {
         let label: SharedString = label.into();
         Self {
+            id: ElementId::CodeLocation(*Location::caller()),
             style: Default::default(),
             label,
             secondary: None,
             masked: false,
             highlights_text: None,
         }
+    }
+
+    /// Set the label's element id, replacing the default taken from where
+    /// [`Label::new`] was called.
+    ///
+    /// Pass one where a single `Label::new` renders several labels as
+    /// siblings, such as in a loop: they share the default id, so assistive
+    /// technology gets only the first of them, and GPUI's debug builds panic
+    /// on the duplicate while it is connected. The id must be unique among
+    /// those siblings. Labels under parents that have their own ids, like the
+    /// rows of a `List`, are already distinct.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
     }
 
     /// Set the secondary text for the label,
@@ -181,7 +207,7 @@ impl Label {
             highlights.push((
                 range.clone(),
                 HighlightStyle {
-                    color: Some(cx.theme().blue),
+                    color: Some(cx.theme().primary),
                     ..Default::default()
                 },
             ));
@@ -207,10 +233,23 @@ impl RenderOnce for Label {
         };
 
         let highlights = self.measure_highlights(text.len(), cx);
+        // Plain text is not in the accessibility tree, so the label carries
+        // it. A masked label keeps its text out of the tree.
+        let accessible_text = (!self.masked && !text.is_empty()).then(|| text.clone());
 
         div()
+            .id(self.id)
+            .test_support()
+            .when_some(accessible_text, |this, text| {
+                // A `Label` node is named by its value, not its label.
+                this.role(gpui::Role::Label).aria_value(text)
+            })
             .line_height(rems(1.25))
             .text_color(cx.theme().foreground)
+            // Start-aligned in RTL; LTR keeps the inherited alignment.
+            .when(LayoutDirection::global(cx).is_rtl(), |this| {
+                this.text_start(cx)
+            })
             .refine_style(&self.style)
             .child(
                 StyledText::new(&text).when_some(highlights, |this, hl| this.with_highlights(hl)),
@@ -219,9 +258,82 @@ impl RenderOnce for Label {
     }
 }
 
+/// `text` with every occurrence of the search `query` drawn in the theme's
+/// primary color, matched the way searchable lists filter: by case-insensitive
+/// substring.
+pub(crate) fn highlight_matches(text: SharedString, query: &str, cx: &App) -> StyledText {
+    let style = HighlightStyle {
+        color: Some(cx.theme().blue),
+        ..Default::default()
+    };
+    let highlights = match_ranges(&text, query)
+        .into_iter()
+        .map(|range| (range, style))
+        .collect::<Vec<_>>();
+
+    StyledText::new(text).with_highlights(highlights)
+}
+
+/// The byte ranges of `text` that case-insensitively equal `query`, without
+/// overlaps.
+fn match_ranges(text: &str, query: &str) -> Vec<Range<usize>> {
+    let query = query
+        .chars()
+        .flat_map(char::to_lowercase)
+        .collect::<Vec<_>>();
+    let mut ranges = Vec::new();
+    if query.is_empty() {
+        return ranges;
+    }
+
+    let mut next_start = 0;
+    for (start, _) in text.char_indices() {
+        if start < next_start {
+            continue;
+        }
+        if let Some(len) = match_len(&text[start..], &query) {
+            ranges.push(start..start + len);
+            next_start = start + len;
+        }
+    }
+
+    ranges
+}
+
+/// The byte length of the start of `text` whose lowercase form is `query`.
+fn match_len(text: &str, query: &[char]) -> Option<usize> {
+    let mut rest = query;
+    for (offset, ch) in text.char_indices() {
+        for lower in ch.to_lowercase() {
+            let (first, tail) = rest.split_first()?;
+            if *first != lower {
+                return None;
+            }
+            rest = tail;
+        }
+        if rest.is_empty() {
+            return Some(offset + ch.len_utf8());
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn match_ranges_find_every_case_insensitive_occurrence() {
+        assert_eq!(match_ranges("Rust", "ru"), vec![0..2]);
+        assert_eq!(match_ranges("Banana", "AN"), vec![1..3, 3..5]);
+        assert_eq!(match_ranges("aaaa", "aa"), vec![0..2, 2..4]);
+        assert_eq!(match_ranges("Rust", "go"), Vec::<Range<usize>>::new());
+        assert_eq!(match_ranges("Rust", ""), Vec::<Range<usize>>::new());
+        assert_eq!(match_ranges("Café Crème", "CRÈ"), vec![6..10]);
+        assert_eq!(match_ranges("İstanbul", "i̇s"), vec![0..3]);
+        assert_eq!(match_ranges("İstanbul", "i"), Vec::<Range<usize>>::new());
+    }
 
     struct MaskedLabels;
 
@@ -254,7 +366,7 @@ mod tests {
             );
         });
         let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
     }
 
     #[cfg(feature = "test-support")]
@@ -276,7 +388,7 @@ mod tests {
         // Root starts each frame; this window has none.
         cx.update(|window, cx| {
             gpui_base::test_support::begin_frame(window);
-            window.draw(cx).clear(cx)
+            crate::test_redraw(window, cx)
         });
         cx.update(|window, _| {
             let texts: Vec<_> = gpui_base::test_support::texts(window)

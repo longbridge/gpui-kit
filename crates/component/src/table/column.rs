@@ -26,7 +26,10 @@ pub struct Column {
     pub paddings: Option<Edges<Pixels>>,
     /// The width of the column.
     pub width: Pixels,
-    /// Whether the column is fixed, the fixed column will pin at the left side when scrolling horizontally.
+    /// Whether the column is fixed, the fixed column stays pinned to its side
+    /// when scrolling horizontally.
+    ///
+    /// Left-fixed columns must come first and right-fixed columns last.
     pub fixed: Option<ColumnFixed>,
     /// Whether the column is resizable.
     pub resizable: bool,
@@ -170,6 +173,14 @@ impl Column {
         self
     }
 
+    /// Set whether the column is fixed on right side, default is false.
+    ///
+    /// Right-fixed columns must be the last columns of the table.
+    pub fn fixed_right(mut self) -> Self {
+        self.fixed = Some(ColumnFixed::Right);
+        self
+    }
+
     /// Set whether the column is resizable, default is true.
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
@@ -236,9 +247,13 @@ impl Column {
 
 impl FluentBuilder for Column {}
 
+/// The side a fixed column is pinned to when the table scrolls horizontally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnFixed {
+    /// Pin to the left side, the column must be one of the first columns.
     Left,
+    /// Pin to the right side, the column must be one of the last columns.
+    Right,
 }
 
 /// Used to sort the column runtime info in Table internal.

@@ -231,6 +231,7 @@ pub struct Diff {
     change_indicator: DiffChangeIndicator,
     change_background: bool,
     soft_wrap: bool,
+    split_ratio: f32,
     header: HeaderSlots,
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
@@ -263,6 +264,7 @@ impl Diff {
             change_indicator: DiffChangeIndicator::default(),
             change_background: true,
             soft_wrap: false,
+            split_ratio: 0.5,
             header: HeaderSlots::default(),
             annotations: Rc::default(),
             annotation_content: None,
@@ -313,6 +315,17 @@ impl Diff {
     /// Default is false.
     pub fn soft_wrap(mut self, value: bool) -> Self {
         self.soft_wrap = value;
+        self
+    }
+    /// Gives the original column this share of the width in split mode,
+    /// clamped to 0.1..=0.9. Default is 0.5. Without soft wrap, neither column
+    /// gets narrower than its longest line.
+    pub fn split_ratio(mut self, ratio: f32) -> Self {
+        self.split_ratio = if ratio.is_finite() {
+            ratio.clamp(0.1, 0.9)
+        } else {
+            0.5
+        };
         self
     }
     /// Supplies annotations with stable identities and targets.
@@ -535,6 +548,7 @@ fn render_diff(
         props.line_number,
         marker_lane,
         soft_wrap,
+        props.split_ratio,
     );
     if state.update_layout(layout, row_height) {
         // Wrapped rows take the viewport width instead of their longest line.
@@ -555,11 +569,17 @@ fn render_diff(
         state.set_content_width(width);
     }
     state.sync_annotations(&props.annotations.items);
-    let content_width = state.content_width().max(state.viewport().width);
-    let column_width = if mode == DiffMode::Split {
-        content_width / 2.
+    let viewport_width = state.viewport().width;
+    let (content_width, column_width, modified_width) = if mode == DiffMode::Split {
+        // Each column keeps room for its longest line; the ratio divides
+        // whatever the viewport adds beyond that.
+        let half = state.content_width() / 2.;
+        let original = (viewport_width * props.split_ratio).max(half);
+        let modified = (viewport_width * (1. - props.split_ratio)).max(half);
+        (original + modified, original, modified)
     } else {
-        content_width
+        let width = state.content_width().max(viewport_width);
+        (width, width, width)
     };
     let code = Rc::new(CodePresentation {
         files: state.files().to_vec(),
@@ -567,6 +587,7 @@ fn render_diff(
         mode,
         content_width,
         column_width,
+        modified_width,
         font_size,
         row_height,
         gutter_width,
@@ -644,10 +665,15 @@ fn render_diff(
             )
         })
         .when(has_rows, |this| {
-            this.child(Scrollbar::vertical(&scrollbar))
-                .when(!soft_wrap, |this| {
-                    this.child(Scrollbar::horizontal(&horizontal))
-                })
+            this.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(Scrollbar::vertical(&scrollbar).viewport_from_layout()),
+            )
+            .when(!soft_wrap, |this| {
+                this.child(Scrollbar::horizontal(&horizontal))
+            })
         })
         // A line-number drag may finish anywhere, including outside the body.
         .on_mouse_up(
@@ -808,7 +834,10 @@ struct CodePresentation {
     presentations: Vec<Option<Arc<FilePresentation>>>,
     mode: DiffMode,
     content_width: Pixels,
+    /// The original column in split mode; the whole width in unified mode.
     column_width: Pixels,
+    /// The modified column in split mode.
+    modified_width: Pixels,
     font_size: Pixels,
     row_height: Pixels,
     gutter_width: Pixels,
@@ -1434,7 +1463,11 @@ fn render_cell(
     cx: &mut App,
 ) -> AnyElement {
     let cell = v_flex()
-        .w(code.column_width)
+        .w(if side == DiffSide::Original {
+            code.column_width
+        } else {
+            code.modified_width
+        })
         .min_w_0()
         .flex_shrink_0()
         .when(side == DiffSide::Original, |this| {

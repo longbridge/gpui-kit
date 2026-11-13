@@ -154,7 +154,20 @@ div()
 
 GPUI Kit 的 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/text/compat.rs) 能渲染带样式 run、选择与可选滚动的 Markdown 或 HTML；解析、布局和选择行为由 Base 承担。富文档可用 `TextView::markdown("article", source)`。[Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 在 [`prepaint`](./element#prepaint) 中塑形可见行，此时已知最终宽度与输入几何；光标和指针映射使用同一份塑形布局。普通标签不需要自行实现这些工作。
 
-`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` 检查窗口坐标中的一点是否命中当前选择作用域内已注册的可选择文字。应在指针事件分发期间传入事件的位置，让 hitbox 对应所查询的点。查询使用当前帧的文字几何与 hitbox，不启动或改变选区；空白处、非当前作用域的文字和触摸选择控件都不命中。外层控件可在认领长按前查询，让窗口级选词优先处理。`ContextMenu` 已自动采用这一规则：长按可选择文字会选词，长按空白处则打开对象菜单。
+`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` 检查窗口坐标中的一点是否命中当前选择作用域内已注册的可选择文字。应在指针事件分发期间传入事件的位置，让 hitbox 对应所查询的点。查询使用当前帧的文字几何与 hitbox，不启动或改变选区；空白处、非当前作用域的文字、触摸选择控件和标记了 `keep_text_selection` 的元素都不命中。外层控件可在认领长按前查询，让窗口级选词优先处理。`ContextMenu` 已自动采用这一规则：长按可选择文字会选词，长按空白处则打开对象菜单。
+
+在窗口任意位置按下鼠标，都会在元素处理之前清除选区，因此作用于选区的按钮（复制、评论、暂存所选行）在点击执行时已经找不到选区。用 `ElementExt::keep_text_selection(id)` 标记这类控件：按下它既不清除选区，也不开始新的选区。它用 hitbox 覆盖该元素，因此控件前方的弹出层仍会接收按下事件；控件从缓存视图绘制时也照常生效。`id` 在该元素的子元素中必须唯一。窗口会保留每个这样标记过的元素直到关闭，因此应标记一组按钮，而不是长列表中的每一行。
+
+```rust
+use gpui_kit::base::ElementExt;
+use gpui_kit::component::{button::Button, h_flex};
+use gpui_kit::*;
+
+h_flex()
+    .gap_2()
+    .keep_text_selection("selection-actions")
+    .child(Button::new("copy").label("Copy").on_click(copy_selection))
+```
 
 ## 字体解析与度量
 
@@ -232,3 +245,11 @@ GPUI 的 [Render](./render) 流程分开布局、prepaint 和 paint；自定义�
 `WindowTextSystem` 在当前帧和上一帧的缓存中保存行布局，并通过 `TextSystem` 共享字体解析及度量。共享系统还缓存字形光栅边界；绘制使用的字形参数包含字体、字号、缩放系数和子像素位置。缓存键包含文本、已解析的字体 run、字号与宽度约束。相同输入可复用布局；改变文本、字体、features、字号、强制宽度或换行宽度，可能需要新布局。绘制颜色和背景属于装饰 run，与字形位置分开；只改变它们未必需要重新塑形。帧缓存不保证布局会被无限期保留。若预先知道会用到哪些字体，可在后台 executor 上调用 `TextSystem::prewarm_fonts(&fonts)` 准备平台字体缓存；普通塑形仍会按需填补缺失项。应复用窗口文本系统，也不要保存跨帧的 `&mut Window` 引用。
 
 大型虚拟化编辑器或文档只应塑形可见内容，避免每次重绘都测量所有行。GPUI Kit 的 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) 可虚拟化可滚动的块，[Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 则塑形可见行。如果性能分析显示长行文本反复被物化，`try_layout_line_by_hash` 可在不构造连续字符串的情况下探测缓存，而 `shape_line_by_hash` 只在缓存未命中时构造文本。使用后者时，返回的 `ShapedLine.text` 始终是空占位；若还需要原文，应单独保存。调用方必须保证相同 hash 对应完全相同的文本，并将其 UTF-8 字节长度传作 `text_len`。在实际测得这项开销之前，优先使用普通 API。
+
+## 外部编辑器的前景色
+
+外部编辑器通过 `RenderContext::with_foreground_ranges(leaf_key, ranges)` 传入当前呈现颜色，作用于带键的段落叶块，包括标题和表格单元格。区间使用叶块呈现文本的 UTF-8 字节偏移；图片和自定义行内对象各占一个 U+FFFC（三个字节），与 `LeafGeometry` 一致。
+
+宿主区间覆盖标记和链接的字形颜色，重叠部分以后传入的区间为准；字重、代码样式、装饰和链接激活保持原有行为。未覆盖文本继续继承正常前景色。文本区间裁剪到各片段；空区间、反向区间和 UTF-8 字符内部边界被忽略。自定义对象的占位符须被完整覆盖才继承颜色，图片不受影响。
+
+颜色属于渲染上下文，不进入 `InlineNode` 或文档的标记缓存。每次渲染传入当前主题或表面的颜色；对同一键再次调用 builder 会替换区间，传入空列表可恢复普通继承，无需重建段落。背景装饰仍通过独立的 `collect_leaf_geometry` 参数传入。

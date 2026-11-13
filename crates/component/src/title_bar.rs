@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use gpui_base::LogicalStyledExt as _;
+
 use crate::{
     ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
 };
@@ -8,7 +10,7 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Pixels, Render, RenderOnce, Rgba,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TitlebarOptions, Window,
     WindowControlArea, WindowOptions, div, linear_color_stop, linear_gradient,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, rems,
 };
 use gpui_base::TestSupportExt as _;
 use smallvec::SmallVec;
@@ -252,7 +254,7 @@ struct WindowControls {
 }
 
 impl RenderOnce for WindowControls {
-    fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
             return div().id("window-controls").test_support();
         }
@@ -276,7 +278,9 @@ impl RenderOnce for WindowControls {
         // always ours to offer.
         let supported = window.window_controls();
 
+        // In RTL the controls sit on the start (left) edge, close outermost.
         h_flex()
+            .flex_row_dir(cx)
             .id("window-controls")
             .test_support()
             .items_center()
@@ -327,16 +331,26 @@ impl RenderOnce for TitleBar {
         let is_macos = cfg!(target_os = "macos");
 
         let state = window.use_state(cx, |_, _| TitleBarState { should_move: false });
+        let radii = crate::window_corner_radii(window, cx);
 
         div().flex_shrink_0().child(
             div()
                 .id("title-bar")
-                .flex()
-                .flex_row()
+                .flex_row_dir(cx)
                 .items_center()
                 .justify_between()
                 .h(TITLE_BAR_HEIGHT)
-                .pl(TITLE_BAR_LEFT_PADDING)
+                // macOS draws its traffic lights on the left whatever the
+                // direction; elsewhere the padding is on the start edge.
+                .map(|this| {
+                    if is_macos {
+                        this.pl(TITLE_BAR_LEFT_PADDING)
+                    } else {
+                        this.ps(TITLE_BAR_LEFT_PADDING, cx)
+                    }
+                })
+                .rounded_tl(radii.top_left)
+                .rounded_tr(radii.top_right)
                 .border_b_1()
                 .border_color(cx.theme().title_bar_border)
                 .bg(default_title_bar_background(
@@ -357,8 +371,11 @@ impl RenderOnce for TitleBar {
                 }))
                 .on_mouse_down(
                     MouseButton::Left,
-                    window.listener_for(&state, |state, _, _, _| {
-                        state.should_move = true;
+                    // A control that took the press, such as a Button or a
+                    // focusable Select, prevents the default; its click must
+                    // not turn into a window move on the smallest motion.
+                    window.listener_for(&state, |state, _, window, _| {
+                        state.should_move = !window.default_prevented();
                     }),
                 )
                 .on_mouse_up(
@@ -382,7 +399,7 @@ impl RenderOnce for TitleBar {
                         .flex_1()
                         .when(!is_web, |this| {
                             this.window_control_area(WindowControlArea::Drag)
-                                .when(window.is_fullscreen(), |this| this.pl_3())
+                                .when(window.is_fullscreen(), |this| this.ps(rems(0.75), cx))
                                 .when(is_linux && is_client_decorated, |this| {
                                     this.child(
                                         div()
@@ -412,7 +429,77 @@ impl RenderOnce for TitleBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Rgba, linear_color_stop, linear_gradient};
+    use gpui::{
+        AppContext as _, Modifiers, Rgba, TestAppContext, VisualTestContext, linear_color_stop,
+        linear_gradient, point, px,
+    };
+    use std::cell::Cell;
+
+    use crate::button::Button;
+
+    const BUTTON: &str = "title-bar-button";
+
+    struct BarWithButton {
+        clicks: Rc<Cell<usize>>,
+    }
+
+    impl Render for BarWithButton {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let clicks = self.clicks.clone();
+            TitleBar::new().child(div().w(px(200.)).child("App")).child(
+                Button::new("open")
+                    .label("Open")
+                    .debug_selector(|| BUTTON.to_string())
+                    .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+            )
+        }
+    }
+
+    fn open(cx: &mut TestAppContext) -> (VisualTestContext, Rc<Cell<usize>>) {
+        cx.update(crate::init);
+        let clicks = Rc::new(Cell::new(0));
+        let view = cx.new(|_| BarWithButton {
+            clicks: clicks.clone(),
+        });
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| crate::Root::new(view.clone(), window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (cx, clicks)
+    }
+
+    /// Press, move one pixel, release, as a hand often does.
+    fn click_with_drift(cx: &mut VisualTestContext, at: gpui::Point<Pixels>) {
+        let drift = point(at.x + px(1.), at.y);
+        cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(drift, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(drift, MouseButton::Left, Modifiers::default());
+    }
+
+    #[gpui::test]
+    fn a_press_on_a_control_keeps_its_click(cx: &mut TestAppContext) {
+        let (mut cx, clicks) = open(cx);
+        let at = cx
+            .debug_bounds(BUTTON)
+            .expect("the button is drawn")
+            .center();
+        click_with_drift(&mut cx, at);
+        assert_eq!(clicks.get(), 1);
+    }
+
+    /// The test platform's `start_window_move` is `unimplemented!()`, so a
+    /// press on the bar itself still reaching it shows up as this panic.
+    #[gpui::test]
+    #[should_panic(expected = "not implemented")]
+    fn a_press_on_the_bar_itself_still_moves_the_window(cx: &mut TestAppContext) {
+        let (mut cx, _) = open(cx);
+        let button = cx.debug_bounds(BUTTON).expect("the button is drawn");
+        click_with_drift(&mut cx, point(button.left() - px(100.), button.center().y));
+    }
 
     #[test]
     fn test_default_title_bar_background() {

@@ -4,11 +4,13 @@ use crate::{
         Cancel, SelectDown, SelectFirst, SelectLast, SelectNextColumn, SelectPageDown,
         SelectPageUp, SelectPrevColumn, SelectUp,
     },
+    scroll::ScrollbarMode,
     table::{TableDelegate, TableState},
 };
 use gpui::{
     App, Edges, Entity, Focusable, InteractiveElement, IntoElement, KeyBinding, ParentElement,
-    Pixels, RenderOnce, Styled, Window, div, prelude::FluentBuilder,
+    Pixels, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder,
 };
 use gpui_base::TestSupportExt as _;
 
@@ -24,19 +26,18 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("end", SelectLast, Some(CONTEXT)),
         KeyBinding::new("pageup", SelectPageUp, Some(CONTEXT)),
         KeyBinding::new("pagedown", SelectPageDown, Some(CONTEXT)),
-        KeyBinding::new("tab", SelectNextColumn, Some(CONTEXT)),
-        KeyBinding::new("shift-tab", SelectPrevColumn, Some(CONTEXT)),
     ]);
 }
 
 pub(super) struct TableOptions {
     pub(super) scroll_bounce: Option<bool>,
     pub(super) scrollbar_visible: Edges<bool>,
+    pub(super) scrollbar_mode: Option<ScrollbarMode>,
     /// Set stripe style of the table.
     pub(super) stripe: bool,
     /// Set to use border style of the table.
     pub(super) bordered: bool,
-    /// Draw the border on the right edge of the fixed columns.
+    /// Draw the border on the inner edge of the fixed columns.
     pub(super) fixed_cols_border: bool,
     /// The cell size of the table.
     pub(super) size: Size,
@@ -49,6 +50,7 @@ impl Default for TableOptions {
         Self {
             scroll_bounce: None,
             scrollbar_visible: Edges::all(true),
+            scrollbar_mode: None,
             stripe: false,
             bordered: true,
             fixed_cols_border: true,
@@ -67,7 +69,7 @@ impl Default for TableOptions {
 /// - **Virtual Scrolling**: Efficient rendering of large datasets
 /// - **Resizable Columns**: Drag column borders to resize
 /// - **Movable Columns**: Drag column headers to reorder
-/// - **Fixed Columns**: Pin columns to the left side
+/// - **Fixed Columns**: Pin columns to the left or right side
 /// - **Sortable Columns**: Click column headers to sort
 /// - **Context Menus**: Right-click support for rows and cells
 ///
@@ -100,6 +102,7 @@ pub struct DataTable<D: TableDelegate> {
     state: Entity<TableState<D>>,
     options: TableOptions,
     focus_ring_enabled: bool,
+    accessibility_label: Option<SharedString>,
 }
 
 impl<D> DataTable<D>
@@ -112,7 +115,14 @@ where
             state: state.clone(),
             options: TableOptions::default(),
             focus_ring_enabled: true,
+            accessibility_label: None,
         }
+    }
+
+    /// Sets the label exposed to accessibility clients, the table's name.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
     }
 
     /// Set to use stripe style of the table, default to false.
@@ -146,8 +156,9 @@ where
         self
     }
 
-    /// Set whether to draw the border on the right edge of the fixed columns,
-    /// default to true.
+    /// Set whether to draw the border on the inner edge of the fixed columns,
+    /// the right edge of left-fixed columns and the left edge of right-fixed
+    /// columns, default to true.
     ///
     /// Turn it off when the fixed cells draw that edge themselves, so the
     /// boundary is not drawn twice.
@@ -163,6 +174,16 @@ where
             bottom: horizontal,
             ..Default::default()
         };
+        self
+    }
+
+    /// Set the show mode of both the vertical and horizontal scrollbars.
+    ///
+    /// Defaults to the theme's [`ScrollbarMode`]. A data grid can use
+    /// [`ScrollbarMode::Always`] so that the columns out of view are visible
+    /// without scrolling.
+    pub fn scrollbar_mode(mut self, mode: ScrollbarMode) -> Self {
+        self.options.scrollbar_mode = Some(mode);
         self
     }
 }
@@ -199,13 +220,32 @@ where
         let bordered = self.options.bordered;
         let focus_ring_enabled = self.focus_ring_enabled;
         let focus_handle = self.state.focus_handle(cx);
-        self.state.update(cx, |state, _| {
+        let (role, rows_count, columns_count) = self.state.update(cx, |state, cx| {
             state.options = self.options;
+            // A table that selects rows or cells is a grid.
+            let role = if state.row_selectable || state.cell_selectable {
+                gpui::Role::Grid
+            } else {
+                gpui::Role::Table
+            };
+            let delegate = state.delegate();
+            (role, delegate.rows_count(cx), delegate.columns_count(cx))
         });
 
+        // The element that holds the keyboard focus is the table's
+        // accessibility node: GPUI reports focus only on an element with a
+        // role, and otherwise falls back to the window.
         div()
             .id("table")
             .test_support()
+            .role(role)
+            .when_some(self.accessibility_label, |this, label| {
+                this.aria_label(label)
+            })
+            // The counts cover every row, not just the rendered ones, plus
+            // the header row.
+            .aria_row_count(rows_count + 1)
+            .aria_column_count(columns_count)
             .size_full()
             .key_context(CONTEXT)
             .track_focus(&focus_handle)
@@ -321,6 +361,7 @@ mod tests {
             .header_row_height(px(32.))
             .fixed_cols_border(false)
             .scrollbar_visible(false, true)
+            .scrollbar_mode(ScrollbarMode::Always)
             .with_size(Size::Small)
             .focus_ring(false);
         assert!(table.options.stripe);
@@ -330,6 +371,7 @@ mod tests {
         assert!(!table.options.fixed_cols_border);
         assert!(!table.options.scrollbar_visible.right);
         assert!(table.options.scrollbar_visible.bottom);
+        assert_eq!(table.options.scrollbar_mode, Some(ScrollbarMode::Always));
         assert_eq!(table.options.size, Size::Small);
         assert!(!table.is_focus_ring_enabled());
         assert!(table.focus_ring(true).is_focus_ring_enabled());

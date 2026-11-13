@@ -9,7 +9,7 @@ exclude = ["examples/"]
 repository = "https://github.com/longbridge/gpui-kit"
 homepage = "https://gpui-kit.com"
 documentation = "https://docs.rs/gpui-base"
-version = "0.8.1"
+version = "0.9.1"
 publish = true
 edition.workspace = true
 
@@ -55,6 +55,7 @@ serde_json.workspace = true
 smallvec.workspace = true
 sum-tree.workspace = true
 tracing.workspace = true
+sys-locale = "0.3"
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.12.0"
 web-time = "1"
@@ -82,6 +83,7 @@ ashpd = { version = "0.13", default-features = false, features = ["async-io", "s
 
 [dev-dependencies]
 criterion = "0.8"
+gpui-base = { path = ".", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support", "bench-support"] }
 gpui-fast = { workspace = true, features = ["test-support", "bench-support"] }
 gpui_platform = { workspace = true, features = ["bench-support"] }

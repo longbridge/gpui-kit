@@ -10,6 +10,7 @@ use gpui::{
 };
 
 use crate::{
+    LayoutDirection,
     actions::{Confirm, SelectDown, SelectLeft, SelectRight, SelectUp},
     styled::StyledExt as _,
 };
@@ -390,24 +391,24 @@ impl TreeState {
         }
     }
 
+    // The arrow toward the end edge expands and the one toward the start
+    // collapses: Right and Left in LTR, Left and Right in RTL.
     fn on_action_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(ix) = self.selected_ix
-            && self
-                .entries
-                .get(ix)
-                .is_some_and(|entry| entry.is_folder() && entry.is_expanded())
-        {
-            self.toggle_expand(ix, cx);
-            cx.notify();
-        }
+        let expand = LayoutDirection::global(cx).is_rtl();
+        self.set_selected_expanded(expand, cx);
     }
 
     fn on_action_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+        let expand = !LayoutDirection::global(cx).is_rtl();
+        self.set_selected_expanded(expand, cx);
+    }
+
+    fn set_selected_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
         if let Some(ix) = self.selected_ix
             && self
                 .entries
                 .get(ix)
-                .is_some_and(|entry| entry.is_folder() && !entry.is_expanded())
+                .is_some_and(|entry| entry.is_folder() && entry.is_expanded() != expanded)
         {
             self.toggle_expand(ix, cx);
             cx.notify();
@@ -600,7 +601,7 @@ mod tests {
     fn clones_share_state_and_ancestors_keep_nearest_first_order() {
         let leaf = TreeItem::new("leaf", "Leaf");
         let branch = TreeItem::new("branch", "Branch").child(leaf.clone());
-        let root = TreeItem::new("root", "Root").child(branch.clone());
+        let root = TreeItem::new("root", "Root").child(branch);
 
         leaf.clone().disabled(true).expanded(true);
         assert!(leaf.is_disabled());
@@ -684,6 +685,45 @@ mod tests {
             state.toggle_expand(1, cx);
             assert_eq!(state.index_of(&"docs/guide/a".into()), Some(2));
         });
+    }
+
+    #[gpui::test]
+    fn arrow_keys_expand_toward_the_end_edge(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = cx.add_window_view(|_, cx| TreeState::new(cx));
+        for (direction, expand, collapse) in [
+            (LayoutDirection::Ltr, "right", "left"),
+            (LayoutDirection::Rtl, "left", "right"),
+        ] {
+            let press = |key: &str, cx: &mut VisualTestContext| {
+                cx.update(|window, cx| {
+                    state.update(cx, |s, cx| match key {
+                        "left" => s.on_action_left(&SelectLeft, window, cx),
+                        _ => s.on_action_right(&SelectRight, window, cx),
+                    })
+                });
+                state.read_with(cx, |s, _| s.entries.len() > 1)
+            };
+            cx.update(|_, cx| {
+                direction.set_global(cx);
+                state.update(cx, |s, cx| {
+                    s.set_items(
+                        vec![TreeItem::new("src", "src").child(TreeItem::new("lib.rs", "lib.rs"))],
+                        cx,
+                    );
+                    s.set_selected_index(Some(0), cx);
+                });
+            });
+            assert!(
+                !press(collapse, cx),
+                "{direction:?}: {collapse} keeps it collapsed"
+            );
+            assert!(press(expand, cx), "{direction:?}: {expand} expands");
+            assert!(
+                press(expand, cx),
+                "{direction:?}: {expand} keeps it expanded"
+            );
+            assert!(!press(collapse, cx), "{direction:?}: {collapse} collapses");
+        }
     }
 
     struct TreeHarness {

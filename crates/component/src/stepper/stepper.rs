@@ -5,6 +5,8 @@ use gpui::{
     StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
+use gpui_base::LogicalStyledExt as _;
+
 use crate::{AxisExt, Sizable, Size, StyledExt as _, stepper::StepperItem};
 
 /// A step-by-step progress for users to navigate through a series of steps or stages.
@@ -107,12 +109,14 @@ impl Styled for Stepper {
 }
 
 impl RenderOnce for Stepper {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let total_items = self.items.len();
         div()
             .id(self.id)
             .w_full()
-            .when(self.layout.is_horizontal(), |this| this.h_flex())
+            .when(self.layout.is_horizontal(), |this| {
+                this.h_flex().flex_row_dir(cx)
+            })
             .when(self.layout.is_vertical(), |this| this.v_flex())
             .refine_style(&self.style)
             .children(self.items.into_iter().enumerate().map(|(step, item)| {

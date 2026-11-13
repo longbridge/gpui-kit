@@ -31,6 +31,7 @@ use gpui_kit::base::{Decrement, Increment, NumberInput, NumberInputText};
 ## 状态与事件
 
 父级或持久 entity 保存数值；按钮和文本输入共同更新同一状态。
+调用 `.stepper(false)` 可不创建递增和递减按钮，同时保留 spinbutton 的 Up/Down 键步进。
 
 受控状态应保存在父渲染类型或 GPUI entity 中；在回调中更新并调用 `cx.notify()`，不要在每次渲染时重建持久 entity。
 
