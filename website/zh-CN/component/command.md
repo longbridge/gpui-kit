@@ -211,7 +211,7 @@ impl StockSearch {
 
 ## 搜索
 
-Command 默认在条目的 label 和 keywords 中进行忽略大小写的子串匹配。空查询会匹配全部条目。分组中的条目全被过滤时，其标题会隐藏；过滤后位于首尾或相邻的分隔线不会显示。每一行会高亮 label 中与查询匹配的部分；通过 `child` 构建的行，以及设置了 `filterable(false)` 的面板，不显示高亮。
+Command 默认在条目的 label 和 keywords 中进行忽略大小写的子串匹配。空查询会匹配全部条目。分组中的条目全被过滤时，其标题会隐藏；过滤后位于首尾或相邻的分隔线不会显示。设置 `.highlight_matches(true)` 后（默认关闭），每一行会高亮 label 中与查询匹配的部分；通过 `child` 构建的行，以及设置了 `filterable(false)` 的面板，不显示高亮。
 
 ```rust
 CommandItem::new().label("Profile")

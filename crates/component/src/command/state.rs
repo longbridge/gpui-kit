@@ -40,6 +40,7 @@ pub(crate) struct CommandModel {
     pub(crate) entries: Vec<CommandEntry>,
     pub(crate) searchable: bool,
     pub(crate) filterable: bool,
+    pub(crate) highlight_matches: bool,
     pub(crate) on_query: Option<Rc<OnQuery>>,
     pub(crate) on_select: Option<Rc<OnIndex>>,
     pub(crate) on_confirm: Option<Rc<OnIndex>>,
@@ -52,6 +53,7 @@ impl Default for CommandModel {
             entries: Vec::new(),
             searchable: true,
             filterable: true,
+            highlight_matches: false,
             on_query: None,
             on_select: None,
             on_confirm: None,
@@ -339,9 +341,9 @@ impl CommandState {
     }
 
     /// The query the rows highlight in their labels: the one the palette
-    /// filtered by, or none when the host filters.
+    /// filtered by when `highlight_matches` is on, or none.
     fn highlighted_query(&self) -> &str {
-        if self.model.searchable && self.model.filterable {
+        if self.model.highlight_matches && self.model.searchable && self.model.filterable {
             self.applied_query.trim()
         } else {
             ""
@@ -1616,7 +1618,24 @@ mod tests {
         let cx = cx.add_empty_window();
 
         cx.update(|window, cx| {
-            let state = cx.new(|cx| command_state(window, cx, suggestion_entries()));
+            let plain = cx.new(|cx| command_state(window, cx, suggestion_entries()));
+            plain.update(cx, |state, cx| {
+                state.set_query("cal", window, cx);
+                assert_eq!(state.highlighted_query(), "");
+            });
+
+            let state = cx.new(|cx| {
+                let mut state = CommandState::new(window, cx);
+                state.install_model(
+                    CommandModel {
+                        entries: suggestion_entries(),
+                        highlight_matches: true,
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                state
+            });
             state.update(cx, |state, cx| {
                 assert_eq!(state.highlighted_query(), "");
                 state.set_query(" cal ", window, cx);
@@ -1629,6 +1648,7 @@ mod tests {
                     CommandModel {
                         entries: suggestion_entries(),
                         filterable: false,
+                        highlight_matches: true,
                         ..CommandModel::default()
                     },
                     cx,

@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    delegate::{SearchableListDelegate, SearchableListItem as _, with_search_query},
+    delegate::{SearchableListDelegate, SearchableListItem as _},
     item::SearchableListItemElement,
 };
 
@@ -26,8 +26,10 @@ pub(crate) struct SearchableListAdapter<D: SearchableListDelegate + 'static> {
     /// selection change. `render_item` reads this directly so it never touches the parent entity
     /// (which would panic — the `ListState` entity is already locked during render).
     pub(crate) selection_snapshot: Vec<(IndexPath, D::Item)>,
-    /// The last search query, which the default item rows highlight.
+    /// The last search query, passed to rows when `highlight_matches` is on.
     query: SharedString,
+    /// Render rows with [`SearchableListItem::render_highlighted`].
+    pub(crate) highlight_matches: bool,
     /// Called when the user confirms an item (click or Enter).
     on_confirm:
         Box<dyn Fn(Option<IndexPath>, bool, &mut Window, &mut Context<ListState<Self>>) + 'static>,
@@ -53,6 +55,7 @@ impl<D: SearchableListDelegate + 'static> SearchableListAdapter<D> {
             selected_index: None,
             selection_snapshot: Vec::new(),
             query: SharedString::default(),
+            highlight_matches: false,
             on_confirm: Box::new(on_confirm),
             on_cancel: Box::new(on_cancel),
             on_render_empty: Box::new(on_render_empty),
@@ -135,12 +138,12 @@ impl<D: SearchableListDelegate + 'static> ListDelegate for SearchableListAdapter
             .clone()
             .unwrap_or_else(|| Icon::new(IconName::Check));
 
-        let content = div()
-            .min_w_0()
-            .truncate()
-            .child(with_search_query(&self.query, || {
-                item.render(window, cx).into_any_element()
-            }));
+        let content = div().min_w_0().truncate().child(if self.highlight_matches {
+            item.render_highlighted(self.query.trim(), window, cx)
+                .into_any_element()
+        } else {
+            item.render(window, cx).into_any_element()
+        });
 
         Some(
             SearchableListItemElement::new(ix.row)
@@ -208,13 +211,13 @@ mod tests {
     use crate::{
         IndexPath,
         list::{ListDelegate as _, ListState},
-        searchable_list::{SearchableListItem, delegate::search_query},
+        searchable_list::SearchableListItem,
     };
 
     #[derive(Clone)]
     struct RecordingItem {
         title: SharedString,
-        rendered_with: Rc<RefCell<Vec<SharedString>>>,
+        rendered: Rc<RefCell<Vec<Option<String>>>>,
     }
 
     impl SearchableListItem for RecordingItem {
@@ -225,7 +228,17 @@ mod tests {
         }
 
         fn render(&self, _: &mut Window, _: &mut gpui::App) -> impl gpui::IntoElement {
-            self.rendered_with.borrow_mut().push(search_query());
+            self.rendered.borrow_mut().push(None);
+            self.title.clone()
+        }
+
+        fn render_highlighted(
+            &self,
+            query: &str,
+            _: &mut Window,
+            _: &mut gpui::App,
+        ) -> impl gpui::IntoElement {
+            self.rendered.borrow_mut().push(Some(query.to_string()));
             self.title.clone()
         }
 
@@ -235,15 +248,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn rows_render_with_the_current_search_query(cx: &mut TestAppContext) {
+    fn rows_highlight_the_query_only_when_enabled(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
-        let rendered_with = Rc::new(RefCell::new(Vec::new()));
+        let rendered = Rc::new(RefCell::new(Vec::new()));
 
         cx.update(|window, cx| {
             let items = vec![RecordingItem {
                 title: "Rust".into(),
-                rendered_with: rendered_with.clone(),
+                rendered: rendered.clone(),
             }];
             let list = cx.new(|cx| {
                 let adapter = SearchableListAdapter::new(
@@ -262,14 +275,17 @@ mod tests {
                 });
             };
 
-            render_row(window, cx);
             list.update(cx, |list, cx| list.set_query(" ru ", window, cx));
+            render_row(window, cx);
+            list.update(cx, |list, _| list.delegate_mut().highlight_matches = true);
             render_row(window, cx);
             list.update(cx, |list, cx| list.set_query("", window, cx));
             render_row(window, cx);
         });
 
-        assert_eq!(*rendered_with.borrow(), ["", "ru", ""]);
-        assert_eq!(search_query(), "");
+        assert_eq!(
+            *rendered.borrow(),
+            [None, Some("ru".to_string()), Some(String::new())]
+        );
     }
 }

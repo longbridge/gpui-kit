@@ -107,7 +107,7 @@ Combobox::new(&state)
 
 `String`、`SharedString` 和 `&'static str` 已内置实现了 `SearchableListItem`。自定义类型需手动实现该 trait。
 
-默认的 `render` 绘制 `title()`，并高亮其中与搜索词匹配的部分。重写 `render` 可以绘制更丰富的行，此时不再显示高亮。
+在 `Combobox` 上设置 `.highlight_matches(true)` 后，行通过 `render_highlighted(query, ..)` 渲染，默认实现会用主题的 primary 颜色高亮 `title()` 中匹配的部分。自定义行需同时重写它和 `render`。默认不高亮。
 
 ```rust
 #[derive(Clone)]

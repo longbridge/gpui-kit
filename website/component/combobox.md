@@ -107,7 +107,7 @@ Combobox::new(&state)
 
 Built-in implementations exist for `String`, `SharedString`, and `&'static str`. For custom types implement the trait.
 
-The default `render` draws `title()` and highlights the part that matches the search query. Override `render` to draw a richer row; it then shows no highlight.
+With `.highlight_matches(true)` on the `Combobox`, rows render through `render_highlighted(query, ..)`, whose default draws `title()` with the matched text in the theme's primary color. Override it as well as `render` to keep a custom row highlighted. Highlighting is off by default.
 
 ```rust
 #[derive(Clone)]

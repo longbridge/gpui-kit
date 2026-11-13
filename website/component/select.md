@@ -99,7 +99,7 @@ Select::new(&state)
     .icon(IconName::Search) // Shows search icon
 ```
 
-While a query is typed, each row highlights the part of its title that matches it. An item with its own `render` draws its whole row, so it shows no highlight.
+Use `.highlight_matches(true)` to highlight the part of each row that matches the query (off by default). Rows render through `SelectItem::render_highlighted`; an item with a custom row overrides it as well as `render`.
 
 ### Impl SelectItem
 

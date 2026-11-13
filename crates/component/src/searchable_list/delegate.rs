@@ -1,28 +1,8 @@
-use std::cell::RefCell;
-
 use gpui::{AnyElement, App, IntoElement, SharedString, Task, Window};
 
 use crate::IndexPath;
 
 use super::change::SearchableListChange;
-
-thread_local! {
-    static SEARCH_QUERY: RefCell<SharedString> = RefCell::default();
-}
-
-/// Run `f` with `query` as the search query that [`SearchableListItem::render`]
-/// highlights.
-pub(crate) fn with_search_query<R>(query: &SharedString, f: impl FnOnce() -> R) -> R {
-    let previous = SEARCH_QUERY.replace(query.clone());
-    let result = f();
-    SEARCH_QUERY.set(previous);
-    result
-}
-
-/// The search query of the row being rendered, empty outside a dropdown row.
-pub(crate) fn search_query() -> SharedString {
-    SEARCH_QUERY.with_borrow(Clone::clone)
-}
 
 /// An item that can appear in a searchable list (Select, ComboBox).
 pub trait SearchableListItem: Clone {
@@ -49,10 +29,20 @@ pub trait SearchableListItem: Clone {
     /// Render this item's row content inside the dropdown.
     ///
     /// Override to add icons, avatars, secondary text, etc.
-    /// The default renders `title()`, with the text that matches the search
-    /// query highlighted.
-    fn render(&self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::label::highlight_matches(self.title(), &search_query(), cx)
+    /// The default renders `title()`.
+    fn render(&self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        self.title()
+    }
+
+    /// Render this item's row content with the text matching `query`
+    /// highlighted. Used instead of [`Self::render`] when the component
+    /// enables `highlight_matches`.
+    ///
+    /// The default renders `title()` with every case-insensitive occurrence
+    /// of `query` highlighted. Override it together with `render` to keep a
+    /// custom row when highlighting is enabled.
+    fn render_highlighted(&self, query: &str, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        crate::label::highlight_matches(self.title(), query, cx)
     }
 
     /// The value that identifies this item.
