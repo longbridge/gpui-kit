@@ -4,8 +4,8 @@
 //! identified GPUI elements with `.test_support()`, without supplying test-only state.
 use gpui::{
     App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, ImageSource,
-    InspectorElementId, InteractiveElement, IntoElement, LayoutId, Pixels, RenderImage,
-    SharedString, SharedUri, Visibility, Window, px,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, Pixels, SharedString,
+    SharedUri, Visibility, Window, px,
 };
 use image::{Frame, RgbaImage};
 use smallvec::SmallVec;
@@ -739,33 +739,28 @@ impl<E: Element + gpui::StatefulInteractiveElement> gpui::StatefulInteractiveEle
 {
 }
 
-/// A solid-color decoded image, for UI tests that exercise image rendering.
+/// An image source for UI tests: every URI resolves synchronously to a solid
+/// image of `width` x `height` pixels, so layout does not race a decoder.
 ///
 /// Images normally decode on background tasks through GPUI's asset system,
 /// which a `#[gpui_kit::test]` app drives at unpredictable times: a text view
 /// holding an image measures its placeholder until the decode lands, so
-/// layout-sensitive assertions race the decoder. Hand the returned image to a
-/// view through [`image_override`] instead: a `Custom` image source resolves
-/// synchronously on every layout, so its size is stable from the first frame.
-pub fn solid_image(width: u32, height: u32, rgba: [u8; 4]) -> Arc<RenderImage> {
-    let buffer = RgbaImage::from_pixel(width, height, image::Rgba(rgba));
-    Arc::new(gpui::RenderImage::new(SmallVec::from_buf([Frame::new(
-        buffer,
-    )])))
-}
-
-/// An image-source override that hands `image` to every URI synchronously.
-///
-/// Pair it with [`crate::TextViewDefaults::image_source`] so a test's images
-/// render and measure deterministically:
+/// layout-sensitive assertions race the decoder. A `Custom` image source
+/// resolves synchronously on every layout instead, so its size is stable from
+/// the first frame. Pair it with [`crate::TextView::image_source`]:
 ///
 /// ```ignore
-/// let image = test_support::solid_image(200, 60, [190, 40, 40, 255]);
-/// let view = TextView::new(&state).image_source(test_support::image_override(image));
+/// let view = TextView::markdown("doc", "before ![](a.png) after")
+///     .image_source(test_support::sized_image_source(200, 60));
 /// ```
-pub fn image_override(
-    image: Arc<RenderImage>,
+pub fn sized_image_source(
+    width: u32,
+    height: u32,
 ) -> impl Fn(&SharedUri) -> ImageSource + Send + Sync + 'static {
+    let buffer = RgbaImage::from_pixel(width, height, image::Rgba(TEST_IMAGE_RGBA));
+    let image = Arc::new(gpui::RenderImage::new(SmallVec::from_buf([Frame::new(
+        buffer,
+    )])));
     move |_| {
         ImageSource::Custom(Arc::new({
             let image = image.clone();
@@ -773,3 +768,7 @@ pub fn image_override(
         }))
     }
 }
+
+/// The color [`sized_image_source`] fills its frames with. The layout tests
+/// never assert on it; the value only has to stay opaque.
+const TEST_IMAGE_RGBA: [u8; 4] = [190, 40, 40, 255];

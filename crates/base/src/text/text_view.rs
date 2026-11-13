@@ -2330,25 +2330,29 @@ mod tests {
 
     struct ImageSourceTestRoot {
         text_view: Entity<TextViewState>,
-        image: Arc<gpui::RenderImage>,
+        image_source: Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>,
     }
 
     impl ImageSourceTestRoot {
-        fn new(markdown: &str, image: Arc<gpui::RenderImage>, cx: &mut Context<Self>) -> Self {
+        fn new(
+            markdown: &str,
+            image_source: Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>,
+            cx: &mut Context<Self>,
+        ) -> Self {
             Self {
                 text_view: cx.new(|cx| TextViewState::markdown(markdown, cx)),
-                image,
+                image_source,
             }
         }
     }
 
     impl Render for ImageSourceTestRoot {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            use crate::test_support::image_override;
+            let image_source = self.image_source.clone();
             div().w(px(420.)).child(
                 TextView::new(&self.text_view)
                     .selectable(true)
-                    .image_source(image_override(self.image.clone())),
+                    .image_source(move |uri| image_source(uri)),
             )
         }
     }
@@ -2361,12 +2365,12 @@ mod tests {
     /// data URL.
     #[gpui::test]
     fn inline_image_without_size_is_drawn_at_its_intrinsic_size(cx: &mut TestAppContext) {
-        use crate::test_support::solid_image;
+        use crate::test_support::sized_image_source;
 
         cx.update(crate::init);
-        let image = solid_image(200, 60, [190, 40, 40, 255]);
+        let image_source = Arc::new(sized_image_source(200, 60));
         let (content, cx) = cx.add_window_view(|_, cx| {
-            ImageSourceTestRoot::new("Before ![dot](test://dot) after", image, cx)
+            ImageSourceTestRoot::new("Before ![dot](test://dot) after", image_source, cx)
         });
         let cx: &mut VisualTestContext = cx;
 
@@ -2393,12 +2397,12 @@ mod tests {
     /// text after it wraps to the next line instead of overflowing (#3707).
     #[gpui::test]
     fn inline_image_wider_than_the_view_wraps_the_text_after_it(cx: &mut TestAppContext) {
-        use crate::test_support::solid_image;
+        use crate::test_support::sized_image_source;
 
         cx.update(crate::init);
-        let image = solid_image(600, 60, [190, 40, 40, 255]);
+        let image_source = Arc::new(sized_image_source(600, 60));
         let (content, cx) = cx.add_window_view(|_, cx| {
-            ImageSourceTestRoot::new("Before ![wide](test://wide) after", image, cx)
+            ImageSourceTestRoot::new("Before ![wide](test://wide) after", image_source, cx)
         });
         let cx: &mut VisualTestContext = cx;
 
