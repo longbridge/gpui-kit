@@ -843,7 +843,7 @@ where
     /// Highlight the part of each row that matches the search query, default is `false`.
     ///
     /// Rows render with [`SearchableListItem::render_highlighted`]; the default
-    /// highlights the matched text of `title()` in the theme's primary color.
+    /// highlights the matched text of `title()` in the theme's `list_highlight` color.
     pub fn highlight_matches(mut self, highlight: bool) -> Self {
         self.options.highlight_matches = highlight;
         self
