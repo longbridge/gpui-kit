@@ -1294,7 +1294,10 @@ impl Element for Inline {
             });
         }
 
-        if is_selection || is_selectable {
+        let shows_text_cursor = GlobalState::global(cx)
+            .text_view_state()
+            .is_some_and(|view| view.read(cx).shows_text_cursor());
+        if (is_selection || is_selectable) && shows_text_cursor {
             window.set_cursor_style(CursorStyle::IBeam, &hitbox);
         }
 
