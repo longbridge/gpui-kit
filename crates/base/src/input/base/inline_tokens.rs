@@ -412,6 +412,39 @@ macro_rules! token_api {
             pub fn tokens(&self) -> &[InlineTokenSpan] {
                 self.token_spans()
             }
+            /// Replace the tokens and keep the text, the selection and the undo
+            /// history. `content` must hold the input's text, and no token may
+            /// cut through the selection.
+            pub fn set_tokens(
+                &mut self,
+                content: InputContent,
+                cx: &mut Context<Self>,
+            ) -> Result<(), InlineTokenError> {
+                self.check_token_mode()?;
+                if self.text != content.text.as_ref() {
+                    return Err(InlineTokenError::TextMismatch);
+                }
+                let selection = self.selected_range();
+                let cuts = |at: usize| {
+                    content
+                        .tokens
+                        .iter()
+                        .any(|span| span.range.start < at && at < span.range.end)
+                };
+                if cuts(selection.start) || cuts(selection.end) {
+                    return Err(InlineTokenError::InvalidRange);
+                }
+                if self.token_spans() == content.tokens.as_slice() {
+                    return Ok(());
+                }
+                self.inline_tokens = (!content.tokens.is_empty()).then(|| {
+                    Box::new(InlineTokenStore {
+                        spans: content.tokens,
+                    })
+                });
+                cx.notify();
+                Ok(())
+            }
             /// The text with its tokens, as `set_value` accepts it.
             pub fn content(&self) -> InputContent {
                 InputContent {
