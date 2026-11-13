@@ -265,8 +265,8 @@ mod tests {
     use std::{cell::Cell, rc::Rc};
 
     use gpui::{
-        Bounds, Context, IntoElement, Modifiers, MouseButton, ParentElement as _, Render,
-        Styled as _, TestAppContext, Window, div, point, px, size,
+        AppContext as _, Bounds, Context, IntoElement, Modifiers, MouseButton, ParentElement as _,
+        Render, Styled as _, TestAppContext, Window, div, point, px, size,
     };
 
     use super::SelectableText;
@@ -498,5 +498,109 @@ mod tests {
                 Bounds::from_corners(point(px(10.), px(80.)), point(px(30.), px(100.))),
             ]
         );
+    }
+
+    /// A selectable line, and under it a control that acts on the selection,
+    /// drawn by a view of its own: cached when `cached`.
+    struct ControlTestView {
+        control: gpui::Entity<ControlView>,
+        cached: bool,
+    }
+
+    struct ControlView {
+        renders: Rc<Cell<usize>>,
+    }
+
+    impl Render for ControlView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            use crate::ElementExt as _;
+            self.renders.set(self.renders.get() + 1);
+            div().w(px(60.)).h(px(20.)).keep_text_selection("control")
+        }
+    }
+
+    impl Render for ControlTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let control = gpui::AnyView::from(self.control.clone());
+            let control = if self.cached {
+                control
+                    .cached(gpui::StyleRefinement::default().w(px(60.)).h(px(20.)))
+                    .into_any_element()
+            } else {
+                control.into_any_element()
+            };
+            div()
+                .size_full()
+                .child(TextSelectionLayer)
+                .child(
+                    div()
+                        .w(px(240.))
+                        .h(px(32.))
+                        .child(SelectableText::new("local", "alpha beta")),
+                )
+                .child(control)
+        }
+    }
+
+    fn press(position: gpui::Point<gpui::Pixels>, cx: &mut gpui::VisualTestContext) {
+        cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::default());
+    }
+
+    fn select_line(cx: &mut gpui::VisualTestContext) {
+        cx.simulate_mouse_down(
+            point(px(1.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(px(220.), px(12.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            point(px(220.), px(12.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
+        });
+    }
+
+    fn selected(cx: &mut gpui::VisualTestContext) -> String {
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            TextSelection::selected_text(window, cx)
+        })
+    }
+
+    #[gpui::test]
+    fn a_press_on_an_element_marked_keep_text_selection_keeps_it(cx: &mut TestAppContext) {
+        for cached in [false, true] {
+            let renders = Rc::new(Cell::new(0));
+            let (view, cx) = cx.add_window_view(|_, cx| ControlTestView {
+                control: cx.new(|_| ControlView {
+                    renders: renders.clone(),
+                }),
+                cached,
+            });
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            select_line(cx);
+            // drawn again: a cached control is replayed, not drawn
+            let drawn = renders.get();
+            view.update(cx, |_, cx| cx.notify());
+            assert_eq!(selected(cx), "alpha beta");
+            assert_eq!(renders.get() == drawn, cached);
+
+            press(point(px(30.), px(42.)), cx);
+            assert_eq!(selected(cx), "alpha beta", "cached: {cached}");
+            // beside the control, the press clears it as before
+            press(point(px(120.), px(42.)), cx);
+            assert_eq!(selected(cx), "", "cached: {cached}");
+        }
     }
 }
