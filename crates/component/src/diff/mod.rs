@@ -1748,7 +1748,6 @@ fn code_line(
                 this.flex().flex_row().flex_shrink_0()
             }
         })
-        .when_some(split_offset, |this, offset| this.relative().left(-offset))
         .children(ranges.into_iter().enumerate().map(|(chunk_ix, range)| {
             CodeText::new(
                 ("code", chunk_ix).into(),
@@ -1830,6 +1829,49 @@ fn code_line(
                 this.child(render(marker, window, cx))
             })
     });
+    let source = div()
+        .id("source")
+        .test_support()
+        .map(|this| {
+            if code.soft_wrap {
+                this.flex_1().min_w_0()
+            } else {
+                this.flex_shrink_0()
+            }
+        })
+        .when_some(split_offset, |this, offset| this.relative().left(-offset))
+        .role(gpui::accesskit::Role::Label)
+        .aria_label(source_line.text().clone())
+        .aria_description(
+            t!(
+                if changed {
+                    if side == DiffSide::Original {
+                        "Diff.RemovedLine"
+                    } else {
+                        "Diff.AddedLine"
+                    }
+                } else {
+                    "Diff.SourceLine"
+                },
+                side = side_label(text_side),
+                line = position.line()
+            )
+            .to_string(),
+        )
+        .when_some(code.on_line_click.clone(), |this, handler| {
+            let position = position.clone();
+            this.on_click(move |event, window, cx| {
+                // A drag selects text; only a stationary press is a click.
+                if let ClickEvent::Mouse(mouse) = event {
+                    let moved = mouse.up.position - mouse.down.position;
+                    if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
+                        return;
+                    }
+                }
+                handler(&position, event, window, cx)
+            })
+        })
+        .child(text);
     h_flex()
         .id("line-row")
         .group("diff-line")
@@ -1875,52 +1917,20 @@ fn code_line(
         })
         .children(marker_lane)
         .child(indicator)
-        .child(
-            div()
-                .id("source")
-                .test_support()
-                .map(|this| {
-                    if code.soft_wrap {
-                        this.flex_1().min_w_0()
-                    } else if split_offset.is_some() {
-                        this.flex().flex_1().min_w_0().overflow_hidden()
-                    } else {
-                        this.flex_shrink_0()
-                    }
-                })
-                .role(gpui::accesskit::Role::Label)
-                .aria_label(source_line.text().clone())
-                .aria_description(
-                    t!(
-                        if changed {
-                            if side == DiffSide::Original {
-                                "Diff.RemovedLine"
-                            } else {
-                                "Diff.AddedLine"
-                            }
-                        } else {
-                            "Diff.SourceLine"
-                        },
-                        side = side_label(text_side),
-                        line = position.line()
-                    )
-                    .to_string(),
+        .map(|this| {
+            if split_offset.is_some() {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(source),
                 )
-                .when_some(code.on_line_click.clone(), |this, handler| {
-                    let position = position.clone();
-                    this.on_click(move |event, window, cx| {
-                        // A drag selects text; only a stationary press is a click.
-                        if let ClickEvent::Mouse(mouse) = event {
-                            let moved = mouse.up.position - mouse.down.position;
-                            if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
-                                return;
-                            }
-                        }
-                        handler(&position, event, window, cx)
-                    })
-                })
-                .child(text),
-        )
+            } else {
+                this.child(source)
+            }
+        })
         .children(add_button)
         .into_any_element()
 }

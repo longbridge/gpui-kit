@@ -134,11 +134,11 @@ fn a_mode_switch_at_the_top_keeps_the_file_header_in_view(cx: &mut TestAppContex
 }
 
 #[cfg(feature = "test-support")]
-fn source_lefts(cx: &mut VisualTestContext) -> Vec<gpui::Pixels> {
+fn lefts(cx: &mut VisualTestContext, id: gpui::ElementId) -> Vec<gpui::Pixels> {
     cx.update(|window, _| {
-        gpui_base::test_support::find_all(window, &[], &gpui::ElementId::from("source"))
+        gpui_base::test_support::find_all(window, &[], &id)
             .into_iter()
-            .map(|source| source.bounds().left())
+            .map(|element| element.bounds().left())
             .collect()
     })
 }
@@ -161,7 +161,11 @@ fn split_columns_keep_half_the_viewport_beside_a_long_line(cx: &mut TestAppConte
     for _ in 0..3 {
         draw(cx);
     }
-    let before = source_lefts(cx);
+    let gutters = || gpui::ElementId::from(("line", 0usize));
+    let sources = || gpui::ElementId::from("source");
+    let gutters_before = lefts(cx, gutters());
+    let before = lefts(cx, sources());
+    assert_eq!(gutters_before.len(), 2, "one gutter per side");
     assert_eq!(before.len(), 4, "two sides of two lines");
     assert!(
         before.iter().all(|left| *left < px(400.)),
@@ -179,8 +183,16 @@ fn split_columns_keep_half_the_viewport_beside_a_long_line(cx: &mut TestAppConte
     let offset = cx.update(|_, cx| state.read(cx).horizontal_scroll().offset().x);
     assert!(offset < px(0.), "the long line scrolls: {offset:?}");
     assert_eq!(
-        source_lefts(cx),
-        before,
-        "the columns stay in place while their code scrolls"
+        lefts(cx, gutters()),
+        gutters_before,
+        "the columns stay in place"
+    );
+    let after = lefts(cx, sources());
+    assert!(
+        after
+            .iter()
+            .zip(&before)
+            .all(|(after, before)| after < before),
+        "the code of both columns scrolls: {before:?} -> {after:?}"
     );
 }
