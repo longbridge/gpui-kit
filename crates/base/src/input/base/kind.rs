@@ -366,8 +366,25 @@ impl InputModeKind for InputMode {
 impl InputModeKind for TextareaMode {
     const MULTI_LINE: bool = true;
 
-    /// Ordinary multi-line text needs nothing beyond the shared engine.
-    type Extras = ();
+    /// Ordinary multi-line text, with decorations its owner sets.
+    type Extras = TextareaExtras;
+}
+
+/// What a textarea adds: text decorations its owner replaces whole, such as
+/// inline marks. Unlike an editor's collections they don't follow edits.
+#[derive(Default)]
+pub struct TextareaExtras {
+    pub(crate) decorations: Vec<TextDecoration>,
+}
+
+impl InputExtras for TextareaExtras {
+    fn decoration_layers(&self) -> Vec<&[TextDecoration]> {
+        if self.decorations.is_empty() {
+            Vec::new()
+        } else {
+            vec![&self.decorations[..]]
+        }
+    }
 }
 // `EditorMode`'s implementation lives with the editor code, next to the
 // language features it dispatches to.

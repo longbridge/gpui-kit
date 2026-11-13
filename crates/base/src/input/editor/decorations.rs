@@ -1,4 +1,4 @@
-use crate::input::EditorMode;
+use crate::input::{EditorMode, TextareaMode};
 use std::{collections::BTreeMap, ops::Range};
 
 use gpui::{App, Context, HighlightStyle, Hsla, Pixels, WeakEntity};
@@ -875,6 +875,23 @@ fn normalize<T: TrackedDecoration>(text: &Rope, decorations: Vec<T>) -> Vec<T> {
         .collect()
 }
 
+impl InputBaseState<TextareaMode> {
+    /// Replace the textarea's text decorations, as UTF-8 byte ranges into
+    /// [`Self::value`]. They don't follow edits: set them again after the text
+    /// changes. Decorations are not rendered while the input is masked.
+    pub fn set_decorations(&mut self, decorations: Vec<TextDecoration>, cx: &mut Context<Self>) {
+        let decorations = normalize(&self.text, decorations);
+        if self.extras.decorations != decorations {
+            self.extras.decorations = decorations;
+            cx.notify();
+        }
+    }
+    /// The textarea's text decorations, as last set.
+    pub fn decorations(&self) -> &[TextDecoration] {
+        &self.extras.decorations
+    }
+}
+
 impl InputBaseState<EditorMode> {
     /// Create an independently owned collection of geometric range decorations.
     ///
@@ -1012,6 +1029,39 @@ impl InputBaseState<EditorMode> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn textarea_decorations_are_normalized_and_rendered(cx: &mut gpui::TestAppContext) {
+        use crate::input::InputExtras as _;
+
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(|window, cx| {
+            crate::input::TextareaState::new(window, cx).default_value("héllo world")
+        });
+        let bold = HighlightStyle {
+            font_weight: Some(gpui::FontWeight::BOLD),
+            ..Default::default()
+        };
+        state.update(cx, |state, cx| {
+            state.set_decorations(
+                vec![
+                    TextDecoration::new(2..4, bold),
+                    TextDecoration::new(100..200, bold),
+                ],
+                cx,
+            );
+        });
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.decorations().len(), 1);
+            assert_eq!(state.decorations()[0].range, 1..4);
+            assert_eq!(state.extras.decoration_layers().len(), 1);
+        });
+        state.update(cx, |state, cx| state.set_decorations(vec![], cx));
+        state.read_with(cx, |state, _| {
+            assert!(state.decorations().is_empty());
+            assert!(state.extras.decoration_layers().is_empty());
+        });
+    }
 
     #[test]
     fn geometric_collections_share_utf8_normalization_and_edit_affinity() {
