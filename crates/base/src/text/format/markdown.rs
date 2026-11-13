@@ -19,13 +19,20 @@ use crate::text::{
 /// Parse Markdown into a tree of nodes.
 pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<ParsedDocument, SharedString> {
     let options = cx.markdown_extensions.parse_options();
-    let mut root =
-        markdown::to_mdast(source, &options).map_err(|e| SharedString::from(e.to_string()))?;
+    let mut root = parse_mdast(source, &options)?;
     let mut prose = options;
     prose.constructs.math_text = false;
     prose.constructs.math_flow = false;
     flatten_unclaimed_math(&mut root, source, &prose, cx);
     Ok(ast_to_document(source, root, cx))
+}
+
+fn parse_mdast(source: &str, options: &ParseOptions) -> Result<Node, SharedString> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        markdown::to_mdast(source, options)
+    }))
+    .map_err(|_| SharedString::from("Markdown parser panicked"))?
+    .map_err(|error| SharedString::from(error.to_string()))
 }
 
 /// Math parsing is on by default, so prose that merely contains two dollar
@@ -75,7 +82,7 @@ fn reparse_as_prose(node: &Node, source: &str, options: &ParseOptions) -> Option
     if !may_hold_inline_markup(literal) {
         return None;
     }
-    let Ok(Node::Root(mut root)) = markdown::to_mdast(literal, options) else {
+    let Ok(Node::Root(mut root)) = parse_mdast(literal, options) else {
         return None;
     };
     let [Node::Paragraph(paragraph)] = root.children.as_mut_slice() else {
