@@ -2099,7 +2099,6 @@ mod tests {
         let b_notified = Rc::new(Cell::new(false));
         let _subscription = cx.update({
             let b_notified = b_notified.clone();
-            let second = second.clone();
             move |_, cx| cx.observe(&second, move |_, _| b_notified.set(true))
         });
         b_notified.set(false);
