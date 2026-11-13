@@ -46,7 +46,7 @@ The command above supplies application initialization, window creation, and shar
 
 ## Accessibility
 
-Slider exposes its value, bounds, step and orientation, and handles accessible Increment and Decrement. Name it with `.accessibility_label(...)`; this does not add a visible label.
+Slider exposes its value, bounds, step and orientation, and handles accessible Increment, Decrement and SetValue. SetValue moves the reported thumb (the end thumb for a range) to the requested value, subject to the step and range bounds. Name it with `.accessibility_label(...)`; this does not add a visible label.
 
 Give it a focus handle with `.track_focus(...)` to step it from the keyboard: the arrow keys move the end thumb one step, Page Up and Page Down ten steps, Home and End to the slider's ends. Each step emits `Change`, then `Release`.
 
