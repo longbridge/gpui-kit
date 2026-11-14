@@ -2,6 +2,7 @@ _version: 2
 Attachment:
   Remove:
     en: Remove
+    ja: "削除"
     pt-BR: "Remover"
     ru: "Удалить"
     zh-CN: 移除
@@ -9,6 +10,7 @@ Attachment:
     zh-TW: 移除
   Retry:
     en: Retry
+    ja: "再試行"
     pt-BR: "Tentar de novo"
     ru: "Повторить"
     zh-CN: 重试
@@ -17,6 +19,7 @@ Attachment:
 Calendar:
   week.0:
     en: Su
+    ja: "日"
     pt-BR: "Do"
     ru: "Вс"
     zh-CN: 日
@@ -25,6 +28,7 @@ Calendar:
     it: Do
   week.1:
     en: Mo
+    ja: "月"
     pt-BR: "Se"
     ru: "Пн"
     zh-CN: 一
@@ -33,6 +37,7 @@ Calendar:
     it: Lu
   week.2:
     en: Tu
+    ja: "火"
     pt-BR: "Te"
     ru: "Вт"
     zh-CN: 二
@@ -41,6 +46,7 @@ Calendar:
     it: Ma
   week.3:
     en: We
+    ja: "水"
     pt-BR: "Qa"
     ru: "Ср"
     zh-CN: 三
@@ -49,6 +55,7 @@ Calendar:
     it: Me
   week.4:
     en: Th
+    ja: "木"
     pt-BR: "Qi"
     ru: "Чт"
     zh-CN: 四
@@ -57,6 +64,7 @@ Calendar:
     it: Gi
   week.5:
     en: Fr
+    ja: "金"
     pt-BR: "Sx"
     ru: "Пт"
     zh-CN: 五
@@ -65,6 +73,7 @@ Calendar:
     it: Ve
   week.6:
     en: Sa
+    ja: "土"
     pt-BR: "Sá"
     ru: "Сб"
     zh-CN: 六
@@ -73,6 +82,7 @@ Calendar:
     it: Sa
   month.January:
     en: January
+    ja: "1月"
     pt-BR: "Janeiro"
     ru: "Январь"
     zh-CN: 一月
@@ -81,6 +91,7 @@ Calendar:
     it: Gennaio
   month.February:
     en: February
+    ja: "2月"
     pt-BR: "Fevereiro"
     ru: "Февраль"
     zh-CN: 二月
@@ -89,6 +100,7 @@ Calendar:
     it: Febbraio
   month.March:
     en: March
+    ja: "3月"
     pt-BR: "Março"
     ru: "Март"
     zh-CN: 三月
@@ -97,6 +109,7 @@ Calendar:
     it: Marzo
   month.April:
     en: April
+    ja: "4月"
     pt-BR: "Abril"
     ru: "Апрель"
     zh-CN: 四月
@@ -105,6 +118,7 @@ Calendar:
     it: Aprile
   month.May:
     en: May
+    ja: "5月"
     pt-BR: "Maio"
     ru: "Май"
     zh-CN: 五月
@@ -113,6 +127,7 @@ Calendar:
     it: Maggio
   month.June:
     en: June
+    ja: "6月"
     pt-BR: "Junho"
     ru: "Июнь"
     zh-CN: 六月
@@ -121,6 +136,7 @@ Calendar:
     it: Giugno
   month.July:
     en: July
+    ja: "7月"
     pt-BR: "Julho"
     ru: "Июль"
     zh-CN: 七月
@@ -129,6 +145,7 @@ Calendar:
     it: Luglio
   month.August:
     en: August
+    ja: "8月"
     pt-BR: "Agosto"
     ru: "Август"
     zh-CN: 八月
@@ -137,6 +154,7 @@ Calendar:
     it: Agosto
   month.September:
     en: September
+    ja: "9月"
     pt-BR: "Setembro"
     ru: "Сентябрь"
     zh-CN: 九月
@@ -145,6 +163,7 @@ Calendar:
     it: Settembre
   month.October:
     en: October
+    ja: "10月"
     pt-BR: "Outubro"
     ru: "Октябрь"
     zh-CN: 十月
@@ -153,6 +172,7 @@ Calendar:
     it: Ottobre
   month.November:
     en: November
+    ja: "11月"
     pt-BR: "Novembro"
     ru: "Ноябрь"
     zh-CN: 十一月
@@ -161,6 +181,7 @@ Calendar:
     it: Novembre
   month.December:
     en: December
+    ja: "12月"
     pt-BR: "Dezembro"
     ru: "Декабрь"
     zh-CN: 十二月
@@ -170,6 +191,7 @@ Calendar:
 DatePicker:
   placeholder:
     en: "Select date"
+    ja: "日付を選択"
     pt-BR: "Escolha uma data"
     ru: "Выберите дату"
     zh-CN: 选择日期
@@ -178,6 +200,7 @@ DatePicker:
     it: "Seleziona data"
   time:
     en: Time
+    ja: "時刻"
     pt-BR: "Hora"
     ru: "Время"
     zh-CN: 时间
@@ -185,6 +208,7 @@ DatePicker:
 Select:
   placeholder:
     en: "Please select"
+    ja: "選択してください"
     pt-BR: "Escolha"
     ru: "Выберите"
     zh-CN: "请选择"
@@ -194,6 +218,7 @@ Select:
 ComboBox:
   placeholder:
     en: "Please select"
+    ja: "選択してください"
     pt-BR: "Escolha"
     ru: "Выберите"
     zh-CN: "请选择"
@@ -202,6 +227,7 @@ ComboBox:
     it: Seleziona
   search_placeholder:
     en: "Search..."
+    ja: "検索..."
     pt-BR: "Buscar…"
     ru: "Поиск…"
     zh-CN: "搜索..."
@@ -210,6 +236,7 @@ ComboBox:
     it: "Cerca..."
   empty:
     en: "No results"
+    ja: "結果はありません"
     pt-BR: "Nada encontrado"
     ru: "Ничего не найдено"
     zh-CN: "暂无数据"
@@ -219,6 +246,7 @@ ComboBox:
 DropdownButton:
   more_options:
     en: More options
+    ja: "その他のオプション"
     pt-BR: "Mais opções"
     ru: "Другие действия"
     zh-CN: 更多选项
@@ -227,6 +255,7 @@ DropdownButton:
 Dock:
   Unnamed:
     en: Unnamed
+    ja: "名前なし"
     pt-BR: "Sem nome"
     ru: "Без названия"
     zh-CN: 未命名
@@ -235,6 +264,7 @@ Dock:
     it: "Senza nome"
   Close:
     en: Close
+    ja: "閉じる"
     pt-BR: "Fechar"
     ru: "Закрыть"
     zh-CN: 关闭
@@ -243,6 +273,7 @@ Dock:
     it: Chiudi
   Zoom In:
     en: Zoom In
+    ja: "最大化"
     pt-BR: "Ampliar"
     ru: "Увеличить"
     zh-CN: 放大
@@ -251,6 +282,7 @@ Dock:
     it: Zoom In
   Zoom Out:
     en: Zoom Out
+    ja: "最大化解除"
     pt-BR: "Reduzir"
     ru: "Уменьшить"
     zh-CN: 缩小
@@ -259,6 +291,7 @@ Dock:
     it: Zoom Out
   Collapse:
     en: Collapse
+    ja: "折りたたむ"
     pt-BR: "Recolher"
     ru: "Свернуть"
     zh-CN: 隐藏
@@ -267,6 +300,7 @@ Dock:
     it: Nascondi
   Expand:
     en: Expand
+    ja: "展開"
     pt-BR: "Expandir"
     ru: "Развернуть"
     zh-CN: 展开
@@ -275,6 +309,7 @@ Dock:
     it: Espandi
   Unavailable Panel:
     en: This panel isn’t available in this version.
+    ja: "このパネルはこのバージョンでは利用できません。"
     pt-BR: "Este painel não está disponível nesta versão."
     ru: "Эта панель недоступна в текущей версии."
     zh-CN: 当前版本无法显示该面板。
@@ -284,6 +319,7 @@ Dock:
 ColorPicker:
   Palette:
     en: Palette
+    ja: "パレット"
     pt-BR: "Paleta"
     ru: "Палитра"
     zh-CN: 调色板
@@ -292,6 +328,7 @@ ColorPicker:
     it: Tavolozza
   HSLA:
     en: HSLA
+    ja: "HSLA"
     pt-BR: "HSLA"
     ru: "HSLA"
     zh-CN: HSLA
@@ -300,6 +337,7 @@ ColorPicker:
     it: HSLA
   Hue:
     en: Hue
+    ja: "色相"
     pt-BR: "Matiz"
     ru: "Оттенок"
     zh-CN: 色相
@@ -308,6 +346,7 @@ ColorPicker:
     it: Tonalità
   Saturation:
     en: Saturation
+    ja: "彩度"
     pt-BR: "Saturação"
     ru: "Насыщенность"
     zh-CN: 饱和度
@@ -316,6 +355,7 @@ ColorPicker:
     it: Saturazione
   Lightness:
     en: Lightness
+    ja: "明度"
     pt-BR: "Luminosidade"
     ru: "Светлота"
     zh-CN: 亮度
@@ -324,6 +364,7 @@ ColorPicker:
     it: Luminosità
   Alpha:
     en: Alpha
+    ja: "アルファ"
     pt-BR: "Opacidade"
     ru: "Непрозрачность"
     zh-CN: 透明度
@@ -333,6 +374,7 @@ ColorPicker:
 Dialog:
   ok:
     en: OK
+    ja: "OK"
     pt-BR: "OK"
     ru: "ОК"
     zh-CN: 确定
@@ -341,6 +383,7 @@ Dialog:
     it: OK
   cancel:
     en: Cancel
+    ja: "キャンセル"
     pt-BR: "Cancelar"
     ru: "Отмена"
     zh-CN: 取消
@@ -350,6 +393,7 @@ Dialog:
 Command:
   placeholder:
     en: Type a command or search...
+    ja: "コマンドを入力、または検索..."
     pt-BR: "Digite um comando ou busque…"
     ru: "Введите команду или запрос…"
     zh-CN: 输入命令或搜索...
@@ -358,6 +402,7 @@ Command:
     it: Digita un comando o cerca...
   empty:
     en: No results found.
+    ja: "結果はありません。"
     pt-BR: "Nada encontrado."
     ru: "Ничего не найдено."
     zh-CN: 未找到结果。
@@ -367,6 +412,7 @@ Command:
 List:
   search_placeholder:
     en: Search...
+    ja: "検索..."
     pt-BR: "Buscar…"
     ru: "Поиск…"
     zh-CN: 搜索...
@@ -376,6 +422,7 @@ List:
 Input:
   Decrement:
     en: Decrement
+    ja: "減らす"
     pt-BR: "Diminuir"
     ru: "Уменьшить"
     zh-CN: 减少
@@ -383,6 +430,7 @@ Input:
     zh-TW: 減少
   Increment:
     en: Increment
+    ja: "増やす"
     pt-BR: "Aumentar"
     ru: "Увеличить"
     zh-CN: 增加
@@ -390,6 +438,7 @@ Input:
     zh-TW: 增加
   Replace:
     en: Replace
+    ja: "置換"
     pt-BR: "Substituir"
     ru: "Заменить"
     zh-CN: 替换
@@ -397,6 +446,7 @@ Input:
     zh-TW: 取代
   Replace All:
     en: Replace All
+    ja: "すべて置換"
     pt-BR: "Substituir tudo"
     ru: "Заменить все"
     zh-CN: 全部替换
@@ -404,6 +454,7 @@ Input:
     zh-TW: 全部取代
   Clear:
     en: Clear
+    ja: "クリア"
     pt-BR: "Limpar"
     ru: "Очистить"
     zh-CN: 清除
@@ -411,6 +462,7 @@ Input:
     zh-TW: 清除
   Cut:
     en: Cut
+    ja: "切り取り"
     pt-BR: "Recortar"
     ru: "Вырезать"
     zh-CN: 剪切
@@ -418,6 +470,7 @@ Input:
     zh-TW: 剪下
   Copy:
     en: Copy
+    ja: "コピー"
     pt-BR: "Copiar"
     ru: "Скопировать"
     zh-CN: 复制
@@ -425,6 +478,7 @@ Input:
     zh-TW: 複製
   Paste:
     en: Paste
+    ja: "貼り付け"
     pt-BR: "Colar"
     ru: "Вставить"
     zh-CN: 粘贴
@@ -432,6 +486,7 @@ Input:
     zh-TW: 貼上
   Select All:
     en: Select All
+    ja: "すべて選択"
     pt-BR: "Selecionar tudo"
     ru: "Выбрать все"
     zh-CN: 全选
@@ -439,6 +494,7 @@ Input:
     zh-TW: 全選
   Go to Definition:
     en: Go to Definition
+    ja: "定義へ移動"
     pt-BR: "Ir para a definição"
     ru: "Перейти к определению"
     zh-CN: 跳转到定义
@@ -446,6 +502,7 @@ Input:
     zh-TW: 前往定義
   Show Code Actions:
     en: Show Code Actions
+    ja: "コード アクションの表示"
     pt-BR: "Mostrar ações de código"
     ru: "Показать действия с кодом"
     zh-CN: 显示代码操作
@@ -453,6 +510,7 @@ Input:
     zh-TW: 顯示程式碼動作
   Show Password:
     en: Show password
+    ja: "パスワードを表示"
     pt-BR: "Mostrar senha"
     ru: "Показать пароль"
     zh-CN: 显示密码
@@ -460,6 +518,7 @@ Input:
     zh-TW: 顯示密碼
   Hide Password:
     en: Hide password
+    ja: "パスワードを非表示"
     pt-BR: "Esconder senha"
     ru: "Скрыть пароль"
     zh-CN: 隐藏密码
@@ -468,6 +527,7 @@ Input:
 Settings:
   search_placeholder:
     en: Search...
+    ja: "検索..."
     pt-BR: "Buscar…"
     ru: "Поиск…"
     zh-CN: 搜索...
@@ -476,6 +536,7 @@ Settings:
     it: Ricerca...
   no_results:
     en: No matching settings
+    ja: "一致する設定がありません"
     pt-BR: "Nenhuma configuração encontrada"
     ru: "Подходящих настроек нет"
     zh-CN: 没有匹配的设置
@@ -484,6 +545,7 @@ Settings:
     it: Nessuna impostazione corrispondente
   no_results_description:
     en: Try a different keyword.
+    ja: "別のキーワードをお試しください。"
     pt-BR: "Tente outra palavra-chave."
     ru: "Попробуйте другое ключевое слово."
     zh-CN: 请尝试其他关键词。
@@ -492,6 +554,7 @@ Settings:
     it: Prova con un'altra parola chiave.
   Reset All:
     en: Reset All
+    ja: "すべてリセット"
     pt-BR: "Restaurar tudo"
     ru: "Сбросить все"
     zh-CN: 重置全部
@@ -501,6 +564,7 @@ Settings:
 Pagination:
   previous:
     en: Previous
+    ja: "前へ"
     pt-BR: "Anterior"
     ru: "Назад"
     zh-CN: 上一页
@@ -508,6 +572,7 @@ Pagination:
     zh-TW: 上一頁
   next:
     en: Next
+    ja: "次へ"
     pt-BR: "Próxima"
     ru: "Вперёд"
     zh-CN: 下一页
@@ -516,6 +581,7 @@ Pagination:
 Carousel:
   label:
     en: Carousel
+    ja: "カルーセル"
     pt-BR: "Carrossel"
     ru: "Карусель"
     zh-CN: 轮播
@@ -523,6 +589,7 @@ Carousel:
     zh-TW: 輪播
   previous:
     en: Previous slide
+    ja: "前のスライド"
     pt-BR: "Slide anterior"
     ru: "Предыдущий слайд"
     zh-CN: 上一张
@@ -530,6 +597,7 @@ Carousel:
     zh-TW: 上一張
   next:
     en: Next slide
+    ja: "次のスライド"
     pt-BR: "Próximo slide"
     ru: "Следующий слайд"
     zh-CN: 下一张
@@ -537,6 +605,7 @@ Carousel:
     zh-TW: 下一張
   slide:
     en: Slide %{current} of %{total}
+    ja: "スライド %{current}/%{total}"
     pt-BR: "Slide %{current} de %{total}"
     ru: "Слайд %{current} из %{total}"
     zh-CN: 第 %{current} 张，共 %{total} 张
@@ -544,6 +613,7 @@ Carousel:
     zh-TW: 第 %{current} 張，共 %{total} 張
   pagination:
     en: Carousel pagination
+    ja: "カルーセルのページネーション"
     pt-BR: "Páginas do carrossel"
     ru: "Страницы карусели"
     zh-CN: 轮播分页
@@ -551,6 +621,7 @@ Carousel:
     zh-TW: 輪播分頁
   go_to_slide:
     en: Go to slide %{current}
+    ja: "スライド %{current} へ移動"
     pt-BR: "Ir para o slide %{current}"
     ru: "Перейти к слайду %{current}"
     zh-CN: 前往第 %{current} 张
@@ -559,6 +630,7 @@ Carousel:
 Table:
   SortBy:
     en: Sort by %{column}
+    ja: "%{column} で並べ替え"
     pt-BR: "Ordenar por %{column}"
     ru: "Сортировать по: %{column}"
     zh-CN: 按 %{column} 排序
@@ -567,6 +639,7 @@ Table:
 Chart:
   open:
     en: Open
+    ja: "始値"
     pt-BR: "Abertura"
     ru: "Открытие"
     zh-CN: 开盘
@@ -574,6 +647,7 @@ Chart:
     zh-TW: 開盤
   high:
     en: High
+    ja: "高値"
     pt-BR: "Máxima"
     ru: "Максимум"
     zh-CN: 最高
@@ -581,6 +655,7 @@ Chart:
     zh-TW: 最高
   low:
     en: Low
+    ja: "安値"
     pt-BR: "Mínima"
     ru: "Минимум"
     zh-CN: 最低
@@ -588,6 +663,7 @@ Chart:
     zh-TW: 最低
   close:
     en: Close
+    ja: "終値"
     pt-BR: "Fechamento"
     ru: "Закрытие"
     zh-CN: 收盘
@@ -596,6 +672,7 @@ Chart:
 Questionnaire:
   progress:
     en: Question %{current} of %{total}
+    ja: "質問 %{current}/%{total}"
     pt-BR: "Pergunta %{current} de %{total}"
     ru: "Вопрос %{current} из %{total}"
     zh-CN: 第 %{current} 题，共 %{total} 题
@@ -603,6 +680,7 @@ Questionnaire:
     zh-TW: 第 %{current} 題，共 %{total} 題
   previous:
     en: Previous
+    ja: "前へ"
     pt-BR: "Anterior"
     ru: "Назад"
     zh-CN: 上一题
@@ -610,6 +688,7 @@ Questionnaire:
     zh-TW: 上一題
   next:
     en: Next
+    ja: "次へ"
     pt-BR: "Próxima"
     ru: "Далее"
     zh-CN: 下一题
@@ -617,6 +696,7 @@ Questionnaire:
     zh-TW: 下一題
   skip:
     en: Skip
+    ja: "スキップ"
     pt-BR: "Pular"
     ru: "Пропустить"
     zh-CN: 跳过
@@ -624,6 +704,7 @@ Questionnaire:
     zh-TW: 跳過
   submit:
     en: Submit
+    ja: "送信"
     pt-BR: "Enviar"
     ru: "Отправить"
     zh-CN: 提交
@@ -631,6 +712,7 @@ Questionnaire:
     zh-TW: 提交
   error.required:
     en: Choose an answer to continue.
+    ja: "続行するには回答を選択してください。"
     pt-BR: "Escolha uma resposta para continuar."
     ru: "Выберите ответ, чтобы продолжить."
     zh-CN: 请选择一个答案后继续。
@@ -638,6 +720,7 @@ Questionnaire:
     zh-TW: 請選擇一個答案後繼續。
   error.optional:
     en: Choose an answer or skip this question.
+    ja: "回答を選択するか、この質問をスキップしてください。"
     pt-BR: "Escolha uma resposta ou pule esta pergunta."
     ru: "Выберите ответ или пропустите этот вопрос."
     zh-CN: 请选择一个答案，或跳过此题。
@@ -646,6 +729,7 @@ Questionnaire:
 Speech:
   Start:
     en: Dictate
+    ja: "音声入力"
     pt-BR: "Ditar"
     ru: "Диктовать"
     zh-CN: 语音输入
@@ -653,6 +737,7 @@ Speech:
     zh-TW: 語音輸入
   Stop:
     en: Stop dictation
+    ja: "音声入力を停止"
     pt-BR: "Parar o ditado"
     ru: "Остановить диктовку"
     zh-CN: 停止语音输入
@@ -660,6 +745,7 @@ Speech:
     zh-TW: 停止語音輸入
   Unavailable:
     en: Dictation unavailable
+    ja: "音声入力は利用できません"
     pt-BR: "Ditado indisponível"
     ru: "Диктовка недоступна"
     zh-CN: 语音输入不可用
@@ -668,216 +754,252 @@ Speech:
 Diff:
   BinaryChanges:
     en: Binary file changed
+    ja: "バイナリ ファイルが変更されました"
     pt-BR: "Arquivo binário alterado"
     ru: "Двоичный файл изменён"
     zh-CN: 二进制文件已变更
     zh-HK: 二進位檔案已變更
   NoTextChanges:
     en: No text changes in this patch
+    ja: "このパッチにはテキストの変更がありません"
     pt-BR: "Nenhuma mudança de texto neste patch"
     ru: "В этом патче нет изменений текста"
     zh-CN: 此 patch 没有文本变更
     zh-HK: 此 patch 沒有文字變更
   NoChanges:
     en: No changes
+    ja: "変更なし"
     pt-BR: "Sem alterações"
     ru: "Изменений нет"
     zh-CN: 没有变更
     zh-HK: 沒有變更
   EmptyFile:
     en: Empty file
+    ja: "空のファイル"
     pt-BR: "Arquivo vazio"
     ru: "Пустой файл"
     zh-CN: 空文件
     zh-HK: 空檔案
   AddedFile:
     en: Added file
+    ja: "追加されたファイル"
     pt-BR: "Arquivo novo"
     ru: "Файл добавлен"
     zh-CN: 新增文件
     zh-HK: 新增檔案
   DeletedFile:
     en: Deleted file
+    ja: "削除されたファイル"
     pt-BR: "Arquivo apagado"
     ru: "Файл удалён"
     zh-CN: 已删除文件
     zh-HK: 已刪除檔案
   RenamedFile:
     en: Renamed
+    ja: "名前変更済み"
     pt-BR: "Renomeado"
     ru: "Переименован"
     zh-CN: 已重命名
     zh-HK: 已重新命名
   CopiedFile:
     en: Copied
+    ja: "コピー済み"
     pt-BR: "Copiado"
     ru: "Скопирован"
     zh-CN: 已复制
     zh-HK: 已複製
   HiddenLines:
     en: "%{count} lines not in patch"
+    ja: "パッチに含まれない %{count} 行"
     pt-BR: "%{count} linhas fora do patch"
     ru: "Строк вне патча: %{count}"
     zh-CN: "patch 中未包含 %{count} 行"
     zh-HK: "patch 中未包含 %{count} 行"
   ExpandAbove:
     en: Show %{count} lines above
+    ja: "上の %{count} 行を表示"
     pt-BR: "Mostrar %{count} linhas acima"
     ru: "Показать строки выше: %{count}"
     zh-CN: 显示上方 %{count} 行
     zh-HK: 顯示上方 %{count} 行
   ExpandBelow:
     en: Show %{count} lines below
+    ja: "下の %{count} 行を表示"
     pt-BR: "Mostrar %{count} linhas abaixo"
     ru: "Показать строки ниже: %{count}"
     zh-CN: 显示下方 %{count} 行
     zh-HK: 顯示下方 %{count} 行
   CollapseFile:
     en: Collapse %{name}
+    ja: "%{name} を折りたたむ"
     pt-BR: "Recolher %{name}"
     ru: "Свернуть %{name}"
     zh-CN: 收起 %{name}
     zh-HK: 收起 %{name}
   ExpandFile:
     en: Expand %{name}
+    ja: "%{name} を展開"
     pt-BR: "Expandir %{name}"
     ru: "Развернуть %{name}"
     zh-CN: 展开 %{name}
     zh-HK: 展開 %{name}
   AddAnnotation:
     en: Add annotation to line %{line}
+    ja: "%{line} 行目に注釈を追加"
     pt-BR: "Anotar a linha %{line}"
     ru: "Добавить примечание к строке %{line}"
     zh-CN: 为第 %{line} 行添加批注
     zh-HK: 為第 %{line} 行新增批註
   ConflictedFile:
     en: Conflicts
+    ja: "競合"
     pt-BR: "Conflitos"
     ru: "Конфликты"
     zh-CN: 有冲突
     zh-HK: 有衝突
   CurrentChange:
     en: Current change
+    ja: "現在の変更"
     pt-BR: "Alteração atual"
     ru: "Текущее изменение"
     zh-CN: 当前更改
     zh-HK: 目前變更
   IncomingChange:
     en: Incoming change
+    ja: "入力側の変更"
     pt-BR: "Alteração que chega"
     ru: "Входящее изменение"
     zh-CN: 传入的更改
     zh-HK: 傳入的變更
   BaseChange:
     en: Common ancestor
+    ja: "共通の祖先"
     pt-BR: "Ancestral comum"
     ru: "Общий предок"
     zh-CN: 共同祖先
     zh-HK: 共同祖先
   AcceptCurrent:
     en: Accept Current
+    ja: "現在の変更を取り込む"
     pt-BR: "Aceitar a atual"
     ru: "Принять текущее"
     zh-CN: 采用当前更改
     zh-HK: 採用目前變更
   AcceptIncoming:
     en: Accept Incoming
+    ja: "入力側の変更を取り込む"
     pt-BR: "Aceitar a que chega"
     ru: "Принять входящее"
     zh-CN: 采用传入的更改
     zh-HK: 採用傳入的變更
   AcceptBoth:
     en: Accept Both
+    ja: "両方の変更を取り込む"
     pt-BR: "Aceitar as duas"
     ru: "Принять оба"
     zh-CN: 保留双方更改
     zh-HK: 保留雙方變更
   AcceptedCurrent:
     en: Accepted current change
+    ja: "現在の変更を取り込みました"
     pt-BR: "Atual aceita"
     ru: "Принято текущее изменение"
     zh-CN: 已采用当前更改
     zh-HK: 已採用目前變更
   AcceptedIncoming:
     en: Accepted incoming change
+    ja: "入力側の変更を取り込みました"
     pt-BR: "A que chega foi aceita"
     ru: "Принято входящее изменение"
     zh-CN: 已采用传入的更改
     zh-HK: 已採用傳入的變更
   AcceptedBoth:
     en: Accepted both changes
+    ja: "両方の変更を取り込みました"
     pt-BR: "As duas aceitas"
     ru: "Приняты оба изменения"
     zh-CN: 已保留双方更改
     zh-HK: 已保留雙方變更
   UndoResolution:
     en: Undo
+    ja: "元に戻す"
     pt-BR: "Desfazer"
     ru: "Отменить"
     zh-CN: 撤销
     zh-HK: 復原
   Original:
     en: Original
+    ja: "オリジナル"
     pt-BR: "Original"
     ru: "Исходная"
     zh-CN: 原版
     zh-HK: 原版
   Modified:
     en: Modified
+    ja: "変更済み"
     pt-BR: "Alterado"
     ru: "Изменённая"
     zh-CN: 新版
     zh-HK: 新版
   ExpandLines:
     en: Expand %{count} unchanged lines
+    ja: "変更されていない %{count} 行を展開"
     pt-BR: "Expandir %{count} linhas sem mudança"
     ru: "Развернуть неизменённые строки: %{count}"
     zh-CN: 展开 %{count} 行未变更内容
     zh-HK: 展開 %{count} 行未變更內容
   SourceLine:
     en: "%{side} line %{line}"
+    ja: "%{side} %{line} 行目"
     pt-BR: "%{side} linha %{line}"
     ru: "%{side} строка %{line}"
     zh-CN: "%{side}第 %{line} 行"
     zh-HK: "%{side}第 %{line} 行"
   AddedLine:
     en: "%{side} line %{line}, added"
+    ja: "%{side} %{line} 行目、追加"
     pt-BR: "%{side} linha %{line}, adicionada"
     ru: "%{side} строка %{line}, добавлена"
     zh-CN: "%{side}第 %{line} 行，新增"
     zh-HK: "%{side}第 %{line} 行，新增"
   RemovedLine:
     en: "%{side} line %{line}, removed"
+    ja: "%{side} %{line} 行目、削除"
     pt-BR: "%{side} linha %{line}, removida"
     ru: "%{side} строка %{line}, удалена"
     zh-CN: "%{side}第 %{line} 行，删除"
     zh-HK: "%{side}第 %{line} 行，刪除"
   UnchangedLines:
     en: "%{count} unchanged lines"
+    ja: "変更されていない %{count} 行"
     pt-BR: "%{count} linhas sem mudança"
     ru: "Неизменённых строк: %{count}"
     zh-CN: "%{count} 行未变更内容"
     zh-HK: "%{count} 行未變更內容"
   SelectLine:
     en: Select %{side} line %{line}
+    ja: "%{side} %{line} 行目を選択"
     pt-BR: "Selecionar %{side} linha %{line}"
     ru: "Выбрать: %{side} строка %{line}"
     zh-CN: 选择%{side}第 %{line} 行
     zh-HK: 選擇%{side}第 %{line} 行
   NoNewline:
     en: No newline at end of file
+    ja: "ファイル末尾に改行がありません"
     pt-BR: "Sem quebra de linha no fim do arquivo"
     ru: "Нет перевода строки в конце файла"
     zh-CN: 文件末尾没有换行
     zh-HK: 檔案末尾沒有換行
   Viewer:
     en: Diff for %{name}
+    ja: "%{name} の差分"
     pt-BR: "Diff de %{name}"
     ru: "Изменения в %{name}"
     zh-CN: "%{name} 的差异"
     zh-HK: "%{name} 的差異"
   ViewerFiles:
     en: Diff for %{count} files
+    ja: "%{count} 個のファイルの差分"
     pt-BR: "Diff de %{count} arquivos"
     ru: "Изменения в файлах: %{count}"
     zh-CN: "%{count} 个文件的差异"
