@@ -5,7 +5,7 @@ use crate::{
     native_menu::FallbackMenuOverlay,
     notification::{Notification, NotificationList},
     sheet::Sheet,
-    tooltip::render_tooltip,
+    tooltip::tooltip_renderer,
     touch_selection::WindowTouchSelectionOverlay,
     window_border,
 };
@@ -108,7 +108,7 @@ impl WindowState {
             focused_input: None,
             notification: cx.new(|cx| NotificationList::new(window, cx)),
             tooltip_overlay: cx
-                .new(|_| gpui_base::TooltipOverlay::new().render_with(render_tooltip)),
+                .new(|_| gpui_base::TooltipOverlay::new().render_with(tooltip_renderer())),
             tooltip_hovered_trigger: None,
             tooltip_trigger_lifetime: std::rc::Weak::new(),
             tooltip_pressed_trigger: None,
