@@ -15,6 +15,9 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+#[cfg(all(feature = "test-support", feature = "gpui-fast"))]
+mod a11y_text;
+
 mod assets;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod collection_steps;

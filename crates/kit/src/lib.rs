@@ -18,7 +18,7 @@
 //! layers:
 //!
 //! ```no_run
-//! use gpui_kit::*;
+//! use gpui_kit::{component::label::Label, *};
 //!
 //! actions!(hello, [Quit]);
 //!
@@ -26,7 +26,7 @@
 //!
 //! impl Render for Hello {
 //!     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-//!         div().child("Hello, World!")
+//!         div().child(Label::new("Hello, World!"))
 //!     }
 //! }
 //!

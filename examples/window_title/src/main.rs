@@ -1,6 +1,7 @@
 use gpui_kit::component::{
     TitleBar,
     button::{Button, ButtonVariants},
+    label::Label,
     h_flex, v_flex,
 };
 use gpui_kit::*;
@@ -28,7 +29,7 @@ impl Render for Example {
                     .size_full()
                     .items_center()
                     .justify_center()
-                    .child("Hello, World!")
+                    .child(Label::new("Hello, World!"))
                     .child(
                         Button::new("ok")
                             .primary()
