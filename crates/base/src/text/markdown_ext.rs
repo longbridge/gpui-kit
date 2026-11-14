@@ -249,6 +249,7 @@ impl PartialEq for MarkdownNode {
 pub struct MarkdownExtensions {
     enable_mdx: bool,
     enable_frontmatter: bool,
+    disable_raw_html: bool,
     block_parsers: Vec<Arc<MarkdownBlockParserFn>>,
     block_renderers: HashMap<SharedString, Arc<MarkdownBlockRenderFn>>,
     inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
@@ -285,6 +286,19 @@ impl MarkdownExtensions {
     /// priority over MDX when both are enabled.
     pub fn mdx(mut self) -> Self {
         self.enable_mdx = true;
+        self.bump_revision();
+        self
+    }
+
+    /// Set whether raw HTML in Markdown is parsed as HTML (the default).
+    ///
+    /// When `false`, CommonMark's HTML blocks and inline tags are not
+    /// recognized, so a `<b>` or an `<img>` in the source shows as the text
+    /// it is written as, and nothing is loaded from it. Use this for Markdown
+    /// from a source that must not render HTML. Autolinks such as
+    /// `<https://example.com>` are not HTML and still render as links.
+    pub fn raw_html(mut self, enabled: bool) -> Self {
+        self.disable_raw_html = !enabled;
         self.bump_revision();
         self
     }
@@ -412,6 +426,7 @@ impl MarkdownExtensions {
         self.parser_revision == other.parser_revision
             && self.enable_mdx == other.enable_mdx
             && self.enable_frontmatter == other.enable_frontmatter
+            && self.disable_raw_html == other.disable_raw_html
             && self.block_parsers.len() == other.block_parsers.len()
             && self.block_renderers.len() == other.block_renderers.len()
             && self.inline_parsers.len() == other.inline_parsers.len()
@@ -462,6 +477,10 @@ impl MarkdownExtensions {
         // construct swallows a `$$` block, so a block plugin matching
         // `Node::Math` never fires and the formula renders inline.
         options.constructs.math_flow = true;
+        if self.disable_raw_html {
+            options.constructs.html_flow = false;
+            options.constructs.html_text = false;
+        }
         if self.enable_mdx {
             options.constructs.html_flow = false;
             options.constructs.html_text = false;
