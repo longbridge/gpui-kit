@@ -520,6 +520,30 @@ including adding a reference to existing text, emit `InputEvent::Change`.
 Programmatic setters can update readonly or disabled inputs, so check these
 states in application commands that should be unavailable to users.
 
+### Derive tokens from the text
+
+To show part of the typed text as a token, such as `**bold**` while the caret is
+elsewhere, pass the current text with its tokens to `set_tokens`. It keeps the
+text, the selections and the undo history, and does not emit `InputEvent::Change`:
+
+```rust
+use gpui_kit::component::input::{InlineToken, InputContent};
+
+input.update(cx, |state, cx| {
+    let content = InputContent::new(state.value())
+        .with_token(2..7, InlineToken::new("bold", "**b**"))
+        .expect("the text holds `**b**` at 2..7");
+    // Rejected while a caret is inside 2..7: the text stays plain.
+    state.set_tokens(content, cx).ok();
+});
+```
+
+`set_tokens` returns `TextMismatch` when the content holds other text and
+`SplitsSelection` when a token would cut through a selection or a caret; the
+tokens stay as they were. Undo and Redo replay the text with the tokens recorded
+for each edit and drop a token that an undone edit cuts through, so call
+`set_tokens` again after each change to keep derived tokens current.
+
 ### Validation and supported inputs
 
 Tokens work with Input and Textarea. They are not available in Editor,

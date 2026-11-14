@@ -74,7 +74,7 @@ impl MultiLineMode for EditorMode {}
 /// renderer is generic over the mode, so it cannot name `EditorExtras` and
 /// reach its fields directly, and these are the accessors it goes through
 /// instead. Every one of them has an empty answer, which is what a plain input
-/// and a textarea give.
+/// gives; a textarea answers only [`Self::decoration_layers`].
 ///
 /// [`InputModeKind`] is *behavior*: points where the engine hands control back
 /// during an edit. Adding a field an editor renders belongs here and leaves
@@ -387,8 +387,37 @@ impl InputModeKind for InputMode {
 impl InputModeKind for TextareaMode {
     const MULTI_LINE: bool = true;
 
-    /// Ordinary multi-line text needs nothing beyond the shared engine.
-    type Extras = ();
+    /// Ordinary multi-line text, with decorations its owner sets.
+    type Extras = TextareaExtras;
+
+    fn reset_annotations(state: &mut InputBaseState<Self>) {
+        state.extras.decorations.clear();
+    }
+
+    fn adjust_annotations(
+        state: &mut InputBaseState<Self>,
+        range: &std::ops::Range<usize>,
+        new_len: usize,
+    ) {
+        state.extras.adjust_for_edit(range, new_len);
+    }
+}
+
+/// What a textarea adds: one layer of text decorations, such as inline marks.
+/// Their ranges follow edits like an editor's decoration collections.
+#[derive(Default)]
+pub struct TextareaExtras {
+    pub(crate) decorations: Vec<TextDecoration>,
+}
+
+impl InputExtras for TextareaExtras {
+    fn decoration_layers(&self) -> Vec<&[TextDecoration]> {
+        if self.decorations.is_empty() {
+            Vec::new()
+        } else {
+            vec![&self.decorations[..]]
+        }
+    }
 }
 // `EditorMode`'s implementation lives with the editor code, next to the
 // language features it dispatches to.

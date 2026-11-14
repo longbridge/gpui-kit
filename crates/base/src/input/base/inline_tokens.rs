@@ -171,6 +171,7 @@ pub enum InlineTokenError {
     UnsupportedMode,
     ValidationRejected,
     CompositionActive,
+    SplitsSelection,
 }
 
 impl std::error::Error for InlineTokenError {}
@@ -187,6 +188,7 @@ impl std::fmt::Display for InlineTokenError {
             Self::UnsupportedMode => "tokens are not supported by this input mode",
             Self::ValidationRejected => "input validation rejected the content",
             Self::CompositionActive => "finish the active IME composition before editing tokens",
+            Self::SplitsSelection => "token range splits a selection",
         })
     }
 }
@@ -226,7 +228,10 @@ impl InlineTokenStore {
         let shift = new_len as isize - range.len() as isize;
         self.spans.retain_mut(|span| {
             if span.range.start < range.end && range.start < span.range.end {
-                removed.push(span.shifted(-(range.start as isize)));
+                // Replaying history can cut through a token set after the edit.
+                if range.start <= span.range.start && span.range.end <= range.end {
+                    removed.push(span.shifted(-(range.start as isize)));
+                }
                 false
             } else {
                 if span.range.start >= range.end {
@@ -411,6 +416,52 @@ macro_rules! token_api {
             }
             pub fn tokens(&self) -> &[InlineTokenSpan] {
                 self.token_spans()
+            }
+            /// Replace the tokens and keep the text, the selections and the undo
+            /// history.
+            ///
+            /// Returns [`InlineTokenError::TextMismatch`] if `content` holds
+            /// different text, [`InlineTokenError::SplitsSelection`] if a token
+            /// cuts through any selection, [`InlineTokenError::CompositionActive`]
+            /// during IME composition and [`InlineTokenError::UnsupportedMode`]
+            /// for masked or password inputs.
+            ///
+            /// Undo and redo replay the text and the tokens recorded with it; a
+            /// token set here that an undone edit cuts through is dropped. Call
+            /// this again after every change to keep derived tokens current.
+            pub fn set_tokens(
+                &mut self,
+                content: InputContent,
+                cx: &mut Context<Self>,
+            ) -> Result<(), InlineTokenError> {
+                self.check_token_mode()?;
+                if self.text != content.text.as_ref() {
+                    return Err(InlineTokenError::TextMismatch);
+                }
+                let cuts = |at: usize| {
+                    content
+                        .tokens
+                        .iter()
+                        .any(|span| span.range.start < at && at < span.range.end)
+                };
+                if self
+                    .selections
+                    .iter()
+                    .any(|selection| cuts(selection.start) || cuts(selection.end))
+                {
+                    return Err(InlineTokenError::SplitsSelection);
+                }
+                if self.token_spans() == content.tokens.as_slice() {
+                    return Ok(());
+                }
+                self.document_revision = self.document_revision.wrapping_add(1);
+                self.inline_tokens = (!content.tokens.is_empty()).then(|| {
+                    Box::new(InlineTokenStore {
+                        spans: content.tokens,
+                    })
+                });
+                cx.notify();
+                Ok(())
             }
             /// The text with its tokens, as `set_value` accepts it.
             pub fn content(&self) -> InputContent {
