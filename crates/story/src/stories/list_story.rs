@@ -339,6 +339,17 @@ impl CompanyListDelegate {
 }
 
 impl ListDelegate for CompanyListDelegate {
+    fn item_accessibility_label(&self, index: IndexPath, _: &App) -> Option<SharedString> {
+        let company = self.matched_companies.get(index.section)?.get(index.row)?;
+        Some(
+            format!(
+                "{}, {}, {}",
+                company.name, company.last_done_str, company.change_percent_str
+            )
+            .into(),
+        )
+    }
+
     type Item = CompanyListItem;
 
     fn sections_count(&self, _: &App) -> usize {

@@ -1,4 +1,7 @@
-use gpui::{AnyElement, App, Context, IntoElement, ParentElement as _, Styled as _, Task, Window};
+use gpui::{
+    AnyElement, App, Context, IntoElement, ParentElement as _, SharedString, Styled as _, Task,
+    Window,
+};
 
 use crate::{
     ActiveTheme as _, Icon, IconName, IndexPath, Selectable, h_flex,
@@ -19,6 +22,13 @@ pub trait ListDelegate: Sized + 'static {
         cx: &mut Context<ListState<Self>>,
     ) -> Task<()> {
         Task::ready(())
+    }
+
+    /// Return the accessible name of a row, independently of its rendered children.
+    ///
+    /// The default leaves the row unnamed so its children retain their existing semantics.
+    fn item_accessibility_label(&self, _: IndexPath, _: &App) -> Option<SharedString> {
+        None
     }
 
     /// Return the number of sections in the list, default is 1.

@@ -511,10 +511,12 @@ where
         let id = SharedString::from(format!("list-item-{}", ix));
 
         let total_items = self.rows_cache.items_count();
+        let aria_label = self.delegate.item_accessibility_label(ix, cx);
 
         div()
             .id(id)
             .role(Role::ListItem)
+            .when_some(aria_label, |this, label| this.aria_label(label))
             .aria_position_in_set(ix.row + 1)
             .aria_size_of_set(total_items)
             .aria_selected(selected)
@@ -1074,5 +1076,64 @@ mod measurement_tests {
                 div()
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod row_label_tests {
+    use super::*;
+    use crate::list::ListItem;
+    use gpui::{Element as _, TestAppContext, accesskit};
+
+    struct LabelDelegate;
+
+    impl ListDelegate for LabelDelegate {
+        type Item = ListItem;
+
+        fn items_count(&self, _: usize, _: &App) -> usize {
+            2
+        }
+
+        fn item_accessibility_label(&self, index: IndexPath, _: &App) -> Option<SharedString> {
+            (index.row == 0).then(|| "Acme, up 2 percent".into())
+        }
+
+        fn set_selected_index(
+            &mut self,
+            _: Option<IndexPath>,
+            _: &mut Window,
+            _: &mut Context<ListState<Self>>,
+        ) {
+        }
+
+        fn render_item(
+            &mut self,
+            index: IndexPath,
+            _: &mut Window,
+            _: &mut Context<ListState<Self>>,
+        ) -> Option<ListItem> {
+            Some(ListItem::new(index.row).child("Acme"))
+        }
+    }
+
+    #[gpui::test]
+    fn accessible_names_belong_to_the_row_container(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.update(|window, cx| {
+            let list = cx.new(|cx| ListState::new(LabelDelegate, window, cx));
+            for (row, label) in [(0, Some("Acme, up 2 percent")), (1, None)] {
+                let node = list.update(cx, |list, cx| {
+                    let element = list
+                        .render_list_item(IndexPath::new(row), window, cx)
+                        .into_element();
+                    let mut node = accesskit::Node::new(element.a11y_role().unwrap());
+                    element.write_a11y_info(&mut node);
+                    node
+                });
+                assert_eq!(node.role(), Role::ListItem);
+                assert_eq!(node.label(), label);
+            }
+        });
     }
 }
