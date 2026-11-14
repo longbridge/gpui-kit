@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
 use crate::input::clear_button;
+use crate::list::{ListDelegate, ListState};
 use crate::native_menu::NativeMenu;
 use crate::spinner::Spinner;
 use crate::touch_selection::{EditMenuItem, TouchSelectionOverlay};
@@ -163,6 +164,9 @@ pub struct Input {
     /// An optional paste handler. If set, it is invoked with the clipboard item
     /// before the default text insertion. Return `true` if handled.
     paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
+
+    /// The list offered under the field while typing; see [`Input::list`].
+    list: Option<Rc<dyn super::list_popup::InputList>>,
 }
 
 impl Sizable for Input {
@@ -271,6 +275,7 @@ impl Input {
             token_renderer: None,
             token_click_listener: None,
             token_hover_listener: None,
+            list: None,
         }
     }
 
@@ -283,6 +288,29 @@ impl Input {
 
     pub(crate) fn is_disabled(&self) -> bool {
         self.disabled
+    }
+
+    /// Offer a [`List`](crate::list::List) under the field while the user
+    /// types, as an HTML `<input list>` does. The input still accepts any
+    /// text: the list only helps type it.
+    ///
+    /// The list searches with the field's text through
+    /// [`ListDelegate::perform_search`], so the delegate decides what matches,
+    /// how long to wait and how rows look. Nothing is highlighted until the
+    /// user presses Down, so Enter on the typed text emits
+    /// [`InputEvent::PressEnter`](super::InputEvent::PressEnter). Write the
+    /// accepted value in [`ListDelegate::confirm`], for example with
+    /// [`InputState::replace_all`]. The popup shows while there are rows or
+    /// [`ListDelegate::loading`] is true, and only while the input has focus.
+    /// A disabled or read-only input offers none.
+    ///
+    /// ```ignore
+    /// let hosts = cx.new(|cx| ListState::new(HostDelegate::new(&input), window, cx));
+    /// Input::new(&input).list(&hosts)
+    /// ```
+    pub fn list<D: ListDelegate>(mut self, list: &Entity<ListState<D>>) -> Self {
+        self.list = Some(Rc::new(list.clone()));
+        self
     }
 
     pub fn accessibility_id(mut self, id: impl Into<SharedString>) -> Self {
@@ -548,7 +576,7 @@ fn start_text_align(cx: &App) -> TextAlign {
 }
 
 impl RenderOnce for Input {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         const LINE_HEIGHT: Rems = Rems(1.25);
         // Unless the caller aligns the text, it starts on the start edge.
         let text_align = self
@@ -695,6 +723,18 @@ impl RenderOnce for Input {
         let presentation = state.presentation(cx);
         let content_type = self.content_type;
         let disabled = self.disabled;
+        // A list belongs to a single-line input, like an HTML `<input list>`.
+        let list_popup = match (&state, self.list.take()) {
+            (TextInputState::Input(input), Some(list)) => Some(super::list_popup::ListPopup::new(
+                input,
+                list,
+                !self.disabled && !self.readonly,
+                self.size,
+                window,
+                cx,
+            )),
+            _ => None,
+        };
         let is_multi_line = presentation.is_multi_line();
         // Without a content type, a masked input is a password field to screen
         // readers, so they announce it as one.
@@ -864,6 +904,7 @@ impl RenderOnce for Input {
             })
             .relative()
             .children(overlays.floating)
+            .when_some(list_popup, |this, popup| popup.attach(this, cx))
             .when_some(paste_handler, |this, handler| {
                 this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
                     if let Some(clipboard) = cx.read_from_clipboard() {

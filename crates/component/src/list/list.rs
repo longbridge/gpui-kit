@@ -313,6 +313,60 @@ where
         }
     }
 
+    /// Search for an input showing this list under its field. The rows only
+    /// help type the text, so unlike a search box, nothing gets highlighted.
+    pub(crate) fn search_from_input(
+        &mut self,
+        query: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_search(query, window, cx);
+        self._set_selected_index(None, window, cx);
+    }
+
+    /// Drop the search in flight, with whatever its delegate task still had to do.
+    pub(crate) fn cancel_search(&mut self) {
+        self._search_task = Task::ready(());
+    }
+
+    pub(crate) fn has_items(&self, cx: &App) -> bool {
+        (0..self.delegate.sections_count(cx).max(1))
+            .any(|section| self.delegate.items_count(section, cx) > 0)
+    }
+
+    /// Whether the selection still points at a row: results that arrive after
+    /// it was made may have fewer.
+    pub(crate) fn selected_item_exists(&self, cx: &App) -> bool {
+        self.selected_index
+            .is_some_and(|ix| ix.row < self.delegate.items_count(ix.section, cx))
+    }
+
+    /// Select the first row, even before the rows have been laid out.
+    pub(crate) fn select_first_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let section = (0..self.delegate.sections_count(cx).max(1))
+            .find(|section| self.delegate.items_count(*section, cx) > 0);
+        if let Some(section) = section {
+            self.select_item(IndexPath::default().section(section), window, cx);
+        }
+    }
+
+    /// Like `on_action_select_prev`, but above the first row is nothing
+    /// instead of the last row.
+    pub(crate) fn select_prev_or_none(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(selected) = self.selected_index else {
+            return;
+        };
+        let prev = self.rows_cache.prev(Some(selected));
+        let wrapped = self.rows_cache.position_of(&prev) >= self.rows_cache.position_of(&selected);
+        if wrapped {
+            self._set_selected_index(None, window, cx);
+            cx.notify();
+        } else {
+            self.select_item(prev, window, cx);
+        }
+    }
+
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
         self.set_searching(true, window, cx);
         let search = self.delegate.perform_search(&query, window, cx);
@@ -379,7 +433,12 @@ where
         self
     }
 
-    fn on_action_cancel(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn on_action_cancel(
+        &mut self,
+        _: &Cancel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         cx.propagate();
         if self.reset_on_cancel {
             self._set_selected_index(None, window, cx);
@@ -390,7 +449,7 @@ where
         cx.notify();
     }
 
-    fn on_action_confirm(
+    pub(crate) fn on_action_confirm(
         &mut self,
         confirm: &Confirm,
         window: &mut Window,

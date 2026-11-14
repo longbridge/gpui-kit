@@ -369,6 +369,74 @@ v_flex()
     .child(Input::new(&self.email_input))
 ```
 
+## List
+
+`list` shows a [List](list.md) under the field while the user types, and the input still accepts any text — the counterpart of an HTML `<input list>`. Use it when the field takes free text but known values help people type it, such as a host name or a metric. When the value must be one of the items, use [Combobox](combobox.md) instead. To complete a word at the caret, such as a `$variable` or an `@mention`, compose a menu around the input, as the Completion example in the Input story does.
+
+```rust
+struct HostDelegate {
+    input: Entity<InputState>,
+    api: Api,
+    hosts: Vec<Host>,
+    selected: Option<IndexPath>,
+}
+
+impl ListDelegate for HostDelegate {
+    type Item = ListItem;
+
+    // Replacing the returned task drops the previous one, so a timer at its
+    // start debounces and an older query can never overwrite a newer one.
+    fn perform_search(&mut self, query: &str, window: &mut Window, cx: &mut Context<ListState<Self>>) -> Task<()> {
+        let (api, query) = (self.api.clone(), query.to_string());
+        cx.spawn_in(window, async move |list, cx| {
+            cx.background_executor().timer(Duration::from_millis(200)).await;
+            let hosts = api.search_hosts(&query).await.unwrap_or_default();
+            _ = list.update(cx, |list, cx| {
+                list.delegate_mut().hosts = hosts;
+                cx.notify();
+            });
+        })
+    }
+
+    fn items_count(&self, _: usize, _: &App) -> usize {
+        self.hosts.len()
+    }
+
+    fn render_item(&mut self, ix: IndexPath, _: &mut Window, _: &mut Context<ListState<Self>>) -> Option<ListItem> {
+        let host = self.hosts.get(ix.row)?;
+        Some(ListItem::new(ix.row).child(host.name.clone()))
+    }
+
+    fn set_selected_index(&mut self, ix: Option<IndexPath>, _: &mut Window, _: &mut Context<ListState<Self>>) {
+        self.selected = ix;
+    }
+
+    // Write what accepting means. It may differ from the row's label.
+    fn confirm(&mut self, _: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        if let Some(host) = self.selected.and_then(|ix| self.hosts.get(ix.row)) {
+            let id = host.id.clone();
+            self.input.update(cx, |input, cx| input.replace_all(id, window, cx));
+        }
+    }
+}
+
+let input = cx.new(|cx| InputState::new(window, cx));
+let hosts = cx.new(|cx| ListState::new(HostDelegate::new(input.clone()), window, cx));
+
+Input::new(&input).list(&hosts)
+```
+
+A fixed list is a delegate whose `perform_search` filters synchronously and returns `Task::ready(())`.
+
+The delegate owns the search, like any `List`: matching, debouncing, sections, paging and rows. The popup shows while the delegate has rows or `loading` returns true, and only while the input has focus. With no rows it hides, because free text needs no "No results"; show a failed search as a row. Only typing searches, so a change made in code to an unfocused input does not. Write the accepted value in `confirm`, not in a `ListEvent::Confirm` subscription, because a change written after the popup closes counts as typing. A disabled or read-only input offers none.
+
+| Key | Action |
+| --- | --- |
+| Down | Highlight the next row, or open the popup |
+| Up | Highlight the previous row; from the first, return to the typed text |
+| Enter | Accept the highlighted row; with none, the input emits `InputEvent::PressEnter` as usual |
+| Escape | Close the popup |
+
 ## Atomic inline tokens
 
 Use inline tokens for mentions, file references or commands that should be selected
