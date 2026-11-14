@@ -118,6 +118,30 @@ let editor = cx.new(|cx| {
 
 `scroll_bounce(true)` 让超出编辑器高度的代码在触控板或 Magic Mouse 的精细像素滚动到达顶部或底部时越过边缘并弹回，与 [Textarea](./textarea.md#滚动回弹) 相同。行号栏随代码移动，外框和滚动条保持不动；普通鼠标滚轮的按行滚动不触发回弹。
 
+滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上；若 gutter 位于右侧，文本会与滚动条保持间距。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+
+在右侧 gutter、左侧滚动条的镜像窗格中，横向轨道会避开 gutter，纵向轨道仍位于窗格外侧边缘。
+
+```rust
+EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
+```
+
+行号和折叠图标所在的 gutter 默认位于左侧。在并排 diff 中，两侧的 gutter 可以朝向中间，使对应行的行号隔着分隔线相邻。左侧窗格用 `gutter_side` 将 gutter 放到右侧（镜像排列，折叠图标紧邻文本），并把滚动条放到外侧边缘：
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号、gutter 标记和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后。在 diff 中，这样可以把变更标记放在文本与行号之间：
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Markers])
+```
+
+Editor Diff 示例展示了这两种布局，两个窗格同步滚动。
+
 ## 主动补全
 
 `ShowCompletions` 可以在不修改文本的情况下请求补全，**没有默认快捷键**。应用应结合平台习惯选择绑定，避开 Ctrl+Space 等输入法快捷键。Editor 的绑定可以使用 `Input && mode == editor` 条件；现有 `Input` 绑定仍然有效。
@@ -296,7 +320,8 @@ Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用�
 ### 行号槽与概览标尺装饰
 
 需要在文本之外标记整行（例如版本控制 diff 中新增、修改或删除的行）时，使用这两个集合。
-`GutterDecorationCollection` 在行号之前的窄带中绘制标记。
+`GutterDecorationCollection` 在 gutter 外侧边缘、行号和行装饰标记之前的窄带中绘制标记；
+可用 `gutter_order` 通过 `GutterColumn::Decorations` 调整其位置。
 `OverviewRulerDecorationCollection` 在垂直滚动条轨道上绘制标记，Monaco 将这条轨道称为概览标尺。
 要同时在两处显示标记，请分别创建两个集合。
 
@@ -345,11 +370,210 @@ let ruler = editor.update(cx, |state, cx| {
   按惯例，版本控制使用 `Left`，搜索结果使用 `Center`，诊断使用 `Right`。每个标记按所在行占内容高度的比例定位，
   高度至少为 6 px。同一分区中颜色相同且相互接触的标记会合并。
 - 标记绘制在滚动条下方，无论滚动条是 Base 提供的还是由 `set_scrollbar_renderer` 提供的。
-  滑块淡出时，标记仍然可见。
+  滑块淡出时，标记仍然可见。`scrollbar_placement` 放在左侧时，轨道和标记随之移到左边缘；
+  自定义滚动条通过 `EditorScrollbarContext::placement` 读取位置。
 - 不调用 `with_color` 时，两个集合都使用编辑器前景色。版本控制的颜色可以读取高亮主题中
   Zed 的状态键 `created`、`modified` 和 `deleted`，对应方法为 `status.created(cx)`、
   `status.modified(cx)` 和 `status.deleted(cx)`。缺少对应键时，这些方法分别使用 `success`、
   `warning` 和 `error`。
+
+### 行装饰
+
+`LineDecorationCollection` 以整行为单位绘制：横跨该行的背景色带、行号槽中的标记，或两者兼有。
+条目由 `LineDecorationProvider` 提供：编辑器每绘制一帧，都会以当前可见的缓冲区行范围询问它。
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::App;
+use gpui_kit::component::{
+    ActiveTheme as _,
+    input::{GutterMarker, LineDecoration, LineDecorationProvider},
+};
+
+/// 从零开始的缓冲区行，已排序。
+struct AddedRows(Vec<usize>);
+
+impl LineDecorationProvider for AddedRows {
+    fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+        let start = self.0.partition_point(|&row| row < rows.start);
+        let end = self.0.partition_point(|&row| row < rows.end);
+        self.0[start..end]
+            .iter()
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_marker(GutterMarker::DiffAdded)
+            })
+            .collect()
+    }
+}
+
+let added = editor.update(cx, |state, cx| {
+    state.create_line_decorations_collection(Rc::new(AddedRows(vec![2, 3, 7])), cx)
+});
+
+added.set_provider(Rc::new(AddedRows(vec![4])), cx); // 下一帧改为询问它。
+added.clear(cx);   // 停止绘制，但保留集合以便复用。
+added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
+```
+
+由于每一帧都会重新询问 provider，行由 provider 自己维护：编辑器不会随编辑移动这些行，
+替换全文时也不会清空它们，并且会忽略询问范围之外的装饰。请按行为数据建立索引，让回答保持轻量；
+在被询问时从 `cx` 读取颜色，使其跟随主题变化。与其他装饰集合一样，各集合相互独立；
+后创建的集合绘制在先创建的集合之上。
+
+背景横跨整行（包括行号槽），覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
+选区和文字下方。标记绘制在独立槽位中，只在显示行号时出现。默认顺序下，该槽位位于行号与行号槽外缘之间；
+使用 `gutter_order` 可将其移到更靠近文本的位置，与 IntelliJ IDEA 放置标记的方式一致。只要有集合设置了
+provider，行号槽就会保留该槽位，标记行滚入或滚出视图时宽度不变。
+样式化编辑器的标记尺寸为实际字号的 90%，间距为字号的 30%。图标、预留槽位和垂直居中使用同一尺寸，
+因此标记既跟随界面缩放，也跟随编辑器单独设置的 `.text_size(...)` 变化。`DiffAdded`、`DiffRemoved`、
+`DiffChanged`、`Conflict`、`Bookmark` 和 `Breakpoint` 使用主题的 success、danger、warning 和
+info 颜色；`GutterMarker::Custom { icon, color }` 按原样绘制给定的图标资源路径。两者都不影响
+命中测试或焦点，也不提供鼠标或键盘操作。
+
+`EditorState::row_bounds(row)` 返回某一行在窗口坐标中实际绘制的区域：多行内联补全下方的行会随
+文字一起下移。该行尚未布局时返回 `None`。
+Editor 展示页的 **Decorations** 标签用 provider 标记了最后三行。
+
+`EditorState::hit_test(position)` 按最近一次绘制，返回窗口坐标中的某个点落在什么上：文本（附带在该处
+单击时光标所在的偏移量），或行号栏（附带所在的 `GutterColumn`，落在边距中时为 `None`）。两种情况都会
+给出该点旁边的缓冲区行，以及该点是否位于这一行的间隔行上。在行号栏中，第一行之上和最后一行之下的行为
+`None`。`EditorState::gutter_bounds()` 返回行号栏实际绘制的区域。首次绘制之前两者都返回 `None`；
+它们都不会改变编辑器对单击的处理。
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(position) {
+    match hit.area() {
+        InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. } => {
+            // 行号：`hit.row()` 是缓冲区行。
+        }
+        InputHitArea::Text { offset, .. } => { /* 文本，位于 `offset` */ }
+        _ => {}
+    }
+}
+```
+
+`EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
+`DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
+`gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、
+同步视图，以及缓冲区坐标与显示坐标之间的转换。
+
+```rust
+use gpui_kit::base::input::BufferPoint;
+
+let state = editor.read(cx);
+let map = state.display_map();
+let count = map.display_row_count();
+let rows = map.buffer_line_to_display_row_range(0); // 折叠隐藏的行返回 None
+let display = map.buffer_pos_to_display_pos(BufferPoint::new(0, 0));
+let buffer = map.display_pos_to_buffer_pos(display);
+let version = map.version();
+```
+
+映射覆盖整个已准备的文本，包括视口外的行。软换行使用最近准备的布局参数；文本尚未准备时，
+映射没有显示行。编辑、重新换行、折叠或填充行变化会改变 `map.version()`。比较同一映射的版本可以判断
+何时需要重新查询；滚动不会改变版本。
+
+映射不包含内联补全的额外行。显示行序号乘以行高表示文本映射位置，不一定是实际绘制位置：
+多行内联补全会把后续文本向下推，而映射和版本不变。可见行的实际几何信息应通过 `row_bounds` 获取。
+
+缓冲区和显示坐标的序号均从零开始。被折叠隐藏的缓冲区行没有显示行范围（返回 `None`）；
+缓冲区位置与显示位置之间的转换使用映射的坐标转换方法。
+
+### 填充行
+
+`Spacer` 是位于某个缓冲区行上方或下方的一组空白行。它不包含文本：没有行号，光标会跳过它，
+点击它会落到旁边的文本行上，行装饰、选区、搜索匹配和内联颜色都不会覆盖它。它的行与其他显示行一样，
+因此滚动高度、滚动到某一行以及 `row_bounds` 都会把它计算在内。并排显示的两个编辑器可以用填充行补齐
+较矮的行，使两侧对应的行无论各自如何换行都从同一高度开始，就像并排 diff 那样。
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::{App, WeakEntity};
+use gpui_kit::component::input::{EditorState, Spacer, SpacerProvider};
+
+/// 为每一行补上 `other` 中同一行因换行而多出的行数。
+struct Level {
+    this: WeakEntity<EditorState>,
+    other: WeakEntity<EditorState>,
+}
+
+impl SpacerProvider for Level {
+    fn spacers(&self, lines: Range<usize>, cx: &App) -> Vec<Spacer> {
+        let (Some(this), Some(other)) = (self.this.upgrade(), self.other.upgrade()) else {
+            return Vec::new();
+        };
+        let rows = |editor: &EditorState, line| {
+            editor
+                .display_map()
+                .buffer_line_to_display_row_range(line)
+                .map_or(0, |rows| rows.len())
+        };
+        let (this, other) = (this.read(cx), other.read(cx));
+        lines
+            .filter_map(|line| {
+                let (own, theirs) = (rows(this, line), rows(other, line));
+                (theirs > own).then(|| Spacer::below(line, theirs - own))
+            })
+            .collect()
+    }
+}
+
+let level = Rc::new(Level {
+    this: left.downgrade(),
+    other: right.downgrade(),
+});
+left.update(cx, |state, cx| state.set_spacer_provider(Some(level), cx));
+```
+
+与行装饰不同，填充行会推动其下方的所有行，因此编辑器一次性询问所有行的填充行并保留结果：设置 provider 时、
+编辑之后、文本重新换行或折叠变化之后，以及调用 `refresh_spacers` 时。询问发生在布局阶段，此时文本已按编辑器的
+宽度完成换行，并且不在编辑器的任何更新之内，因此 provider 可以读取本编辑器和其他编辑器。若结果依赖另一个
+编辑器的行，请在该编辑器的 `display_map().version()` 变化时调用 `refresh_spacers`。`Spacer::above(0, rows)`
+在文本顶部补行，`with_background` 为这些行（包括行号槽）填充颜色。位于折叠隐藏的行或最后一行之后的填充行不会显示。
+**Editor Diff** 展示页对两侧都启用换行，并用填充行使它们对齐。
+
+在显示映射中，填充行也是显示行：`display_row_count()` 会计入它们，`buffer_line_to_display_row_range(line)`
+只包含该行文本所占的行，`display_row_to_buffer_line(row)` 把填充行视为它旁边的那一行，`is_spacer_row(row)`
+用于区分填充行和文本行。填充行变化时 `version()` 也会变化，因此按版本缓存的行映射不会过期；provider 返回与当前相同的填充行时版本不变，
+所以在版本变化时调用 `refresh_spacers` 最终会稳定下来。
+
+## 行号栏右键菜单
+
+`Editor::context_menu_with` 在构建右键菜单时知道它是在哪里打开的：
+除了 capabilities，它还会收到这次单击的 `hit_test` 结果，因此菜单可以只针对行号栏
+中的某一行，而文本上仍保留通常的菜单（由 `default_context_menu` 构建）。在行号栏上右键单击会像在文本
+上一样把光标移到该行；`gutter_context_menu_moves_cursor(false)` 则在行号栏菜单打开期间保留当前选区。
+
+```rust
+use gpui_kit::component::input::{Editor, EditorState, default_context_menu};
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .line_number(true)
+        .gutter_context_menu_moves_cursor(false)
+});
+
+Editor::new(&editor).context_menu_with(|menu, capabilities, hit, _, _| {
+    match hit {
+        Some(hit) if hit.is_gutter() => match hit.row() {
+            Some(row) => menu
+                .menu(format!("Bookmark Line {}", row + 1), Box::new(ToggleBookmark))
+                .menu(format!("Copy Line {}", row + 1), Box::new(CopyLine)),
+            None => menu, // 最后一行之下：不显示菜单
+        },
+        _ => default_context_menu(menu, capabilities),
+    }
+})
+```
+
+构建函数在菜单打开时运行；可以在这里记下行号，供菜单操作读取。
+`examples/editor_gutter_menu` 演示了为单击的行添加书签、选中和复制。
 
 ## 值与事件
 

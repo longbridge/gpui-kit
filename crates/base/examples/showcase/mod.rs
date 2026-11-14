@@ -179,6 +179,16 @@ pub struct BaseShowcase {
     text_selection_footer_bounds: Rc<std::cell::RefCell<Option<gpui::Bounds<gpui::Pixels>>>>,
 }
 
+/// The showcase's editor colors, assigned over the defaults.
+fn editor_style() -> InputEditorStyle {
+    let mut style = InputEditorStyle::default();
+    style.foreground = example_rgb(0x171717).into();
+    style.muted_foreground = example_rgb(0x737373).into();
+    style.selection = gpui::hsla(0.6, 0.8, 0.7, 0.45);
+    style.caret = example_rgb(0x171717).into();
+    style
+}
+
 impl BaseShowcase {
     pub fn new(component: impl Into<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         activate_palette(window, cx);
@@ -191,24 +201,12 @@ impl BaseShowcase {
                 } else {
                     "Hello GPUI"
                 });
-            state.set_editor_style(InputEditorStyle {
-                foreground: example_rgb(0x171717).into(),
-                muted_foreground: example_rgb(0x737373).into(),
-                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
-                caret: example_rgb(0x171717).into(),
-                ..InputEditorStyle::default()
-            });
+            state.set_editor_style(editor_style());
             state
         });
         let toolbar_search = cx.new(|cx| {
             let mut state = InputState::new(window, cx).placeholder("Search");
-            state.set_editor_style(InputEditorStyle {
-                foreground: example_rgb(0x171717).into(),
-                muted_foreground: example_rgb(0x737373).into(),
-                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
-                caret: example_rgb(0x171717).into(),
-                ..InputEditorStyle::default()
-            });
+            state.set_editor_style(editor_style());
             state
         });
         let otp = cx.new(|cx| OtpState::new(6, window, cx).default_value("12"));
@@ -229,13 +227,7 @@ impl BaseShowcase {
         });
         let textarea_base = textarea.clone();
         textarea_base.update(cx, |state, _| {
-            state.set_editor_style(InputEditorStyle {
-                foreground: example_rgb(0x171717).into(),
-                muted_foreground: example_rgb(0x737373).into(),
-                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
-                caret: example_rgb(0x171717).into(),
-                ..InputEditorStyle::default()
-            });
+            state.set_editor_style(editor_style());
         });
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
@@ -254,24 +246,13 @@ impl BaseShowcase {
                 }),
                 cx,
             );
-            state.set_editor_style(InputEditorStyle {
-                foreground: example_rgb(0x171717).into(),
-                muted_foreground: example_rgb(0x737373).into(),
-                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
-                caret: example_rgb(0x171717).into(),
-                highlight_styles: Arc::new(ShowcaseHighlightStyles),
-                ..InputEditorStyle::default()
-            });
+            let mut style = editor_style();
+            style.highlight_styles = Arc::new(ShowcaseHighlightStyles);
+            state.set_editor_style(style);
         });
         let combobox_query = cx.new(|cx| {
             let mut state = InputState::new(window, cx).placeholder("Search frameworks…");
-            state.set_editor_style(InputEditorStyle {
-                foreground: example_rgb(0x171717).into(),
-                muted_foreground: example_rgb(0x737373).into(),
-                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
-                caret: example_rgb(0x171717).into(),
-                ..InputEditorStyle::default()
-            });
+            state.set_editor_style(editor_style());
             state
         });
         cx.subscribe(
@@ -438,26 +419,18 @@ impl BaseShowcase {
     }
 
     fn refresh_editor_styles(&self, cx: &mut Context<Self>) {
-        let style = || InputEditorStyle {
-            foreground: example_rgb(0x171717).into(),
-            muted_foreground: example_rgb(0x737373).into(),
-            selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
-            caret: example_rgb(0x171717).into(),
-            ..InputEditorStyle::default()
-        };
         self.input
-            .update(cx, |state, _| state.set_editor_style(style()));
+            .update(cx, |state, _| state.set_editor_style(editor_style()));
         self.textarea
-            .update(cx, |state, _| state.set_editor_style(style()));
+            .update(cx, |state, _| state.set_editor_style(editor_style()));
         self.combobox_query
-            .update(cx, |state, _| state.set_editor_style(style()));
+            .update(cx, |state, _| state.set_editor_style(editor_style()));
         self.toolbar_search
-            .update(cx, |state, _| state.set_editor_style(style()));
+            .update(cx, |state, _| state.set_editor_style(editor_style()));
         self.editor.update(cx, |state, _| {
-            state.set_editor_style(InputEditorStyle {
-                highlight_styles: Arc::new(ShowcaseHighlightStyles),
-                ..style()
-            });
+            let mut style = editor_style();
+            style.highlight_styles = Arc::new(ShowcaseHighlightStyles);
+            state.set_editor_style(style);
         });
     }
 

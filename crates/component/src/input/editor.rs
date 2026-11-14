@@ -5,7 +5,8 @@ use gpui::{
     Window, prelude::FluentBuilder as _, relative,
 };
 
-use super::{EditorState, Input};
+use super::input::ContextMenuBuilder;
+use super::{EditorState, Input, InputContextMenuCapabilities, InputHit};
 use crate::native_menu::NativeMenu;
 use crate::{ActiveTheme as _, RoleOverride, Sizable, Size, StyledExt as _};
 
@@ -31,7 +32,7 @@ pub struct Editor {
     /// An optional context menu builder to allow a custom context menu.
     ///
     /// If set, this overrides the built-in context menu.
-    context_menu_builder: Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+    context_menu_builder: Option<ContextMenuBuilder>,
 
     paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
 }
@@ -110,6 +111,27 @@ impl Editor {
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
     ) -> Self {
+        self.context_menu_builder =
+            Some(Rc::new(move |menu, _, _, window, cx| f(menu, window, cx)));
+        self
+    }
+
+    /// Replace the built-in context menu, told what it was opened on.
+    ///
+    /// See [`Input::context_menu_with`]: a menu for a row of the gutter reads
+    /// the row from the [`InputHit`] it is given, and
+    /// [`super::default_context_menu`] keeps the built-in items for the text.
+    pub fn context_menu_with(
+        mut self,
+        f: impl Fn(
+            NativeMenu,
+            InputContextMenuCapabilities,
+            Option<InputHit>,
+            &mut Window,
+            &mut App,
+        ) -> NativeMenu
+        + 'static,
+    ) -> Self {
         self.context_menu_builder = Some(Rc::new(f));
         self
     }
@@ -166,7 +188,9 @@ impl RenderOnce for Editor {
             .when_some(self.height, |this, height| this.h(height))
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .when_some(self.context_menu_builder, |this, build| {
-                this.context_menu(move |menu, window, cx| build(menu, window, cx))
+                this.context_menu_with(move |menu, capabilities, hit, window, cx| {
+                    build(menu, capabilities, hit, window, cx)
+                })
             })
             .when_some(self.paste_handler, |this, handler| {
                 this.on_paste(move |item, window, cx| handler(item, window, cx))
@@ -285,6 +309,35 @@ mod tests {
             // Only the insets change, not the font.
             assert_eq!(line_height, rows, "{size:?}");
         }
+    }
+
+    #[gpui::test]
+    fn a_gutter_on_the_right_keeps_the_padding_it_has_on_the_left(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("fn main() {}"));
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        let mut padding = |side: crate::Side| {
+            VisualTestContext::update(cx, |window, cx| {
+                state.update(cx, |state, cx| state.set_gutter_side(side, cx));
+                window.draw(cx).clear(cx);
+                let bounds = state.read(cx).input_bounds();
+                (bounds.left(), window.viewport_size().width - bounds.right())
+            })
+        };
+
+        let (left_outer, left_inner) = padding(crate::Side::Left);
+        let (right_inner, right_outer) = padding(crate::Side::Right);
+        assert!(left_outer < left_inner);
+        assert_eq!(right_outer, left_outer);
+        assert_eq!(right_inner, left_inner);
     }
 
     #[gpui::test]
@@ -470,6 +523,145 @@ mod tests {
         });
     }
 
+    /// The styled editor projects a presentation for every gutter marker, and
+    /// paints them through the editor's own prepaint.
+    #[gpui::test]
+    fn line_decorations_paint_every_marker_kind(cx: &mut TestAppContext) {
+        use crate::IconName;
+        use crate::input::{GutterMarker, LineDecoration, LineDecorationProvider};
+        use gpui_kit_assets::IconNamed as _;
+        use std::{cell::Cell, ops::Range};
+
+        struct EveryKind(Rc<Cell<usize>>);
+
+        impl LineDecorationProvider for EveryKind {
+            fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+                self.0.set(self.0.get() + 1);
+                let markers = [
+                    GutterMarker::DiffAdded,
+                    GutterMarker::DiffRemoved,
+                    GutterMarker::DiffChanged,
+                    GutterMarker::Conflict,
+                    GutterMarker::Bookmark,
+                    GutterMarker::Breakpoint,
+                    GutterMarker::Custom {
+                        icon: IconName::Star.path(),
+                        color: cx.theme().primary,
+                    },
+                ];
+                rows.zip(markers)
+                    .map(|(row, marker)| {
+                        LineDecoration::new(row)
+                            .with_background(cx.theme().success.opacity(0.16))
+                            .with_marker(marker)
+                    })
+                    .collect()
+            }
+        }
+
+        cx.update(crate::init);
+        let asked = Rc::new(Cell::new(0));
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("a\n".repeat(7)));
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Rc::new(EveryKind(asked.clone())), cx);
+            });
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+
+        assert!(asked.get() > 0, "the provider was never asked");
+        cx.read(|cx| {
+            let first = state
+                .read(cx)
+                .row_bounds(0)
+                .expect("the first row is laid out");
+            let second = state
+                .read(cx)
+                .row_bounds(1)
+                .expect("the second row is laid out");
+            assert_eq!(second.origin.y, first.bottom());
+        });
+    }
+
+    #[gpui::test]
+    fn gutter_markers_follow_editor_font_changes_without_changing_rem(cx: &mut TestAppContext) {
+        use crate::input::{GutterMarker, LineDecoration, LineDecorationProvider};
+        use std::ops::Range;
+
+        struct Marker;
+
+        impl LineDecorationProvider for Marker {
+            fn line_decorations(&self, rows: Range<usize>, _: &App) -> Vec<LineDecoration> {
+                rows.map(|row| LineDecoration::new(row).with_marker(GutterMarker::DiffAdded))
+                    .collect()
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let mut harness = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx).default_value("first\nsecond"));
+            editor = Some(state.clone());
+            harness = Some(cx.entity());
+            Harness {
+                state,
+                text_size: None,
+            }
+        });
+        let editor = editor.unwrap();
+        let harness = harness.unwrap();
+        VisualTestContext::update(cx, |window, cx| {
+            let rem_size = window.rem_size();
+            let mut previous = None;
+            for font_size in [px(11.), px(20.)] {
+                harness.update(cx, |view, cx| {
+                    view.text_size = Some(font_size);
+                    cx.notify();
+                });
+                window.draw(cx).clear(cx);
+                let unmarked = editor.read(cx).range_to_bounds(&(0..0)).unwrap().left();
+                let collection = editor.update(cx, |state, cx| {
+                    state.create_line_decorations_collection(Rc::new(Marker), cx)
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let slot = state.range_to_bounds(&(0..0)).unwrap().left() - unmarked;
+                let row_height = state.row_bounds(0).unwrap().size.height;
+                assert!(slot > px(0.));
+                if let Some((previous_slot, previous_font, previous_height)) = previous {
+                    assert!(
+                        slot > previous_slot,
+                        "the marker slot did not follow the font"
+                    );
+                    assert!(row_height > previous_height);
+                    // Row heights round to device pixels; compare the marker's
+                    // scale against font size rather than rounded row height.
+                    let expected = previous_slot * (font_size / previous_font);
+                    assert!(
+                        (slot - expected).abs() < px(0.01),
+                        "marker and text scale diverged: slot {slot:?}, previous slot {previous_slot:?}, font {font_size:?}, previous font {previous_font:?}"
+                    );
+                }
+                previous = Some((slot, font_size, row_height));
+                assert_eq!(window.rem_size(), rem_size);
+                collection.clear(cx);
+                window.draw(cx).clear(cx);
+                assert_eq!(
+                    editor.read(cx).range_to_bounds(&(0..0)).unwrap().left(),
+                    unmarked
+                );
+            }
+        });
+    }
+
     #[gpui::test]
     fn test_on_paste_builder(cx: &mut TestAppContext) {
         use gpui::{AppContext as _, Render};
@@ -489,5 +681,77 @@ mod tests {
             assert!(editor.paste_handler.is_some());
             PasteProbe
         });
+    }
+
+    /// An editor whose right-click menu records what it was opened on, through
+    /// `context_menu_with` or, with `with` off, through `context_menu`.
+    struct MenuHarness {
+        state: Entity<EditorState>,
+        with: bool,
+        opened: Rc<std::cell::RefCell<Vec<Option<crate::input::InputHit>>>>,
+    }
+
+    impl Render for MenuHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let opened = self.opened.clone();
+            let editor = Editor::new(&self.state);
+            let editor = if self.with {
+                editor.context_menu_with(move |menu, _, hit, _, _| {
+                    opened.borrow_mut().push(hit);
+                    menu
+                })
+            } else {
+                editor.context_menu(move |menu, _, _| {
+                    opened.borrow_mut().push(None);
+                    menu
+                })
+            };
+            div().size_full().child(editor)
+        }
+    }
+
+    #[gpui::test]
+    fn a_menu_built_with_its_target_knows_the_row_of_the_gutter(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for with in [true, false] {
+            let opened: Rc<std::cell::RefCell<Vec<_>>> = Default::default();
+            let mut state = None;
+            let (_, cx) = cx.add_window_view(|window, cx| {
+                let editor =
+                    cx.new(|cx| EditorState::new(window, cx).default_value("one\ntwo\nthree"));
+                state = Some(editor.clone());
+                MenuHarness {
+                    state: editor,
+                    with,
+                    opened: opened.clone(),
+                }
+            });
+            let state = state.unwrap();
+            VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+            let (gutter, text) = cx.read(|cx| {
+                let state = state.read(cx);
+                let y = state.row_bounds(1).unwrap().center().y;
+                let gutter = state.gutter_bounds().unwrap();
+                (
+                    gpui::point(gutter.center().x, y),
+                    gpui::point(gutter.right() + px(10.), y),
+                )
+            });
+            for position in [gutter, text] {
+                cx.simulate_mouse_down(position, gpui::MouseButton::Right, Default::default());
+                cx.simulate_mouse_up(position, gpui::MouseButton::Right, Default::default());
+                cx.run_until_parked();
+            }
+
+            let opened = opened.borrow();
+            assert_eq!(opened.len(), 2, "with {with}");
+            if with {
+                let (on_gutter, on_text) = (opened[0].unwrap(), opened[1].unwrap());
+                assert!(on_gutter.is_gutter());
+                assert_eq!(on_gutter.row(), Some(1));
+                assert!(!on_text.is_gutter());
+                assert_eq!(on_text.row(), Some(1));
+            }
+        }
     }
 }

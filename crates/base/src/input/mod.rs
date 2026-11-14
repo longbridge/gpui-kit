@@ -53,6 +53,8 @@ mod language;
 pub mod language_config;
 #[path = "base/layout.rs"]
 mod layout;
+#[path = "editor/line_decorations.rs"]
+mod line_decorations;
 #[path = "editor/lsp/mod.rs"]
 mod lsp;
 #[path = "base/mask_pattern.rs"]
@@ -70,6 +72,8 @@ mod scrollbar_presentation;
 mod search;
 #[path = "base/selection.rs"]
 mod selection;
+#[path = "editor/spacers.rs"]
+mod spacers;
 #[path = "base/state.rs"]
 mod state;
 #[path = "base/tab_stops.rs"]
@@ -101,9 +105,9 @@ pub use diagnostics::{
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
 pub use editor::{Editor, EditorState};
 pub use highlighting::{
-    DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, HighlightStyleResolver,
-    InputEditorStyle, InputHighlighter, InputHighlighterFactory, SharedHighlightStyleResolver,
-    SyntaxContext, SyntaxContextProvider,
+    DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, GutterMarkerRenderer,
+    HighlightStyleResolver, InputEditorStyle, InputHighlighter, InputHighlighterFactory,
+    SharedHighlightStyleResolver, SyntaxContext, SyntaxContextProvider,
 };
 pub use indent::TabSize;
 pub use input::{Input, InputState};
@@ -115,6 +119,10 @@ pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};
 pub(crate) use language_config::LanguageConfig;
 pub use language_config::{AutoClosingPair, BracketPair, IndentationRules};
+pub use layout::{GutterColumn, InputHit, InputHitArea};
+pub use line_decorations::{
+    GutterMarker, LineDecoration, LineDecorationCollection, LineDecorationProvider,
+};
 pub use lsp::{
     CodeActionItem, CodeActionMenuState, CodeActionProvider, CompletionHighlighter,
     CompletionMenuOptions, CompletionMenuState, CompletionProvider, DefinitionProvider,
@@ -131,5 +139,6 @@ pub use native::{NativeMenu, NativeMenuItem};
 pub use rope_ext::{InputEdit, Point, RopeExt, RopeLines};
 pub use ropey::Rope;
 pub use search::{SearchMatcher, SearchSession};
+pub use spacers::{Spacer, SpacerProvider};
 pub use state::*;
 pub use textarea::{Textarea, TextareaState};

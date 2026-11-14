@@ -22,7 +22,7 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, InputContextMenuCapabilities,
+    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, GutterColumn, InputContextMenuCapabilities,
     InputEditorStyle, InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep,
     WrappingIndent,
     blink_cursor::BlinkCursor,
@@ -37,12 +37,16 @@ use super::{
     mode::LayoutMode,
     undo_manager::{EditIntent, UndoManager},
 };
+use crate::ScrollbarPlacement;
+use crate::Side;
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::rope_ext::{next_grapheme_boundary, previous_grapheme_boundary};
 use crate::input::{
-    InputEdit, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    InputEdit, InputExtras as _, Position, RopeExt as _,
+    element::RIGHT_MARGIN,
+    layout::{InputHit, InputHitArea, LastLayout},
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
@@ -442,6 +446,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) mode: LayoutMode,
     pub(super) text: Rope,
     pub(super) display_map: DisplayMap,
+    /// The display rows version the spacer provider was last asked at, `None`
+    /// when it must be asked again.
+    pub(super) spacers_asked: Option<usize>,
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
@@ -500,6 +507,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// The fully visible part of the window this input last asked its scroll
     /// containers to reveal it in, while focused. `None` while unfocused.
     pub(super) revealed_viewport: Option<Bounds<Pixels>>,
+    /// The gutter bounds, `None` without a gutter.
+    pub(super) last_gutter_bounds: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<CursorSelection>,
     /// The current edit batch, copied into an event when a change is emitted.
     pub(super) last_input_edits: Vec<(InputEdit, Rope)>,
@@ -542,6 +551,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) editor_scrollbar_snapshot: Cell<Option<EditorScrollbarSnapshot>>,
     /// Overview ruler marks in display rows, kept between frames.
     pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
+    pub(super) scrollbar_placement: ScrollbarPlacement,
+    pub(super) gutter_side: Side,
+    pub(super) gutter_order: [GutterColumn; 4],
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -574,10 +586,22 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) diagnostic_popover: Option<Rc<crate::input::DiagnosticEntry>>,
 
     context_menu_handler: Option<
-        Rc<dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App)>,
+        Rc<
+            dyn Fn(
+                NativeMenu,
+                InputContextMenuCapabilities,
+                Option<InputHit>,
+                Point<Pixels>,
+                &mut Window,
+                &mut App,
+            ),
+        >,
     >,
-    pending_context_menu: Option<(Point<Pixels>, usize)>,
+    pending_context_menu: Option<(Point<Pixels>, usize, Option<InputHit>)>,
     context_menu_offset: Option<usize>,
+    /// Whether a right-click on the gutter moves the caret to its row, as one
+    /// on the text does.
+    pub(super) gutter_context_menu_moves_cursor: bool,
 
     /// Whether the context menu that shows on right-click is enabled.
     ///
@@ -691,6 +715,7 @@ pub struct InputPresentation {
     masked: bool,
     multi_line: bool,
     code_editor: bool,
+    gutter_side: Side,
     text_align: TextAlign,
     placeholder: SharedString,
     mask_placeholder: Option<String>,
@@ -730,6 +755,10 @@ impl InputPresentation {
 
     pub fn is_code_editor(&self) -> bool {
         self.code_editor
+    }
+
+    pub fn gutter_side(&self) -> Side {
+        self.gutter_side
     }
 
     pub fn text_align(&self) -> TextAlign {
@@ -783,6 +812,15 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Text edits use the cached wrapping parameters. Layout refreshes the
     /// cache after width or font changes; consume that count on a subsequent
     /// render, or use [`Self::prewrap`] to prepare it before the first layout.
+    ///
+    /// The map covers the whole buffer, including lines outside the viewport,
+    /// and the state owns all updates. Use [`DisplayMap::version`] to
+    /// invalidate cached mappings after edits, rewrapping, or folding changes.
+    ///
+    /// Display coordinates describe text after wrapping and folding, with the
+    /// spacer rows between lines. They do not include inline completion ghost
+    /// lines; use [`Self::row_bounds`] for the actual painted geometry of a
+    /// visible buffer line.
     pub fn display_map(&self) -> &DisplayMap {
         &self.display_map
     }
@@ -831,6 +869,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             masked: self.masked,
             multi_line: self.is_multi_line(),
             code_editor: self.is_code_editor(),
+            gutter_side: self.gutter_side,
             text_align: self.text_align,
             placeholder: self.placeholder.clone(),
             mask_placeholder: self.mask_pattern.placeholder(),
@@ -913,6 +952,28 @@ impl<M: InputModeKind> InputBaseState<M> {
             dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App),
         >,
     ) {
+        self.context_menu_handler = Some(Rc::new(
+            move |menu, capabilities, _, position, window, cx| {
+                handler(menu, capabilities, position, window, cx)
+            },
+        ));
+    }
+
+    /// Like [`Self::on_context_menu`], also told what the right-click was over.
+    #[doc(hidden)]
+    pub fn on_context_menu_with_hit(
+        &mut self,
+        handler: Rc<
+            dyn Fn(
+                NativeMenu,
+                InputContextMenuCapabilities,
+                Option<InputHit>,
+                Point<Pixels>,
+                &mut Window,
+                &mut App,
+            ),
+        >,
+    ) {
         self.context_menu_handler = Some(handler);
     }
 
@@ -978,6 +1039,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             selection_focus: None,
             text: "".into(),
             display_map: DisplayMap::new(text_style.font(), window.rem_size(), None),
+            spacers_asked: None,
             search_session: super::SearchSession::default(),
             search_activation_revision: 0,
             searchable: false,
@@ -1027,6 +1089,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             prepaint_caret_geometry: None,
             last_bounds: None,
             revealed_viewport: None,
+            last_gutter_bounds: None,
             last_selected_range: None,
             last_input_edits: Vec::new(),
             column_select_start: None,
@@ -1038,6 +1101,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             scroll_size: gpui::size(px(0.), px(0.)),
             editor_scrollbar_snapshot: Cell::new(None),
             overview_ruler_rows: Default::default(),
+            scrollbar_placement: ScrollbarPlacement::default(),
+            gutter_side: Side::Left,
+            gutter_order: GutterColumn::DEFAULT_ORDER,
             longest_line_width: Cell::new(None),
             editor_paddings: Edges::default(),
             deferred_scroll_offset: None,
@@ -1054,6 +1120,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             context_menu_handler: None,
             pending_context_menu: None,
             context_menu_offset: None,
+            gutter_context_menu_moves_cursor: true,
             enable_context_menu: true,
             completion_inserting: false,
             overlay_action_handler: None,
@@ -1075,6 +1142,25 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn context_menu(mut self, enable: bool) -> Self {
         self.enable_context_menu = enable;
         self
+    }
+
+    /// Sets whether a right-click on the gutter moves the caret to the row
+    /// clicked, as a right-click on the text does.
+    ///
+    /// It does by default. Turn it off to keep the selection while a menu for
+    /// a row of the gutter is open.
+    pub fn gutter_context_menu_moves_cursor(mut self, moves: bool) -> Self {
+        self.gutter_context_menu_moves_cursor = moves;
+        self
+    }
+
+    pub fn set_gutter_context_menu_moves_cursor(&mut self, moves: bool) {
+        self.gutter_context_menu_moves_cursor = moves;
+    }
+
+    /// Returns true when a right-click at `hit` leaves the caret where it is.
+    fn keeps_cursor_on_context_menu(&self, hit: Option<InputHit>) -> bool {
+        !self.gutter_context_menu_moves_cursor && hit.is_some_and(|hit| hit.is_gutter())
     }
 
     pub fn set_context_menu_enabled(&mut self, enabled: bool) {
@@ -1261,6 +1347,8 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let mut y_offset = last_layout.visible_top;
         for (vi, line) in last_layout.lines.iter().enumerate() {
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
             let buffer_line = last_layout.visible_buffer_lines[vi];
             if buffer_line == target_row {
                 let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
@@ -1269,11 +1357,11 @@ impl<M: InputModeKind> InputBaseState<M> {
                     .position_for_index(local_offset, last_layout, false)
                     .unwrap_or_else(|| point(px(0.), px(0.)));
                 let sub_line_index = (pos.y / line_height) as usize;
-                let adjusted_pos = point(pos.x + last_layout.line_number_width, pos.y + y_offset);
+                let adjusted_pos = point(pos.x + last_layout.text_origin_x, pos.y + y_offset);
                 return (vi, sub_line_index, Some(adjusted_pos));
             }
 
-            y_offset += line.size(line_height).height;
+            y_offset += line.size(line_height).height + spacer_below;
         }
         (0, 0, None)
     }
@@ -2587,6 +2675,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         &mut self,
         position: Point<Pixels>,
         offset: usize,
+        hit: Option<InputHit>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2598,11 +2687,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         self.context_menu_offset = Some(offset);
-        if !self.active_selection().contains(offset) {
+        let keep_cursor = self.keeps_cursor_on_context_menu(hit);
+        if !keep_cursor && !self.active_selection().contains(offset) {
             self.move_to(offset, None, cx);
         }
 
-        if self.is_code_editor() {
+        if self.is_code_editor() && !keep_cursor {
             M::on_hover_definition(self, offset, window, cx);
         }
 
@@ -2616,7 +2706,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     return;
                 }
                 let previous_focus = window.focused(cx);
-                handler(NativeMenu::new(), capabilities, position, window, cx);
+                handler(NativeMenu::new(), capabilities, hit, position, window, cx);
                 // A drawn menu takes focus synchronously; native menus leave it
                 // on the input. Capture it here rather than in the handler.
                 input
@@ -2756,6 +2846,9 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let mut new_selections = Vec::with_capacity(end_row - start_row + 1);
         for row in start_row..=end_row {
+            if self.display_map.is_spacer_row(row) {
+                continue;
+            }
             let sel_start = self
                 .display_map
                 .display_row_column_to_offset(row, start_col);
@@ -2866,10 +2959,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Show Mouse context menu
         if event.button == MouseButton::Right {
             if self.enable_context_menu {
-                if !self.active_selection().contains(offset) {
+                let hit = self.hit_test(event.position);
+                if !self.keeps_cursor_on_context_menu(hit)
+                    && !self.active_selection().contains(offset)
+                {
                     self.move_to(offset, None, cx);
                 }
-                self.pending_context_menu = Some((event.position, offset));
+                self.pending_context_menu = Some((event.position, offset, hit));
             }
             return;
         }
@@ -2908,8 +3004,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Right {
-            if let Some((position, offset)) = self.pending_context_menu.take() {
-                self.handle_right_click_menu(position, offset, window, cx);
+            if let Some((position, offset, hit)) = self.pending_context_menu.take() {
+                self.handle_right_click_menu(position, offset, hit, window, cx);
             }
         }
         if self.active_selection().is_empty() {
@@ -3164,7 +3260,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             let line = &last_layout.lines[vi];
             let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
-                let bounds_width = bounds.size.width - last_layout.line_number_width;
+                let bounds_width = last_layout.text_width;
                 let col_offset_x = pos.x;
                 if col_offset_x - safety_margin < -scroll_offset.x {
                     // If the position is out of the visible area, scroll to make it visible
@@ -3763,7 +3859,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
 
         let line_height = last_layout.line_height;
-        let line_number_width = last_layout.line_number_width;
+        let text_origin_x = last_layout.text_origin_x;
 
         // TIP: About the IBeam cursor
         //
@@ -3775,7 +3871,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         //
         // - included the input padding.
         // - included the scroll offset.
-        let inner_position = position - bounds.origin - point(line_number_width, px(0.));
+        let inner_position = position - bounds.origin - point(text_origin_x, px(0.));
 
         let mut y_offset = last_layout.visible_top;
         // Position relative to the last line walked, kept for a pointer that ends up
@@ -3783,17 +3879,33 @@ impl<M: InputModeKind> InputBaseState<M> {
         let mut last_line_pos = None;
 
         // Traverse visible buffer lines (compact, no hidden entries)
-        for (vi, (line_layout, _buffer_line)) in last_layout
+        for (vi, (line_layout, &buffer_line)) in last_layout
             .lines
             .iter()
             .zip(last_layout.visible_buffer_lines.iter())
             .enumerate()
         {
             let line_start_offset = last_layout.visible_line_byte_offsets[vi];
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
+            let height = line_layout.size(line_height).height;
+            // Ghost lines stand between the row's text and its spacers below,
+            // and push every row after it down, as `row_extents` lays them out.
+            let ghost_height = match last_layout.ghost_lines {
+                Some((ghost_row, ghost_height)) if ghost_row == buffer_line => ghost_height,
+                _ => px(0.),
+            };
 
             // Calculate line origin for this display row
             let line_origin = point(px(0.), y_offset);
-            let pos = inner_position - line_origin;
+            let mut pos = inner_position - line_origin;
+            // A pointer on a spacer row, or on the ghost lines, is on the row
+            // of text it stands beside.
+            if pos.y < px(0.) && pos.y >= -spacer_above {
+                pos.y = px(0.);
+            } else if pos.y >= height && pos.y < height + ghost_height + spacer_below {
+                pos.y = height - line_height;
+            }
 
             // Return offset by use closest_index_for_x if is single line mode.
             if self.is_single_line() {
@@ -3820,7 +3932,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (self.resolve_index(line_start_offset), false, 0);
             }
 
-            y_offset += line_layout.size(line_height).height;
+            y_offset += height + ghost_height + spacer_below;
             last_line_pos = Some(pos);
         }
 
@@ -4339,6 +4451,77 @@ impl<M: InputModeKind> InputBaseState<M> {
         Some(Bounds::from_corners(
             last_bounds.origin + start_pos,
             last_bounds.origin + end_pos + point(px(0.), last_layout.line_height),
+        ))
+    }
+
+    /// Return the rendered bounds of a zero-based buffer row, across its soft wraps.
+    ///
+    /// The bounds span the input from the gutter to the right edge, and follow the
+    /// row down past inline completion ghost lines above it. Returns `None` when
+    /// the row is not currently laid out or visible.
+    pub fn row_bounds(&self, row: usize) -> Option<Bounds<Pixels>> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let ix = last_layout.visible_buffer_lines.binary_search(&row).ok()?;
+        let (top, height) = last_layout.row_extents().nth(ix)?;
+
+        Some(Bounds::new(
+            point(self.input_bounds.origin.x, last_bounds.origin.y + top),
+            gpui::size(self.input_bounds.size.width, height),
+        ))
+    }
+
+    /// Return the bounds of the gutter as last painted, from the text's margin to
+    /// the outer edge of the input's padding.
+    ///
+    /// Returns `None` before the first paint and when the input has no gutter.
+    pub fn gutter_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.last_gutter_bounds
+    }
+
+    /// Return what `position`, in window coordinates, is over, as last painted.
+    ///
+    /// A point on a spacer row is beside the row of text it stands by, as for
+    /// a click. Returns `None` before the first paint and outside the input.
+    pub fn hit_test(&self, position: Point<Pixels>) -> Option<InputHit> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let beside = last_layout.row_at(position.y - last_bounds.origin.y);
+        let spacer = beside.is_some_and(|(_, spacer)| spacer);
+
+        if self
+            .last_gutter_bounds
+            .is_some_and(|gutter| gutter.contains(&position))
+        {
+            let folding = self.mode.is_folding();
+            let column = last_layout.gutter_order.iter().copied().find(|&column| {
+                let (x, width) = super::element::gutter_column(last_layout, folding, column);
+                let left = self.input_bounds.origin.x + x;
+                position.x >= left && position.x < left + width
+            });
+            return Some(InputHit::new(
+                InputHitArea::Gutter { column },
+                beside.map(|(row, _)| row),
+                spacer,
+            ));
+        }
+
+        // As for the gutter, the ghost lines extend the text below its bounds.
+        let paddings = self.editor_paddings;
+        let ghost_height = last_layout.ghost_lines.map_or(px(0.), |(_, height)| height);
+        let outer = Bounds::from_corners(
+            self.input_bounds.origin - point(paddings.left, paddings.top),
+            self.input_bounds.bottom_right()
+                + point(paddings.right, paddings.bottom + ghost_height),
+        );
+        if !outer.contains(&position) {
+            return None;
+        }
+        let (offset, _) = self.index_for_mouse_position(position);
+        Some(InputHit::new(
+            InputHitArea::Text { offset },
+            Some(self.text.offset_to_point(offset).row),
+            spacer,
         ))
     }
 
@@ -5113,12 +5296,11 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
     ) -> Option<Bounds<Pixels>> {
         let last_layout = self.last_layout.as_ref()?;
         let line_height = last_layout.line_height;
-        let line_number_width = last_layout.line_number_width;
         let range = self.range_from_utf16(&range_utf16);
 
         let mut start_origin = None;
         let mut end_origin = None;
-        let line_number_origin = point(line_number_width, px(0.));
+        let text_origin = point(last_layout.text_origin_x, px(0.));
         let mut y_offset = last_layout.visible_top;
 
         let start_row = self
@@ -5135,6 +5317,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 break;
             }
 
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
             let buffer_line = last_layout.visible_buffer_lines[vi];
             let index_offset = last_layout.visible_line_byte_offsets[vi];
 
@@ -5154,13 +5338,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 end_origin = Some(p + point(px(0.), y_offset));
             }
 
-            y_offset += line.size(line_height).height;
+            y_offset += line.size(line_height).height + spacer_below;
         }
 
         let start_origin = start_origin.or_else(|| {
             let offset = self.last_cursor.or(Some(self.cursor()))?;
             let (_, _, origin) = self.line_and_position_for_offset(offset);
-            origin.map(|origin| origin - line_number_origin)
+            origin.map(|origin| origin - text_origin)
         })?;
         let mut end_origin = end_origin.unwrap_or(start_origin);
         // Ensure at same line.
@@ -5170,9 +5354,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         }
 
         Some(Bounds::from_corners(
-            bounds.origin + line_number_origin + start_origin,
+            bounds.origin + text_origin + start_origin,
             // + line_height for show IME panel under the cursor line.
-            bounds.origin + line_number_origin + point(end_origin.x, end_origin.y + line_height),
+            bounds.origin + text_origin + point(end_origin.x, end_origin.y + line_height),
         ))
     }
 
@@ -5186,16 +5370,18 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         // The same origin as `resolve_mouse_position`: past the gutter, at the first
         // visible line.
         let inner_point = self.last_bounds?.localize(&point)?
-            - gpui::point(last_layout.line_number_width, last_layout.visible_top);
+            - gpui::point(last_layout.text_origin_x, last_layout.visible_top);
 
         let mut line_top = px(0.);
         for (vi, line) in last_layout.lines.iter().enumerate() {
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            line_top += spacer_above;
             let offset = last_layout.visible_line_byte_offsets[vi];
             let line_point = inner_point - gpui::point(px(0.), line_top);
             if let Some(utf8_index) = line.index_for_position(line_point, last_layout) {
                 return Some(self.offset_to_utf16(self.resolve_index(offset + utf8_index)));
             }
-            line_top += line.size(last_layout.line_height).height;
+            line_top += line.size(last_layout.line_height).height + spacer_below;
         }
 
         None
@@ -7458,7 +7644,7 @@ mod tests {
                     items2.set(menu.items.len());
                     menu_focus.focus(window, cx);
                 }));
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             })
         });
         assert_eq!(calls.get(), 1);
@@ -7478,7 +7664,7 @@ mod tests {
         // A custom handler may keep using the same, already-focused menu.
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             });
         });
         assert_eq!(calls.get(), 2);
@@ -7489,7 +7675,7 @@ mod tests {
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
                 state.disabled = true;
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             })
         });
         assert_eq!(calls.get(), 2);
@@ -7512,7 +7698,7 @@ mod tests {
                 state.on_context_menu(Rc::new(move |_, _, _, _, cx| {
                     cursor.set(weak.upgrade().map(|input| input.read(cx).cursor()));
                 }));
-                state.handle_right_click_menu(point(px(0.), px(0.)), 2, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 2, None, window, cx);
             })
         });
         assert_eq!(cursor.get(), Some(2));
@@ -7541,7 +7727,7 @@ mod tests {
                     }));
                 }));
                 // A right-click inside the selection keeps the cursor at its end.
-                state.handle_right_click_menu(point(px(0.), px(0.)), 2, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 2, None, window, cx);
             })
         });
         assert_eq!(seen.get(), Some((11, Some(2))));
@@ -13275,6 +13461,68 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
         cx.notify();
     }
 
+    /// The placement of the scrollbars, default is [`ScrollbarPlacement::BottomRight`].
+    ///
+    /// On the left, the vertical scrollbar sits on the input's left edge, over
+    /// the gutter when that is on the left too; otherwise the text keeps clear
+    /// of it. At the top, the horizontal scrollbar overlays the first line, as
+    /// at the bottom it overlays the last.
+    pub fn scrollbar_placement(mut self, placement: ScrollbarPlacement) -> Self {
+        self.scrollbar_placement = placement;
+        self
+    }
+
+    /// See [`InputBaseState::scrollbar_placement`].
+    pub fn set_scrollbar_placement(
+        &mut self,
+        placement: ScrollbarPlacement,
+        cx: &mut Context<Self>,
+    ) {
+        self.scrollbar_placement = placement;
+        cx.notify();
+    }
+
+    /// The side of the gutter with the line numbers and fold icons, default is
+    /// [`Side::Left`].
+    ///
+    /// [`Side::Right`] is for the left pane of a side-by-side diff, so that both
+    /// gutters face the center and corresponding line numbers sit next to each
+    /// other. On the right, the gutter is mirrored: its columns keep their order
+    /// from the text outward, see [`InputBaseState::gutter_order`], and the
+    /// line numbers are aligned toward the text. A vertical scrollbar on the
+    /// same side stays outermost.
+    pub fn gutter_side(mut self, side: Side) -> Self {
+        self.gutter_side = side;
+        self
+    }
+
+    /// See [`InputBaseState::gutter_side`].
+    pub fn set_gutter_side(&mut self, side: Side, cx: &mut Context<Self>) {
+        self.gutter_side = side;
+        cx.notify();
+    }
+
+    /// The order of the gutter's columns from the text outward, default is
+    /// `[GutterColumn::FoldIcons, GutterColumn::LineNumbers, GutterColumn::Markers,
+    /// GutterColumn::Decorations]`.
+    ///
+    /// A column left out follows the listed ones in its default order, and a
+    /// repeated one is ignored. The order holds on either side.
+    pub fn gutter_order(mut self, columns: impl IntoIterator<Item = GutterColumn>) -> Self {
+        self.gutter_order = GutterColumn::order(columns);
+        self
+    }
+
+    /// See [`InputBaseState::gutter_order`].
+    pub fn set_gutter_order(
+        &mut self,
+        columns: impl IntoIterator<Item = GutterColumn>,
+        cx: &mut Context<Self>,
+    ) {
+        self.gutter_order = GutterColumn::order(columns);
+        cx.notify();
+    }
+
     /// Set the soft wrap mode, default is true.
     #[doc(hidden)]
     pub fn soft_wrap(mut self, wrap: bool) -> Self {
@@ -13491,18 +13739,18 @@ impl InputBaseState<crate::input::EditorMode> {
 
     /// Horizontal offset from the content area's left edge to unscrolled source text.
     ///
-    /// Includes the laid-out gap, line numbers, folding controls, and gutter
-    /// decorations. Excludes input-frame padding, horizontal scrolling, and
-    /// text alignment. For left-aligned text, add this to the content area's
-    /// origin and the horizontal scroll offset to recover the text origin.
+    /// With the gutter on the left, includes the laid-out gap, line numbers,
+    /// folding controls, and gutter decorations; with it on the right, only the
+    /// clearance kept from a scrollbar on the left. Excludes input-frame padding,
+    /// horizontal scrolling, and text alignment. For left-aligned text, add this
+    /// to the content area's origin and the horizontal scroll offset to recover
+    /// the text origin.
     ///
     /// Returns `None` before the first layout. Like [`Self::range_to_bounds`],
     /// this describes the most recent layout; render again after changing
     /// gutter settings or typography before using it to align a static view.
     pub fn text_origin_offset(&self) -> Option<Pixels> {
-        self.last_layout
-            .as_ref()
-            .map(|layout| layout.line_number_width)
+        self.last_layout.as_ref().map(|layout| layout.text_origin_x)
     }
 
     /// Set enable/disable line number.

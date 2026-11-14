@@ -356,6 +356,8 @@ pub(crate) struct TextWrapper {
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
     /// Exact native widths avoid reshaping the same prefix when a drag crosses wrap thresholds.
     width_measurements: Rc<std::cell::RefCell<WidthMeasurements>>,
+    /// Bumped whenever the lines are wrapped again.
+    version: usize,
     _initialized: bool,
 }
 
@@ -372,6 +374,7 @@ impl TextWrapper {
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
             width_measurements: Rc::default(),
+            version: 0,
             _initialized: false,
         }
     }
@@ -397,6 +400,12 @@ impl TextWrapper {
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.lines.summary().wrap_rows
+    }
+
+    /// A number that changes whenever the lines are wrapped again.
+    #[inline]
+    pub(crate) fn version(&self) -> usize {
+        self.version
     }
 
     /// Get the total number of buffer lines.
@@ -827,6 +836,7 @@ impl TextWrapper {
         }
 
         self.text = changed_text.clone();
+        self.version = self.version.wrapping_add(1);
     }
 
     /// Update the text wrapper and recalculate the wrapped lines.
@@ -1826,6 +1836,15 @@ mod tests {
             wrap_width: None,
             wrapping_indent: WrappingIndent::default(),
             line_number_width: px(0.),
+            gutter_marker_width: px(0.),
+            gutter_decorations_width: px(0.),
+            ghost_lines: None,
+            spacer_rows: Vec::new(),
+            gutter_side: crate::Side::Left,
+            gutter_order: crate::input::GutterColumn::DEFAULT_ORDER,
+            text_origin_x: px(0.),
+            gutter_origin_x: px(0.),
+            text_width: px(0.),
             space_width: px(0.),
             cursor_bounds: None,
             text_align: TextAlign::Left,
@@ -2133,6 +2152,15 @@ mod tests {
             wrap_width: Some(px(10.)),
             wrapping_indent: WrappingIndent::Same,
             line_number_width: px(0.),
+            gutter_marker_width: px(0.),
+            gutter_decorations_width: px(0.),
+            ghost_lines: None,
+            spacer_rows: Vec::new(),
+            gutter_side: crate::Side::Left,
+            gutter_order: crate::input::GutterColumn::DEFAULT_ORDER,
+            text_origin_x: px(0.),
+            gutter_origin_x: px(0.),
+            text_width: px(0.),
             space_width: px(0.),
             cursor_bounds: None,
             text_align: TextAlign::Left,

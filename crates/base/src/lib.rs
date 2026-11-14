@@ -178,7 +178,7 @@ pub use scrollable_mask::{
 };
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,
-    ScrollbarStyles, ScrollbarThumbStyle, ScrollbarTrackStyle,
+    ScrollbarPlacement, ScrollbarStyles, ScrollbarThumbStyle, ScrollbarTrackStyle,
 };
 pub use select::Select;
 pub use selectable_text::SelectableText;

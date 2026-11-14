@@ -27,10 +27,12 @@ use gpui::{Div, Entity, Stateful, Window};
 use ropey::Rope;
 
 use super::decorations::DecorationCollections;
+use super::line_decorations::LineDecorationProviders;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
+use super::spacers::SpacerProvider;
 use crate::input::{
-    GutterDecoration, HighlightStyleResolver, InputEdit, InputHighlighter, OverviewRulerDecoration,
-    RangeDecoration, SyntaxContext, TextDecoration,
+    GutterDecoration, HighlightStyleResolver, InputEdit, InputHighlighter, LineDecoration,
+    OverviewRulerDecoration, RangeDecoration, SyntaxContext, TextDecoration,
 };
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
@@ -109,6 +111,25 @@ pub trait InputExtras: Default + 'static {
     /// replaced, extended, cleared or released.
     fn overview_ruler_revision(&self) -> u64 {
         0
+    }
+
+    /// Line decorations for the visible buffer rows, in collection order.
+    fn line_decorations(
+        &self,
+        _rows: std::ops::Range<usize>,
+        _cx: &gpui::App,
+    ) -> Vec<LineDecoration> {
+        Vec::new()
+    }
+
+    /// Whether any line decoration collection has a provider.
+    fn has_line_decorations(&self) -> bool {
+        false
+    }
+
+    /// The provider of the spacers, if one is set.
+    fn spacer_provider(&self) -> Option<Rc<dyn SpacerProvider>> {
+        None
     }
 
     /// Semantic-token styles for a visible range, when an LSP supplies them.
@@ -409,6 +430,8 @@ pub struct EditorExtras {
     pub(crate) gutter_decorations: DecorationCollections<GutterDecoration>,
     pub(crate) gutter_decorations_width: gpui::Pixels,
     pub(crate) overview_ruler_decorations: DecorationCollections<OverviewRulerDecoration>,
+    pub(crate) line_decorations: LineDecorationProviders,
+    pub(crate) spacer_provider: Option<Rc<dyn SpacerProvider>>,
     pub(crate) inline_completion: InlineCompletion,
     pub(crate) context_menu_content: ContextMenuContent,
     pub(crate) hover_popover: Option<HoverPopoverState>,
@@ -425,6 +448,8 @@ impl Default for EditorExtras {
             gutter_decorations: DecorationCollections::default(),
             gutter_decorations_width: gpui::px(3.),
             overview_ruler_decorations: DecorationCollections::default(),
+            line_decorations: LineDecorationProviders::default(),
+            spacer_provider: None,
             inline_completion: InlineCompletion::default(),
             context_menu_content: ContextMenuContent::default(),
             hover_popover: None,
