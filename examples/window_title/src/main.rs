@@ -28,7 +28,7 @@ impl Render for Example {
                     .size_full()
                     .items_center()
                     .justify_center()
-                    .child("Hello, World!")
+                    .child(text!("Hello, World!"))
                     .child(
                         Button::new("ok")
                             .primary()

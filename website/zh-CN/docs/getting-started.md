@@ -91,7 +91,7 @@ impl Render for HelloWorld {
             .items_center()
             .justify_center()
             .gap_2()
-            .child("Hello, World!")
+            .child(text!("Hello, World!"))
             .child(
                 Button::new("hello")
                     .primary()
@@ -116,6 +116,8 @@ fn main() {
 ```
 
 在项目目录执行 `cargo run`。窗口会显示文字和按钮；点击按钮后，终端会输出 `Clicked!`。
+
+示例中的文字用 `text!` 而不是直接写字符串。`text!` 会给文字一个稳定的元素 ID，GPUI 需要它才能把文字放进无障碍树，读屏软件才能读到。直接写字符串（如 `.child("Hello")`）显示效果一样，但辅助技术读不到。
 
 启动过程分为三步：
 

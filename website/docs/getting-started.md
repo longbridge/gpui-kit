@@ -99,7 +99,7 @@ impl Render for HelloWorld {
             .items_center()
             .justify_center()
             .gap_2()
-            .child("Hello, World!")
+            .child(text!("Hello, World!"))
             .child(
                 Button::new("hello")
                     .primary()
@@ -124,6 +124,8 @@ fn main() {
 ```
 
 Run `cargo run` from the project directory. A window shows the label and button; clicking the button prints `Clicked!` in the terminal.
+
+The greeting uses `text!` rather than a bare string. `text!` gives the text a stable element ID, which GPUI needs to add it to the accessibility tree, so screen readers can read it. A bare string such as `.child("Hello")` renders the same but is not exposed to assistive technology.
 
 The startup sequence has three parts:
 

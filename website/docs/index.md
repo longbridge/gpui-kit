@@ -116,7 +116,7 @@ impl Render for HelloWorld {
             .items_center()
             .justify_center()
             .gap_2()
-            .child("Hello, World!")
+            .child(text!("Hello, World!"))
             .child(
                 Button::new("hello")
                     .primary()
