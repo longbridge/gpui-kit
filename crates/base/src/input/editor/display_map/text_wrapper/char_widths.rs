@@ -16,6 +16,7 @@ use std::{
 use gpui::{Pixels, px};
 
 use super::monospace::{MonospaceWidths, TABLE_CHARS, is_printable_ascii};
+use crate::input::tab_stops::next_tab_stop;
 
 #[cfg(test)]
 mod tests;
@@ -330,7 +331,7 @@ impl LineWidths<'_> {
         let mut pos = range.start;
         for &tab in &self.tabs[first..last] {
             x += self.prefix[tab] - self.prefix[pos];
-            x = self.tab_stop * ((x / self.tab_stop).floor() + 1.0);
+            x = next_tab_stop(x, self.tab_stop);
             pos = tab + 1;
         }
         x += self.prefix[range.end] - self.prefix[pos];

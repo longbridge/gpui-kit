@@ -500,7 +500,7 @@ fn exact_measure(text: &str) -> Pixels {
     let mut x = 0.0;
     for c in text.chars() {
         if c == '\t' {
-            x = stop * ((x / stop).floor() + 1.0);
+            x = crate::input::tab_stops::next_tab_stop(x, stop);
         } else if matches!(c, ' '..='~') {
             x += EXACT_ASCII;
         } else {
@@ -797,5 +797,49 @@ fn production_wrapper_with_and_without_the_summed_width_path_agree(cx: &mut Test
         fast.set_tab_size(2, cx);
         shaped.set_tab_size(2, cx);
         assert_eq!(rows(&fast), rows(&shaped));
+    });
+}
+
+/// A tab after text that ends on a tab stop sits on a floating point tie. Lines of printable
+/// ASCII and tabs share one comparison with the shaper, so the summed path must resolve that
+/// tie the way the shaped path does on every line.
+#[gpui::test]
+fn summed_and_shaped_paths_agree_on_tabs_after_text_that_ends_on_a_stop(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        // The first line of ASCII and tabs passes the shared comparison. The later lines put a
+        // tab after every count of columns, so some of them end on a stop at each tab size.
+        let mut source = String::from("\tindented first line\n");
+        for columns in 0..40 {
+            source.push_str(&"a".repeat(columns));
+            source.push('\t');
+            source.push_str(&"word ".repeat(12));
+            source.push('\n');
+        }
+        let text = Rope::from(source);
+        for font_size in [12., 13., 14., 15., 16.] {
+            for tab_size in [2, 3, 4, 8] {
+                let mut build = |fast: bool| {
+                    let mut wrapper =
+                        TextWrapper::new(font("Menlo"), px(font_size), Some(px(400.)));
+                    wrapper.tab_size = tab_size;
+                    wrapper.set_fast_non_ascii(fast);
+                    wrapper.update(&text, &(0..0), &text, cx);
+                    wrapper
+                };
+                let mut fast = build(true);
+                let mut shaped = build(false);
+                // A width of a whole number of columns is a tie of its own: the two paths may
+                // differ there by less than the line tolerance. The fraction keeps clear of it.
+                for width in (200..700).step_by(7).map(|width| width as f32 + 0.37) {
+                    fast.set_wrap_width(Some(px(width)), cx);
+                    shaped.set_wrap_width(Some(px(width)), cx);
+                    assert_eq!(
+                        rows(&fast),
+                        rows(&shaped),
+                        "font size {font_size}, tab size {tab_size}, width {width}"
+                    );
+                }
+            }
+        }
     });
 }
