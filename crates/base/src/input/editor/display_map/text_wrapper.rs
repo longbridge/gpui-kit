@@ -801,20 +801,17 @@ impl TextWrapper {
         };
         let shaped = |text: &str| expanded_width(&layout(text), text, tab_stop);
         let cached = |text: &str| measurements.borrow_mut().measure(text, || shaped(text));
+        let glyph_starts = |text: &str| {
+            let layout = layout(text);
+            let glyphs = layout.runs.iter().flat_map(|run| &run.glyphs);
+            let mut starts: Vec<Pixels> = glyphs.map(|glyph| glyph.position.x).collect();
+            starts.push(layout.width);
+            starts
+        };
         // Only wrapping measures text, so an unwrapped editor never pays for the detection.
         let monospace = if self.wrap_width.is_some() {
             self.monospace
-                .get_or_insert_with(|| {
-                    let glyph_starts = |text: &str| {
-                        let layout = layout(text);
-                        let glyphs = layout.runs.iter().flat_map(|run| &run.glyphs);
-                        let mut starts: Vec<Pixels> =
-                            glyphs.map(|glyph| glyph.position.x).collect();
-                        starts.push(layout.width);
-                        starts
-                    };
-                    MonospaceWidths::detect(glyph_starts, shaped).map(Rc::new)
-                })
+                .get_or_insert_with(|| MonospaceWidths::detect(glyph_starts, shaped).map(Rc::new))
                 .clone()
         } else {
             None
@@ -875,6 +872,7 @@ impl TextWrapper {
                             monospace,
                             tab_stop,
                             &mut |text: &str| shaped(text),
+                            &mut |text: &str| glyph_starts(text),
                         )
                     {
                         return fast_wrap(

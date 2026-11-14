@@ -2,10 +2,10 @@
 //!
 //! In a monospace font the width of a line is the sum of the advances of its characters, so a
 //! line made only of characters that never combine with a neighbor can be measured without
-//! shaping every prefix of it. Each character is shaped on its own once, and each distinct line is
-//! compared with the shaper once, so a wrong sum is caught before a break could move. Lines of
-//! printable ASCII and tabs share one such comparison, because their widths come from the checked
-//! monospace table.
+//! shaping every prefix of it. New characters are shaped once, many to a shaping call, and each
+//! distinct line is compared with the shaper once, so a wrong sum is caught before a break could
+//! move. Lines of printable ASCII and tabs share one such comparison, because their widths come
+//! from the checked monospace table.
 
 use std::{
     collections::HashMap,
@@ -29,6 +29,13 @@ const MAX_CHECKED_LINES: usize = 1 << 20;
 /// How far a character's eight-fold run may differ from eight times its single advance, in pixels.
 const ADVANCE_TOLERANCE: f64 = 0.01;
 
+/// Copies of a new character shaped in a row to measure it.
+const RUN_CHARS: usize = 8;
+
+/// New characters measured by one shaping call. Glyph positions are `f32`, so a longer batch
+/// would round the positions near its end by more than `ADVANCE_TOLERANCE` allows.
+const BATCH_CHARS: usize = 16;
+
 /// Smallest difference, in pixels, between a summed and a shaped line width that fails the check.
 const LINE_TOLERANCE: f32 = 0.01;
 
@@ -47,6 +54,8 @@ pub(super) struct CharWidths {
     prefix: Vec<f64>,
     /// Byte offsets of the tabs in the line, in order.
     tabs: Vec<usize>,
+    /// Characters of the line that have no entry in `others` yet.
+    unmeasured: Vec<char>,
 }
 
 impl CharWidths {
@@ -63,17 +72,22 @@ impl CharWidths {
         if self.tabs.capacity() > MAX_RETAINED_ENTRIES {
             self.tabs = Vec::new();
         }
+        if self.unmeasured.capacity() > MAX_RETAINED_ENTRIES {
+            self.unmeasured = Vec::new();
+        }
     }
 
     /// Widths for `line`, or `None` when the line must be shaped.
     ///
-    /// `shaped` returns the shaped width of a string after tab expansion.
+    /// `shaped` returns the shaped width of a string after tab expansion. `glyph_starts` returns
+    /// the x position of each glyph of a string, followed by the width of the string.
     pub(super) fn line_widths(
         &mut self,
         line: &str,
         monospace: &MonospaceWidths,
         tab_stop: Pixels,
         shaped: &mut impl FnMut(&str) -> Pixels,
+        glyph_starts: &mut impl FnMut(&str) -> Vec<Pixels>,
     ) -> Option<LineWidths<'_>> {
         if line.is_empty()
             || (tab_stop <= px(0.) && line.contains('\t'))
@@ -85,7 +99,7 @@ impl CharWidths {
             let table = monospace.width(TABLE_CHARS)?;
             self.ascii = Some(f64::from(f32::from(table)) / TABLE_CHARS as f64);
         }
-        let ascii_and_tabs = self.fill_prefix(line, shaped)?;
+        let ascii_and_tabs = self.fill_prefix(line, shaped, glyph_starts)?;
         let passed = if ascii_and_tabs {
             self.passes_ascii_tabs_check(line, tab_stop, shaped)
         } else {
@@ -96,11 +110,37 @@ impl CharWidths {
 
     /// Fill `prefix` and `tabs` for `line`, measuring characters not seen before.
     ///
-    /// Returns whether the line is only printable ASCII and tabs.
-    fn fill_prefix(&mut self, line: &str, shaped: &mut impl FnMut(&str) -> Pixels) -> Option<bool> {
-        let ascii = self.ascii?;
+    /// Returns whether the line is only printable ASCII and tabs, or `None` when the line holds a
+    /// character that must be shaped.
+    fn fill_prefix(
+        &mut self,
+        line: &str,
+        shaped: &mut impl FnMut(&str) -> Pixels,
+        glyph_starts: &mut impl FnMut(&str) -> Vec<Pixels>,
+    ) -> Option<bool> {
+        match self.sum_known(line) {
+            Summed::Done { ascii_and_tabs } => return Some(ascii_and_tabs),
+            Summed::Ineligible => return None,
+            Summed::Unmeasured => {}
+        }
+        self.measure_new(shaped, glyph_starts);
+        match self.sum_known(line) {
+            Summed::Done { ascii_and_tabs } => Some(ascii_and_tabs),
+            Summed::Ineligible | Summed::Unmeasured => None,
+        }
+    }
+
+    /// Fill `prefix` and `tabs` from the advances already known.
+    ///
+    /// When the line has characters with no advance yet, they are left in `unmeasured` and the
+    /// buffers are not complete.
+    fn sum_known(&mut self, line: &str) -> Summed {
+        let Some(ascii) = self.ascii else {
+            return Summed::Ineligible;
+        };
         self.prefix.clear();
         self.tabs.clear();
+        self.unmeasured.clear();
         self.prefix.push(0.0);
         let mut sum = 0.0;
         let mut ascii_and_tabs = true;
@@ -111,15 +151,98 @@ impl CharWidths {
                 sum += ascii;
             } else if is_fast_char(c) {
                 ascii_and_tabs = false;
-                sum += self.advance_of(c, shaped)?;
+                match self.others.get(&c) {
+                    Some(Some(advance)) => sum += advance,
+                    Some(None) => return Summed::Ineligible,
+                    None => self.unmeasured.push(c),
+                }
             } else {
-                return None;
+                return Summed::Ineligible;
             }
-            for _ in 0..c.len_utf8() {
-                self.prefix.push(sum);
+            if self.unmeasured.is_empty() {
+                for _ in 0..c.len_utf8() {
+                    self.prefix.push(sum);
+                }
             }
         }
-        Some(ascii_and_tabs)
+        if self.unmeasured.is_empty() {
+            Summed::Done { ascii_and_tabs }
+        } else {
+            Summed::Unmeasured
+        }
+    }
+
+    /// Measure the characters in `unmeasured`, several to a shaping call.
+    fn measure_new(
+        &mut self,
+        shaped: &mut impl FnMut(&str) -> Pixels,
+        glyph_starts: &mut impl FnMut(&str) -> Vec<Pixels>,
+    ) {
+        let mut new = std::mem::take(&mut self.unmeasured);
+        new.sort_unstable();
+        new.dedup();
+        for batch in new.chunks(BATCH_CHARS) {
+            if !self.measure_batch(batch, glyph_starts) {
+                for &c in batch {
+                    self.measure_alone(c, shaped);
+                }
+            }
+        }
+        new.clear();
+        self.unmeasured = new;
+    }
+
+    /// Measure every character of `batch` with one shaping call.
+    ///
+    /// The shaped text is a run of each character, with a space between runs. The last glyph of a
+    /// run stands next to a space or the end of the text, so its advance is the advance of the
+    /// character on its own. A character whose run is not `RUN_CHARS` times that advance changes
+    /// width next to itself and is rejected.
+    ///
+    /// Returns false, having recorded nothing, when the shaper did not return one glyph per
+    /// character, because the glyphs cannot be matched to characters then.
+    fn measure_batch(
+        &mut self,
+        batch: &[char],
+        glyph_starts: &mut impl FnMut(&str) -> Vec<Pixels>,
+    ) -> bool {
+        let stride = RUN_CHARS + 1;
+        let mut text = String::with_capacity(batch.len() * stride * 3);
+        for (i, &c) in batch.iter().enumerate() {
+            if i > 0 {
+                text.push(' ');
+            }
+            text.extend(std::iter::repeat_n(c, RUN_CHARS));
+        }
+        let starts = glyph_starts(&text);
+        let in_order = starts.windows(2).all(|pair| pair[0] <= pair[1]);
+        if starts.len() != batch.len() * stride || !in_order {
+            return false;
+        }
+        let at = |glyph: usize| f64::from(f32::from(starts[glyph]));
+        for (i, &c) in batch.iter().enumerate() {
+            let first = i * stride;
+            let one = at(first + RUN_CHARS) - at(first + RUN_CHARS - 1);
+            let run = at(first + RUN_CHARS) - at(first);
+            self.record(c, one, run);
+        }
+        true
+    }
+
+    /// Measure `c` with two shaping calls, on its own and as a run.
+    fn measure_alone(&mut self, c: char, shaped: &mut impl FnMut(&str) -> Pixels) {
+        let mut text = c.to_string();
+        let one = f64::from(f32::from(shaped(&text)));
+        text.extend(std::iter::repeat_n(c, RUN_CHARS - 1));
+        let run = f64::from(f32::from(shaped(&text)));
+        self.record(c, one, run);
+    }
+
+    /// Record the advance of `c` from its width alone and as a run of `RUN_CHARS`.
+    fn record(&mut self, c: char, one: f64, run: f64) {
+        let count = RUN_CHARS as f64;
+        let passed = one > 0.0 && (run - count * one).abs() <= ADVANCE_TOLERANCE;
+        self.others.insert(c, passed.then_some(run / count));
     }
 
     /// Whether lines of printable ASCII and tabs are measured correctly.
@@ -172,19 +295,6 @@ impl CharWidths {
         (summed - actual).abs() <= LINE_TOLERANCE.max(actual * 1e-5)
     }
 
-    /// The advance of `c`, shaping it on a miss. `None` when `c` failed the check.
-    fn advance_of(&mut self, c: char, shaped: &mut impl FnMut(&str) -> Pixels) -> Option<f64> {
-        if let Some(known) = self.others.get(&c) {
-            return *known;
-        }
-        let one = f64::from(f32::from(shaped(&c.to_string())));
-        let eight = f64::from(f32::from(shaped(&c.to_string().repeat(8))));
-        let passed = one > 0.0 && (eight - 8.0 * one).abs() <= ADVANCE_TOLERANCE;
-        let advance = passed.then_some(eight / 8.0);
-        self.others.insert(c, advance);
-        advance
-    }
-
     fn view(&self, tab_stop: Pixels) -> LineWidths<'_> {
         LineWidths {
             prefix: &self.prefix,
@@ -192,6 +302,16 @@ impl CharWidths {
             tab_stop: f64::from(f32::from(tab_stop)),
         }
     }
+}
+
+/// What `CharWidths::sum_known` found in a line.
+enum Summed {
+    /// Every character has an advance, and the buffers are filled.
+    Done { ascii_and_tabs: bool },
+    /// The line holds a character that must be shaped.
+    Ineligible,
+    /// The line holds eligible characters that are not measured yet.
+    Unmeasured,
 }
 
 /// Widths of the substrings of one line.

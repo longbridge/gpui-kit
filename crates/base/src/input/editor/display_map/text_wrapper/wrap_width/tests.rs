@@ -568,7 +568,20 @@ fn exact_fast_wrap(
         shaping_calls.set(shaping_calls.get() + 1);
         exact_measure(text)
     };
-    let widths = chars.line_widths(line, monospace, px(EXACT_TAB_STOP), &mut shaped)?;
+    let mut glyph_starts = |text: &str| {
+        shaping_calls.set(shaping_calls.get() + 1);
+        let ends = text.char_indices().map(|(i, c)| i + c.len_utf8());
+        std::iter::once(px(0.))
+            .chain(ends.map(|end| exact_measure(&text[..end])))
+            .collect()
+    };
+    let widths = chars.line_widths(
+        line,
+        monospace,
+        px(EXACT_TAB_STOP),
+        &mut shaped,
+        &mut glyph_starts,
+    )?;
     Some(fast_wrap(line, width, indent, scratch, &widths))
 }
 
