@@ -1053,6 +1053,10 @@ mod tests {
     }
 
     fn painted_width(cx: &mut VisualTestContext, index: usize) -> f32 {
+        // The animation's frame request only reaches the test window through
+        // the platform frame callback, which a direct draw skips. Without a
+        // refresh, GPUI Fast replays the retained first frame (fade at 0).
+        cx.update(|window, _| window.refresh());
         draw(cx);
         cx.update(|window, _| {
             let marker: gpui::Background = gpui::rgb(TOOLTIP_COLORS[index]).into();
