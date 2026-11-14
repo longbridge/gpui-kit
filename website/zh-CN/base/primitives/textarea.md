@@ -49,6 +49,25 @@ let value = notes.read(cx).value();
 
 不希望视觉换行时使用 `soft_wrap(false)`。只有 Enter 应提交而非换行时才设置 `submit_on_enter(true)`。`TextareaState` 发出与 `InputState` 相同的 `InputEvent`。
 
+## 文本装饰
+
+用 `set_decorations` 为部分文本设置样式，例如消息输入框中的行内 Markdown 标记。范围是 `value()` 中的 UTF-8 字节偏移：
+
+```rust
+use gpui::{FontWeight, HighlightStyle};
+use gpui_kit::base::input::TextDecoration;
+
+let bold = HighlightStyle {
+    font_weight: Some(FontWeight::BOLD),
+    ..Default::default()
+};
+notes.update(cx, |state, cx| {
+    state.set_decorations(vec![TextDecoration::new(0..5, bold)], cx);
+});
+```
+
+每次调用都会替换之前的装饰。与 Editor 的装饰集合一样，范围会随之后的编辑移动；文本被删除的装饰会被丢弃，因此 `set_value("")` 会清空装饰。软换行按基础字体测量行宽，因此加宽文本的装饰（例如粗体）可能让换行后的行略微超出。
+
 ## 表现
 
 该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../component/textarea.md)。
