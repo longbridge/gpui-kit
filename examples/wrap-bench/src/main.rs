@@ -4,6 +4,10 @@
 //! has painted, and prints how long `set_value` took and how long it took until the next frame
 //! had been painted. It then times scrolling and replacing the document with an empty one, and
 //! quits, so runs can be scripted.
+//!
+//! Fixtures: `python3 examples/wrap-bench/fixtures.py <dir>` writes seven seeded files (about
+//! 3.9 MB each, Latin, CJK, mixed, JSON, tabs, emoji, and one 1.3 MB single line) to `<dir>`,
+//! to compare soft-wrap timings across text shapes. Repeated runs write identical files.
 
 use std::time::Instant;
 

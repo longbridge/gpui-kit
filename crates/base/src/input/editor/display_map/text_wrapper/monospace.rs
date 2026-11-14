@@ -13,7 +13,7 @@ mod tests;
 
 /// Characters covered by the table. A row measures little more than twice its own width, so
 /// this covers rows of up to about 2000 columns; longer prefixes are shaped instead.
-const TABLE_CHARS: usize = 4096;
+pub(super) const TABLE_CHARS: usize = 4096;
 
 /// Sequences that ligatures or contextual alternates commonly reshape in programming fonts.
 const LIGATURE_SAMPLES: &[&str] = &[

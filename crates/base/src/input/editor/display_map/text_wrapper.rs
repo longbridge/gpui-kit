@@ -1,7 +1,9 @@
 use super::inline_line::InputLine;
+mod char_widths;
 mod measurements;
 mod monospace;
 mod wrap_width;
+use char_widths::{CharWidths, LineWidths};
 use gpui::Half;
 use measurements::WidthMeasurements;
 use monospace::{MonospaceWidths, is_printable_ascii};
@@ -137,6 +139,27 @@ fn monospace_wrap(
     })
 }
 
+/// [`measured_wrap`] for a line whose widths come from `widths`.
+///
+/// Widths grow with every character, so a line that fits whole needs no search.
+fn fast_wrap(
+    text: &str,
+    width: Pixels,
+    wrapping_indent: WrappingIndent,
+    scratch: &mut WrapScratch,
+    widths: &LineWidths<'_>,
+) -> MeasuredWrap {
+    let line_width = widths.width(0..text.len());
+    if line_width <= width {
+        let mut valid_widths = WidthRange::all();
+        valid_widths.fits(line_width, width, px(0.));
+        return MeasuredWrap::unbroken(valid_widths);
+    }
+    measured_wrap_ranges(text, width, wrapping_indent, scratch, |range| {
+        widths.width(range)
+    })
+}
+
 /// Preserve the measured comparisons that make these breaks valid at nearby widths.
 fn measured_wrap(
     text: &str,
@@ -144,6 +167,19 @@ fn measured_wrap(
     wrapping_indent: WrappingIndent,
     scratch: &mut WrapScratch,
     mut measure: impl FnMut(&str) -> Pixels,
+) -> MeasuredWrap {
+    measured_wrap_ranges(text, width, wrapping_indent, scratch, |range| {
+        measure(&text[range])
+    })
+}
+
+/// The break search behind [`measured_wrap`], measuring byte ranges of `text`.
+fn measured_wrap_ranges(
+    text: &str,
+    width: Pixels,
+    wrapping_indent: WrappingIndent,
+    scratch: &mut WrapScratch,
+    mut measure: impl FnMut(Range<usize>) -> Pixels,
 ) -> MeasuredWrap {
     #[cfg(test)]
     wrap_width::MEASURED_LINES.with(|count| count.set(count.get() + 1));
@@ -156,7 +192,7 @@ fn measured_wrap(
     } else {
         0
     };
-    let indent_width = measure(&text[..indent]);
+    let indent_width = measure(0..indent);
     let WrapScratch {
         ends,
         opportunities,
@@ -193,7 +229,7 @@ fn measured_wrap(
                 return None;
             }
             Some(valid_widths.fits(
-                measure(&text[start..end]),
+                measure(start..end),
                 available,
                 if start == 0 { px(0.) } else { indent_width },
             ))
@@ -485,6 +521,10 @@ pub(crate) struct TextWrapper {
     /// Whether the font measures printable ASCII by lookup; `None` until first needed.
     monospace: Option<Option<Rc<MonospaceWidths>>>,
     scratch: WrapScratch,
+    char_widths: CharWidths,
+    /// Lets tests compare the summed-width path with the shaped one.
+    #[cfg(test)]
+    fast_non_ascii: bool,
     _initialized: bool,
 }
 
@@ -503,6 +543,9 @@ impl TextWrapper {
             width_measurements: Rc::default(),
             monospace: None,
             scratch: WrapScratch::default(),
+            char_widths: CharWidths::default(),
+            #[cfg(test)]
+            fast_non_ascii: true,
             _initialized: false,
         }
     }
@@ -670,8 +713,14 @@ impl TextWrapper {
         }
 
         self.tab_size = tab_size;
+        self.char_widths.clear();
         self.update_all(&self.text.clone(), cx);
         true
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_fast_non_ascii(&mut self, enabled: bool) {
+        self.fast_non_ascii = enabled;
     }
 
     pub(crate) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
@@ -682,6 +731,7 @@ impl TextWrapper {
         self.font = font;
         self.font_size = font_size;
         self.monospace = None;
+        self.char_widths.clear();
         self.update_all(&self.text.clone(), cx);
     }
 
@@ -770,6 +820,9 @@ impl TextWrapper {
             None
         };
         let mut scratch = std::mem::take(&mut self.scratch);
+        let mut char_widths = std::mem::take(&mut self.char_widths);
+        #[cfg(test)]
+        let fast_non_ascii = self.fast_non_ascii;
         self.update_lines(
             changed_text,
             range,
@@ -811,6 +864,27 @@ impl TextWrapper {
                             cached,
                         );
                     }
+                    #[cfg(test)]
+                    let fast = fast_non_ascii;
+                    #[cfg(not(test))]
+                    let fast = true;
+                    if fast
+                        && let Some(monospace) = &monospace
+                        && let Some(widths) = char_widths.line_widths(
+                            line_str,
+                            monospace,
+                            tab_stop,
+                            &mut |text: &str| shaped(text),
+                        )
+                    {
+                        return fast_wrap(
+                            line_str,
+                            wrap_width,
+                            wrapping_indent,
+                            &mut scratch,
+                            &widths,
+                        );
+                    }
                     return measured_wrap(
                         line_str,
                         wrap_width,
@@ -832,6 +906,8 @@ impl TextWrapper {
         );
         scratch.release_excess();
         self.scratch = scratch;
+        char_widths.release_excess();
+        self.char_widths = char_widths;
     }
 
     pub(crate) fn adjust_inline_metrics(&mut self, range: &Range<usize>, new_len: usize) {
