@@ -13,7 +13,10 @@ icons/battery-warning.svg
 icons/battery.svg
 icons/bell.svg
 icons/book-open.svg
+icons/bookmark.svg
 icons/bot.svg
+icons/brain.svg
+icons/bug.svg
 icons/building-2.svg
 icons/calendar.svg
 icons/case-sensitive.svg
@@ -26,8 +29,10 @@ icons/chevron-up.svg
 icons/chevrons-up-down.svg
 icons/circle-alert.svg
 icons/circle-check.svg
+icons/circle-slash.svg
 icons/circle-user.svg
 icons/circle-x.svg
+icons/circle.svg
 icons/close.svg
 icons/copy.svg
 icons/cpu.svg
@@ -38,8 +43,12 @@ icons/ellipsis.svg
 icons/external-link.svg
 icons/eye-off.svg
 icons/eye.svg
+icons/file-minus.svg
+icons/file-pen.svg
+icons/file-plus.svg
 icons/file-text.svg
 icons/file.svg
+icons/flask-conical.svg
 icons/folder-closed.svg
 icons/folder-open.svg
 icons/folder.svg
@@ -54,6 +63,8 @@ icons/inbox.svg
 icons/info.svg
 icons/inspector.svg
 icons/layout-dashboard.svg
+icons/list-checks.svg
+icons/list-todo.svg
 icons/loader-circle.svg
 icons/loader.svg
 icons/map.svg
@@ -74,6 +85,7 @@ icons/panel-left.svg
 icons/panel-right-close.svg
 icons/panel-right-open.svg
 icons/panel-right.svg
+icons/paperclip.svg
 icons/pause.svg
 icons/play.svg
 icons/plus.svg
@@ -86,6 +98,7 @@ icons/rotate-cw.svg
 icons/search.svg
 icons/settings-2.svg
 icons/settings.svg
+icons/shield-alert.svg
 icons/sort-ascending.svg
 icons/sort-descending.svg
 icons/square-terminal.svg
@@ -104,3 +117,5 @@ icons/window-close.svg
 icons/window-maximize.svg
 icons/window-minimize.svg
 icons/window-restore.svg
+icons/workflow.svg
+icons/wrench.svg

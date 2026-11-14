@@ -10,6 +10,7 @@ collapsed: false
 ## 基础组件
 
 - [Accordion](accordion) - 折叠内容面板
+- [AI Elements](ai-elements) - 智能体的推理过程、工具调用、计划、引用来源和输入框
 - [Alert](alert) - 多种变体的提示消息
 - [Attachment](attachment) - 文件与媒体附件表面
 - [Avatar](avatar) - 用户头像与回退文本

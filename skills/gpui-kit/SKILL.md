@@ -224,6 +224,8 @@ fetch the component's `.md` doc.
 | `Bubble`          | `bubble::{Bubble, BubbleContent, BubbleVariant}`         | Stateless. Message bubble             |
 | `Attachment`      | `attachment::{Attachment, AttachmentContent, ...}`       | Stateless. File/media attachment card |
 | `MessageScroller` | `message_scroller::{MessageScroller, MessageScrollerState}` | Stateful. Auto-scrolling message list |
+| `PromptInput`     | `ai::{PromptInput, PromptStatus}`                        | Stateless. Composer over a `TextareaState` |
+| `Reasoning`, `Tool`, `Plan`, … | `ai::*`                                     | Stateless, controlled. Agent traces   |
 
 ### Charts
 

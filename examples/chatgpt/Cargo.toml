@@ -1,0 +1,28 @@
+[package]
+name = "example-chatgpt"
+description = "A ChatGPT client built from GPUI Kit's AI elements, signing in with ChatGPT and streaming the Responses API."
+version = "0.8.0"
+publish = false
+edition.workspace = true
+
+[[bin]]
+name = "chatgpt"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64 = "0.22"
+dirs = "6.0.0"
+gpui-kit.workspace = true
+rand = "0.8"
+reqwest = { workspace = true, features = ["blocking", "json"] }
+serde = { workspace = true }
+serde_json.workspace = true
+sha2 = "0.10"
+smol.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]
