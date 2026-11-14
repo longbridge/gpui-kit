@@ -125,6 +125,7 @@ gpui-kit = { version = "0.7", features = ["gpui-fast"] }
 ```rs
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
+use gpui_kit::component::label::Label;
 use gpui_kit::*;
 
 pub struct HelloWorld;
@@ -136,7 +137,7 @@ impl Render for HelloWorld {
             .size_full()
             .items_center()
             .justify_center()
-            .child(text!("Hello, World!"))
+            .child(Label::new("Hello, World!"))
             .child(
                 Button::new("ok")
                     .primary()

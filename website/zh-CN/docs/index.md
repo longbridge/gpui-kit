@@ -85,7 +85,10 @@ gpui-kit = "{{gpui_kit_version}}"
 点击按钮后，终端输出 `Clicked!`。
 
 ```rust
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{
+    button::{Button, ButtonVariants},
+    label::Label,
+};
 use gpui_kit::*;
 
 struct HelloWorld;
@@ -99,7 +102,7 @@ impl Render for HelloWorld {
             .items_center()
             .justify_center()
             .gap_2()
-            .child(text!("Hello, World!"))
+            .child(Label::new("Hello, World!"))
             .child(
                 Button::new("hello")
                     .primary()

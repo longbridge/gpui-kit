@@ -1,15 +1,15 @@
 use crate::common;
-use gpui_kit::{AppContext, Context, TestAppContext, Window, div, prelude::*, text};
+use gpui_kit::{AppContext, Context, TestAppContext, Window, component::label::Label, div, prelude::*};
 
-/// The Quick Start renders its greeting with `text!`, which gives the text an
-/// element ID. GPUI only adds elements with an ID to the accessibility tree, so
-/// a bare string child stays invisible to screen readers.
+/// The Quick Start renders its greeting with `Label`, which exposes its text in
+/// the accessibility tree. GPUI only adds elements with an ID to the tree, so a
+/// bare string child stays invisible to screen readers.
 struct Greeting;
 impl Render for Greeting {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .child(text!("Hello, World!"))
+            .child(Label::new("Hello, World!"))
             .child("Bare string")
     }
 }
@@ -36,6 +36,7 @@ fn quick_start_text_is_in_the_accessibility_tree(cx: &mut TestAppContext) {
         return;
     }
 
+    cx.update(gpui_kit::init);
     let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| Greeting));
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
