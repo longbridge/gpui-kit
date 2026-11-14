@@ -2431,6 +2431,97 @@ mod tests {
         );
     }
 
+    struct ImageSourceTestRoot {
+        text_view: Entity<TextViewState>,
+        image_source: Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>,
+    }
+
+    impl ImageSourceTestRoot {
+        fn new(
+            markdown: &str,
+            image_source: Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>,
+            cx: &mut Context<Self>,
+        ) -> Self {
+            Self {
+                text_view: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+                image_source,
+            }
+        }
+    }
+
+    impl Render for ImageSourceTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let image_source = self.image_source.clone();
+            div().w(px(420.)).child(
+                TextView::new(&self.text_view)
+                    .selectable(true)
+                    .image_source(move |uri| image_source(uri)),
+            )
+        }
+    }
+
+    /// An image without a size shares its paragraph with text and is drawn at
+    /// its own size, as a browser draws `<img>` — not shrunk to a line-height
+    /// square (#3707). The image source resolves synchronously
+    /// (`test_support::image_override`), so the drawn size is deterministic:
+    /// the same assertions raced the image decoder when they ran against a
+    /// data URL.
+    #[gpui::test]
+    fn inline_image_without_size_is_drawn_at_its_intrinsic_size(cx: &mut TestAppContext) {
+        use crate::test_support::sized_image_source;
+
+        cx.update(crate::init);
+        let image_source = Arc::new(sized_image_source(200, 60));
+        let (content, cx) = cx.add_window_view(|_, cx| {
+            ImageSourceTestRoot::new("Before ![dot](test://dot) after", image_source, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let inline_bounds = content.read_with(cx, |content, cx| {
+            content.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert_eq!(inline_bounds.len(), 2);
+        assert_eq!(
+            inline_bounds[0].top(),
+            inline_bounds[1].top(),
+            "text before and after the image share its line"
+        );
+        let gap = inline_bounds[1].left() - inline_bounds[0].right();
+        assert!(
+            gap > px(180.),
+            "the image reserves its intrinsic width, not a line-height placeholder; gap {gap:?}"
+        );
+    }
+
+    /// An image wider than the view is narrowed to the wrap width, so the
+    /// text after it wraps to the next line instead of overflowing (#3707).
+    #[gpui::test]
+    fn inline_image_wider_than_the_view_wraps_the_text_after_it(cx: &mut TestAppContext) {
+        use crate::test_support::sized_image_source;
+
+        cx.update(crate::init);
+        let image_source = Arc::new(sized_image_source(600, 60));
+        let (content, cx) = cx.add_window_view(|_, cx| {
+            ImageSourceTestRoot::new("Before ![wide](test://wide) after", image_source, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let inline_bounds = content.read_with(cx, |content, cx| {
+            content.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        assert_eq!(inline_bounds.len(), 2);
+        assert!(
+            inline_bounds[1].top() > inline_bounds[0].top(),
+            "text after an image wider than the view wraps to the next line"
+        );
+    }
+
     #[gpui::test]
     fn inline_html_image_after_newline_does_not_panic(cx: &mut TestAppContext) {
         cx.update(crate::init);

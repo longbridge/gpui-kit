@@ -3,15 +3,18 @@
 //! Native accessibility properties are read automatically. Applications register
 //! identified GPUI elements with `.test_support()`, without supplying test-only state.
 use gpui::{
-    App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, Pixels, SharedString, Visibility, Window, px,
+    App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, ImageSource,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, Pixels, SharedString,
+    SharedUri, Visibility, Window, px,
 };
+use image::{Frame, RgbaImage};
 use smallvec::SmallVec;
 use std::{
     cell::RefCell,
     collections::HashMap,
     fmt,
     rc::{Rc, Weak},
+    sync::Arc,
 };
 
 /// Owned facts from the last paint of an observed element.
@@ -735,3 +738,37 @@ impl<E: Element + gpui::StatefulInteractiveElement> gpui::StatefulInteractiveEle
     for ObservedText<E>
 {
 }
+
+/// An image source for UI tests: every URI resolves synchronously to a solid
+/// image of `width` x `height` pixels, so layout does not race a decoder.
+///
+/// Images normally decode on background tasks through GPUI's asset system,
+/// which a `#[gpui_kit::test]` app drives at unpredictable times: a text view
+/// holding an image measures its placeholder until the decode lands, so
+/// layout-sensitive assertions race the decoder. A `Custom` image source
+/// resolves synchronously on every layout instead, so its size is stable from
+/// the first frame. Pair it with [`crate::TextView::image_source`]:
+///
+/// ```ignore
+/// let view = TextView::markdown("doc", "before ![](a.png) after")
+///     .image_source(test_support::sized_image_source(200, 60));
+/// ```
+pub fn sized_image_source(
+    width: u32,
+    height: u32,
+) -> impl Fn(&SharedUri) -> ImageSource + Send + Sync + 'static {
+    let buffer = RgbaImage::from_pixel(width, height, image::Rgba(TEST_IMAGE_RGBA));
+    let image = Arc::new(gpui::RenderImage::new(SmallVec::from_buf([Frame::new(
+        buffer,
+    )])));
+    move |_| {
+        ImageSource::Custom(Arc::new({
+            let image = image.clone();
+            move |_, _| Some(Ok(image.clone()))
+        }))
+    }
+}
+
+/// The color [`sized_image_source`] fills its frames with. The layout tests
+/// never assert on it; the value only has to stay opaque.
+const TEST_IMAGE_RGBA: [u8; 4] = [190, 40, 40, 255];

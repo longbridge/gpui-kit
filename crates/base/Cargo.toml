@@ -27,7 +27,7 @@ harness = false
 [features]
 gpui-fast = ["dep:gpui-fast"]
 decimal = ["dep:rust_decimal"]
-test-support = ["gpui/test-support", "gpui-fast?/test-support"]
+test-support = ["gpui/test-support", "gpui-fast?/test-support", "dep:image"]
 inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-fast?/inspector"]
 
 [dependencies]
@@ -38,6 +38,7 @@ data-url = "0.3"
 futures = "0.3"
 gpui.workspace = true
 gpui-fast = { workspace = true, optional = true }
+image = { version = "0.25", optional = true }
 gpui_macros.workspace = true
 instant.workspace = true
 itertools = "0.13.0"
@@ -88,6 +89,9 @@ gpui = { workspace = true, features = ["test-support", "bench-support"] }
 gpui-fast = { workspace = true, features = ["test-support", "bench-support"] }
 gpui_platform = { workspace = true, features = ["bench-support"] }
 gpui-fast-platform = { workspace = true, features = ["bench-support"] }
+# Same minor version as `gpui`'s own, so the crate is shared instead of
+# compiled twice: the test-support image helpers build `Frame`s.
+image = "0.25"
 indoc = "2"
 reqwest_client.workspace = true
 
