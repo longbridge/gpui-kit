@@ -23,6 +23,7 @@ members = [
     "examples/dock",
     "examples/html",
     "examples/large-text",
+    "examples/wrap-bench",
     "examples/markdown",
     "examples/stream-markdown",
     "examples/window_title",

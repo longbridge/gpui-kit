@@ -2931,6 +2931,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-wrap-bench"
+version = "0.8.1"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
