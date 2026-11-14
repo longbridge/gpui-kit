@@ -105,6 +105,28 @@ Sidebar::new()
     )
 ```
 
+### 分组标题操作
+
+使用 `suffix` 在分组标题的末端放置内容，例如向分组中添加项目的按钮。标签会缩短为它让出空间；Sidebar 折叠时，它和标签一起隐藏。
+
+```rust
+SidebarGroup::new("Projects")
+    .suffix(|_, _| {
+        Button::new("new-project")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Plus)
+            .tooltip("New Project")
+            .on_click(|_, _, _| {
+                // Create a project
+            })
+    })
+    .child(
+        SidebarMenu::new()
+            .child(SidebarMenuItem::new("Design Engineering").icon(IconName::Frame))
+    )
+```
+
 ### Badge 与后缀
 
 ```rust

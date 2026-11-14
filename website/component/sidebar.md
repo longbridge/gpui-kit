@@ -137,6 +137,28 @@ Sidebar::new()
     )
 ```
 
+### Group Header Actions
+
+Use `suffix` to put content at the end of a group's header, such as a button that adds an item to the group. The label shortens to make room for it, and it is hidden with the label while the sidebar is collapsed.
+
+```rust
+SidebarGroup::new("Projects")
+    .suffix(|_, _| {
+        Button::new("new-project")
+            .ghost()
+            .xsmall()
+            .icon(IconName::Plus)
+            .tooltip("New Project")
+            .on_click(|_, _, _| {
+                // Create a project
+            })
+    })
+    .child(
+        SidebarMenu::new()
+            .child(SidebarMenuItem::new("Design Engineering").icon(IconName::Frame))
+    )
+```
+
 ### With Badges and Suffixes
 
 ```rust
