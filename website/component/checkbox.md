@@ -78,6 +78,26 @@ Checkbox::new("cb").label("Medium") // default
 Checkbox::new("cb").text_lg().label("Large")
 ```
 
+### Indeterminate State
+
+Use `indeterminate(true)` on a checkbox that stands for a group whose items are only partly checked. It draws a dash instead of the check mark and reports the mixed state to screen readers, whatever `checked` is set to. Activating it requests `true`, so the usual handler checks every item:
+
+```rust
+let all = files.iter().all(|file| file.checked);
+let some = files.iter().any(|file| file.checked);
+
+Checkbox::new("all-files")
+    .label("All files")
+    .checked(all)
+    .indeterminate(some && !all)
+    .on_change(cx.listener(|view, checked, _, cx| {
+        for file in &mut view.files {
+            file.checked = *checked;
+        }
+        cx.notify();
+    }))
+```
+
 ### Disabled State
 
 ```rust
