@@ -848,11 +848,21 @@ impl<M: InputModeKind> TextElement<M> {
         window.on_mouse_event({
             let state = self.state.clone();
 
-            move |event: &MouseMoveEvent, _, window, cx| {
+            move |event: &MouseMoveEvent, phase, window, cx| {
                 if event.pressed_button == Some(MouseButton::Left) {
                     state.update(cx, |state, cx| {
                         state.on_drag_move(event, window, cx);
                     });
+                } else if phase.capture() {
+                    state.update(cx, |state, cx| state.cancel_mouse_gesture(cx));
+                }
+            }
+        });
+        window.on_mouse_event({
+            let state = self.state.clone();
+            move |_: &gpui::MouseExitEvent, phase, _, cx| {
+                if phase.capture() {
+                    state.update(cx, |state, cx| state.cancel_mouse_gesture(cx));
                 }
             }
         });

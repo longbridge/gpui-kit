@@ -384,12 +384,21 @@ impl RenderOnce for TitleBar {
                         state.should_move = false;
                     }),
                 )
-                .on_mouse_move(window.listener_for(&state, |state, _, window, _| {
-                    if state.should_move {
-                        state.should_move = false;
-                        window.start_window_move();
-                    }
-                }))
+                .on_mouse_move(window.listener_for(
+                    &state,
+                    |state, event: &gpui::MouseMoveEvent, window, cx| {
+                        if event.pressed_button != Some(MouseButton::Left) {
+                            state.should_move = false;
+                            return;
+                        }
+                        if state.should_move {
+                            state.should_move = false;
+                            gpui_base::TextSelection::end(window, cx);
+                            cx.stop_active_drag(window);
+                            window.start_window_move();
+                        }
+                    },
+                ))
                 .child(
                     h_flex()
                         .id("bar")

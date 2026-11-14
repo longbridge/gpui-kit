@@ -957,6 +957,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
             // Blink the cursor when the window is active, pause when it's not.
             cx.observe_window_activation(window, |input, window, cx| {
+                if !window.is_window_active() {
+                    input.cancel_mouse_gesture(cx);
+                }
                 if window.is_window_active() {
                     let focus_handle = input.focus_handle.clone();
                     if focus_handle.is_focused(window) {
@@ -966,6 +969,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     }
                 }
             }),
+            cx.observe_window_bounds(window, |input, _, cx| input.cancel_mouse_gesture(cx)),
             cx.on_focus(&focus_handle, window, Self::on_focus),
             cx.on_blur(&focus_handle, window, Self::on_blur),
         ];
@@ -4079,6 +4083,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_mouse_gesture(cx);
         self.revealed_viewport = None;
         if M::is_context_menu_open(self, cx) {
             return;
@@ -4144,12 +4149,26 @@ impl<M: InputModeKind> InputBaseState<M> {
         });
     }
 
+    pub(super) fn cancel_mouse_gesture(&mut self, cx: &mut Context<Self>) {
+        let was_dragging = self.selecting || self.column_select_start.is_some();
+        self.selecting = false;
+        self.column_select_start = None;
+        self.auto_scroll.stop();
+        if was_dragging {
+            cx.notify();
+        }
+    }
+
     pub(super) fn on_drag_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.cancel_mouse_gesture(cx);
+            return;
+        }
         if self.text.len() == 0 {
             return;
         }
@@ -10602,6 +10621,34 @@ mod tests {
         view.input.read_with(&cx, |state, _| {
             let ranges: Vec<_> = state.selections.iter().map(|s| (s.start, s.end)).collect();
             assert_eq!(ranges, vec![(1, 5), (8, 9)]);
+        });
+    }
+
+    #[gpui::test]
+    fn test_lost_mouse_release_ends_selection_on_plain_motion(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|alpha bravo charlie delta");
+        let (start, end, beyond) = view.input.read_with(&cx, |state, _| {
+            (
+                state.range_to_bounds(&(0..1)).unwrap().center(),
+                state.range_to_bounds(&(6..7)).unwrap().center(),
+                state.range_to_bounds(&(18..19)).unwrap().center(),
+            )
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
+        let selected = view.input.read_with(&cx, |state, _| {
+            assert!(state.selecting);
+            let text = state.selected_value();
+            assert!(!text.is_empty());
+            text
+        });
+        cx.simulate_mouse_move(beyond, None, gpui::Modifiers::default());
+        view.input.read_with(&cx, |state, _| {
+            assert!(!state.selecting);
+            assert_eq!(state.selected_value(), selected);
         });
     }
 
