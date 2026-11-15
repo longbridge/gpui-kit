@@ -420,20 +420,49 @@ mod rendering {
         let state = cx.update(|cx| view.read(cx).state.clone());
         cx.update_window(handle, |_, window, cx| window.render_frame(cx))
             .unwrap();
-        let gutter_ink = |capture: Capture| {
-            capture
-                .raw
-                .chunks_exact(4)
-                .enumerate()
-                .filter(|(_, pixel)| {
-                    u16::from(pixel[0]) > u16::from(pixel[1]) + 32
-                        && u16::from(pixel[0]) > u16::from(pixel[2]) + 32
-                })
-                .map(|(index, pixel)| (index, pixel.to_vec()))
-                .collect::<Vec<_>>()
+        let (gutter_left, body_left, first_row_top, line_height) = cx
+            .update_window(handle, |_, _, cx| {
+                let state = state.read(cx);
+                let first_row = state.range_to_bounds(&(0..1)).unwrap();
+                (
+                    state.input_bounds().left(),
+                    first_row.left(),
+                    first_row.top(),
+                    first_row.size.height,
+                )
+            })
+            .unwrap();
+        // Only label placement matters here, not antialiasing coverage. Keep
+        // colored body glyphs out of the measurement and retain exact bounds
+        // so even a one-device-pixel baseline shift fails the regression.
+        let gutter_bounds = |capture: &Capture| {
+            let bounds: [_; 3] = std::array::from_fn(|row| {
+                let top = capture.device(first_row_top + line_height * row);
+                let bottom = capture.device(first_row_top + line_height * (row + 1));
+                let mut bounds = None::<(i32, i32, i32, i32)>;
+                for y in top..bottom {
+                    for x in capture.device(gutter_left)..capture.device(body_left) {
+                        let [red, green, blue] = capture.get_pixel(x, y);
+                        if red > green + 32 && red > blue + 32 {
+                            bounds = Some(match bounds {
+                                Some((left, top, right, bottom)) => {
+                                    (left.min(x), top.min(y), right.max(x), bottom.max(y))
+                                }
+                                None => (x, y, x, y),
+                            });
+                        }
+                    }
+                }
+                bounds
+            });
+            bounds
         };
-        let expected = gutter_ink(Capture::take(&mut cx, handle));
-        assert!(!expected.is_empty(), "line-number glyphs must be visible");
+        let initial = Capture::take(&mut cx, handle);
+        let expected = gutter_bounds(&initial);
+        assert!(
+            expected.iter().all(Option::is_some),
+            "line-number glyphs must be visible"
+        );
         for text in ["A\nA\nA", "A\n漢😀A\nA", "A\n\nA"] {
             cx.update_window(handle, |_, window, cx| {
                 state.update(cx, |state, cx| {
@@ -443,7 +472,12 @@ mod rendering {
                 window.render_frame(cx);
             })
             .unwrap();
-            assert_eq!(gutter_ink(Capture::take(&mut cx, handle)), expected);
+            let actual = Capture::take(&mut cx, handle);
+            assert_eq!(
+                gutter_bounds(&actual),
+                expected,
+                "line-number bounds changed for {text:?}"
+            );
         }
     }
 

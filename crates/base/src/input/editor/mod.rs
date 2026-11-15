@@ -22,11 +22,14 @@ pub trait EditorLineNumberRenderer: 'static {
     ) -> (Pixels, Pixels);
 
     /// Resolves a shared vertical offset from the configured fonts before shaping rows.
+    /// Renderers using body typography need no vertical correction.
     fn resolve_line_number_baseline_offset(
         &self,
-        body_style: &TextStyle,
-        window: &Window,
-    ) -> Pixels;
+        _body_style: &TextStyle,
+        _window: &Window,
+    ) -> Pixels {
+        px(0.)
+    }
 
     /// Shapes one supported, one-based line number, without padding characters.
     fn shape_line_number(
