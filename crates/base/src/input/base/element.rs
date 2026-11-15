@@ -3382,11 +3382,11 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let runs = if let (false, Some(highlight_styles)) = (is_empty, highlight_styles) {
             let mut runs = Vec::with_capacity(highlight_styles.len() + 2);
 
-            for (range, style) in &highlight_styles {
+            for (range, highlight) in &highlight_styles {
                 // Keep typography on the syntax style through shaping, rather
                 // than collecting and joining a second set of font ranges.
-                let mut styled_text = text_style.clone().highlight(HighlightStyle::from(style));
-                if let Some(family) = &style.font_family {
+                let mut styled_text = text_style.clone().highlight(highlight.style);
+                if let Some(family) = &highlight.font_family {
                     styled_text.font_family = family.clone();
                 }
                 let mut run = styled_text.to_run(range.len());
@@ -6388,7 +6388,7 @@ mod tests {
             vec![0..2, 2..5, 5..10]
         );
         assert_eq!(styles[0].1, crate::text::InlineHighlight::default());
-        assert_eq!(styles[1].1.background_color, Some(gpui::red()));
+        assert_eq!(styles[1].1.style.background_color, Some(gpui::red()));
         assert_eq!(styles[2].1, crate::text::InlineHighlight::default());
     }
 
@@ -6413,7 +6413,7 @@ mod tests {
             compose_decoration_collections(Vec::new(), [&first[..], &second[..]], 0..4).unwrap();
 
         assert_eq!(styles.len(), 1);
-        assert_eq!(styles[0].1.background_color, Some(gpui::red()));
+        assert_eq!(styles[0].1.style.background_color, Some(gpui::red()));
     }
 
     #[test]
@@ -6435,25 +6435,25 @@ mod tests {
         let styles = compose_decorations(syntax, [(2..6, decoration)], 0..8).unwrap();
 
         assert_eq!(styles[1].0, 2..6);
-        assert_eq!(styles[1].1.color, Some(gpui::red()));
-        assert_eq!(styles[1].1.font_style, Some(gpui::FontStyle::Italic));
+        assert_eq!(styles[1].1.style.color, Some(gpui::red()));
+        assert_eq!(styles[1].1.style.font_style, Some(gpui::FontStyle::Italic));
 
         // A later syntax boundary must not rise above an active decoration.
         let syntax = [0..5, 5..10].map(|range| {
-            let mut style = crate::text::InlineHighlight::default();
-            style.color = Some(gpui::blue());
-            style.font_family = Some("Syntax".into());
-            (range, style)
+            let mut highlight = crate::text::InlineHighlight::default();
+            highlight.style.color = Some(gpui::blue());
+            highlight.font_family = Some("Syntax".into());
+            (range, highlight)
         });
         let styles = compose_decorations(syntax.into(), [(2..8, decoration)], 0..10).unwrap();
-        for (range, style) in styles
+        for (range, highlight) in styles
             .iter()
             .filter(|(range, _)| range.start >= 2 && range.end <= 8)
         {
-            assert_eq!(style.color, Some(gpui::red()), "{range:?}");
-            assert_eq!(style.font_style, Some(gpui::FontStyle::Italic));
+            assert_eq!(highlight.style.color, Some(gpui::red()), "{range:?}");
+            assert_eq!(highlight.style.font_style, Some(gpui::FontStyle::Italic));
             assert_eq!(
-                style.font_family.as_ref().map(|family| family.as_ref()),
+                highlight.font_family.as_ref().map(|family| family.as_ref()),
                 Some("Syntax")
             );
         }
@@ -6476,8 +6476,8 @@ mod tests {
         assert_eq!(styles.len(), 3);
         assert_eq!(styles[0], (0..2, syntax.into()));
         assert_eq!(styles[1].0, 2..6);
-        assert_eq!(styles[1].1.color, Some(gpui::red()));
-        assert_eq!(styles[1].1.font_weight, Some(gpui::FontWeight::BOLD));
+        assert_eq!(styles[1].1.style.color, Some(gpui::red()));
+        assert_eq!(styles[1].1.style.font_weight, Some(gpui::FontWeight::BOLD));
         assert_eq!(styles[2], (6..8, syntax.into()));
 
         // Precedence follows the order layers are passed in, not where a
@@ -6490,7 +6490,7 @@ mod tests {
         assert!(
             styles
                 .iter()
-                .all(|(_, style)| style.color == Some(gpui::green()))
+                .all(|(_, highlight)| highlight.style.color == Some(gpui::green()))
         );
     }
 
@@ -6527,7 +6527,7 @@ mod tests {
                 .find(|(range, _)| range.contains(&decorated_at))
                 .expect("decorated run");
             assert_eq!(
-                decorated.1.color,
+                decorated.1.style.color,
                 Some(gpui::red()),
                 "run_count = {run_count}"
             );

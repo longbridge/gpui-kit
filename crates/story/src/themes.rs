@@ -35,20 +35,23 @@ fn apply_theme_config(theme_config: std::rc::Rc<ThemeConfig>, cx: &mut App) {
 fn apply_syntax_styling(theme: &mut Theme) {
     // Use the application's monospace choice instead of a platform-specific family name.
     let mono_font = theme.mono_font_family.clone();
-    let literal_style = serde_json::from_value::<ThemeStyle>(serde_json::json!({
-        "font_family": mono_font,
-        "color": theme.danger,
-        "font_weight": FontWeightContent::Bold,
-        "font_style": FontStyle::Normal,
-    }))
-    .expect("the syntax styling example must define a valid theme style");
     let highlight = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
-    highlight.syntax.text_literal = Some(literal_style.clone());
+    // Refine typography in place so each palette keeps its syntax colors.
+    let literal_style = highlight.syntax.text_literal.get_or_insert_with(ThemeStyle::default);
+    literal_style.font_family = Some(mono_font.clone());
+    literal_style.font_style = Some(FontStyle::Normal);
+    // Refine only the heading weight so each palette keeps its other title attributes.
+    highlight.syntax.title.get_or_insert_with(ThemeStyle::default).font_weight =
+        Some(FontWeightContent::Bold);
 
     // Mode switches reload the stored palettes, so keep the example's style there too.
     for config in [&mut theme.light_theme, &mut theme.dark_theme] {
         if let Some(highlight) = std::rc::Rc::make_mut(config).highlight.as_mut() {
-            highlight.syntax.text_literal = Some(literal_style.clone());
+            let literal_style = highlight.syntax.text_literal.get_or_insert_with(ThemeStyle::default);
+            literal_style.font_family = Some(mono_font.clone());
+            literal_style.font_style = Some(FontStyle::Normal);
+            highlight.syntax.title.get_or_insert_with(ThemeStyle::default).font_weight =
+                Some(FontWeightContent::Bold);
         }
     }
 }
@@ -110,7 +113,7 @@ pub fn init(cx: &mut App) {
     Theme::update(cx, apply_syntax_styling);
     // The registry observer reloads the original palettes after watch_dir's
     // on_load callback. Apply the example after those observers finish, or
-    // that reload silently discards its color, weight and slant overrides.
+    // that reload silently discards its font family, weight and slant overrides.
     cx.observe_global::<ThemeRegistry>(|cx| {
         cx.defer(|cx| Theme::update(cx, apply_syntax_styling));
     })

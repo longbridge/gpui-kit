@@ -163,8 +163,8 @@ pub struct ThemeStyle {
 impl From<ThemeStyle> for InlineHighlight {
     fn from(style: ThemeStyle) -> Self {
         let mut highlight = Self::default();
-        highlight.color = style.color;
-        highlight.font_weight = style.font_weight.map(|w| match w {
+        highlight.style.color = style.color;
+        highlight.style.font_weight = style.font_weight.map(|w| match w {
             FontWeightContent::Thin => gpui::FontWeight::THIN,
             FontWeightContent::ExtraLight => gpui::FontWeight::EXTRA_LIGHT,
             FontWeightContent::Light => gpui::FontWeight::LIGHT,
@@ -175,7 +175,7 @@ impl From<ThemeStyle> for InlineHighlight {
             FontWeightContent::ExtraBold => gpui::FontWeight::EXTRA_BOLD,
             FontWeightContent::Black => gpui::FontWeight::BLACK,
         });
-        highlight.font_style = style.font_style.map(|s| match s {
+        highlight.style.font_style = style.font_style.map(|s| match s {
             FontStyle::Normal => gpui::FontStyle::Normal,
             FontStyle::Italic => gpui::FontStyle::Italic,
             FontStyle::Underline => gpui::FontStyle::Normal,

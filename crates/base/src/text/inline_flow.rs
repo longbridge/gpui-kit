@@ -1332,7 +1332,7 @@ fn code_background(
         })
         .fold(Pixels::ZERO, Pixels::max);
     let vertical_padding = font_size * 0.125 + shaped_line.descent / 2.;
-    let color = highlights.iter().find_map(|(_, h)| h.background_color);
+    let color = highlights.iter().find_map(|(_, h)| h.style.background_color);
     let mut style = highlights
         .iter()
         .find_map(|(_, h)| h.code_style.clone())
@@ -1341,7 +1341,7 @@ fn code_background(
         style.background = color.map(Into::into);
     }
     for (_, highlight) in highlights.iter_mut() {
-        highlight.background_color = None;
+        highlight.style.background_color = None;
     }
     let insets = code_insets(highlights, font_size, window.rem_size());
     let top = if style.padding.top.is_some() {
@@ -2371,7 +2371,10 @@ mod tests {
                     font_family: Some(MONO.into()),
                     font_size_scale: Some(0.875),
                     code_style: Some(code_style.clone()),
-                    background_color: Some(gpui::green()),
+                    style: gpui::HighlightStyle {
+                        background_color: Some(gpui::green()),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 };
                 let items = vec![MeasureItem::Text {

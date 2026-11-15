@@ -16,38 +16,21 @@ const EXAMPLE_CODE: &str = include_str!("./editor_preview.rs");
 
 const SYNTAX_STYLING_EXAMPLE: &str = r#"# Syntax Styling
 
-These two lines have the same number of characters but different widths.
+With Theme default, these lines use a proportional font and have different widths.
 
-iiiiiiiiiiiiiiiiiiiiiiii
-WWWWWWWWWWWWWWWWWWWWWWWW
-
-In code block, these should have equal widths.
+iii
+WWW
 
 ```rust
-// iiiiiiiiiiiiiiiiiiiiiiii
-// WWWWWWWWWWWWWWWWWWWWWWWW
+// Fenced code blocks use a monospace font, so iii and WWW have equal widths.
+// iii
+// WWW
 
-Theme::update(cx, |theme| {
-    let mono_font = theme.mono_font_family.clone();
-    let style = serde_json::from_value::<ThemeStyle>(serde_json::json!({
-        "font_family": mono_font,
-        "color": theme.danger,
-        "font_weight": FontWeightContent::Bold,
-        "font_style": FontStyle::Normal,
-    })).expect("valid syntax style");
-
-    Arc::make_mut(&mut theme.highlight_theme)
-        .style.syntax.text_literal = Some(style);
-});
+let style = highlight.syntax.text_literal.get_or_insert_with(ThemeStyle::default);
+style.font_family = Some(mono_font.into());
 ```
 
-Inline `iii WWW` keeps its own syntax style.
-
-An indented code block uses the same style:
-
-    iii WWW 0123456789
-
-[Link text](https://example.com "iii WWW 0123456789")
+Inline code `iii WWW` uses Theme default because no font family is specified.
 "#;
 
 /// Words chosen so `fl` and `log` light up different spans under each highlighter.

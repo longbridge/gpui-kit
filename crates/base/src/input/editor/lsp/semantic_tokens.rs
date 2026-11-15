@@ -213,10 +213,10 @@ mod tests {
     impl HighlightStyleResolver for TestTheme {
         fn style(&self, name: &str) -> Option<crate::text::InlineHighlight> {
             (name == "keyword" || name == "comment").then(|| {
-                let mut style = InlineHighlight::default();
-                style.color = Some(hsla(0.5, 0.5, 0.5, 1.));
-                style.font_family = Some("Semantic".into());
-                style
+                let mut highlight = InlineHighlight::default();
+                highlight.style.color = Some(hsla(0.5, 0.5, 0.5, 1.));
+                highlight.font_family = Some("Semantic".into());
+                highlight
             })
         }
     }

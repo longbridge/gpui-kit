@@ -1225,7 +1225,7 @@ impl SyntaxHighlighter {
 
         // NOTE: DO NOT remove this comment, it is used for debugging.
         // for style in &styles {
-        //     println!("---- style: {:?} - {:?}", style.0, style.1.color);
+        //     println!("---- style: {:?} - {:?}", style.0, style.1.style.color);
         // }
         // println!("--------------------------------");
 
@@ -1333,10 +1333,12 @@ pub(crate) fn unique_styles(
 }
 
 /// Merge other style (Other on top)
-fn merge_highlight_style(style: &mut InlineHighlight, other: &InlineHighlight) {
+fn merge_highlight_style(highlight: &mut InlineHighlight, other: &InlineHighlight) {
     if let Some(font_family) = &other.font_family {
-        style.font_family = Some(font_family.clone());
+        highlight.font_family = Some(font_family.clone());
     }
+    let style = &mut highlight.style;
+    let other = &other.style;
     if let Some(color) = other.color {
         style.color = Some(color);
     }
@@ -1524,23 +1526,23 @@ mod tests {
         let left = unique_styles(
             &range,
             left.into_iter()
-                .map(|(range, style)| (range, style.into()))
+                .map(|(range, highlight)| (range, highlight.into()))
                 .collect(),
         );
         if left.len() != right.len() {
             println!("\n---------------------------------------------");
-            for (range, style) in left.iter() {
-                println!("({:?}, {})", range, color_name(style.color));
+            for (range, highlight) in left.iter() {
+                println!("({:?}, {})", range, color_name(highlight.style.color));
             }
             println!("---------------------------------------------");
             panic!("left {} styles, right {} styles", left.len(), right.len());
         }
         for (left, right) in left.into_iter().zip(right) {
-            if left.1.color != right.1.color || left.0 != right.0 {
+            if left.1.style.color != right.1.color || left.0 != right.0 {
                 panic!(
                     "\n left: ({:?}, {})\nright: ({:?}, {})\n",
                     left.0,
-                    color_name(left.1.color),
+                    color_name(left.1.style.color),
                     right.0,
                     color_name(right.1.color)
                 );
@@ -1656,11 +1658,11 @@ console.log(answer);
         let theme = HighlightTheme::default_dark();
         let styles = highlighter.styles(&(0..markdown.len()), theme.as_ref());
         let keyword_start = markdown.find("fn first").unwrap();
-        let keyword_color = theme.style("keyword").and_then(|style| style.color);
-        assert!(styles.iter().any(|(range, style)| {
+        let keyword_color = theme.style("keyword").and_then(|highlight| highlight.style.color);
+        assert!(styles.iter().any(|(range, highlight)| {
             range.start <= keyword_start
                 && range.end >= keyword_start + 2
-                && style.color == keyword_color
+                && highlight.style.color == keyword_color
         }));
     }
 
@@ -1946,11 +1948,11 @@ $x = 1;
             let end = start + text.len();
 
             assert!(
-                styles.iter().any(|(range, style)| {
+                styles.iter().any(|(range, highlight)| {
                     range.start <= start
                         && range.end >= end
-                        && style.font_weight == Some(gpui::FontWeight::BOLD)
-                        && style.font_style == Some(gpui::FontStyle::Italic)
+                        && highlight.style.font_weight == Some(gpui::FontWeight::BOLD)
+                        && highlight.style.font_style == Some(gpui::FontStyle::Italic)
                 }),
                 "{text:?} should combine bold and italic styles"
             );

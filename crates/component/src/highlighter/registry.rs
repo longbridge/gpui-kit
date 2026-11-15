@@ -238,9 +238,9 @@ pub struct ThemeStyle {
 impl From<ThemeStyle> for InlineHighlight {
     fn from(style: ThemeStyle) -> Self {
         let mut highlight = Self::default();
-        highlight.color = style.color;
-        highlight.font_weight = style.font_weight.map(Into::into);
-        highlight.font_style = style.font_style.map(Into::into);
+        highlight.style.color = style.color;
+        highlight.style.font_weight = style.font_weight.map(Into::into);
+        highlight.style.font_style = style.font_style.map(Into::into);
         highlight.font_family = style.font_family;
         highlight
     }

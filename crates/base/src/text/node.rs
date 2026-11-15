@@ -1755,8 +1755,8 @@ impl Paragraph {
                 if let Some(link_mark) = style.link.clone() {
                     let link = node_cx.link(&link_mark, cx);
                     if link.is_some() {
-                        highlight.color = Some(node_cx.style.link());
-                        highlight.underline = Some(link_underline(&node_cx.style));
+                        highlight.style.color = Some(node_cx.style.link());
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
                     }
                     links.push((inner_range.clone(), link_mark));
                     replaced.push(link);
@@ -3145,8 +3145,8 @@ impl Paragraph {
                     if let Some(link_mark) = style.link.as_ref()
                         && let Some(link) = node_cx.link(link_mark, cx)
                     {
-                        highlight.color = Some(node_cx.style.link());
-                        highlight.underline = Some(link_underline(&node_cx.style));
+                        highlight.style.color = Some(node_cx.style.link());
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
                         links.push((inner_range.clone(), link));
                     }
 
@@ -3280,7 +3280,7 @@ impl Paragraph {
                 let mut object_link = None;
                 for (_, mark) in &inline_node.marks {
                     object_style = object_style
-                        .highlight(HighlightStyle::from(&mark_highlight(mark, node_cx, cx)));
+                        .highlight(mark_highlight(mark, node_cx, cx).style);
                     if let Some(link) = mark.link.as_ref().and_then(|link| node_cx.link(link, cx)) {
                         object_link = Some(link);
                         object_style.color = Some(node_cx.style.link());
@@ -3351,8 +3351,8 @@ impl Paragraph {
                     if let Some(link_mark) = style.link.as_ref()
                         && let Some(link) = node_cx.link(link_mark, cx)
                     {
-                        highlight.color = Some(node_cx.style.link());
-                        highlight.underline = Some(link_underline(&node_cx.style));
+                        highlight.style.color = Some(node_cx.style.link());
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
                         links.push((inner_range.clone(), link));
                     }
 
@@ -4819,18 +4819,18 @@ mod tests {
                     vec![0..1, 1..4, 4..8, 8..11, 11..12]
                 );
                 for ix in [1, 2] {
-                    assert_eq!(spans[ix].1.font_weight, Some(FontWeight::BOLD));
-                    assert_eq!(spans[ix].1.font_style, Some(FontStyle::Italic));
+                    assert_eq!(spans[ix].1.style.font_weight, Some(FontWeight::BOLD));
+                    assert_eq!(spans[ix].1.style.font_style, Some(FontStyle::Italic));
                 }
                 assert!(spans[2].1.code_style.is_some());
                 assert_eq!(spans[2].1.font_size_scale, Some(0.875));
-                assert_eq!(spans[3].1.font_weight, Some(FontWeight::BOLD));
-                assert_eq!(spans[3].1.font_style, None);
+                assert_eq!(spans[3].1.style.font_weight, Some(FontWeight::BOLD));
+                assert_eq!(spans[3].1.style.font_style, None);
                 assert!(spans[3].1.code_style.is_none());
-                assert_eq!(spans[4].1.font_weight, None);
+                assert_eq!(spans[4].1.style.font_weight, None);
             }
             assert!(highlights[3..].iter().all(|(_, highlight)| {
-                highlight.color == Some(context.style.link()) && highlight.underline.is_some()
+                highlight.style.color == Some(context.style.link()) && highlight.style.underline.is_some()
             }));
             let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
             let [
@@ -4864,9 +4864,9 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![0..1, 1..2, 2..3]
             );
-            assert_eq!(highlights[1].1.font_weight, Some(FontWeight::BOLD));
-            assert_eq!(highlights[1].1.font_style, Some(FontStyle::Italic));
-            assert_eq!(highlights[2].1.font_weight, None);
+            assert_eq!(highlights[1].1.style.font_weight, Some(FontWeight::BOLD));
+            assert_eq!(highlights[1].1.style.font_style, Some(FontStyle::Italic));
+            assert_eq!(highlights[2].1.style.font_weight, None);
         });
     }
 
@@ -4933,18 +4933,18 @@ mod tests {
                 let (text, highlights, links) = paragraph.plain_render(&context, cx);
                 assert_eq!(text.as_ref(), "a中😀link");
                 assert_eq!(links, vec![(1..12, link.clone())]);
-                assert!(highlights.iter().all(|(_, h)| h.color == Some(color)));
+                assert!(highlights.iter().all(|(_, h)| h.style.color == Some(color)));
                 assert!(
                     highlights
                         .iter()
-                        .all(|(_, h)| h.font_weight == Some(FontWeight::BOLD))
+                        .all(|(_, h)| h.style.font_weight == Some(FontWeight::BOLD))
                 );
                 assert!(
                     highlights
                         .iter()
                         .filter(|(r, _)| r.start >= 1)
-                        .all(|(_, h)| h.font_style == Some(FontStyle::Italic)
-                            && h.underline.is_some())
+                        .all(|(_, h)| h.style.font_style == Some(FontStyle::Italic)
+                            && h.style.underline.is_some())
                 );
                 assert!(Arc::ptr_eq(
                     &cached,
@@ -5019,7 +5019,7 @@ mod tests {
             };
             assert_eq!(text.as_ref(), "a中😀link");
             assert_eq!(links, &vec![(1..12, link.clone())]);
-            assert!(highlights.iter().all(|(_, h)| h.color == Some(gpui::red())));
+            assert!(highlights.iter().all(|(_, h)| h.style.color == Some(gpui::red())));
             assert!(
                 highlights
                     .iter()
@@ -5043,7 +5043,7 @@ mod tests {
                 assert!(
                     highlights
                         .iter()
-                        .all(|(_, h)| h.color == Some(gpui::blue()))
+                        .all(|(_, h)| h.style.color == Some(gpui::blue()))
                 );
                 assert!(!highlights.is_empty());
             }
@@ -5245,13 +5245,13 @@ mod tests {
             // The default `<mark>` yellow needs dark text, whatever the theme's
             // text color is (light in a dark theme).
             let yellow: Hsla = gpui::rgb(0xfef08a).into();
-            let style = mark_highlight(&TextMark::default().highlight(yellow), &node_cx, cx);
+            let style = mark_highlight(&TextMark::default().highlight(yellow), &node_cx, cx).style;
             assert_eq!(style.background_color, Some(yellow));
             assert_eq!(style.color, Some(gpui::black()));
 
             // A dark custom highlight gets light text instead.
             let navy: Hsla = gpui::rgb(0x1e3a8a).into();
-            let style = mark_highlight(&TextMark::default().highlight(navy), &node_cx, cx);
+            let style = mark_highlight(&TextMark::default().highlight(navy), &node_cx, cx).style;
             assert_eq!(style.color, Some(gpui::white()));
 
             // A translucent mark is composited with the theme surface before
@@ -5267,11 +5267,11 @@ mod tests {
                 gpui::white()
             );
             let transparent: Hsla = gpui::rgba(0x00000000).into();
-            let style = mark_highlight(&TextMark::default().highlight(transparent), &node_cx, cx);
+            let style = mark_highlight(&TextMark::default().highlight(transparent), &node_cx, cx).style;
             assert_eq!(style.color, None);
 
             // Text that is not marked keeps the inherited color.
-            let style = mark_highlight(&TextMark::default().bold(), &node_cx, cx);
+            let style = mark_highlight(&TextMark::default().bold(), &node_cx, cx).style;
             assert_eq!(style.color, None);
         });
     }
@@ -5293,10 +5293,10 @@ mod tests {
             let context = NodeContext::default();
             crate::Theme::global_mut(cx).tokens.colors.background = gpui::white();
             let (_, light, _) = paragraph.plain_render(&context, cx);
-            assert_eq!(light[0].1.color, Some(gpui::black()));
+            assert_eq!(light[0].1.style.color, Some(gpui::black()));
             crate::Theme::global_mut(cx).tokens.colors.background = gpui::black();
             let (_, dark, _) = paragraph.plain_render(&context, cx);
-            assert_eq!(dark[0].1.color, Some(gpui::white()));
+            assert_eq!(dark[0].1.style.color, Some(gpui::white()));
         });
     }
 
@@ -5338,7 +5338,7 @@ mod tests {
             let underlined = |highlights: &[(Range<usize>, InlineHighlight)], at: usize| {
                 highlights
                     .iter()
-                    .any(|(range, highlight)| range.contains(&at) && highlight.underline.is_some())
+                    .any(|(range, highlight)| range.contains(&at) && highlight.style.underline.is_some())
             };
 
             let (_, highlights, links) = paragraph.plain_render(&node_cx, cx);
@@ -5978,8 +5978,8 @@ mod tests {
         let light_styles = block.highlighted_styles(&light);
         let dark_styles = block.highlighted_styles(&dark);
 
-        assert_eq!(light_styles[0].1.color, Some(gpui::rgb(0x0000ff).into()));
-        assert_eq!(dark_styles[0].1.color, Some(gpui::rgb(0xffff00).into()));
+        assert_eq!(light_styles[0].1.style.color, Some(gpui::rgb(0x0000ff).into()));
+        assert_eq!(dark_styles[0].1.style.color, Some(gpui::rgb(0xffff00).into()));
         assert_eq!(block.code(), "42", "the document must survive the swap");
     }
 
