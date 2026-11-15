@@ -416,6 +416,11 @@ impl TextView {
     }
 
     /// Set whether the text view is selectable, default is true.
+    ///
+    /// Hovering selectable text shows the I-beam cursor. A cursor set on the
+    /// text view itself, such as `.cursor_default()`, replaces it: use that for
+    /// text on a surface that opens on click. Links keep the pointing hand, and
+    /// the I-beam still shows while a drag selection is in progress.
     pub fn selectable(mut self, selectable: bool) -> Self {
         self.selectable = selectable;
         self
@@ -631,6 +636,14 @@ impl TextView {
     pub fn markdown_mdx(mut self) -> Self {
         let extensions = Arc::make_mut(&mut self.markdown_extensions);
         *extensions = extensions.clone().mdx();
+        self
+    }
+
+    /// Set whether raw HTML in Markdown renders as HTML (the default) or
+    /// shows as the text it is written as. See [`MarkdownExtensions::raw_html`].
+    pub fn markdown_raw_html(mut self, enabled: bool) -> Self {
+        let extensions = Arc::make_mut(&mut self.markdown_extensions);
+        *extensions = extensions.clone().raw_html(enabled);
         self
     }
 
@@ -910,6 +923,7 @@ impl Element for TextView {
                 state.set_motion(motion.clone());
             }
             state.selectable = self.selectable;
+            state.hover_cursor = self.style.mouse_cursor;
             state.selection_format = self.selection_format;
             state.scrollable = self.scrollable;
             state.max_lines = max_lines;
@@ -1139,11 +1153,11 @@ mod tests {
     use super::{TaskToggleEvent, TextView, TextViewPlugin};
     use crate::text::{SelectionFormat, TableData, TextViewState, TextViewStyle};
     use gpui::{
-        AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
-        Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Overflow, ParentElement as _, Pixels,
-        Render, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _,
-        TestAppContext, VisualTestContext, Window, div, point, prelude::FluentBuilder as _, px,
-        rems,
+        AppContext as _, Bounds, ClickEvent, Context, CursorStyle, Entity, InteractiveElement as _,
+        IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Overflow,
+        ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+        StyleRefinement, Styled as _, TestAppContext, VisualTestContext, Window, div, point,
+        prelude::FluentBuilder as _, px, rems,
     };
 
     struct TextViewTestRoot {
@@ -1812,6 +1826,26 @@ mod tests {
         assert!(TextView::new(&state).selectable);
         assert!(TextView::markdown("markdown", "text").selectable);
         assert!(TextView::html("html", "<p>text</p>").selectable);
+    }
+
+    #[gpui::test]
+    fn cursor_on_text_view_replaces_hover_ibeam(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("state", cx)));
+
+        assert_eq!(TextView::new(&state).style.mouse_cursor, None);
+        assert_eq!(
+            TextView::new(&state).cursor_default().style.mouse_cursor,
+            Some(CursorStyle::Arrow)
+        );
+
+        state.update(cx, |state, _| {
+            assert!(state.shows_text_cursor());
+            state.hover_cursor = Some(CursorStyle::Arrow);
+            assert!(!state.shows_text_cursor());
+            state.is_selecting = true;
+            assert!(state.shows_text_cursor());
+        });
     }
 
     #[gpui::test]
@@ -3874,6 +3908,60 @@ mod tests {
             first_column(4000., bold)[0],
             single_line,
             "the table text refinement is measured"
+        );
+    }
+
+    #[gpui::test]
+    fn link_tooltip_shows_on_one_of_two_renderings_of_a_document(cx: &mut TestAppContext) {
+        struct Preview;
+        impl Render for Preview {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .debug_selector(|| "link-destination-preview".into())
+                    .child("/tmp/report.json")
+            }
+        }
+        struct Twice {
+            view: Entity<TextViewState>,
+        }
+        impl Render for Twice {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .child(
+                        TextView::new(&self.view)
+                            .link_tooltip(|_, _, cx| cx.new(|_| Preview).into()),
+                    )
+                    .child(
+                        TextView::new(&self.view)
+                            .link_tooltip(|_, _, cx| cx.new(|_| Preview).into()),
+                    )
+            }
+        }
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| Twice {
+            view: cx.new(|cx| {
+                TextViewState::markdown("[preview destination](file:///tmp/report.json)", cx)
+            }),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let bounds = root.read_with(cx, |root, cx| {
+            root.view.read(cx).selection_adapter.text_bounds()[0]
+        });
+        let start = point(bounds.left() + px(2.), bounds.center().y);
+        cx.update(|window, cx| window.simulate_mouse_move(start, cx));
+        cx.run_until_parked();
+        let mut requested = 0;
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            requested = cx.update(|window, cx| window.simulate_next_frame(cx));
+            cx.run_until_parked();
+        }
+        assert_eq!(requested, 0, "a settled hover stops redrawing");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds("link-destination-preview").is_some(),
+            "the hovered rendering shows its destination"
         );
     }
 

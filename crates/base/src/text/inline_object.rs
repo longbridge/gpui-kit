@@ -406,7 +406,11 @@ impl Element for InlineObject {
                     ),
                     cx,
                 );
-            if self.link.is_none() {
+            if self.link.is_none()
+                && view
+                    .as_ref()
+                    .is_some_and(|view| view.read(cx).shows_text_cursor())
+            {
                 window.set_cursor_style(CursorStyle::IBeam, hitbox);
             }
             let visible = bounds.intersect(&window.content_mask().bounds);

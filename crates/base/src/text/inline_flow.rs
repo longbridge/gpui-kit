@@ -1713,16 +1713,17 @@ fn push_text_wrap_fragments<'a>(
         if width <= wrap_width {
             fragments.push(WrapLineFragment::element(width, span.len()));
         } else {
+            // The insets wrap each line of the span, not each piece of it, so
+            // the pieces go in without them and `line_ranges` shrinks a line
+            // that comes out too wide once its insets are added.
             for word in span.split_word_bounds() {
-                let width = measure(word) + padding;
-                if width <= wrap_width {
+                let width = measure(word);
+                if width + padding <= wrap_width {
                     fragments.push(WrapLineFragment::element(width, word.len()));
                 } else {
                     for grapheme in word.graphemes(true) {
-                        fragments.push(WrapLineFragment::element(
-                            measure(grapheme) + padding,
-                            grapheme.len(),
-                        ));
+                        fragments
+                            .push(WrapLineFragment::element(measure(grapheme), grapheme.len()));
                     }
                 }
             }
@@ -2249,6 +2250,66 @@ mod tests {
                 })
                 .collect();
             assert_eq!(reconstructed, text);
+        }
+    }
+
+    /// An oversized code word counts its insets once per line, not once per
+    /// character, so it fills each line instead of wrapping at about half.
+    /// Insets wider than a character make the wrapper overfill a line, which
+    /// `line_ranges` then shrinks back to fit.
+    #[test]
+    fn long_inline_code_word_fills_each_line() {
+        use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::{Empty, TestApp};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let font_size = px(10.);
+        let style = TextStyle {
+            font_family: BODY.into(),
+            font_size: AbsoluteLength::Pixels(font_size),
+            ..Default::default()
+        };
+        let text = "0123456789abcdefghijklmnopqrstuvwxyz0123";
+        let char_width = WideMonoTextSystem::width_of("0", MONO, font_size);
+
+        for (code_style, padding) in [
+            (None, px(INLINE_CODE_PADDING * 2.)),
+            (Some(StyleRefinement::default().px(px(12.))), px(24.)),
+        ] {
+            let items = vec![MeasureItem::Text {
+                text: text.into(),
+                links: vec![],
+                highlights: vec![(
+                    0..text.len(),
+                    InlineHighlight {
+                        font_family: Some(MONO.into()),
+                        font_size_scale: Some(1.),
+                        code_style,
+                        ..Default::default()
+                    },
+                )],
+            }];
+            let wrap_width = char_width * 9. + padding;
+
+            let layout = window.update(|_, window, cx| {
+                layout_flow(&items, &[None], &style, Some(wrap_width), window, cx)
+            });
+
+            let lines = layout
+                .fragments
+                .iter()
+                .filter_map(|fragment| match fragment {
+                    PositionedFragment::Text { text, .. } => Some(text.as_ref()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                lines,
+                ["012345678", "9abcdefgh", "ijklmnopq", "rstuvwxyz", "0123"],
+                "padding {padding:?}"
+            );
+            assert!(layout.size.width <= wrap_width, "{:?}", layout.size);
         }
     }
 
