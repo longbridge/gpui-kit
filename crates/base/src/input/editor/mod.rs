@@ -10,6 +10,7 @@ use super::{EditorMode, InputBaseState, InputModeKind, element::LINE_NUMBER_RIGH
 /// The element owns this renderer, never the editing state: application styling
 /// must not become retained Base data. Measurement runs before wrapping; shaping
 /// runs only for visible buffer lines after wrapping and folding are resolved.
+#[doc(hidden)]
 pub trait EditorLineNumberRenderer: 'static {
     /// Returns the number lane width (excluding the gap) and resolved gap.
     /// A zero digit count requests only the gap when line numbers are hidden.
@@ -19,6 +20,13 @@ pub trait EditorLineNumberRenderer: 'static {
         body_style: &TextStyle,
         window: &Window,
     ) -> (Pixels, Pixels);
+
+    /// Resolves a shared vertical offset from the configured fonts before shaping rows.
+    fn resolve_line_number_baseline_offset(
+        &self,
+        body_style: &TextStyle,
+        window: &Window,
+    ) -> Pixels;
 
     /// Shapes one supported, one-based line number, without padding characters.
     fn shape_line_number(
@@ -50,6 +58,11 @@ impl EditorLineNumberRenderer for () {
             .fold(px(0.), Pixels::max)
             * digit_count;
         (width, LINE_NUMBER_RIGHT_MARGIN)
+    }
+
+    fn resolve_line_number_baseline_offset(&self, _: &TextStyle, _: &Window) -> Pixels {
+        // The default renderer uses the body's own font and size.
+        px(0.)
     }
 
     fn shape_line_number(
@@ -318,6 +331,7 @@ impl Editor {
 
 impl<R: EditorLineNumberRenderer> Editor<R> {
     /// Supplies presentation for this element's frame without changing editor state.
+    #[doc(hidden)]
     pub fn with_line_number_renderer<T: EditorLineNumberRenderer>(self, renderer: T) -> Editor<T> {
         Editor {
             state: self.state,

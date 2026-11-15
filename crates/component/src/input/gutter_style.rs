@@ -44,6 +44,27 @@ impl EditorLineNumberRenderer for GutterStyle {
         (width, gap)
     }
 
+    fn resolve_line_number_baseline_offset(
+        &self,
+        body_style: &TextStyle,
+        window: &Window,
+    ) -> Pixels {
+        let number_style = self.resolve_text_style(body_style);
+        let text_system = window.text_system();
+        let line_height = window.line_height();
+        // Empty rows have no glyph metrics. Use the configured fonts so edits
+        // and syntax highlighting cannot move the line-number baseline.
+        let baseline = |style: &TextStyle| {
+            let size = style.font_size.to_pixels(window.rem_size());
+            let font_id = text_system.resolve_font(&style.font());
+            let ascent = text_system.ascent(font_id, size);
+            // GPUI's shaped layouts use a positive descent for centered painting.
+            let descent = text_system.descent(font_id, size).abs();
+            (line_height - ascent - descent) / 2. + ascent
+        };
+        baseline(body_style) - baseline(&number_style)
+    }
+
     fn shape_line_number(
         &self,
         number: usize,
@@ -77,9 +98,10 @@ impl EditorLineNumberRenderer for GutterStyle {
                 style: body_style.font_style,
             },
             color,
-            background_color: body_style.background_color,
-            underline: body_style.underline,
-            strikethrough: body_style.strikethrough,
+            // Body annotations describe editable text, not the gutter labels.
+            background_color: None,
+            underline: None,
+            strikethrough: None,
         };
         window.text_system().shape_line(
             label,

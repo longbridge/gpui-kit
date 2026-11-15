@@ -2770,6 +2770,7 @@ pub(super) struct PrepaintState {
     /// The child is the soft lines.
     line_numbers: Option<Vec<SmallVec<[ShapedLine; 1]>>>,
     line_number_right_edge_offset: Pixels,
+    line_number_baseline_offset: Pixels,
     /// Size of the scrollable area by entire lines.
     scroll_size: Size<Pixels>,
     /// Caret bounds for every selection, active flagged.
@@ -3065,6 +3066,12 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         // Wrapping and pointer mapping must share the gutter geometry used for painting.
         let (line_number_width, gutter_gap) =
             self.layout_line_numbers(&state, &text, &text_style, window);
+        let line_number_baseline_offset = if state.mode.line_number() {
+            self.line_number_renderer
+                .resolve_line_number_baseline_offset(&text_style, window)
+        } else {
+            px(0.)
+        };
         let line_number_right_edge_offset = line_number_width
             - gutter_gap
             - if state.mode.is_folding() {
@@ -3542,6 +3549,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             scroll_size,
             line_numbers,
             line_number_right_edge_offset,
+            line_number_baseline_offset,
             cursor_infos,
             cursor_scroll_offset,
             current_row,
@@ -3846,7 +3854,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 for line in lines {
                     let number_origin = point(
                         p.x + prepaint.line_number_right_edge_offset - line.width,
-                        p.y,
+                        origin.y + offset_y + prepaint.line_number_baseline_offset,
                     );
                     _ = line.paint(
                         number_origin,
@@ -4208,6 +4216,10 @@ mod tests {
             // Base must consume externally measured geometry without needing
             // the font or spacing configuration that produced it.
             (px(100.), self.0)
+        }
+
+        fn resolve_line_number_baseline_offset(&self, _: &TextStyle, _: &Window) -> Pixels {
+            px(0.)
         }
 
         fn shape_line_number(
