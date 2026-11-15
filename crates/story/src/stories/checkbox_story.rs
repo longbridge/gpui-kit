@@ -18,6 +18,7 @@ pub struct CheckboxStory {
     check4: bool,
     check5: bool,
     check6: bool,
+    files: [bool; 3],
     size: Size,
 }
 
@@ -49,6 +50,7 @@ impl CheckboxStory {
             check4: false,
             check5: false,
             check6: false,
+            files: [true, false, false],
             size: Size::default(),
         }
     }
@@ -106,6 +108,43 @@ impl Render for CheckboxStory {
                                 this.check3 = *checked;
                                 cx.notify();
                             })),
+                    ),
+            )
+            .child(
+                section("Indeterminate")
+                    .description("A group checkbox shows a dash while only some items are checked.")
+                    .child(
+                        v_flex()
+                            .gap_2()
+                            .child(
+                                Checkbox::new("all-files")
+                                    .with_size(self.size)
+                                    .label("All files")
+                                    .checked(self.files.iter().all(|checked| *checked))
+                                    .indeterminate(
+                                        self.files.iter().any(|checked| *checked)
+                                            && !self.files.iter().all(|checked| *checked),
+                                    )
+                                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
+                                        this.files = [*checked; 3];
+                                        cx.notify();
+                                    })),
+                            )
+                            .children(["README.md", "Cargo.toml", "main.rs"].into_iter().enumerate().map(
+                                |(ix, name)| {
+                                    Checkbox::new(("file", ix))
+                                        .with_size(self.size)
+                                        .ml_6()
+                                        .label(name)
+                                        .checked(self.files[ix])
+                                        .on_change(cx.listener(
+                                            move |this, checked: &bool, _, cx| {
+                                                this.files[ix] = *checked;
+                                                cx.notify();
+                                            },
+                                        ))
+                                },
+                            )),
                     ),
             )
             .child(
