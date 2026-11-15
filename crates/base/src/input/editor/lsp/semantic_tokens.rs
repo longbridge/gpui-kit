@@ -198,7 +198,7 @@ fn decode_semantic_tokens(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{HighlightStyle, hsla};
+    use gpui::hsla;
     use lsp_types::{SemanticToken, SemanticTokenType, SemanticTokensLegend};
 
     fn legend() -> SemanticTokensLegend {
@@ -212,13 +212,12 @@ mod tests {
 
     impl HighlightStyleResolver for TestTheme {
         fn style(&self, name: &str) -> Option<crate::text::InlineHighlight> {
-            (name == "keyword" || name == "comment").then_some(
-                InlineHighlight::from(HighlightStyle {
-                    color: Some(hsla(0.5, 0.5, 0.5, 1.)),
-                    ..Default::default()
-                })
-                .with_font_family(Some("Semantic".into())),
-            )
+            (name == "keyword" || name == "comment").then(|| {
+                let mut style = InlineHighlight::default();
+                style.color = Some(hsla(0.5, 0.5, 0.5, 1.));
+                style.font_family = Some("Semantic".into());
+                style
+            })
         }
     }
 
@@ -305,11 +304,15 @@ mod tests {
         );
         assert_eq!(styles[0].0, 0..6, "keyword token maps to bytes 0..6");
         assert_eq!(
-            styles[0].1.get_font_family().map(|family| family.as_ref()),
+            styles[0]
+                .1
+                .font_family
+                .as_ref()
+                .map(|family| family.as_ref()),
             Some("Semantic")
         );
         assert!(
-            styles[0].1.get_style() != HighlightStyle::default(),
+            styles[0].1 != InlineHighlight::default(),
             "'keyword' should resolve to a non-default style on default-dark"
         );
     }

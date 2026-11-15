@@ -78,6 +78,7 @@ impl MultiLineMode for EditorMode {}
 /// [`InputModeKind`] is *behavior*: points where the engine hands control back
 /// during an edit. Adding a field an editor renders belongs here and leaves
 /// the engine's callbacks alone.
+#[doc(hidden)]
 pub trait InputExtras: Default + 'static {
     /// Decoration ranges to paint, innermost collection first.
     fn decoration_layers(&self) -> Vec<&[TextDecoration]> {

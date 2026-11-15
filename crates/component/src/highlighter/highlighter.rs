@@ -1225,7 +1225,7 @@ impl SyntaxHighlighter {
 
         // NOTE: DO NOT remove this comment, it is used for debugging.
         // for style in &styles {
-        //     println!("---- style: {:?} - {:?}", style.0, style.1.get_style().color);
+        //     println!("---- style: {:?} - {:?}", style.0, style.1.color);
         // }
         // println!("--------------------------------");
 
@@ -1334,32 +1334,30 @@ pub(crate) fn unique_styles(
 
 /// Merge other style (Other on top)
 fn merge_highlight_style(style: &mut InlineHighlight, other: &InlineHighlight) {
-    let font_family = other.get_font_family().or(style.get_font_family()).cloned();
-    let mut merged = style.get_style();
-    let other = other.get_style();
-    let color_style = &mut merged;
+    if let Some(font_family) = &other.font_family {
+        style.font_family = Some(font_family.clone());
+    }
     if let Some(color) = other.color {
-        color_style.color = Some(color);
+        style.color = Some(color);
     }
     if let Some(font_weight) = other.font_weight {
-        color_style.font_weight = Some(font_weight);
+        style.font_weight = Some(font_weight);
     }
     if let Some(font_style) = other.font_style {
-        color_style.font_style = Some(font_style);
+        style.font_style = Some(font_style);
     }
     if let Some(background_color) = other.background_color {
-        color_style.background_color = Some(background_color);
+        style.background_color = Some(background_color);
     }
     if let Some(underline) = other.underline {
-        color_style.underline = Some(underline);
+        style.underline = Some(underline);
     }
     if let Some(strikethrough) = other.strikethrough {
-        color_style.strikethrough = Some(strikethrough);
+        style.strikethrough = Some(strikethrough);
     }
     if let Some(fade_out) = other.fade_out {
-        color_style.fade_out = Some(fade_out);
+        style.fade_out = Some(fade_out);
     }
-    *style = InlineHighlight::from(merged).with_font_family(font_family);
 }
 
 #[cfg(test)]
@@ -1390,7 +1388,7 @@ mod tests {
 
         assert_eq!(styles, vec![(0..text.len(), expected)]);
         assert_eq!(
-            styles[0].1.get_font_family().map(|font| font.as_ref()),
+            styles[0].1.font_family.as_ref().map(|font| font.as_ref()),
             Some("JetBrains Mono")
         );
     }
@@ -1532,17 +1530,17 @@ mod tests {
         if left.len() != right.len() {
             println!("\n---------------------------------------------");
             for (range, style) in left.iter() {
-                println!("({:?}, {})", range, color_name(style.get_style().color));
+                println!("({:?}, {})", range, color_name(style.color));
             }
             println!("---------------------------------------------");
             panic!("left {} styles, right {} styles", left.len(), right.len());
         }
         for (left, right) in left.into_iter().zip(right) {
-            if left.1.get_style().color != right.1.color || left.0 != right.0 {
+            if left.1.color != right.1.color || left.0 != right.0 {
                 panic!(
                     "\n left: ({:?}, {})\nright: ({:?}, {})\n",
                     left.0,
-                    color_name(left.1.get_style().color),
+                    color_name(left.1.color),
                     right.0,
                     color_name(right.1.color)
                 );
@@ -1658,13 +1656,11 @@ console.log(answer);
         let theme = HighlightTheme::default_dark();
         let styles = highlighter.styles(&(0..markdown.len()), theme.as_ref());
         let keyword_start = markdown.find("fn first").unwrap();
-        let keyword_color = theme
-            .style("keyword")
-            .and_then(|style| style.get_style().color);
+        let keyword_color = theme.style("keyword").and_then(|style| style.color);
         assert!(styles.iter().any(|(range, style)| {
             range.start <= keyword_start
                 && range.end >= keyword_start + 2
-                && style.get_style().color == keyword_color
+                && style.color == keyword_color
         }));
     }
 
@@ -1953,8 +1949,8 @@ $x = 1;
                 styles.iter().any(|(range, style)| {
                     range.start <= start
                         && range.end >= end
-                        && style.get_style().font_weight == Some(gpui::FontWeight::BOLD)
-                        && style.get_style().font_style == Some(gpui::FontStyle::Italic)
+                        && style.font_weight == Some(gpui::FontWeight::BOLD)
+                        && style.font_style == Some(gpui::FontStyle::Italic)
                 }),
                 "{text:?} should combine bold and italic styles"
             );

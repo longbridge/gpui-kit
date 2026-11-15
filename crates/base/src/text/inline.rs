@@ -45,28 +45,24 @@ use crate::{
 /// need a separate list of font ranges or another pass over syntax captures.
 /// `None` keeps the family of the enclosing text style.
 #[derive(Clone, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct InlineHighlight {
-    pub(super) style: HighlightStyle,
-    pub(super) font_family: Option<SharedString>,
+    // Keep these attributes flat like GPUI's HighlightStyle so callers can
+    // read and refine captured styles without unpacking a second style.
+    pub color: Option<Hsla>,
+    pub background_color: Option<Hsla>,
+    pub font_weight: Option<gpui::FontWeight>,
+    pub font_style: Option<gpui::FontStyle>,
+    pub underline: Option<gpui::UnderlineStyle>,
+    pub strikethrough: Option<gpui::StrikethroughStyle>,
+    pub fade_out: Option<f32>,
+    pub font_family: Option<SharedString>,
     pub(super) font_size_scale: Option<f32>,
     /// Typography and box refinements for an inline code span.
     pub(super) code_style: Option<StyleRefinement>,
 }
 
 impl InlineHighlight {
-    pub fn with_font_family(mut self, font_family: Option<SharedString>) -> Self {
-        self.font_family = font_family;
-        self
-    }
-
-    pub fn get_font_family(&self) -> Option<&SharedString> {
-        self.font_family.as_ref()
-    }
-
-    pub fn get_style(&self) -> HighlightStyle {
-        self.style
-    }
-
     pub(super) fn font_size(&self, body: Pixels, rem_size: Pixels) -> Pixels {
         self.code_style
             .as_ref()
@@ -121,7 +117,14 @@ impl InlineHighlight {
 
     /// Layers `other` over `self`, the way [`HighlightStyle::highlight`] does.
     pub(crate) fn highlight(mut self, other: &InlineHighlight) -> Self {
-        self.style = self.style.highlight(other.style);
+        let style = HighlightStyle::from(&self).highlight(HighlightStyle::from(other));
+        self.color = style.color;
+        self.background_color = style.background_color;
+        self.font_weight = style.font_weight;
+        self.font_style = style.font_style;
+        self.underline = style.underline;
+        self.strikethrough = style.strikethrough;
+        self.fade_out = style.fade_out;
         if other.font_family.is_some() {
             self.font_family = other.font_family.clone();
         }
@@ -138,10 +141,28 @@ impl InlineHighlight {
 impl From<HighlightStyle> for InlineHighlight {
     fn from(style: HighlightStyle) -> Self {
         Self {
-            style,
-            font_family: None,
-            font_size_scale: None,
-            code_style: None,
+            color: style.color,
+            background_color: style.background_color,
+            font_weight: style.font_weight,
+            font_style: style.font_style,
+            underline: style.underline,
+            strikethrough: style.strikethrough,
+            fade_out: style.fade_out,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<&InlineHighlight> for HighlightStyle {
+    fn from(style: &InlineHighlight) -> Self {
+        Self {
+            color: style.color,
+            background_color: style.background_color,
+            font_weight: style.font_weight,
+            font_style: style.font_style,
+            underline: style.underline,
+            strikethrough: style.strikethrough,
+            fade_out: style.fade_out,
         }
     }
 }
@@ -231,7 +252,7 @@ pub(super) fn foreground_highlights(
     );
     for (range, highlight) in &mut highlights {
         if let Some((_, color)) = ranges.iter().rev().find(|(r, _)| r.contains(&range.start)) {
-            highlight.style.color = Some(*color);
+            highlight.color = Some(*color);
         }
     }
     highlights
@@ -261,7 +282,7 @@ pub(super) fn fade_highlights(
     // GPUI fades only the glyph color, so explicit decoration colors fade
     // here too, or a link underline would show before its text does.
     for (_, highlight) in &mut combined {
-        let Some(fade_out) = highlight.style.fade_out else {
+        let Some(fade_out) = highlight.fade_out else {
             continue;
         };
         if let Some(code) = &mut highlight.code_style {
@@ -272,7 +293,7 @@ pub(super) fn fade_highlights(
                 border.fade_out(fade_out);
             }
         }
-        let style = &mut highlight.style;
+        let style = highlight;
         for color in [
             style.background_color.as_mut(),
             style.underline.as_mut().and_then(|u| u.color.as_mut()),
@@ -301,7 +322,9 @@ pub(crate) fn text_runs(
         if ix < range.start {
             runs.push(default_style.clone().to_run(range.start - ix));
         }
-        let mut style = default_style.clone().highlight(highlight.style);
+        let mut style = default_style
+            .clone()
+            .highlight(HighlightStyle::from(highlight));
         if let Some(code) = &highlight.code_style {
             // Font size is handled by the shaped fragment, not by a TextRun.
             style.font_features = code
@@ -1902,16 +1925,16 @@ mod fade_highlights_tests {
         assert_eq!(ranges, vec![0..2, 2..4, 4..6]);
 
         let (_, untouched) = &combined[0];
-        assert_eq!(untouched.style.fade_out, None);
-        assert_eq!(untouched.style.background_color.unwrap().a, 1.0);
+        assert_eq!(untouched.fade_out, None);
+        assert_eq!(untouched.background_color.unwrap().a, 1.0);
 
         let (_, faded_code) = &combined[1];
-        assert_eq!(faded_code.style.fade_out, Some(0.5));
-        assert_eq!(faded_code.style.background_color.unwrap().a, 0.5);
+        assert_eq!(faded_code.fade_out, Some(0.5));
+        assert_eq!(faded_code.background_color.unwrap().a, 0.5);
 
         let (_, faded_text) = &combined[2];
-        assert_eq!(faded_text.style.fade_out, Some(0.5));
-        assert!(faded_text.style.background_color.is_none());
+        assert_eq!(faded_text.fade_out, Some(0.5));
+        assert!(faded_text.background_color.is_none());
     }
 
     #[test]
@@ -1930,8 +1953,8 @@ mod fade_highlights_tests {
         let combined = fade_highlights(vec![(0..4, link)], &[(0..4, 0.75)]);
 
         let (_, faded) = &combined[0];
-        assert_eq!(faded.style.underline.unwrap().color.unwrap().a, 0.25);
-        assert_eq!(faded.style.strikethrough.unwrap().color.unwrap().a, 0.25);
+        assert_eq!(faded.underline.unwrap().color.unwrap().a, 0.25);
+        assert_eq!(faded.strikethrough.unwrap().color.unwrap().a, 0.25);
     }
 
     #[test]
@@ -1950,7 +1973,7 @@ mod fade_highlights_tests {
         let combined = fade_highlights(vec![(0..4, code)], &[(0..4, 0.75)]);
 
         let (_, faded) = &combined[0];
-        assert_eq!(faded.style.background_color.unwrap().a, 0.25);
+        assert_eq!(faded.background_color.unwrap().a, 0.25);
         assert_eq!(
             faded
                 .code_style
@@ -2557,10 +2580,8 @@ mod tests {
 
     fn mono(style: HighlightStyle) -> InlineHighlight {
         InlineHighlight {
-            style,
             font_family: Some(SharedString::from("Mono")),
-            font_size_scale: None,
-            code_style: None,
+            ..style.into()
         }
     }
 
@@ -2652,10 +2673,10 @@ mod tests {
 
         assert_eq!(combined.len(), 2);
         assert_eq!(combined[0].0, 0..6);
-        assert_eq!(combined[0].1.style.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(combined[0].1.font_weight, Some(FontWeight::BOLD));
         assert_eq!(combined[0].1.font_family, None);
         assert_eq!(combined[1].0, 6..10);
-        assert_eq!(combined[1].1.style.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(combined[1].1.font_weight, Some(FontWeight::BOLD));
         assert_eq!(combined[1].1.font_family.as_deref(), Some("Mono"));
     }
 

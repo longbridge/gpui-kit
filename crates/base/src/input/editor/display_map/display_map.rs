@@ -253,13 +253,13 @@ impl DisplayMap {
         }
     }
 
-    /// Set font parameters
-    pub(crate) fn set_font_runs(
+    /// Keep folded row positions aligned with syntax-aware wrapping.
+    pub(crate) fn apply_font_runs(
         &mut self,
         runs: Option<std::rc::Rc<[gpui::TextRun]>>,
         cx: &mut App,
     ) {
-        self.wrap_map.set_font_runs(runs, cx);
+        self.wrap_map.apply_font_runs(runs, cx);
         self.rebuild_fold_projection();
     }
 

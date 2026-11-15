@@ -1,4 +1,4 @@
-use gpui::{App, FontWeight, HighlightStyle, Hsla, SharedString};
+use gpui::{App, FontWeight, Hsla, SharedString};
 use gpui_base::text::InlineHighlight;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -230,29 +230,28 @@ pub struct ThemeStyle {
     /// Keep typography on the captured style so it follows the same binding
     /// as color and weight instead of a separate scope-to-font configuration.
     pub font_family: Option<SharedString>,
-    color: Option<Hsla>,
-    font_style: Option<FontStyle>,
-    font_weight: Option<FontWeightContent>,
+    pub color: Option<Hsla>,
+    pub font_style: Option<FontStyle>,
+    pub font_weight: Option<FontWeightContent>,
 }
 
 impl From<ThemeStyle> for InlineHighlight {
     fn from(style: ThemeStyle) -> Self {
-        Self::from(HighlightStyle {
-            color: style.color,
-            font_weight: style.font_weight.map(Into::into),
-            font_style: style.font_style.map(Into::into),
-            ..Default::default()
-        })
-        .with_font_family(style.font_family)
+        let mut highlight = Self::default();
+        highlight.color = style.color;
+        highlight.font_weight = style.font_weight.map(Into::into);
+        highlight.font_style = style.font_style.map(Into::into);
+        highlight.font_family = style.font_family;
+        highlight
     }
 }
 
 impl SyntaxColors {
     pub fn style(&self, name: &str) -> Option<InlineHighlight> {
-        self.get_style(name).cloned().map(Into::into)
+        self.find_style(name).cloned().map(Into::into)
     }
 
-    fn get_style(&self, name: &str) -> Option<&ThemeStyle> {
+    fn find_style(&self, name: &str) -> Option<&ThemeStyle> {
         if name.is_empty() {
             return None;
         }
@@ -308,13 +307,14 @@ impl SyntaxColors {
         } else if name.contains('.') {
             name.split('.')
                 .next()
-                .and_then(|prefix| self.get_style(prefix))
+                .and_then(|prefix| self.find_style(prefix))
         } else {
             None
         }
     }
 
     #[inline]
+    #[doc(hidden)]
     pub fn style_for_index(&self, index: usize) -> Option<InlineHighlight> {
         HIGHLIGHT_NAMES.get(index).and_then(|name| self.style(name))
     }
@@ -681,7 +681,8 @@ mod tests {
             syntax
                 .style("keyword")
                 .unwrap()
-                .get_font_family()
+                .font_family
+                .as_ref()
                 .map(|font| font.as_ref()),
             Some("JetBrains Mono")
         );
@@ -689,7 +690,8 @@ mod tests {
             syntax
                 .style("keyword.modifier")
                 .unwrap()
-                .get_font_family()
+                .font_family
+                .as_ref()
                 .map(|font| font.as_ref()),
             Some("JetBrains Mono")
         );

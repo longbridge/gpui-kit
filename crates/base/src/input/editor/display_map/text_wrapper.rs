@@ -507,7 +507,7 @@ impl TextWrapper {
         self.update_all(&self.text.clone(), cx);
     }
 
-    pub(crate) fn set_font_runs(&mut self, runs: Option<Rc<[gpui::TextRun]>>, cx: &mut App) {
+    pub(crate) fn apply_font_runs(&mut self, runs: Option<Rc<[gpui::TextRun]>>, cx: &mut App) {
         if self.font_runs == runs {
             return;
         }

@@ -139,13 +139,13 @@ impl WrapMap {
         self.wrapper.set_tab_size(tab_size, cx)
     }
 
-    /// Set font parameters
-    pub(super) fn set_font_runs(
+    /// Measure wrapping with the same font runs used for painting.
+    pub(super) fn apply_font_runs(
         &mut self,
         runs: Option<std::rc::Rc<[gpui::TextRun]>>,
         cx: &mut App,
     ) {
-        self.wrapper.set_font_runs(runs, cx);
+        self.wrapper.apply_font_runs(runs, cx);
     }
 
     /// Set font parameters

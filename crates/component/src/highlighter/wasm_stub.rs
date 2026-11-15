@@ -162,27 +162,26 @@ pub struct ThemeStyle {
 
 impl From<ThemeStyle> for InlineHighlight {
     fn from(style: ThemeStyle) -> Self {
-        Self::from(HighlightStyle {
-            color: style.color,
-            font_weight: style.font_weight.map(|w| match w {
-                FontWeightContent::Thin => gpui::FontWeight::THIN,
-                FontWeightContent::ExtraLight => gpui::FontWeight::EXTRA_LIGHT,
-                FontWeightContent::Light => gpui::FontWeight::LIGHT,
-                FontWeightContent::Normal => gpui::FontWeight::NORMAL,
-                FontWeightContent::Medium => gpui::FontWeight::MEDIUM,
-                FontWeightContent::Semibold => gpui::FontWeight::SEMIBOLD,
-                FontWeightContent::Bold => gpui::FontWeight::BOLD,
-                FontWeightContent::ExtraBold => gpui::FontWeight::EXTRA_BOLD,
-                FontWeightContent::Black => gpui::FontWeight::BLACK,
-            }),
-            font_style: style.font_style.map(|s| match s {
-                FontStyle::Normal => gpui::FontStyle::Normal,
-                FontStyle::Italic => gpui::FontStyle::Italic,
-                FontStyle::Underline => gpui::FontStyle::Normal,
-            }),
-            ..Default::default()
-        })
-        .with_font_family(style.font_family)
+        let mut highlight = Self::default();
+        highlight.color = style.color;
+        highlight.font_weight = style.font_weight.map(|w| match w {
+            FontWeightContent::Thin => gpui::FontWeight::THIN,
+            FontWeightContent::ExtraLight => gpui::FontWeight::EXTRA_LIGHT,
+            FontWeightContent::Light => gpui::FontWeight::LIGHT,
+            FontWeightContent::Normal => gpui::FontWeight::NORMAL,
+            FontWeightContent::Medium => gpui::FontWeight::MEDIUM,
+            FontWeightContent::Semibold => gpui::FontWeight::SEMIBOLD,
+            FontWeightContent::Bold => gpui::FontWeight::BOLD,
+            FontWeightContent::ExtraBold => gpui::FontWeight::EXTRA_BOLD,
+            FontWeightContent::Black => gpui::FontWeight::BLACK,
+        });
+        highlight.font_style = style.font_style.map(|s| match s {
+            FontStyle::Normal => gpui::FontStyle::Normal,
+            FontStyle::Italic => gpui::FontStyle::Italic,
+            FontStyle::Underline => gpui::FontStyle::Normal,
+        });
+        highlight.font_family = style.font_family;
+        highlight
     }
 }
 
@@ -251,10 +250,10 @@ pub struct SyntaxColors {
 
 impl SyntaxColors {
     pub fn style(&self, name: &str) -> Option<InlineHighlight> {
-        self.get_style(name).cloned().map(Into::into)
+        self.find_style(name).cloned().map(Into::into)
     }
 
-    fn get_style(&self, name: &str) -> Option<&ThemeStyle> {
+    fn find_style(&self, name: &str) -> Option<&ThemeStyle> {
         if name.is_empty() {
             return None;
         }
@@ -310,12 +309,13 @@ impl SyntaxColors {
         } else if name.contains('.') {
             name.split('.')
                 .next()
-                .and_then(|prefix| self.get_style(prefix))
+                .and_then(|prefix| self.find_style(prefix))
         } else {
             None
         }
     }
 
+    #[doc(hidden)]
     pub fn style_for_index(&self, index: usize) -> Option<InlineHighlight> {
         const HIGHLIGHT_NAMES: [&str; 41] = [
             "attribute",

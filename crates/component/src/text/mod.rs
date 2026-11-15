@@ -240,7 +240,7 @@ mod tests {
         assert!(
             styles
                 .iter()
-                .any(|(range, style)| range.contains(&string) && style.get_style().color.is_some()),
+                .any(|(range, style)| range.contains(&string) && style.color.is_some()),
             "the string must be colored: {styles:?}"
         );
         assert_eq!(
@@ -281,7 +281,7 @@ mod tests {
             styles
                 .iter()
                 .find(|(span, _)| span.start <= range.start && span.end >= range.end)
-                .and_then(|(_, style)| style.get_style().color)
+                .and_then(|(_, style)| style.color)
         }
 
         #[test]
@@ -315,12 +315,8 @@ mod tests {
 
             let light = HighlightTheme::default_light();
             let dark = HighlightTheme::default_dark();
-            let light_number = light
-                .style("number")
-                .and_then(|style| style.get_style().color);
-            let dark_number = dark
-                .style("number")
-                .and_then(|style| style.get_style().color);
+            let light_number = light.style("number").and_then(|style| style.color);
+            let dark_number = dark.style("number").and_then(|style| style.color);
             assert_ne!(
                 light_number, dark_number,
                 "the default themes must use different number colors"

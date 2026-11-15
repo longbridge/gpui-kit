@@ -1332,9 +1332,7 @@ fn code_background(
         })
         .fold(Pixels::ZERO, Pixels::max);
     let vertical_padding = font_size * 0.125 + shaped_line.descent / 2.;
-    let color = highlights
-        .iter()
-        .find_map(|(_, h)| h.style.background_color);
+    let color = highlights.iter().find_map(|(_, h)| h.background_color);
     let mut style = highlights
         .iter()
         .find_map(|(_, h)| h.code_style.clone())
@@ -1343,7 +1341,7 @@ fn code_background(
         style.background = color.map(Into::into);
     }
     for (_, highlight) in highlights.iter_mut() {
-        highlight.style.background_color = None;
+        highlight.background_color = None;
     }
     let insets = code_insets(highlights, font_size, window.rem_size());
     let top = if style.padding.top.is_some() {
@@ -2100,7 +2098,7 @@ mod tests {
     #[test]
     fn inline_code_near_the_wrap_width_does_not_overflow_the_flow() {
         use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
-        use gpui::{AbsoluteLength, Empty, HighlightStyle, TestApp};
+        use gpui::{AbsoluteLength, Empty, TestApp};
 
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
         let mut window = app.open_window(|_, _| Empty);
@@ -2116,10 +2114,10 @@ mod tests {
         let code = tail_text.find("code_span_here").unwrap();
         let code_range = code..code + "code_span_here".len();
         let code_highlight = InlineHighlight {
-            style: HighlightStyle::default(),
             font_family: Some(SharedString::from(MONO)),
             font_size_scale: None,
             code_style: None,
+            ..Default::default()
         };
         let items = vec![
             MeasureItem::Text {
@@ -2350,7 +2348,7 @@ mod tests {
     #[test]
     fn inline_code_style_keeps_equal_size_prose_separate_and_measures_its_box() {
         use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
-        use gpui::{Empty, HighlightStyle, TestApp, rems};
+        use gpui::{Empty, TestApp, rems};
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
         let mut window = app.open_window(|_, _| Empty);
         for rem_size in [px(14.), px(28.)] {
@@ -2373,10 +2371,8 @@ mod tests {
                     font_family: Some(MONO.into()),
                     font_size_scale: Some(0.875),
                     code_style: Some(code_style.clone()),
-                    style: HighlightStyle {
-                        background_color: Some(gpui::green()),
-                        ..Default::default()
-                    },
+                    background_color: Some(gpui::green()),
+                    ..Default::default()
                 };
                 let items = vec![MeasureItem::Text {
                     text: "before code after".into(),
