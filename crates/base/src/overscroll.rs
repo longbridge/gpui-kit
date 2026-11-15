@@ -112,12 +112,12 @@ impl Overscroll {
         self.moved_at = Some(now);
     }
 
-    /// Note the phase of a packet not handed to [`Self::packet`], such as a
-    /// sideways one: a touch or a lift there still marks the stream as the
-    /// trackpad's.
+    /// Note a packet not handed to [`Self::packet`], such as a sideways one:
+    /// it keeps the stream going, and a touch or a lift there still marks the
+    /// stream as the trackpad's.
     pub(crate) fn touch_phase(&mut self, phase: TouchPhase, now: Instant) {
+        self.follow(now);
         if phase != TouchPhase::Moved {
-            self.follow(now);
             self.touched = true;
         }
     }
@@ -655,6 +655,26 @@ mod tests {
         overscroll.touch_phase(TouchPhase::Started, start);
         let stretched = (1..=10).any(|n| {
             let at = start + Duration::from_millis(8 * n);
+            overscroll.packet(-40., TouchPhase::Moved, 400., at, text(&mut room))
+        });
+        assert!(stretched);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_swipe_that_leads_sideways_past_the_gap_still_bounces() {
+        // Sideways packets keep the stream alive for longer than a pause, so
+        // the first vertical packet does not start a new gesture.
+        let start = Instant::now();
+        let mut overscroll = Overscroll::default();
+        let mut room = 30.;
+        let lead = 2 * GESTURE_GAP.as_millis() as u64 / 8;
+        overscroll.touch_phase(TouchPhase::Started, start);
+        for n in 1..=lead {
+            overscroll.touch_phase(TouchPhase::Moved, start + Duration::from_millis(8 * n));
+        }
+        let stretched = (1..=10).any(|n| {
+            let at = start + Duration::from_millis(8 * (lead + n));
             overscroll.packet(-40., TouchPhase::Moved, 400., at, text(&mut room))
         });
         assert!(stretched);

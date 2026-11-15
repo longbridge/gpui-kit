@@ -74,6 +74,11 @@
           "type": ["number", "null"],
           "default": 8
         },
+        "window.radius": {
+          "description": "The corner radius of client-decorated windows, default is 0 (square).",
+          "type": ["number", "null"],
+          "default": 0
+        },
         "shadow": {
           "description": "Set shadows in the theme, for example the Input and Button, default is true.",
           "type": ["boolean", "null"],
@@ -287,6 +292,10 @@
         },
         "list.hover.background": {
           "description": "Hover background color for ListItem.",
+          "type": ["string", "null"]
+        },
+        "list.highlight.foreground": {
+          "description": "Text color for the part of a list row that matches the search query.",
           "type": ["string", "null"]
         },
         "muted.background": {

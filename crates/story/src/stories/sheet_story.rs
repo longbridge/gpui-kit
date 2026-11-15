@@ -249,7 +249,7 @@ impl SheetStory {
             selected_index: None,
             confirmed_index: None,
             items: items.clone(),
-            matches: items.clone(),
+            matches: items,
         };
         let list = cx.new(|cx| ListState::new(delegate, window, cx).searchable(true));
         let input1 = cx.new(|cx| InputState::new(window, cx).placeholder("Your Name"));

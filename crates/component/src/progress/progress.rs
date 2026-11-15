@@ -5,7 +5,8 @@ use gpui::{
     prelude::FluentBuilder, px, relative,
 };
 use gpui_base::{
-    Progress as BaseProgress, ProgressIndicator, ProgressTrack, Transition, transition,
+    LayoutDirection, LogicalStyledExt as _, Progress as BaseProgress, ProgressIndicator,
+    ProgressTrack, Transition, transition,
 };
 use instant::Duration;
 
@@ -88,6 +89,7 @@ impl RenderOnce for Progress {
         let loading = self.loading;
         let accessibility_label = self.accessibility_label;
         let reduce_motion = cx.reduce_motion();
+        let rtl = LayoutDirection::global(cx).is_rtl();
 
         let radius = self.style.corner_radii.clone();
         let mut inner_style = StyleRefinement::default();
@@ -140,7 +142,8 @@ impl RenderOnce for Progress {
                 ProgressIndicator::new()
                     .absolute()
                     .top_0()
-                    .left_0()
+                    // Progress fills from the start edge: the right in RTL.
+                    .inset_s(px(0.), cx)
                     .h_full()
                     .bg(bg)
                     .rounded(radius)
@@ -154,7 +157,11 @@ impl RenderOnce for Progress {
                                     let start =
                                         relative(ease_in_out(((delta - 0.5) / 0.5).clamp(0., 1.)));
                                     let end = relative(ease_in_out(1.0 - delta));
-                                    this.when(delta > 0.5, |this| this.left(start)).right(end)
+                                    if rtl {
+                                        this.when(delta > 0.5, |this| this.right(start)).left(end)
+                                    } else {
+                                        this.when(delta > 0.5, |this| this.left(start)).right(end)
+                                    }
                                 },
                             )
                             .into_any_element()

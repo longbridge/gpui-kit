@@ -6,7 +6,7 @@ use gpui::{
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point,
     prelude::FluentBuilder as _, px,
 };
-use gpui_base::spring;
+use gpui_base::{LayoutDirection, LogicalStyledExt as _, spring};
 use rust_i18n::t;
 use smallvec::SmallVec;
 
@@ -439,6 +439,8 @@ impl RenderOnce for TabBar {
             TabVariant::Segmented | TabVariant::Pill | TabVariant::Underline
         );
         let num_tabs = self.children.len();
+        let rtl = LayoutDirection::global(cx).is_rtl();
+        let has_suffix_or_menu = self.suffix.is_some() || self.menu;
 
         // Bounds tracking for tab indicator animation.
         // Uses Rc<RefCell> to avoid triggering re-renders from prepaint writes.
@@ -475,6 +477,8 @@ impl RenderOnce for TabBar {
                 _ => px(32.),
             },
             num_tabs,
+            rtl,
+            leading: usize::from(rtl && has_suffix_or_menu),
         };
         reveal.advance(window, cx);
 
@@ -484,7 +488,6 @@ impl RenderOnce for TabBar {
         let mut indicator_element = indicator.map(|(el, _)| el);
         let indicator_ready = indicator_element.is_some();
 
-        let has_suffix_or_menu = self.suffix.is_some() || self.menu;
         let view = window.current_view();
         let mut item_metas: Vec<(
             Option<SharedString>,
@@ -559,6 +562,11 @@ impl RenderOnce for TabBar {
             // own `flex_grow` / `flex_basis` (e.g. `flex_1()`) must size it.
             let flex_grow = tab.style().flex_grow;
             let flex_basis = tab.style().flex_basis;
+            // In RTL the strip runs from the right: the last tab, laid out
+            // first, takes the free space before it. An auto margin collapses
+            // to zero once the tabs overflow, so they still scroll from the
+            // origin rather than past the left edge of the viewport.
+            let push_end = rtl && !has_suffix_or_menu && ix + 1 == num_tabs;
 
             rendered_tabs.push(if let Some(ref rc) = bounds_rc {
                 let rc = rc.clone();
@@ -573,6 +581,7 @@ impl RenderOnce for TabBar {
                         this.style().flex_basis = flex_basis;
                         this
                     })
+                    .when(push_end, |this| this.ml_auto())
                     .on_prepaint(move |bounds, window, _| {
                         let mut measured = rc.borrow_mut();
                         if let Some(slot) = measured.tabs.get_mut(ix) {
@@ -612,6 +621,7 @@ impl RenderOnce for TabBar {
                         this.style().flex_basis = flex_basis;
                         this
                     })
+                    .when(push_end, |this| this.ml_auto())
                     .when(!disabled, |this| {
                         this.on_hover(move |hovered, _, cx| {
                             hovered_tab.update(cx, |state, cx| {
@@ -630,13 +640,25 @@ impl RenderOnce for TabBar {
                     .child(tab)
                     .into_any_element()
             } else {
-                tab.into_any_element()
+                tab.when(push_end, |this| this.ml_auto()).into_any_element()
             });
         }
+        // `ScrollHandle` indexes the strip's children in layout order, which
+        // `TabReveal::item` maps back to tab indices.
+        if rtl {
+            rendered_tabs.reverse();
+        }
+        let last_empty_space = has_suffix_or_menu.then(|| {
+            div()
+                .flex_shrink_0()
+                .when(rtl, |this| this.ml_auto())
+                .child(self.last_empty_space)
+        });
 
         tabs.group("tab-bar")
             .relative()
-            .flex()
+            // Prefix, tabs, overflow menu and suffix read from the start edge.
+            .flex_row_dir(cx)
             .items_center()
             .bg(bg)
             .text_color(cx.theme().tab_foreground)
@@ -690,8 +712,13 @@ impl RenderOnce for TabBar {
                             .overflow_x_scroll()
                             .lock_scroll_axis()
                             .track_scroll(&scroll_handle)
-                            .children(rendered_tabs)
-                            .when(has_suffix_or_menu, |this| this.child(self.last_empty_space)),
+                            .map(|this| {
+                                if rtl {
+                                    this.children(last_empty_space).children(rendered_tabs)
+                                } else {
+                                    this.children(rendered_tabs).children(last_empty_space)
+                                }
+                            }),
                     )
                     // Outside the tracked children so tab indices stay unchanged.
                     .child(ScrollableMask::vertical_wheel(&scroll_handle)),
@@ -750,6 +777,10 @@ struct TabReveal {
     /// How much of the neighbouring tab stays visible.
     peek: Pixels,
     num_tabs: usize,
+    /// Whether the strip is laid out right to left, last tab first.
+    rtl: bool,
+    /// Strip children before the tabs: the trailing space in RTL.
+    leading: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -776,23 +807,39 @@ impl TabReveal {
         cx.notify(self.view);
     }
 
+    /// The laid-out bounds of tab `ix`, which sits at a mirrored child index
+    /// in a right-to-left strip.
+    fn item(&self, ix: usize) -> Option<Bounds<Pixels>> {
+        if ix >= self.num_tabs {
+            return None;
+        }
+        let child = match self.rtl {
+            false => ix,
+            true => self.leading + self.num_tabs - 1 - ix,
+        };
+        self.scroll_handle.bounds_for_item(child)
+    }
+
     /// The horizontal offset that shows tab `ix` and `peek` of each neighbour,
     /// moving as little as possible. The tab itself wins on a narrow bar.
     fn offset_revealing(&self, ix: usize) -> Option<Pixels> {
         let handle = &self.scroll_handle;
         let viewport = handle.bounds();
-        let tab = handle.bounds_for_item(ix)?;
+        let tab = self.item(ix)?;
         let max = handle.max_offset().x;
+        // The tabs physically left and right of `ix`: its previous and next
+        // tab, swapped in a right-to-left strip.
+        let (left_ix, right_ix) = match self.rtl {
+            false => (ix.checked_sub(1), Some(ix + 1)),
+            true => (Some(ix + 1), ix.checked_sub(1)),
+        };
         // Child bounds are laid out unscrolled: content at x is on screen at
         // x + offset, so the visible content spans `viewport - offset`.
-        let want_left = match ix.checked_sub(1).and_then(|ix| handle.bounds_for_item(ix)) {
+        let want_left = match left_ix.and_then(|ix| self.item(ix)) {
             Some(prev) => (prev.right() - self.peek).max(prev.left()),
             None => viewport.left(),
         };
-        let want_right = match (ix + 1 < self.num_tabs)
-            .then(|| handle.bounds_for_item(ix + 1))
-            .flatten()
-        {
+        let want_right = match right_ix.and_then(|ix| self.item(ix)) {
             Some(next) => (next.left() + self.peek).min(next.right()),
             None => viewport.right() + max,
         };
@@ -1096,6 +1143,44 @@ mod tests {
         assert!(prefix.size.width > px(0.));
         assert!(child.size.width > px(0.));
         assert!(suffix.size.width > px(0.));
+    }
+
+    struct DirectionHarness {
+        suffix: bool,
+    }
+
+    impl Render for DirectionHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            TabBar::new("direction-tabs")
+                .w(px(400.))
+                .child(Tab::new().child(div().debug_selector(|| "rtl-tab-0".into()).child("A")))
+                .child(Tab::new().child(div().debug_selector(|| "rtl-tab-1".into()).child("B")))
+                .when(self.suffix, |this| {
+                    this.suffix(div().debug_selector(|| "rtl-suffix".into()).child("S"))
+                })
+        }
+    }
+
+    #[gpui::test]
+    fn tabs_start_from_the_right_in_rtl(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::theme::init(cx);
+            gpui_base::LayoutDirection::Rtl.set_global(cx);
+        });
+        for suffix in [false, true] {
+            let (_, cx) = cx.add_window_view(|_, _| DirectionHarness { suffix });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let first = cx.debug_bounds("rtl-tab-0").unwrap();
+            let second = cx.debug_bounds("rtl-tab-1").unwrap();
+            assert!(second.right() < first.left(), "suffix: {suffix}");
+            // The first tab sits against the start (right) edge of the bar.
+            assert!(first.right() > px(360.), "suffix: {suffix}");
+            if suffix {
+                let suffix = cx.debug_bounds("rtl-suffix").unwrap();
+                assert!(suffix.right() < second.left());
+            }
+        }
     }
 
     struct ScrollHarness {

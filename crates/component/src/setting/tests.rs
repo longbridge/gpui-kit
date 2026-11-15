@@ -52,7 +52,7 @@ fn item_with_height(keyword: &'static str, height: f32) -> SettingItem {
         div()
             .h(px(height))
             .child("Setting")
-            .debug_selector(move || selector.clone())
+            .debug_selector(move || selector)
     })
     .keywords([keyword])
 }
@@ -163,6 +163,44 @@ fn search_preserves_the_page_and_clicks_use_original_indices(cx: &mut TestAppCon
     search(&host, "", cx);
     assert_eq!(selection(&host, cx), (1, None));
     assert!(cx.debug_bounds("settings-no-results").is_none());
+}
+
+#[gpui::test]
+fn the_shown_pages_title_folds_and_unfolds_its_groups(cx: &mut TestAppContext) {
+    // Row centers: General 68, Appearance 104, then its Colors 136 and Fonts
+    // 168 and Editor 204, or Editor 140 while Appearance is folded.
+    let (host, cx) = setup(cx);
+    assert_eq!(selection(&host, cx), (1, None));
+
+    // Appearance is on display, so its title folds it: Editor moves up.
+    click_nav(104., cx);
+    assert_eq!(selection(&host, cx), (1, None));
+    click_nav(140., cx);
+    assert_eq!(selection(&host, cx), (2, None));
+
+    // Going to a folded page opens it.
+    click_nav(104., cx);
+    assert_eq!(selection(&host, cx), (1, None));
+    click_nav(136., cx);
+    assert_eq!(selection(&host, cx), (1, Some(1)));
+
+    // Going to an open page keeps it open.
+    click_nav(204., cx);
+    assert_eq!(selection(&host, cx), (2, None));
+    click_nav(104., cx);
+    assert_eq!(selection(&host, cx), (1, None));
+    click_nav(168., cx);
+    assert_eq!(selection(&host, cx), (1, Some(2)));
+
+    // With one of its groups selected, the title folds and unfolds it too.
+    click_nav(104., cx);
+    click_nav(140., cx);
+    assert_eq!(selection(&host, cx), (2, None));
+    click_nav(104., cx);
+    click_nav(104., cx);
+    click_nav(104., cx);
+    click_nav(136., cx);
+    assert_eq!(selection(&host, cx), (1, Some(1)));
 }
 
 #[gpui::test]

@@ -143,7 +143,8 @@ export default class App extends View {
     assert_builds("first draw", &first_draw_builds, 1, 1, 5);
     draw(&mut context);
     let second_draw_builds = command::command_probe::take();
-    assert_builds("second draw", &second_draw_builds, 1, 1, 5);
+    // An unchanged, unnotified view reuses its previous frame (gpui-fast 0.1.14).
+    assert_builds("second draw", &second_draw_builds, 0, 0, 0);
     context.update(|_, cx| assert_eq!(view.read(cx).build_error(), None));
     context.simulate_click(point(px(40.), px(50.)), Modifiers::default());
     context.simulate_keystrokes("b");

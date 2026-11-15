@@ -279,6 +279,7 @@ Base also provides the following choices:
 | Keep content mounted through exit | `Presence` | Sample while logically closed; render until `should_render()` becomes false. Reopening during exit reverses from the current sample. |
 | Delay repeated items | `Stagger` | Computes a delay by index and origin; it does not own the list or its IDs. |
 | Expand content of unknown height | `MotionReveal` | Measures the child and clips its visible height by caller-supplied progress. It does not sample or animate progress itself. |
+| A transition that outlives its element, as in a virtualized row | `TransitionState` | The caller holds the state; `sample(target, policy, window, cx)` behaves like `transition_with_status`, including frame requests while `Delayed` or `Running`. |
 
 See the [Base Motion guide](../base/motion.md) for the full signatures, validation rules, examples, and benchmark. Its `Transition` is distinct from the older `gpui_kit::base::animation::EffectTransition`, which wraps GPUI `with_animation` to apply predefined fade, slide, width, and height effects. For new target-driven work, use `base::motion` primitives and apply the sampled value yourself.
 

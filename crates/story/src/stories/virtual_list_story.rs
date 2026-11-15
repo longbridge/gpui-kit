@@ -240,7 +240,7 @@ impl Render for VirtualListStory {
                             .size_full()
                             .child(
                                 v_virtual_list(
-                                    cx.entity().clone(),
+                                    cx.entity(),
                                     "items",
                                     self.item_sizes.clone(),
                                     move |story, visible_range, _, cx| {

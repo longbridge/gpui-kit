@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(svg.style().text.color, Some(gpui::red()));
         assert_eq!(svg.style().size.width, Some(gpui::rems(1.5).into()));
 
-        let rotated = icon.rotate(gpui::radians(std::f32::consts::PI)).clone();
+        let rotated = icon.rotate(gpui::radians(std::f32::consts::PI));
         assert_eq!(
             rotated.transformation,
             Some(Transformation::rotate(gpui::radians(std::f32::consts::PI)))

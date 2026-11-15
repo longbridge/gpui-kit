@@ -189,11 +189,11 @@ where
                             })
                             .detach();
 
-                        menu.clone()
+                        menu
                     }
                 };
 
-                menu.clone()
+                menu
             })
     }
 }
@@ -264,7 +264,7 @@ impl Element for TriggerFocus {
                 (focus_handle, Some(state))
             });
         let build = self.build.take().expect("TriggerFocus is laid out once");
-        let mut child = build(focus_handle.clone(), window, cx);
+        let mut child = build(focus_handle, window, cx);
         let layout_id = child.request_layout(window, cx);
 
         (layout_id, TriggerFocusFrame { child })

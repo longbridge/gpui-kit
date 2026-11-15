@@ -69,7 +69,8 @@ actions!(
         ShowPanelInfo,
         ToggleListActiveHighlight,
         ToggleFpsMonitor,
-        ToggleAppMenuBar
+        ToggleAppMenuBar,
+        ToggleRightToLeft
     ]
 );
 
@@ -227,6 +228,18 @@ pub fn init(cx: &mut App) {
     }
 
     extend_component_translations();
+    // `GPUI_KIT_RTL=1` starts the gallery right to left (e.g. for
+    // screenshots); `0` forces left to right. Set before `gpui_kit::init`
+    // so it wins over the system language.
+    if let Ok(value) = std::env::var("GPUI_KIT_RTL") {
+        let rtl = matches!(value.as_str(), "1" | "true" | "yes");
+        if rtl {
+            gpui_kit::base::LayoutDirection::Rtl
+        } else {
+            gpui_kit::base::LayoutDirection::Ltr
+        }
+        .set_global(cx);
+    }
     gpui_kit::init(cx);
     AppState::init(cx);
     themes::init(cx);
@@ -751,6 +764,7 @@ impl StoryState {
             "DataTableStory" => story!(DataTableStory),
             "TableStory" => story!(TableStory),
             "LabelStory" => story!(LabelStory),
+            "LayoutDirectionStory" => story!(LayoutDirectionStory),
             "TooltipStory" => story!(TooltipStory),
             "AccordionStory" => story!(AccordionStory),
             "SidebarStory" => story!(SidebarStory),

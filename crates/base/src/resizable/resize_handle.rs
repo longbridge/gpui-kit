@@ -2,9 +2,9 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Axis, Div, Element, ElementId, Entity, GlobalElementId, Hitbox,
-    HitboxBehavior, InteractiveElement, Interactivity, IntoElement, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement,
-    Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    HitboxBehavior, InteractiveElement, Interactivity, IntoElement, MouseButton, MouseDownEvent,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
+    StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{AxisExt as _, InteractiveElementExt, TestSupportExt as _, theme::ActiveTheme as _};
@@ -168,7 +168,7 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
     fn new(id: impl Into<ElementId>, axis: Axis) -> Self {
         let id = id.into();
         Self {
-            id: id.clone(),
+            id,
             edge: None,
             drag: None,
             appearance: None,
@@ -438,6 +438,7 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
                 let hitbox = hitbox.clone();
                 move |ev: &MouseDownEvent, phase, window, _| {
                     if phase.bubble()
+                        && ev.button == MouseButton::Left
                         && hitbox.is_hovered_at(ev.position, window)
                         && state.set(ResizeHandleState::Pressed)
                     {
@@ -449,7 +450,15 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
             window.on_mouse_event({
                 let state = state.clone();
                 let hitbox = hitbox.clone();
-                move |ev: &MouseMoveEvent, phase, window, _| {
+                move |ev: &MouseMoveEvent, phase, window, cx| {
+                    if phase.capture()
+                        && ev.pressed_button != Some(MouseButton::Left)
+                        && state.get().is_active()
+                    {
+                        state.set(ResizeHandleState::Idle);
+                        cx.stop_active_drag(window);
+                        window.refresh();
+                    }
                     if !phase.bubble() {
                         return;
                     }
@@ -466,6 +475,17 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
                         _ => ResizeHandleState::Idle,
                     };
                     if state.set(next) {
+                        window.refresh();
+                    }
+                }
+            });
+
+            window.on_mouse_event({
+                let state = state.clone();
+                move |_: &MouseExitEvent, phase, window, cx| {
+                    if phase.capture() && state.get().is_active() {
+                        state.set(ResizeHandleState::Idle);
+                        cx.stop_active_drag(window);
                         window.refresh();
                     }
                 }
@@ -888,11 +908,8 @@ mod tests {
                                 let heard = heard.clone();
                                 move |hovered: &bool, _, _| heard.handle_hovered.set(Some(*hovered))
                             })
-                            .on_double_click({
-                                let heard = heard.clone();
-                                move |_, _, _| {
-                                    heard.double_clicks.set(heard.double_clicks.get() + 1)
-                                }
+                            .on_double_click(move |_, _, _| {
+                                heard.double_clicks.set(heard.double_clicks.get() + 1)
                             })
                             .on_drag(Resize, |drag, _, _, cx| cx.new(|_| drag.clone())),
                     ),

@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -249,9 +250,11 @@ impl SettingPage {
                     .refine_style(&self.header_style)
                     .child(
                         h_flex()
+                            .flex_row_dir(cx)
                             .justify_between()
                             .child(
                                 h_flex()
+                                    .flex_row_dir(cx)
                                     .gap_1()
                                     .child(self.title.clone())
                                     .when_some(self.title_suffix.clone(), |this, suffix| {

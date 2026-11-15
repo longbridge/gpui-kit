@@ -67,6 +67,7 @@ const RUST_STORY_ORDER = [
   "InputGroupStory",
   "KbdStory",
   "LabelStory",
+  "LayoutDirectionStory",
   "ListStory",
   "MenuStory",
   "MarkerStory",

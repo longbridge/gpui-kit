@@ -1,8 +1,8 @@
 use crate::common;
 use gpui_kit::base::text::{TextView, TextViewState};
 use gpui_kit::{
-    AppContext as _, Bounds, Context, Entity, Modifiers, MouseButton, Pixels, Render,
-    TestAppContext, VisualTestContext, Window,
+    AppContext as _, Bounds, Context, Entity, Focusable as _, Modifiers, MouseButton, Pixels,
+    Render, TestAppContext, VisualTestContext, Window,
     base::{SelectableText, TextSelection},
     component, div, point,
     prelude::*,
@@ -533,6 +533,59 @@ fn highlighter_change_preserves_selection_but_parser_change_clears_it(cx: &mut T
             .read_with(cx, |state, _| state.selected_source_range())
             .is_none()
     );
+}
+
+/// Text selected outside a focused input, as in a chat where the composer
+/// keeps the focus while the user selects a message.
+struct TextBesideInput {
+    input: Entity<component::input::InputState>,
+}
+
+impl Render for TextBesideInput {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .h(px(40.))
+                    .child(SelectableText::new("message", "Selected beside the box")),
+            )
+            .child(
+                component::input::Input::new(&self.input)
+                    .id("composer")
+                    .w(px(240.)),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn copy_in_an_input_with_nothing_selected_copies_the_window_selection(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (window, view) = common::open_window(cx, None, |window, cx| {
+        cx.new(|cx| TextBesideInput {
+            input: cx.new(|cx| component::input::InputState::new(window, cx)),
+        })
+    });
+    let mut cx = VisualTestContext::from_window(window.into(), cx);
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let input = view.read_with(&cx, |view, _| view.input.clone());
+    cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    drag(&mut cx, point(px(1.), px(10.)), point(px(400.), px(10.)));
+    assert_eq!(
+        window_selected_text(&mut cx).trim(),
+        "Selected beside the box"
+    );
+    assert!(
+        cx.update(|window, cx| input.read(cx).focus_handle(cx).is_focused(window)),
+        "selecting text must leave the focus in the input"
+    );
+    assert_eq!(copy_selection(&mut cx), "Selected beside the box");
 }
 
 fn window_selected_text(cx: &mut VisualTestContext) -> String {

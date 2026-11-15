@@ -200,6 +200,11 @@ impl ShadowSpec {
 }
 
 fn parse_hex(hex: &str) -> Option<Hsla> {
+    // `from_str_radix` accepts a leading sign, so `+00000` would otherwise
+    // parse as a six-digit color.
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
     let expand = |c: char| {
         let d = c.to_digit(16)?;
         Some(d * 17)
@@ -243,6 +248,8 @@ mod tests {
         assert!(parse_hex("ff000080").is_some());
         assert!(parse_hex("ff00").is_none());
         assert!(parse_hex("zzzzzz").is_none());
+        assert!(parse_hex("+abcde").is_none());
+        assert!(parse_hex("+abcdef0").is_none());
     }
 
     #[test]

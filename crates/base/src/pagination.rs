@@ -219,7 +219,7 @@ mod tests {
         assert_eq!(last.current_page(), 10);
         assert_eq!(last.previous_page(), Some(9));
         assert_eq!(last.next_page(), None);
-        assert_eq!(last.clone().disabled(true).previous_page(), None);
+        assert_eq!(last.disabled(true).previous_page(), None);
     }
 
     #[test]

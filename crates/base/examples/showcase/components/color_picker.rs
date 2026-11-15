@@ -112,7 +112,7 @@ impl BaseShowcase {
                     .child(picker.hex_input().clone()),
             );
 
-        let open_state = state.clone();
+        let open_state = state;
         let root = ColorPicker::new("example-color-picker")
             .open(open)
             .track_focus(&focus_handle)

@@ -14,9 +14,9 @@ use crate::text::TextViewState;
 /// Holds the deferred interaction context open for as long as it is alive.
 ///
 /// Handed out by [`GlobalState::register_deferred_popover`]; drop it to close
-/// the context again. The registry only ever weighs the token's liveness, so
-/// there is nothing inside to read.
-pub struct DeferredPopover(#[allow(dead_code)] Rc<()>);
+/// the context again. The registry only ever weighs the token's liveness and
+/// its place among the others, so there is nothing inside to read.
+pub struct DeferredPopover(Rc<()>);
 
 /// Application-wide state shared by Base behaviors.
 pub struct GlobalState {
@@ -147,6 +147,18 @@ impl GlobalState {
             .deferred_popovers
             .iter()
             .any(|popover| popover.strong_count() > 0)
+    }
+
+    /// Whether a deferred popup that opened after `popover` is still open,
+    /// which is how a popup opened from inside another one appears here.
+    pub(crate) fn has_deferred_popover_after(popover: &DeferredPopover, cx: &App) -> bool {
+        let token = Rc::downgrade(&popover.0);
+        Self::global(cx)
+            .deferred_popovers
+            .iter()
+            .skip_while(|other| !other.ptr_eq(&token))
+            .skip(1)
+            .any(|other| other.strong_count() > 0)
     }
 
     /// Registers an open deferred popup, which stays registered for as long as

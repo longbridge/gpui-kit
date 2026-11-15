@@ -1318,7 +1318,7 @@ mod tests {
         let directory = TempDir::new();
         let file = directory.path().join("storage.json");
         crate::capability::install(Capabilities::new().storage(true));
-        set_storage_path(file.clone());
+        set_storage_path(file);
 
         with_host(|ctx| {
             // Values are strings, exactly as they are in a browser, so anything

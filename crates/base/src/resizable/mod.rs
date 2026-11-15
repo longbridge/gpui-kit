@@ -618,13 +618,10 @@ mod tests {
     #[gpui::test]
     fn panel_made_fixed_in_place_keeps_its_size_across_a_container_resize(cx: &mut TestAppContext) {
         let state = cx.update(|cx| cx.new(|_| ResizableState::default()));
-        let (view, cx) = cx.add_window_view({
-            let state = state.clone();
-            move |_, _| FixedPanelHarness {
-                width: px(840.),
-                fixed: false,
-                state,
-            }
+        let (view, cx) = cx.add_window_view(move |_, _| FixedPanelHarness {
+            width: px(840.),
+            fixed: false,
+            state,
         });
         let draw = |cx: &mut VisualTestContext, update: fn(&mut FixedPanelHarness)| {
             view.update(cx, |view, cx| {
@@ -670,12 +667,9 @@ mod tests {
     #[gpui::test]
     fn caller_owned_state_settles_on_the_same_frame(cx: &mut TestAppContext) {
         let state = cx.update(|cx| cx.new(|_| ResizableState::default()));
-        let (view, cx) = cx.add_window_view({
-            let state = state.clone();
-            move |_, _| CallerStateHarness {
-                width: px(800.),
-                state,
-            }
+        let (view, cx) = cx.add_window_view(move |_, _| CallerStateHarness {
+            width: px(800.),
+            state,
         });
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);

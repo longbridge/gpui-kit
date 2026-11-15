@@ -581,7 +581,7 @@ impl Render for ComboboxStory {
                                 let (icon, title) = match trigger.selection() {
                                     [] => (None, None),
                                     [(_index, item)] => {
-                                        (Some(item.icon.clone()), Some(item.title().clone()))
+                                        (Some(item.icon.clone()), Some(item.title()))
                                     }
                                     items => (
                                         None,
@@ -685,7 +685,7 @@ impl Render for ComboboxStory {
                             .render_trigger(|trigger, _, cx| {
                                 let title = match trigger.selection() {
                                     [] => None,
-                                    [(_index, item)] => Some(item.title().clone()),
+                                    [(_index, item)] => Some(item.title()),
                                     items => {
                                         Some(SharedString::new(format!("{} selected", items.len())))
                                     }

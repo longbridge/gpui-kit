@@ -46,6 +46,7 @@ const shellHref = computed(() => isZh.value ? url('zh-CN/shell') : url('shell'))
 const contributorsHref = computed(() => isZh.value ? url('zh-CN/contributors') : url('contributors'));
 const skillsHref = computed(() => isZh.value ? url('zh-CN/skills') : url('skills'));
 const llmsHref = computed(() => url('llms-full.txt'));
+const nativeShellHref = computed(() => isZh.value ? 'https://nsh.dev/zh-CN' : 'https://nsh.dev');
 
 // Indent depth and token widths (rem) per line
 const editorLines = [
@@ -106,6 +107,11 @@ const copy = computed(() =>
               signalStars: "GitHub stars",
               signalLicense: "软件 · Apache-2.0",
               signalPlatforms: "macOS / Windows / Linux / WebAssembly",
+              nshTitle: "：一次构建，全平台 Native",
+              nshTeam: "源自 GPUI Kit 团队",
+              nshDescription: ["GPUI Kit 深耕桌面；若要覆盖移动端、Web 乃至终端，动态分发界面，或嵌入现有 App，", " 是更好的选择。"],
+              nshBadge: "推荐",
+              nshAction: "了解更多",
               capsKicker: "核心能力",
               capsTitle: "为信息密集型软件而生。",
               capsDescription: "复杂桌面应用真正需要的系统能力，都已整合在框架之中。",
@@ -161,6 +167,11 @@ const copy = computed(() =>
               signalStars: "stars on GitHub",
               signalLicense: "Software · Apache-2.0",
               signalPlatforms: "macOS, Windows, Linux, WebAssembly",
+              nshTitle: ": Build once, native everywhere",
+              nshTeam: "Crafted by the GPUI Kit team",
+              nshDescription: ["GPUI Kit is made for the desktop. For mobile, the web, the terminal, dynamic delivery or embedding in apps, ", " is the better choice."],
+              nshBadge: "Recommended",
+              nshAction: "Learn more",
               capsKicker: "Capabilities",
               capsTitle: "Built for information-dense software.",
               capsDescription: "The systems that real desktop applications need are integrated into one framework.",
@@ -272,6 +283,26 @@ const copy = computed(() =>
     }
 }</code></pre>
                 </div>
+            </div>
+        </section>
+
+        <section class="band band--nsh">
+            <div class="band__inner nsh-banner">
+                <a :href="nativeShellHref" class="nsh-banner__logo-link" target="_blank" rel="noopener noreferrer" tabindex="-1" aria-hidden="true">
+                <img class="nsh-banner__logo nsh-logo nsh-logo--light" :src="url('nsh-logo.svg')" alt="" />
+                <img class="nsh-banner__logo nsh-logo nsh-logo--dark" :src="url('nsh-logo-dark.svg')" alt="" />
+                </a>
+                <div class="nsh-banner__copy">
+                    <div class="nsh-banner__title">
+                        <h2><a :href="nativeShellHref" target="_blank" rel="noopener noreferrer">Native Shell</a>{{ copy.nshTitle }}</h2>
+                        <span class="nsh-banner__badge">{{ copy.nshBadge }}</span>
+                        <span class="nsh-banner__team">{{ copy.nshTeam }}</span>
+                    </div>
+                    <p>{{ copy.nshDescription[0] }}<a :href="nativeShellHref" target="_blank" rel="noopener noreferrer">Native Shell</a>{{ copy.nshDescription[1] }}</p>
+                </div>
+                <a :href="nativeShellHref" class="btn btn--primary nsh-banner__action" target="_blank" rel="noopener noreferrer">
+                    {{ copy.nshAction }}
+                </a>
             </div>
         </section>
 
@@ -460,6 +491,45 @@ const copy = computed(() =>
 }
 
 .band--principle { overflow: hidden; background: var(--sidebar); }
+.band--nsh { background: var(--sidebar); }
+
+.nsh-banner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(1rem, 2.5vw, 1.75rem);
+    padding-block: clamp(1.75rem, 3vw, 2.25rem);
+}
+
+.nsh-banner__logo { display: block; width: 3rem; height: 3rem; }
+
+.nsh-banner__copy h2 { margin: 0; font-size: clamp(1.25rem, 2vw, 1.5rem); font-weight: 640; letter-spacing: -0.03em; line-height: 1.25; }
+.nsh-banner__logo-link { display: block; }
+.nsh-banner__copy h2 a, .nsh-banner__copy p a { color: inherit !important; text-decoration: underline; text-decoration-color: var(--border); text-decoration-thickness: 1px; text-underline-offset: 0.2em; transition: text-decoration-color 150ms ease; }
+.nsh-banner__copy h2 a:hover, .nsh-banner__copy p a:hover { text-decoration-color: currentColor; }
+
+.nsh-banner__action { min-height: 2.25rem; padding-inline: 0.95rem; font-size: 0.85rem; }
+
+.nsh-banner__title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.65rem; }
+
+.nsh-banner__badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: var(--brand);
+    color: var(--brand-contrast);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.nsh-banner__team { color: color-mix(in srgb, var(--muted-foreground) 65%, var(--background)); font-size: 0.8rem; }
+
+.nsh-banner__copy p { margin: 0.3rem 0 0; color: var(--muted-foreground); font-size: 0.95rem; line-height: 1.6; }
+
+html[lang^="zh"] .nsh-banner__copy h2 { letter-spacing: 0; }
 
 
 
@@ -994,11 +1064,15 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
 
 @media (max-width: 860px) {
     .paths__grid { grid-template-columns: minmax(0, 1fr); }
+    .nsh-banner { grid-template-columns: auto minmax(0, 1fr); }
+    .nsh-banner > .btn { grid-column: 2; justify-self: start; }
     .principle { grid-template-columns: 1fr; align-items: start; }
 }
 
 @media (max-width: 640px) {
     .hero__inner, .band__inner { width: calc(100% - 2rem); }
+    .nsh-banner { grid-template-columns: minmax(0, 1fr); }
+    .nsh-banner > .btn { grid-column: auto; }
     .caps__grid { grid-template-columns: minmax(0, 1fr); }
 }
 

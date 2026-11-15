@@ -1,4 +1,6 @@
-use gpui::{App, Bounds, IntoElement, ParentElement, Pixels, Styled as _, Window, canvas};
+use gpui::{
+    App, Bounds, ElementId, IntoElement, ParentElement, Pixels, Styled as _, Window, canvas,
+};
 
 use crate::TextSelectionScopeId;
 
@@ -10,6 +12,18 @@ pub trait ElementExt: ParentElement + Sized {
         Self: IntoElement,
     {
         crate::text_selection::text_selection_scope(scope, self)
+    }
+
+    /// Keeps the window's text selection when this element is pressed, for
+    /// one that acts on the selection, such as a button beside it: pressing
+    /// anywhere on it neither clears the selection nor starts a new one, so
+    /// its click still finds the selection. `id` must be unique among this
+    /// element's children. Works inside a cached view.
+    ///
+    /// The window remembers each element marked this way until it closes, so
+    /// mark the row of buttons, not each row of a long list.
+    fn keep_text_selection(self, id: impl Into<ElementId>) -> Self {
+        self.child(crate::text_selection::keep_text_selection(id.into()))
     }
 
     /// Invokes `callback` during prepaint with this element's resolved bounds.

@@ -4,6 +4,7 @@ use gpui::{
 };
 
 use crate::{ActiveTheme as _, Collapsible, Selectable, h_flex, menu::DropdownMenu};
+use gpui_base::LogicalStyledExt as _;
 
 /// Footer for the [`super::Sidebar`].
 #[derive(IntoElement)]
@@ -69,6 +70,7 @@ impl DropdownMenu for SidebarFooter {}
 impl RenderOnce for SidebarFooter {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
         h_flex()
+            .flex_row_dir(cx)
             .id("sidebar-footer")
             .gap_2()
             .p_2()
