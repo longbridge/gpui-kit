@@ -29,3 +29,9 @@ order: 1
 从[入门指南](./getting-started.md)开始，使用 [TextView](./text-view.md) 渲染可选择的 Markdown 与 HTML，或阅读[文本选择](./text-selection.md)为自定义 renderer 接入窗口级选择。每个页面都提供 Rust 代码和可运行的 WASM 示例。
 
 [History](./history.md) 介绍两种用途明确不同的状态结构：`History` 是包含根条目、当前条目、后退与前进分支的导航轨迹，`UndoHistory` 则记录分组的 undo 与 redo 事务。[Plot](./plot.md) 是图表的无样式基础：比例尺、图形、坐标轴、把 `Plot` 变成子元素的 element，以及 hover 跟踪；颜色和动效时序都交给你的设计系统。
+
+<h2 id="community-design-systems">社区设计系统</h2>
+
+探索基于 GPUI Base 构建的第三方设计系统。这些项目由社区独立维护，支持的版本和项目状态请查阅各自文档。
+
+- **[gpui-kit-material](https://github.com/mizorewww/gpui-kit-material)** — 基于 GPUI Kit 和 `gpui-base` 构建的 Material 3 与 M3 Expressive 组件、主题 token 和动效。[API 文档](https://docs.rs/gpui-kit-material)。
