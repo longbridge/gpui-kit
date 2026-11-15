@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use gpui_kit::component::{
     IndexPath,
+    button::Button,
     list::{List, ListDelegate, ListItem, ListState},
     table::{Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableSelection, TableState},
     tree::{Tree, TreeItem, TreeState},
@@ -281,6 +282,81 @@ fn a_focused_table_is_its_named_grid(cx: &mut TestAppContext) {
         assert_eq!(window.find("table-inner").role(), None);
     })
     .unwrap();
+}
+
+struct TableBetweenButtons {
+    table: Entity<TableState<Rows>>,
+}
+impl Render for TableBetweenButtons {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(Button::new("before").label("Before"))
+            .child(div().h(px(200.)).child(DataTable::new(&self.table)))
+            .child(Button::new("after").label("After"))
+    }
+}
+
+/// The table is one tab stop: Tab and Shift+Tab leave it, and the arrow keys
+/// keep moving inside it, in both row and cell selection.
+#[gpui_kit::test]
+fn tab_moves_focus_through_a_table_as_one_stop(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    for cell_selectable in [false, true] {
+        let (handle, content) =
+            common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+                cx.new(|cx| TableBetweenButtons {
+                    table: cx.new(|cx| {
+                        TableState::new(Rows, window, cx).cell_selectable(cell_selectable)
+                    }),
+                })
+            });
+        let table = cx
+            .update_window(handle.into(), |_, _, cx| content.read(cx).table.clone())
+            .unwrap();
+        let press_and_expect =
+            |key: &'static str, expected: &'static str, cx: &mut TestAppContext| {
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.press(key, cx);
+                    window.render_frame(cx);
+                    assert_eq!(
+                        window.find(expected).focused(),
+                        Some(true),
+                        "{key} should focus {expected} (cell_selectable: {cell_selectable})",
+                    );
+                })
+                .unwrap();
+                cx.run_until_parked();
+            };
+
+        cx.update_window(handle.into(), |_, window, cx| {
+            let focus = table.focus_handle(cx);
+            window.focus(&focus, cx);
+            if cell_selectable {
+                table.update(cx, |table, cx| table.set_selected_cell(0, 0, cx));
+            }
+            window.render_frame(cx);
+        })
+        .unwrap();
+        press_and_expect("shift-tab", "before", cx);
+        press_and_expect("tab", "table", cx);
+        press_and_expect("right", "table", cx);
+        let selection = cx
+            .update_window(handle.into(), |_, _, cx| {
+                let table = table.read(cx);
+                (table.selected_cell(), table.selected_col())
+            })
+            .unwrap();
+        if cell_selectable {
+            assert_eq!(selection.0, Some((0, 1)));
+        } else {
+            assert_eq!(selection.1, Some(1));
+        }
+        press_and_expect("tab", "after", cx);
+        press_and_expect("shift-tab", "table", cx);
+    }
 }
 
 struct NamedRecords {
@@ -812,6 +888,7 @@ struct TableProbe {
     rows_count: usize,
     columns_count: usize,
     left_columns_count: usize,
+    right_columns_count: usize,
     visible_row_ranges: Vec<Range<usize>>,
     visible_column_ranges: Vec<Range<usize>>,
 }
@@ -821,6 +898,7 @@ impl TableProbe {
             rows_count,
             columns_count: 2,
             left_columns_count: 0,
+            right_columns_count: 0,
             visible_row_ranges: Vec::new(),
             visible_column_ranges: Vec::new(),
         }
@@ -839,6 +917,10 @@ impl TableDelegate for TableProbe {
             .when(col_ix < self.left_columns_count, |column| {
                 column.fixed_left()
             })
+            .when(
+                col_ix + self.right_columns_count >= self.columns_count,
+                |column| column.fixed_right(),
+            )
     }
     fn render_td(
         &mut self,
@@ -965,6 +1047,55 @@ fn table_reports_one_scrollable_column_with_and_without_fixed_columns(cx: &mut T
         })
         .unwrap();
     }
+}
+
+/// Right-fixed columns stay at the right edge while the columns between the
+/// fixed ones scroll, and are left out of the scrollable column ranges.
+#[gpui_kit::test]
+fn table_pins_right_fixed_columns_while_scrolling(cx: &mut TestAppContext) {
+    let delegate = TableProbe {
+        columns_count: 8,
+        left_columns_count: 1,
+        right_columns_count: 1,
+        ..TableProbe::new(3)
+    };
+    let (handle, table) = open_table_probe_with_delegate(cx, delegate, false);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let left_cell = window.find("table-cell:0:0").bounds();
+        let right_cell = window.find("table-cell:0:7").bounds();
+        let right_header = window.find(("col-header", 7usize)).bounds();
+        assert_eq!(right_header.left(), right_cell.left());
+        assert!(
+            right_cell.right() > px(600.) && right_cell.right() <= px(640.),
+            "the right-fixed column is not at the right edge: {right_cell:?}"
+        );
+
+        // A right-fixed column is always in view, so scrolling to it keeps
+        // the offset.
+        table.update(cx, |table, cx| table.scroll_to_col(7, cx));
+        assert_eq!(table.read(cx).horizontal_scroll_handle.offset().x, px(0.));
+
+        table.update(cx, |table, cx| table.scroll_to_col(6, cx));
+        window.render_frame(cx);
+        assert!(table.read(cx).horizontal_scroll_handle.offset().x < px(0.));
+        assert_eq!(window.find("table-cell:0:0").bounds(), left_cell);
+        assert_eq!(window.find("table-cell:0:7").bounds(), right_cell);
+        assert_eq!(
+            window.find(("col-header", 7usize)).bounds().left(),
+            right_cell.left()
+        );
+
+        // Ranges count only the six columns between the fixed ones.
+        let ranges = table.read(cx).delegate().visible_column_ranges.clone();
+        assert!(!ranges.is_empty());
+        assert!(
+            ranges.iter().all(|range| range.end <= 6),
+            "reported a fixed column: {ranges:?}"
+        );
+        assert_eq!(ranges.last().map(|range| range.end), Some(6));
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]

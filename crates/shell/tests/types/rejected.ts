@@ -26,6 +26,13 @@ new EmptyHeader().title('No results');
 // @ts-expect-error EmptyMedia supports only default and icon variants.
 new EmptyMedia().p(4).variant('avatar');
 
+// @ts-expect-error A group is named with a string.
+div().group(7);
+// @ts-expect-error A group hover needs the function that declares its styles.
+div().group_hover('row');
+// @ts-expect-error A group hover takes the group's name first.
+div().group_hover(style => style.p(2), 'row');
+
 // @ts-expect-error Registered components reject undeclared click handlers.
 new Spinner().on_click(() => {});
 // @ts-expect-error Style calls must not expose a forbidden handler.

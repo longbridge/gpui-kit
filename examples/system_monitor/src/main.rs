@@ -454,13 +454,7 @@ impl SystemMonitor {
             .gap_4()
             .flex_1()
             .child(self.render_chart("CPU Usage", data.clone(), |d| d.cpu, cx.theme().red, cx))
-            .child(self.render_chart(
-                "Memory Usage",
-                data.clone(),
-                |d| d.memory,
-                cx.theme().blue,
-                cx,
-            ))
+            .child(self.render_chart("Memory Usage", data, |d| d.memory, cx.theme().blue, cx))
     }
 
     fn render_processes_tab(&self, _cx: &Context<Self>) -> impl IntoElement {

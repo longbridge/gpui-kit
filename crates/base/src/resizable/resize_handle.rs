@@ -168,7 +168,7 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
     fn new(id: impl Into<ElementId>, axis: Axis) -> Self {
         let id = id.into();
         Self {
-            id: id.clone(),
+            id,
             edge: None,
             drag: None,
             appearance: None,
@@ -888,11 +888,8 @@ mod tests {
                                 let heard = heard.clone();
                                 move |hovered: &bool, _, _| heard.handle_hovered.set(Some(*hovered))
                             })
-                            .on_double_click({
-                                let heard = heard.clone();
-                                move |_, _, _| {
-                                    heard.double_clicks.set(heard.double_clicks.get() + 1)
-                                }
+                            .on_double_click(move |_, _, _| {
+                                heard.double_clicks.set(heard.double_clicks.get() + 1)
                             })
                             .on_drag(Resize, |drag, _, _, cx| cx.new(|_| drag.clone())),
                     ),

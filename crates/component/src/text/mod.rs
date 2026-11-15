@@ -11,8 +11,8 @@ pub use frontmatter::FrontmatterPlugin;
 pub use gpui_base::text::{
     InlineElement, InlineRenderContext, MarkdownBlockParserFn, MarkdownBlockRenderFn,
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, RangeHighlight,
-    RangeHighlightError, RenderedText, SelectionFormat, TableData, TextViewMotion, TextViewState,
-    markdown_ast,
+    RangeHighlightError, RenderedText, SelectionFormat, TableData, TaskToggleEvent, TextViewMotion,
+    TextViewState, markdown_ast,
 };
 pub use style::TextViewStyle;
 
@@ -57,6 +57,7 @@ pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewS
         .with_code_block(code_block)
         .with_table(table)
         .with_table_head(table_head)
+        .with_table_row_hover(theme.table_hover)
         .with_inline_code(gpui::HighlightStyle {
             background_color: Some(theme.accent),
             ..Default::default()
@@ -379,6 +380,7 @@ mod tests {
         assert_eq!(style.link(), theme.link);
         assert_eq!(style.selection(), theme.selection);
         assert_eq!(style.inline_code().background_color, Some(theme.accent));
+        assert_eq!(style.table_row_hover(), Some(theme.table_hover));
         let radius = theme.semantic_tokens().radius.md;
         assert_eq!(style.table().corner_radii.top_left, Some(radius.into()));
         assert_eq!(style.table().corner_radii.top_right, Some(radius.into()));
@@ -418,7 +420,8 @@ mod tests {
             .style(style)
             .selectable(true)
             .scrollable(true)
-            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())));
+            .image_source(|uri| gpui::ImageSource::from(std::path::PathBuf::from(uri.as_ref())))
+            .on_task_toggle(|_event, _, _| {});
     }
 
     #[test]

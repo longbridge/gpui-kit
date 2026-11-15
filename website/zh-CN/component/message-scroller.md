@@ -190,6 +190,21 @@ cx.notify();
 
 `reset(...)` 会重新安装 row 数量并恢复尾部跟随。若产品需要从未读位置或已保存 index 打开会话，可在 reset 后由应用调用 `scroll_to_item(...)`；已保存位置的持久化和恢复条件不属于组件状态。
 
+`scroll_to_item(...)` 会把 row 顶部对齐到 viewport 顶部。若要让读者回到完全相同的像素位置，离开时保存 `logical_scroll_top()`，返回时传给 `scroll_to_offset(...)`：
+
+```rust
+// 离开会话时。
+let saved = scroller.read(cx).logical_scroll_top();
+
+// 返回时，row 不变。
+scroller.update(cx, |state, cx| {
+    state.reset(messages.len(), cx);
+    let _ = state.scroll_to_offset(saved, cx);
+});
+```
+
+如果期间在 `saved.item_ix` 之前增删了 row，先按增删数量调整 index。
+
 ## 跳到最新按钮
 
 默认会在用户离开尾部时显示内置按钮。可以本地化标签、关闭按钮或自定义样式：
@@ -298,6 +313,7 @@ GPUI 版本保留必要的滚动行为，省略 React primitive 中重复的 Pro
 | `remeasure(cx)` | 标记所有 row 重新测量。 |
 | `remeasure_items(range, cx)` | 标记指定 range 重新测量。 |
 | `scroll_to_item(index, cx)` | 定位到指定 index；越界返回 `false`。 |
+| `scroll_to_offset(offset, cx)` | 精确恢复 `logical_scroll_top()` 返回的位置；越界返回 `false`。 |
 | `scroll_to_end(cx)` | 恢复尾部跟随并滚到最新内容。 |
 
 ### `MessageScroller`

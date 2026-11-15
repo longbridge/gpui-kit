@@ -129,7 +129,7 @@ fn panel(parts: NodeParts) -> ResizablePanel {
     warn_unhonoured_a11y(&behavior, "resizable_panel", &[]);
     // Like `Switch`, the panel is not an interactive element — it is a sized
     // box around one — so a state style on it has nowhere to land.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a resizable_panel are ignored; style an element inside it instead"
         );
@@ -139,7 +139,7 @@ fn panel(parts: NodeParts) -> ResizablePanel {
     if let Some(size) = behavior.panel_size {
         panel = panel.size(size);
     }
-    if let Some(range) = behavior.size_range.clone() {
+    if let Some(range) = behavior.size_range {
         panel = panel.size_range(range);
     }
 

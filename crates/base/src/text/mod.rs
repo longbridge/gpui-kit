@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod block_surface_tests;
 mod document;
 pub mod editor_host;
 mod editor_seam;

@@ -10,7 +10,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder, relative, rems,
 };
-use gpui_base::{Radio as BaseRadio, RadioGroup as BaseRadioGroup};
+use gpui_base::{LogicalStyledExt as _, Radio as BaseRadio, RadioGroup as BaseRadioGroup};
 
 /// A Radio element.
 ///
@@ -216,6 +216,8 @@ impl RenderOnce for Radio {
                 |this, (position, size)| this.set_position(position, size),
             )
             .h_flex()
+            // The indicator leads, on the start edge.
+            .flex_row_dir(cx)
             .gap_x_2()
             .text_color(cx.theme().foreground)
             .items_start()
@@ -388,7 +390,7 @@ impl From<String> for Radio {
 }
 
 impl RenderOnce for RadioGroup {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let on_click = self.on_click;
         let disabled = self.disabled;
         let selected_ix = self.selected_index;
@@ -396,7 +398,7 @@ impl RenderOnce for RadioGroup {
         let base = if self.layout.is_vertical() {
             v_flex()
         } else {
-            h_flex().w_full().flex_wrap()
+            h_flex().flex_row_dir(cx).w_full().flex_wrap()
         };
 
         let total = self.radios.len();

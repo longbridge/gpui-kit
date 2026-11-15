@@ -10,7 +10,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _, px, relative, rems, svg,
 };
-use gpui_base::{CheckboxIndicator, spring};
+use gpui_base::{CheckboxIndicator, LogicalStyledExt as _, spring};
 
 /// A Checkbox element.
 #[derive(IntoElement)]
@@ -279,6 +279,8 @@ impl RenderOnce for Checkbox {
                 })
             })
             .h_flex()
+            // The indicator leads, on the start edge.
+            .flex_row_dir(cx)
             .gap_2()
             .items_start()
             .line_height(relative(1.))

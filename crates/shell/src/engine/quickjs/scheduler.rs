@@ -508,7 +508,7 @@ fn js_sleep<'js>(ctx: Ctx<'js>, ms: Opt<f64>) -> JsResult<Promise<'js>> {
         ),
     )?;
 
-    let sleeping = task.clone();
+    let sleeping = task;
     host.foreground
         .clone()
         .spawn(async move {
@@ -1037,7 +1037,7 @@ pub(super) fn stream<'js, E: StreamEvent>(
         .with_cancellation(cancel),
     )?;
 
-    let running = task.clone();
+    let running = task;
     let foreground = host.foreground.scheduler_executor();
     host.foreground
         .clone()
@@ -1183,7 +1183,7 @@ pub(super) fn actor_deferred<'js>(
         .with_rejection(Persistent::save(ctx, reject)),
     )?;
     let (completion, receiver) = async_channel::bounded(1);
-    let running = task.clone();
+    let running = task;
     let foreground = host.foreground.scheduler_executor();
     host.foreground
         .clone()
@@ -1257,7 +1257,7 @@ where
         .with_rejection(Persistent::save(ctx, reject)),
     )?;
     let (completion, receiver) = async_channel::bounded(1);
-    let running = task.clone();
+    let running = task;
     let foreground = host.foreground.scheduler_executor();
     host.foreground
         .clone()
@@ -1330,7 +1330,7 @@ where
         .with_rejection(Persistent::save(ctx, reject)),
     )?;
 
-    let running = task.clone();
+    let running = task;
     host.foreground
         .clone()
         .spawn(async move {
@@ -1400,7 +1400,7 @@ where
         .with_rejection(Persistent::save(ctx, reject)),
     )?;
 
-    let running = task.clone();
+    let running = task;
     host.foreground
         .clone()
         .spawn(async move {
@@ -1460,10 +1460,9 @@ where
     )?;
 
     let running = task.clone();
-    let watching = task.clone();
+    let watching = task;
     let monitor_background = host.background.clone();
     host.foreground
-        .clone()
         .spawn(async move {
             loop {
                 monitor_background.timer(Duration::from_millis(25)).await;
@@ -1941,7 +1940,7 @@ mod tests {
         first.policy.replace(Some(first_policy.clone()));
         let first = register_unchecked(first);
         let second = TaskState::new("second", None, None);
-        second.policy.replace(Some(second_policy.clone()));
+        second.policy.replace(Some(second_policy));
         let second = register_unchecked(second);
 
         cancel_policy(&first_policy);
@@ -1967,7 +1966,7 @@ mod tests {
 
         let old =
             TaskState::new("reentrant old", None, None).with_application(old_generation.clone());
-        old.policy.replace(Some(reloaded_policy.clone()));
+        old.policy.replace(Some(reloaded_policy));
         let old = register_unchecked(old);
         let unrelated_generation = ApplicationGeneration::new(3);
         let unrelated =

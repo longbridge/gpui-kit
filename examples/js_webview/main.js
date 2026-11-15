@@ -6,6 +6,9 @@
 // script asks it for its title with `evaluate_script`, and the page answers
 // with `window.ipc.postMessage`, which arrives at `on_message`.
 //
+// A page needs the network grant a `fetch` of it would: `gpui-shell.json`
+// grants gpui-kit.com, so another address in the bar is refused.
+//
 //   cargo run -p gpui-shell -- run examples/js_webview
 //
 // On Linux the page needs an X11 window; in a Wayland session, start it with

@@ -71,7 +71,9 @@ impl ComponentMaterializer for LabelMaterializer {
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<LabelOp>().cloned())
             .collect::<Vec<_>>();
-        let mut component = Label::new(text.0.clone());
+        // Every label a script describes is built here, so each takes its
+        // element's id; the call-site default would be the same for all.
+        let mut component = Label::new(text.0.clone()).id(request.element_id().clone());
         for operation in operations {
             component = match operation {
                 LabelOp::Secondary(value) => component.secondary(value),
@@ -83,6 +85,18 @@ impl ComponentMaterializer for LabelMaterializer {
         wrapper.style().refine(&request.take_style());
         wrapper.extend(request.take_children()?);
         Ok(wrapper.into_any_element())
+    }
+}
+
+fn record_link_href(arguments: &[ComponentArgument]) -> Result<ComponentPayload, String> {
+    match arguments {
+        [ComponentArgument::String(value)] if gpui_shell::is_openable_url(value) => {
+            Ok(ComponentPayload::new(LinkOp::Href(value.to_owned())))
+        }
+        [ComponentArgument::String(_)] => {
+            Err("Link.href(url) expects an absolute HTTP(S) URL with a host".into())
+        }
+        _ => Err("Link.href expects one URL string".into()),
     }
 }
 
@@ -129,7 +143,7 @@ impl ComponentMaterializer for KbdMaterializer {
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<KbdOp>().cloned())
             .collect::<Vec<_>>();
-        let mut component = Kbd::new(stroke.clone());
+        let mut component = Kbd::new(stroke);
         for operation in operations {
             component = match operation {
                 KbdOp::Appearance(value) => component.appearance(value),
@@ -184,14 +198,9 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             MethodDescriptor::new(
             "href",
             vec![ArgumentDescriptor::new("href", ArgumentSchema::String)],
-            |arguments| match arguments {
-                [ComponentArgument::String(value)] => {
-                    Ok(ComponentPayload::new(LinkOp::Href(value.to_owned())))
-                }
-                _ => Err("Link.href expects one URL string".into()),
-            },
+            record_link_href,
         )
-        .with_documentation("Sets the external URL opened when activated.")])
+        .with_documentation("Sets the absolute HTTP(S) URL opened when activated.")])
 .with_documentation(
             "An external-resource link. Ordinary children, shell style, disabled state, and on_click are honored.",
         ))?;
@@ -232,4 +241,35 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             .with_documentation("A platform-formatted keyboard shortcut keycap."),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn href(url: &str) -> Result<ComponentPayload, String> {
+        record_link_href(&[ComponentArgument::String(url.to_owned())])
+    }
+
+    #[test]
+    fn link_href_accepts_only_http_urls_with_a_host() {
+        let payload = href("https://gpui-kit.com/docs").unwrap();
+        assert!(matches!(
+            payload.downcast_ref::<LinkOp>(),
+            Some(LinkOp::Href(url)) if url == "https://gpui-kit.com/docs"
+        ));
+
+        for refused in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "smb://server/share",
+            "docs/intro.html",
+            "https://",
+        ] {
+            let error = href(refused)
+                .err()
+                .unwrap_or_else(|| panic!("accepted {refused}"));
+            assert!(error.contains("absolute HTTP(S) URL"), "{refused}: {error}");
+        }
+    }
 }

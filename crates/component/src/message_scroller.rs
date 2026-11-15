@@ -66,10 +66,10 @@ impl MessageScrollerState {
     /// Return the row at the top of the viewport and how far into it the list
     /// is scrolled.
     ///
-    /// Wheel, trackpad, and scrollbar scrolls and [`Self::scroll_to_item`]
-    /// update it at once. [`Self::scroll_to_end`] and tail following settle it
-    /// when the list next lays out; right after `scroll_to_end`, `item_ix` is
-    /// [`Self::item_count`] until then.
+    /// Wheel, trackpad, and scrollbar scrolls, [`Self::scroll_to_item`] and
+    /// [`Self::scroll_to_offset`] update it at once. [`Self::scroll_to_end`]
+    /// and tail following settle it when the list next lays out; right after
+    /// `scroll_to_end`, `item_ix` is [`Self::item_count`] until then.
     pub fn logical_scroll_top(&self) -> ListOffset {
         self.list_state.logical_scroll_top()
     }
@@ -156,14 +156,26 @@ impl MessageScrollerState {
 
     /// Scroll to the row at `index`, if it exists.
     pub fn scroll_to_item(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
-        if index >= self.list_state.item_count() {
+        self.scroll_to_offset(
+            ListOffset {
+                item_ix: index,
+                offset_in_item: px(0.),
+            },
+            cx,
+        )
+    }
+
+    /// Scroll to a position [`Self::logical_scroll_top`] returned, if its row exists:
+    /// the row at the top of the viewport and how far into it the list is scrolled.
+    ///
+    /// Restores a saved reading position to the pixel, where [`Self::scroll_to_item`]
+    /// puts the top of the row at the top of the viewport.
+    pub fn scroll_to_offset(&mut self, offset: ListOffset, cx: &mut Context<Self>) -> bool {
+        if offset.item_ix >= self.list_state.item_count() {
             return false;
         }
 
-        self.list_state.scroll_to(ListOffset {
-            item_ix: index,
-            offset_in_item: px(0.),
-        });
+        self.list_state.scroll_to(offset);
         cx.notify();
         true
     }
@@ -581,6 +593,45 @@ mod tests {
             (after_wheel.item_ix, after_wheel.offset_in_item),
             (11, px(0.))
         );
+    }
+
+    #[gpui::test]
+    fn test_scroll_to_offset_restores_a_saved_position(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.new(|cx| MessageScrollerState::new(30, cx));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| ScrollerHarness { state }
+        });
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+        };
+        draw(cx);
+
+        let saved = ListOffset {
+            item_ix: 10,
+            offset_in_item: px(17.),
+        };
+        cx.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                let past_the_end = ListOffset {
+                    item_ix: 30,
+                    offset_in_item: px(0.),
+                };
+                assert!(!state.scroll_to_offset(past_the_end, cx));
+
+                // As an application does when a person comes back to a chat.
+                state.reset(30, cx);
+                assert!(state.scroll_to_offset(saved, cx));
+                assert!(!state.is_following_tail());
+            })
+        });
+        draw(cx);
+        let top = cx.update(|_, cx| state.read(cx).logical_scroll_top());
+        assert_eq!((top.item_ix, top.offset_in_item), (10, px(17.)));
     }
 
     /// A scrollbar drag to the bottom of the track must reach the end of the

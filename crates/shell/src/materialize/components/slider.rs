@@ -189,9 +189,9 @@ pub(in crate::materialize) fn slider_indicator(
     // among its children the script wanted it, and this is the only order a
     // slider is ever drawn in.
     let mut all: Children = Children::new();
-    if let Some(fill) = behavior.range_style.clone() {
+    if let Some(fill) = behavior.range_style.as_deref() {
         let mut element = div();
-        element.style().refine(&fill);
+        element.style().refine(fill);
         span(
             element.style(),
             axis(&behavior),
@@ -302,7 +302,7 @@ fn pin(refinement: &mut StyleRefinement, axis: Axis, along: f32) {
 
 /// Reports state styles on a part that cannot carry any.
 fn warn_unstateful(states: &StateStyles, component: &str, instead: &str) {
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {component} are ignored: it is not an interactive element. Put \
              them on the {instead} inside it"

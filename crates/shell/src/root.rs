@@ -749,7 +749,7 @@ impl ShellRoot {
                                 .border_1()
                                 .border_color(level_color(toast.level, colors))
                                 .child(toast.title.clone())
-                                .children(toast.description.clone().map(|description| {
+                                .children(toast.description.map(|description| {
                                     div().text_color(colors.muted_foreground).child(description)
                                 })),
                         )

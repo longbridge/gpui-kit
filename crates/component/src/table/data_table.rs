@@ -4,6 +4,7 @@ use crate::{
         Cancel, SelectDown, SelectFirst, SelectLast, SelectNextColumn, SelectPageDown,
         SelectPageUp, SelectPrevColumn, SelectUp,
     },
+    scroll::ScrollbarMode,
     table::{TableDelegate, TableState},
 };
 use gpui::{
@@ -25,19 +26,18 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("end", SelectLast, Some(CONTEXT)),
         KeyBinding::new("pageup", SelectPageUp, Some(CONTEXT)),
         KeyBinding::new("pagedown", SelectPageDown, Some(CONTEXT)),
-        KeyBinding::new("tab", SelectNextColumn, Some(CONTEXT)),
-        KeyBinding::new("shift-tab", SelectPrevColumn, Some(CONTEXT)),
     ]);
 }
 
 pub(super) struct TableOptions {
     pub(super) scroll_bounce: Option<bool>,
     pub(super) scrollbar_visible: Edges<bool>,
+    pub(super) scrollbar_mode: Option<ScrollbarMode>,
     /// Set stripe style of the table.
     pub(super) stripe: bool,
     /// Set to use border style of the table.
     pub(super) bordered: bool,
-    /// Draw the border on the right edge of the fixed columns.
+    /// Draw the border on the inner edge of the fixed columns.
     pub(super) fixed_cols_border: bool,
     /// The cell size of the table.
     pub(super) size: Size,
@@ -50,6 +50,7 @@ impl Default for TableOptions {
         Self {
             scroll_bounce: None,
             scrollbar_visible: Edges::all(true),
+            scrollbar_mode: None,
             stripe: false,
             bordered: true,
             fixed_cols_border: true,
@@ -68,7 +69,7 @@ impl Default for TableOptions {
 /// - **Virtual Scrolling**: Efficient rendering of large datasets
 /// - **Resizable Columns**: Drag column borders to resize
 /// - **Movable Columns**: Drag column headers to reorder
-/// - **Fixed Columns**: Pin columns to the left side
+/// - **Fixed Columns**: Pin columns to the left or right side
 /// - **Sortable Columns**: Click column headers to sort
 /// - **Context Menus**: Right-click support for rows and cells
 ///
@@ -155,8 +156,9 @@ where
         self
     }
 
-    /// Set whether to draw the border on the right edge of the fixed columns,
-    /// default to true.
+    /// Set whether to draw the border on the inner edge of the fixed columns,
+    /// the right edge of left-fixed columns and the left edge of right-fixed
+    /// columns, default to true.
     ///
     /// Turn it off when the fixed cells draw that edge themselves, so the
     /// boundary is not drawn twice.
@@ -172,6 +174,16 @@ where
             bottom: horizontal,
             ..Default::default()
         };
+        self
+    }
+
+    /// Set the show mode of both the vertical and horizontal scrollbars.
+    ///
+    /// Defaults to the theme's [`ScrollbarMode`]. A data grid can use
+    /// [`ScrollbarMode::Always`] so that the columns out of view are visible
+    /// without scrolling.
+    pub fn scrollbar_mode(mut self, mode: ScrollbarMode) -> Self {
+        self.options.scrollbar_mode = Some(mode);
         self
     }
 }
@@ -349,6 +361,7 @@ mod tests {
             .header_row_height(px(32.))
             .fixed_cols_border(false)
             .scrollbar_visible(false, true)
+            .scrollbar_mode(ScrollbarMode::Always)
             .with_size(Size::Small)
             .focus_ring(false);
         assert!(table.options.stripe);
@@ -358,6 +371,7 @@ mod tests {
         assert!(!table.options.fixed_cols_border);
         assert!(!table.options.scrollbar_visible.right);
         assert!(table.options.scrollbar_visible.bottom);
+        assert_eq!(table.options.scrollbar_mode, Some(ScrollbarMode::Always));
         assert_eq!(table.options.size, Size::Small);
         assert!(!table.is_focus_ring_enabled());
         assert!(table.focus_ring(true).is_focus_ring_enabled());

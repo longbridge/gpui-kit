@@ -104,9 +104,11 @@ pub(crate) struct LayoutKey {
     line_number: bool,
     marker_lane: bool,
     soft_wrap: bool,
+    split_ratio: f32,
 }
 
 impl LayoutKey {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         rem: Pixels,
         font_size: Pixels,
@@ -115,6 +117,7 @@ impl LayoutKey {
         line_number: bool,
         marker_lane: bool,
         soft_wrap: bool,
+        split_ratio: f32,
     ) -> Self {
         Self {
             rem,
@@ -124,6 +127,7 @@ impl LayoutKey {
             line_number,
             marker_lane,
             soft_wrap,
+            split_ratio,
         }
     }
 }
@@ -642,7 +646,18 @@ impl DiffState {
             return;
         }
         self.mode = mode;
+        // A diff shown from its top stays there: the top row's anchor is the
+        // file's first line, and revealing it scrolls the header off when
+        // rows wrap to heights the list has not measured yet.
+        let top = self.list.logical_scroll_top();
+        let at_top = top.item_ix == 0 && top.offset_in_item <= px(0.);
         self.rebuild_at_anchor();
+        if at_top {
+            self.list.scroll_to(ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.),
+            });
+        }
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
@@ -672,6 +687,41 @@ impl DiffState {
         self.expanded.iter_mut().for_each(Vec::clear);
         self.rebuild_at_anchor();
         cx.notify();
+    }
+
+    /// Collapses the given files to their headers, or expands them, without
+    /// emitting a user event. One rebuild covers the whole change; calling
+    /// [`Self::set_file_collapsed`] per file rebuilds the rows each time,
+    /// which freezes a view of thousands of files.
+    pub fn set_files_collapsed(
+        &mut self,
+        paths: impl IntoIterator<Item = SharedString>,
+        collapsed: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut changed = false;
+        for path in paths {
+            let Some(ix) = self.file_ix(&path) else {
+                continue;
+            };
+            let path = self.files[ix].path().clone();
+            changed |= if collapsed {
+                self.collapsed.insert(path)
+            } else {
+                self.collapsed.remove(&path)
+            };
+        }
+        if changed {
+            self.rebuild_at_anchor();
+            cx.notify();
+        }
+    }
+
+    /// Collapses every file to its header, or expands them all, in one
+    /// rebuild like [`Self::set_files_collapsed`].
+    pub fn set_all_files_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        let paths: Vec<SharedString> = self.files.iter().map(|file| file.path().clone()).collect();
+        self.set_files_collapsed(paths, collapsed, cx);
     }
 
     /// Collapses the file at `path` to its header, or expands it, without

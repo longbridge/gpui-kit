@@ -64,7 +64,7 @@ impl Default for TextViewStyle {
             paragraph_gap: rems(0.75),
             heading_base_font_size: px(14.),
             heading_font_size: None,
-            highlight_theme: HighlightTheme::default_light().clone(),
+            highlight_theme: HighlightTheme::default_light(),
             code_block: StyleRefinement::default(),
             table: StyleRefinement::default(),
             table_head: StyleRefinement::default(),

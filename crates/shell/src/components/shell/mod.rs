@@ -32,6 +32,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     basic::register(registry)?;
     chart::register(registry)?;
     carousel::register(registry)?;
+    grid_layout::register(registry)?;
     questionnaire::register(registry)?;
     Ok(())
 }
@@ -54,6 +55,7 @@ mod delegate_combobox;
 mod delegate_select;
 mod display;
 mod empty;
+mod grid_layout;
 mod input_group;
 mod layout;
 mod lifecycle;

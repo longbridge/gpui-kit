@@ -1,3 +1,5 @@
+use gpui_base::LogicalStyledExt as _;
+
 use crate::{
     ActiveTheme as _, RoleOverride, Sizable as _, StyledExt as _, h_flex,
     shimmer::{ShimmerStyle, ShimmerText},
@@ -211,6 +213,7 @@ impl RenderOnce for Marker {
         });
 
         let row = h_flex()
+            .flex_row_dir(cx)
             .w_full()
             .min_h(rems(1.))
             .gap_2()
@@ -218,9 +221,9 @@ impl RenderOnce for Marker {
             .line_height(relative(1.5))
             .text_color(tokens.colors.muted_foreground)
             .map(|this| match alignment {
-                MarkerAlignment::Start => this.justify_start().text_left(),
+                MarkerAlignment::Start => this.justify_flex_start().text_start(cx),
                 MarkerAlignment::Center => this.justify_center().text_center(),
-                MarkerAlignment::End => this.justify_end().text_right(),
+                MarkerAlignment::End => this.justify_flex_end().text_end(cx),
             })
             .when(variant == MarkerVariant::Border, |this| {
                 this.border_b_1().border_color(tokens.colors.border).pb_2()
@@ -233,7 +236,7 @@ impl RenderOnce for Marker {
                             .flex_1()
                             .min_w_0()
                             .h(px(1.))
-                            .mr_1()
+                            .me(rems(0.25), cx)
                             .bg(tokens.colors.border)
                             .refine_style(&separator_style),
                     )
@@ -252,7 +255,7 @@ impl RenderOnce for Marker {
                             .flex_1()
                             .min_w_0()
                             .h(px(1.))
-                            .ml_1()
+                            .ms(rems(0.25), cx)
                             .bg(tokens.colors.border)
                             .refine_style(&separator_style),
                     )
@@ -402,9 +405,9 @@ impl RenderOnce for MarkerContent {
             // lines take the rest; elsewhere it may shrink and wrap.
             .when(self.separator, |this| this.flex_none())
             .map(|this| match self.alignment {
-                MarkerAlignment::Start => this.text_left(),
+                MarkerAlignment::Start => this.text_start(cx),
                 MarkerAlignment::Center => this.text_center(),
-                MarkerAlignment::End => this.text_right(),
+                MarkerAlignment::End => this.text_end(cx),
             })
             .refine_style(&self.style)
             .children(children);

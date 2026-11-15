@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, App, Axis, Div, InteractiveElement as _, IntoElement, ParentElement, SharedString,
     Stateful, Styled, Window, div, prelude::FluentBuilder as _,
 };
+use gpui_base::LogicalStyledExt as _;
 use std::{any::TypeId, ops::Deref, rc::Rc};
 
 use crate::{
@@ -278,7 +279,10 @@ impl SettingItem {
                         .when(disabled, |this| this.opacity(0.5))
                         .map(|this| {
                             if layout.is_horizontal() {
-                                this.h_flex().justify_between().items_center()
+                                this.h_flex()
+                                    .flex_row_dir(cx)
+                                    .justify_between()
+                                    .items_center()
                             } else {
                                 this.v_flex()
                             }

@@ -9,8 +9,8 @@ use gpui_kit::test::{ClickOptions, TestAppContextExt, TestSupportExt, TestWindow
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
     InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, LongPressEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, TestAppContext, TouchPhase, Window, WindowHandle,
-    actions, base::Root, div, point, prelude::*, px, size,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, TestAppContext, TouchPhase, Window,
+    WindowHandle, actions, base::Root, div, point, prelude::*, px, size,
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -350,6 +350,92 @@ async fn submenu_opens_unclipped_from_a_scrollable_menu(cx: &mut TestAppContext)
         window.try_find("popup-menu").is_none()
     })
     .await;
+}
+
+/// 48 options in a menu that shows about five at a time, like a time picker,
+/// with `checked` as the current one.
+struct ScrollableOptions {
+    checked: Option<usize>,
+}
+impl Render for ScrollableOptions {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let checked = self.checked;
+        div()
+            .size_full()
+            .p_4()
+            .child(
+                Button::new("options")
+                    .label("Options")
+                    .dropdown_menu(move |menu, _, _| {
+                        (0..48).fold(menu.scrollable(true).max_h(px(160.)), |menu, ix| {
+                            menu.menu_with_check(
+                                format!("Option {ix}"),
+                                checked == Some(ix),
+                                Box::new(Save),
+                            )
+                        })
+                    }),
+            )
+    }
+}
+
+fn open_scrollable_options(checked: Option<usize>, cx: &mut TestAppContext) -> AnyWindowHandle {
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |_, cx| {
+        cx.new(|_| ScrollableOptions { checked })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("options", cx);
+    })
+    .unwrap();
+    handle.into()
+}
+
+/// How far the item `ix` of the open menu sits below the top of the menu.
+fn menu_item_top(window: &mut Window, ix: usize) -> Pixels {
+    let menu_top = window.find("popup-menu").bounds().top();
+    window.within("popup-menu").find(ix).bounds().top() - menu_top
+}
+
+/// A scrollable menu opens scrolled so its checked item is the first one in
+/// view, as a native picker opens on its current value, and leaves scrolling
+/// to the user after that. A menu with nothing checked opens on its first item.
+#[gpui_kit::test]
+fn a_scrollable_menu_opens_on_its_checked_item(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+
+    let handle = open_scrollable_options(None, cx);
+    let first_item_top = cx
+        .update_window(handle, |_, window, cx| {
+            let top = menu_item_top(window, 0);
+            window.render_frame(cx);
+            window.render_frame(cx);
+            assert!(window.within("popup-menu").find(0usize).visible());
+            assert_eq!(menu_item_top(window, 0), top);
+            top
+        })
+        .unwrap();
+
+    let handle = open_scrollable_options(Some(30), cx);
+    cx.update_window(handle, |_, window, cx| {
+        // The items are measured on the menu's first frame, and it scrolls on
+        // the next one.
+        window.render_frame(cx);
+        let menu = window.within("popup-menu");
+        assert!(menu.find(30usize).visible(), "{:?}", menu.find(30usize));
+        assert!(!menu.find(0usize).visible());
+        assert_eq!(menu_item_top(window, 30), first_item_top);
+
+        // It does not scroll back once the user scrolls it.
+        window.within("popup-menu").scroll(
+            30usize,
+            ScrollDelta::Pixels(point(px(0.), px(60.))),
+            cx,
+        );
+        window.render_frame(cx);
+        assert_eq!(menu_item_top(window, 30), first_item_top + px(60.));
+    })
+    .unwrap();
 }
 
 struct ContextMenuInputs {

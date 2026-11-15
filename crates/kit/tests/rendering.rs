@@ -15,6 +15,7 @@ mod rendering {
         TextStyle, UnderlineStyle, Window,
         assets::Assets,
         base::input::EditorLineNumberRenderer,
+        canvas,
         component::{
             ActiveTheme, IconName, IndexPath, Theme, ThemeMode,
             button::{Button, ButtonVariants as _},
@@ -25,8 +26,7 @@ mod rendering {
             table::{Column, DataTable, TableDelegate, TableState},
             text::{TextView, TextViewState},
         },
-        canvas, div, font, hsla,
-        open_window as open_kit_window,
+        div, font, hsla, open_window as open_kit_window,
         platform::current_platform,
         prelude::*,
         px, size,
@@ -413,13 +413,18 @@ mod rendering {
                 cx.new(|cx| GutterBaselineEditor {
                     state: cx.new(|cx| EditorState::new(window, cx).default_value("A\n\nA")),
                 })
-            }).unwrap()
+            })
+            .unwrap()
         });
         let handle = handle.into();
         let state = cx.update(|cx| view.read(cx).state.clone());
-        cx.update_window(handle, |_, window, cx| window.render_frame(cx)).unwrap();
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
         let gutter_ink = |capture: Capture| {
-            capture.raw.chunks_exact(4).enumerate()
+            capture
+                .raw
+                .chunks_exact(4)
+                .enumerate()
                 .filter(|(_, pixel)| {
                     u16::from(pixel[0]) > u16::from(pixel[1]) + 32
                         && u16::from(pixel[0]) > u16::from(pixel[2]) + 32
@@ -436,7 +441,8 @@ mod rendering {
                     state.set_selected_range(0..0, cx);
                 });
                 window.render_frame(cx);
-            }).unwrap();
+            })
+            .unwrap();
             assert_eq!(gutter_ink(Capture::take(&mut cx, handle)), expected);
         }
     }
@@ -448,8 +454,13 @@ mod rendering {
                 canvas(
                     |_, _, _| {},
                     move |bounds, _, window, cx| {
-                        let line = GutterStyle::default()
-                            .shape_line_number(123, false, &body_style, window, cx);
+                        let line = GutterStyle::default().shape_line_number(
+                            123,
+                            false,
+                            &body_style,
+                            window,
+                            cx,
+                        );
                         line.paint_background(
                             bounds.origin,
                             px(24.),

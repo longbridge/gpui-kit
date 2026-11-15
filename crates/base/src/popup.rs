@@ -6,7 +6,7 @@ use gpui::{
     StyleRefinement, Styled, Window, canvas, deferred, div, point, px,
 };
 
-use crate::{Positioner, ResolvedPosition, StyledExt as _};
+use crate::{LayoutDirection, Positioner, ResolvedPosition, StyledExt as _};
 
 /// Distance kept between a popup and the window edge.
 const WINDOW_MARGIN: Pixels = px(8.);
@@ -99,6 +99,26 @@ impl Popup {
     }
 }
 
+/// The physical anchor for `anchor` in `direction`.
+///
+/// Anchors are written for left-to-right layout; in RTL the horizontal side
+/// is mirrored, so a `TopLeft` popover that hangs from the trigger's start
+/// edge hangs from its right edge instead.
+pub fn logical_anchor(anchor: Anchor, direction: LayoutDirection) -> Anchor {
+    if !direction.is_rtl() {
+        return anchor;
+    }
+    match anchor {
+        Anchor::TopLeft => Anchor::TopRight,
+        Anchor::TopRight => Anchor::TopLeft,
+        Anchor::BottomLeft => Anchor::BottomRight,
+        Anchor::BottomRight => Anchor::BottomLeft,
+        Anchor::LeftCenter => Anchor::RightCenter,
+        Anchor::RightCenter => Anchor::LeftCenter,
+        Anchor::TopCenter | Anchor::BottomCenter => anchor,
+    }
+}
+
 /// Match the popup's anchor to the opposite edge of the measured trigger.
 fn anchor_position(anchor: Anchor, trigger: Bounds<Pixels>, offset: Pixels) -> Point<Pixels> {
     match anchor {
@@ -131,7 +151,7 @@ impl RenderOnce for Popup {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state =
             window.use_keyed_state((self.id, "anchor"), cx, |_, _| PopupAnchorState::default());
-        let anchor = self.anchor;
+        let anchor = logical_anchor(self.anchor, LayoutDirection::global(cx));
         let trigger_bounds = Rc::new(Cell::new(state.read(cx).bounds));
         let offset = self.offset;
         let position = Rc::new(Cell::new(anchor_position(
@@ -221,6 +241,19 @@ mod tests {
         assert_eq!(
             Popup::resolved_corner(Anchor::BottomRight, bounds),
             Point::new(px(300.), px(50.))
+        );
+    }
+
+    #[test]
+    fn rtl_mirrors_the_horizontal_side_of_the_anchor() {
+        let rtl = LayoutDirection::Rtl;
+        assert_eq!(logical_anchor(Anchor::TopLeft, rtl), Anchor::TopRight);
+        assert_eq!(logical_anchor(Anchor::BottomRight, rtl), Anchor::BottomLeft);
+        assert_eq!(logical_anchor(Anchor::LeftCenter, rtl), Anchor::RightCenter);
+        assert_eq!(logical_anchor(Anchor::TopCenter, rtl), Anchor::TopCenter);
+        assert_eq!(
+            logical_anchor(Anchor::TopLeft, LayoutDirection::Ltr),
+            Anchor::TopLeft
         );
     }
 

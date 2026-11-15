@@ -153,6 +153,28 @@ Two implementation facts leak far enough to be worth knowing:
 - **`active` and `focus` need a stable element identity.** A plain `div` acquires one lazily, derived from its position in the description, which is stable across renders for a stable tree. `Button`, `Checkbox` and `Input` already have one.
 - **A `Switch` ignores state styles.** The switch root is not the interactive element — its track is — so a state style on it has nowhere to land. The runtime logs a warning saying to style the row around it instead, rather than dropping the declaration silently.
 
+### Group hover
+
+`hover` styles the element under the pointer. To style an element while the pointer is over one of its ancestors, name the ancestor with `group(name)` and declare `group_hover(name, declare)` on the element inside it:
+
+```js
+renderRow(row, cx) {
+  return h_flex()
+    .group("row")
+    .justify_between()
+    .child(row.title)
+    .child(
+      div()
+        .text_color(cx.theme().colors.muted_foreground)
+        .opacity(0)
+        .group_hover("row", (style) => style.opacity(1))
+        .child(row.id),
+    );
+}
+```
+
+A group hover follows the nearest ancestor with that name, so every row of a list can use the same one. Like `hover`, it resolves natively and runs no script, and it is a style rather than a handler, so a virtual list's item renderer may declare it. One that changes the element's size or position needs a stable identity, `.id(name)`, because GPUI lays the element out from its own state; one that only paints, such as an opacity or a colour, does not.
+
 ## Scrolling overflow
 
 Scrolling is element behavior rather than a style declaration. Give the viewport

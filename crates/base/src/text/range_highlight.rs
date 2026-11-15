@@ -232,6 +232,9 @@ pub(super) struct RenderedIndex {
     leaves: Vec<LeafSpan>,
     /// Where the text of each top-level block sits, in document order.
     blocks: Vec<Range<usize>>,
+    /// The text of custom blocks inside block surfaces, each of which is a part
+    /// of a row that a reveal has to reach on its own.
+    surface_customs: Vec<(Range<usize>, TextLeafKey)>,
     /// Where the pieces of `text` came from in the source, with `rendered` in
     /// offsets of `text`, in the order of `text`. Text the parser recorded no
     /// source position for is in none.
@@ -282,6 +285,7 @@ impl RenderedIndex {
             text: builder.text.into(),
             leaves: builder.leaves,
             blocks,
+            surface_customs: builder.surface_customs,
             source_map: builder.source_map,
         };
         debug_assert_eq!(index.text.as_ref(), document.text());
@@ -337,6 +341,16 @@ impl RenderedIndex {
             return Some(RevealTarget::Line {
                 key,
                 offset: leaf_range.start,
+            });
+        }
+        if let Some((_, key)) = self
+            .surface_customs
+            .iter()
+            .find(|(text, _)| text.contains(&range.start))
+        {
+            return Some(RevealTarget::Line {
+                key: *key,
+                offset: 0,
             });
         }
         let block_ix = self
@@ -403,6 +417,8 @@ struct IndexBuilder {
     text: String,
     leaves: Vec<LeafSpan>,
     source_map: Vec<SourceSegment>,
+    in_surface: bool,
+    surface_customs: Vec<(Range<usize>, TextLeafKey)>,
 }
 
 impl IndexBuilder {
@@ -413,6 +429,14 @@ impl IndexBuilder {
                 for child in children {
                     self.push_block(child);
                 }
+            }
+            BlockNode::Surface { children, .. } => {
+                self.in_surface = true;
+                for child in children {
+                    self.push_block(child);
+                }
+                self.in_surface = false;
+                return;
             }
             BlockNode::List { children, .. } | BlockNode::ListItem { children, .. } => {
                 for child in children {
@@ -458,6 +482,14 @@ impl IndexBuilder {
             }
             BlockNode::Custom { node, .. } => {
                 self.push_object_source(self.text.len(), node.as_text(), node.source_range());
+                if self.in_surface
+                    && let Some(source) = node.source_range()
+                {
+                    self.surface_customs.push((
+                        self.text.len()..self.text.len() + node.as_text().len(),
+                        TextLeafKey::block(source.start),
+                    ));
+                }
                 self.text.push_str(node.as_text());
             }
             BlockNode::Definition { .. }
@@ -565,6 +597,7 @@ fn table_row_source_ends(blocks: &[BlockNode], rows: &mut Vec<(TextLeafKey, Opti
             }
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => table_row_source_ends(children, rows),
             _ => {}
@@ -887,7 +920,7 @@ mod tests {
             let separator = format!("|{}\n", "---|".repeat(columns));
             let source = format!("{row}{separator}{}", row.repeat(rows));
             let old = parse(&source);
-            let mut changed = source.clone();
+            let mut changed = source;
             // Even unchanged cells earlier in the edited row must lose their
             // highlights, as must the unchanged rows that follow it.
             let edit = row.len() + separator.len() + row.rfind('x').unwrap();
@@ -1332,6 +1365,7 @@ mod tests {
             match block {
                 BlockNode::Root { children, .. }
                 | BlockNode::Blockquote { children, .. }
+                | BlockNode::Surface { children, .. }
                 | BlockNode::List { children, .. }
                 | BlockNode::ListItem { children, .. } => leaf_nodes(children, leaves),
                 BlockNode::Paragraph(paragraph) => leaves.push(LeafNode::Paragraph(paragraph)),

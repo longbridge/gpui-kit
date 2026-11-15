@@ -3,7 +3,7 @@
 #
 # One name per line, in upper case; `#` starts a comment. Compiled into the
 # runtime by `capability.rs`, whose tests check every entry. A name matches
-# regardless of case, so `HTTP_PROXY` also lets a script read `http_proxy`,
+# regardless of case, so `PATH` also lets a script read `Path` on Windows,
 # under the spelling the environment uses.
 #
 # A variable belongs here when it describes the user's machine, session or
@@ -64,12 +64,9 @@ XDG_CURRENT_DESKTOP
 XDG_SESSION_TYPE
 DESKTOP_SESSION
 
-# Network proxies. A proxy URL can carry a user name and password
-# (`http://user:pass@proxy:8080`); they are listed because tools that reach the
-# network need to honour the user's proxy.
-HTTP_PROXY
-HTTPS_PROXY
-ALL_PROXY
+# Hosts that bypass the network proxy. The proxy URLs themselves
+# (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) are not listed: they can carry a
+# user name and password (`http://user:pass@proxy:8080`).
 NO_PROXY
 
 # Where the platform keeps things.

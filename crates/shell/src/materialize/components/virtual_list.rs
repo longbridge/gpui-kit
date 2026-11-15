@@ -101,7 +101,7 @@ pub(in crate::materialize) fn warn_lazy_list_misuse(
              returns"
         );
     }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles are ignored on a {name}: it has no interactive state of its own. \
              Put them on the rows the item renderer returns, or on an element around the list"
@@ -395,7 +395,6 @@ fn clickable(
     row = row.child(item);
     if let Some(callback) = handlers.click {
         let runtime = Rc::downgrade(runtime);
-        let key = key.clone();
         row = row.on_click(move |_, window, cx| {
             if let Some(runtime) = runtime.upgrade() {
                 runtime.dispatch_item_key(callback, &key, window, cx);

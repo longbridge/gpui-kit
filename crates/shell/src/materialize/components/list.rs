@@ -151,11 +151,11 @@ pub(in crate::materialize) fn list(
                 })
                 .read(cx)
                 .clone();
-            shared_scroll_position(&identity.clone(), window, cx).update(cx, |shared, _| {
+            shared_scroll_position(&identity, window, cx).update(cx, |shared, _| {
                 *shared = SharedScroll::Uniform(scroll.clone())
             });
 
-            let mut list = uniform_list(identity.clone(), item_count, move |range, window, cx| {
+            let mut list = uniform_list(identity, item_count, move |range, window, cx| {
                 render_range(&weak, get_key, render_items, handlers, range, window, cx)
             })
             .track_scroll(&scroll)
@@ -214,7 +214,7 @@ pub(in crate::materialize) fn list(
                 }
                 retained.state.clone()
             });
-            shared_scroll_position(&identity.clone(), window, cx)
+            shared_scroll_position(&identity, window, cx)
                 .update(cx, |shared, _| *shared = SharedScroll::List(state.clone()));
 
             let runtime = weak.clone();
@@ -525,7 +525,7 @@ mod tests {
         // Ten items put above the item at 4 of 20 move it to 14.
         let order: Vec<usize> = search_order(4, 20, 30).collect();
         assert_eq!(order[..2], [4, 14]);
-        let mut visited = order.clone();
+        let mut visited = order;
         visited.sort_unstable();
         assert_eq!(visited, (0..30).collect::<Vec<_>>());
 

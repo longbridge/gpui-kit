@@ -76,6 +76,7 @@ pub trait InputHighlighter {
 pub type InputHighlighterFactory = Rc<dyn Fn(&str) -> Option<Box<dyn InputHighlighter>>>;
 pub type SharedHighlightStyleResolver = Arc<dyn HighlightStyleResolver>;
 pub type FoldIconRenderer = Rc<dyn Fn(usize, bool) -> AnyElement>;
+pub type FoldPlaceholderRenderer = Rc<dyn Fn(usize) -> AnyElement>;
 
 /// Where in the syntax tree an offset sits, for editing decisions.
 ///

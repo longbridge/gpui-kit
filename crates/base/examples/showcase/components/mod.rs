@@ -15,6 +15,7 @@ mod dialog;
 mod dock;
 pub(super) use dock::build_dock;
 mod editor;
+mod grid_layout;
 mod hover_card;
 mod input;
 mod link;

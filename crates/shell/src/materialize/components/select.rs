@@ -200,7 +200,7 @@ where
     // A `RenderOnce` over a plain `div`, like `Collapsible`: it refines the
     // style it was given and stops there, so there is no interactivity for a
     // hover or a pressed style to attach to.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a {component} are ignored; put them on the element you drew as its \
              trigger"

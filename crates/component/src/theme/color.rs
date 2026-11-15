@@ -306,7 +306,9 @@ impl Colorize for Hsla {
     fn parse_hex(hex: &str) -> Result<Self> {
         let hex = hex.trim_start_matches('#');
         let len = hex.len();
-        if len != 6 && len != 8 {
+        // Check the digits before slicing: a non-ASCII character would make
+        // the byte slices below panic, and `from_str_radix` accepts a sign.
+        if (len != 6 && len != 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(anyhow::anyhow!("invalid hex color"));
         }
 
@@ -975,6 +977,15 @@ mod tests {
 
         let color: Hsla = Hsla::parse_hex("#0413FCAA").unwrap();
         assert_eq!(color, rgba(0x0413fcaa).into());
+    }
+
+    #[test]
+    fn test_parse_hex_rejects_non_hex_digits() {
+        assert!(Hsla::parse_hex("#+f+f+f").is_err());
+        assert!(Hsla::parse_hex("#ff00+f").is_err());
+        // Six bytes, but the second character is two bytes wide.
+        assert!(Hsla::parse_hex("#a\u{e9}aaa").is_err());
+        assert!(Hsla::parse_hex("#a\u{e9}aaaaa").is_err());
     }
 
     #[test]

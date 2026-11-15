@@ -186,11 +186,13 @@ impl RenderOnce for Toggle {
             .when_some(self.accessibility_label, |this, label| {
                 this.aria_label(label)
             })
-            .when(!disabled, |this| {
+            // Keep the current focus in the dispatch tree when activation
+            // disables this control, so Tab can still leave in either direction.
+            .when(!disabled || focus_handle.is_focused(window), |this| {
                 this.track_focus(
                     &focus_handle
                         .tab_index(self.tab_index)
-                        .tab_stop(self.tab_stop),
+                        .tab_stop(self.tab_stop && !disabled),
                 )
             })
             .when(disabled, |this| {

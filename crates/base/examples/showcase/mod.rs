@@ -92,6 +92,7 @@ pub const COMPONENTS: &[&str] = &[
     "dialog",
     "dock",
     "editor",
+    "grid-layout",
     "hover-card",
     "input",
     "link",
@@ -162,6 +163,7 @@ pub struct BaseShowcase {
     time_field: gpui::Entity<TimeFieldState>,
     calendar: gpui::Entity<CalendarState>,
     tree: gpui::Entity<TreeState>,
+    grid_layout: gpui::Entity<gpui_base::GridLayoutState>,
     date_focus: gpui::FocusHandle,
     scroll: ScrollHandle,
     example_scroll: ScrollHandle,
@@ -377,6 +379,25 @@ impl BaseShowcase {
             otp,
             time_field,
             calendar: cx.new(|cx| CalendarState::new(window, cx)),
+            grid_layout: cx.new(|cx| {
+                gpui_base::GridLayoutState::new(cx).cols(6).default_areas([
+                    gpui_base::GridArea::new("revenue").col_span(4).row_span(3),
+                    gpui_base::GridArea::new("orders")
+                        .col(4)
+                        .col_span(2)
+                        .row_span(2),
+                    gpui_base::GridArea::new("visitors")
+                        .row(3)
+                        .col_span(3)
+                        .row_span(2),
+                    gpui_base::GridArea::new("notes")
+                        .col(4)
+                        .row(2)
+                        .col_span(2)
+                        .row_span(3)
+                        .locked(true),
+                ])
+            }),
             tree: cx.new(|cx| {
                 TreeState::new(cx).items(vec![
                     TreeItem::new("src", "src").expanded(true).children(vec![
@@ -589,6 +610,7 @@ impl BaseShowcase {
             "date-picker" => self.date_picker(cx).into_any_element(),
             "dialog" => self.dialog(cx).into_any_element(),
             "editor" => self.editor().into_any_element(),
+            "grid-layout" => self.grid_layout().into_any_element(),
             "hover-card" => self.hover_card().into_any_element(),
             "input" => self.input().into_any_element(),
             "link" => self.link().into_any_element(),

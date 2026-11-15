@@ -507,11 +507,9 @@ fn clipboard_normalization_preserves_tabs_and_unicode_graphemes(cx: &mut TestApp
         let end = value.len() - 1;
         assert_edit(&input, value, end..end, end, cx);
         window.press("left", cx);
-        // Arrow selection advances by Unicode scalar, so select the woman,
-        // joiner and laptop before replacing the complete pasted sequence.
-        for _ in 0..3 {
-            window.press("shift-left", cx);
-        }
+        // Arrow selection advances by grapheme cluster, so one step selects
+        // the whole woman, joiner and laptop sequence.
+        window.press("shift-left", cx);
         assert_eq!(input.read(cx).selected_value(), "👩‍💻");
         window.input("X", cx);
         assert_eq!(
@@ -520,8 +518,7 @@ fn clipboard_normalization_preserves_tabs_and_unicode_graphemes(cx: &mut TestApp
         );
         window.press("home", cx);
         window.press("right", cx);
-        // The base letter and combining accent are two scalar steps.
-        window.press("shift-right", cx);
+        // The base letter and combining accent are one grapheme step.
         window.press("shift-right", cx);
         assert_eq!(input.read(cx).selected_value(), "e\u{301}");
         window.press("delete", cx);

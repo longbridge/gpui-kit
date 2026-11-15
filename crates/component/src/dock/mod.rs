@@ -48,12 +48,12 @@ pub use gpui_base::dock::PanelView as BasePanelView;
 /// crate and handing it back with a different meaning is worse than dropping
 /// it. A skin reads a dock through [`DockContext`].
 pub use gpui_base::dock::{
-    AnyDrag, DockArea, DockAreaRenderer, DockAreaState, DockContext, DockEvent, DockLayout,
-    DockPlacement, DockSizing, DockState, DragPanel, DropIndicator, DropPlaceholderBounds,
-    DropTarget, EditResult, InsertTarget, NodeId, PaneNode, PaneRef, PaneTree, PanelBuildContext,
-    PanelBuilder, PanelEvent, PanelId, PanelInfo, PanelRegistry, PanelSource, PanelState, RootKind,
-    TabGroup, TabGroupConstraints, TabGroupContext, TabGroupEvent, TabGroupRenderer,
-    register_panel,
+    AnyDrag, CLOSED_BOTTOM_STRIP, DockArea, DockAreaRenderer, DockAreaState, DockContext,
+    DockEvent, DockLayout, DockPlacement, DockSizing, DockState, DragPanel, DropIndicator,
+    DropPlaceholderBounds, DropTarget, EditResult, InsertTarget, NodeId, PaneNode, PaneRef,
+    PaneTree, PanelBuildContext, PanelBuilder, PanelEvent, PanelId, PanelInfo, PanelRegistry,
+    PanelSource, PanelState, RootKind, TabGroup, TabGroupConstraints, TabGroupContext,
+    TabGroupEvent, TabGroupRenderer, register_panel,
 };
 pub use panel::*;
 pub use tab_panel::DragPanelPreview;
@@ -135,6 +135,7 @@ pub(crate) struct SkinShared {
     panel_style: Cell<PanelStyle>,
     toggle_button_visible: Cell<bool>,
     close_button_visible: Cell<bool>,
+    collapsed_tab_bar_visible: Cell<bool>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
     /// Whether that dock was open when the drag began, so the release can
@@ -218,6 +219,7 @@ impl DockSkin {
                 panel_style: Cell::new(PanelStyle::default()),
                 toggle_button_visible: Cell::new(true),
                 close_button_visible: Cell::new(false),
+                collapsed_tab_bar_visible: Cell::new(true),
                 resizing_dock: Cell::new(None),
                 resize_started_open: Cell::new(false),
             }),
@@ -253,6 +255,18 @@ impl DockSkin {
     /// own close constraints still decide whether its button appears.
     pub fn set_close_button_visible(&self, visible: bool, cx: &mut App) {
         self.shared.close_button_visible.set(visible);
+        self.shared.notify(cx);
+    }
+
+    /// Whether a closed bottom dock keeps its tab bar as a strip to reopen it
+    /// from. Shown by default; hide it when the application offers its own
+    /// toggle, and a closed bottom dock then takes no space.
+    pub fn is_collapsed_tab_bar_visible(&self) -> bool {
+        self.shared.collapsed_tab_bar_visible.get()
+    }
+
+    pub fn set_collapsed_tab_bar_visible(&self, visible: bool, cx: &mut App) {
+        self.shared.collapsed_tab_bar_visible.set(visible);
         self.shared.notify(cx);
     }
 }

@@ -12,6 +12,13 @@
 //! Only `http` and `https` documents load, by script or by the page's own
 //! navigation: any other scheme — `file:` above all — would reach the local
 //! disk or a desktop URL handler past every capability the application holds.
+//!
+//! A page also needs the network grant `fetch` would need to `GET` its URL.
+//! The script runs code in the page and reads its replies, so showing a page
+//! is network access: without the grant a WebView would read loopback and LAN
+//! services the application's own `fetch` is refused. The grant is the one
+//! the creating script holds, checked on every load, every navigation, every
+//! script evaluation and every page message.
 
 use std::{
     cell::{Cell, RefCell},
@@ -20,7 +27,7 @@ use std::{
 };
 
 use gpui_shell::{
-    ArgumentDescriptor, ArgumentSchema, ComponentArgument, ComponentCallback,
+    ArgumentDescriptor, ArgumentSchema, Capabilities, ComponentArgument, ComponentCallback,
     ComponentCallbackArgument, ComponentDataValue, ComponentDescriptor, ComponentMaterializer,
     ComponentPayload, ComponentRegistry, ConstructorDescriptor, MaterializeRequest,
     MethodDescriptor, RegistryError, StateDescriptor, StateMethodDescriptor, anyhow,
@@ -96,6 +103,8 @@ impl PageTheme {
 #[derive(Clone)]
 struct WebViewHandle {
     view: Entity<WebView>,
+    /// The grant of the script that created the page.
+    capabilities: Rc<Capabilities>,
     listeners: Rc<RefCell<Listeners>>,
     /// The script's `set_theme`; `None` follows the application theme.
     theme: Rc<Cell<Option<PageTheme>>>,
@@ -105,7 +114,13 @@ struct WebViewHandle {
 }
 
 impl WebViewHandle {
-    fn new(url: &str, window: &mut gpui::Window, cx: &mut gpui::App) -> anyhow::Result<Self> {
+    fn new(
+        url: &str,
+        capabilities: Capabilities,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) -> anyhow::Result<Self> {
+        let capabilities = Rc::new(capabilities);
         let (sender, receiver) = async_channel::bounded::<PageEvent>(EVENT_QUEUE);
         let send = move |event| {
             if sender.try_send(event).is_err() {
@@ -114,25 +129,51 @@ impl WebViewHandle {
         };
         let builder = wry::WebViewBuilder::new()
             .with_url(url)
-            .with_navigation_handler(|url| is_navigable(&url))
+            .with_navigation_handler({
+                let capabilities = capabilities.clone();
+                move |url| {
+                    let allowed = may_load(&capabilities, &url);
+                    if !allowed {
+                        tracing::warn!(
+                            "blocked a WebView navigation to `{url}`; it is not granted"
+                        );
+                    }
+                    allowed
+                }
+            })
             .with_on_page_load_handler({
+                let capabilities = capabilities.clone();
                 let send = send.clone();
                 move |event, url| {
-                    if matches!(event, wry::PageLoadEvent::Finished) {
+                    if matches!(event, wry::PageLoadEvent::Finished)
+                        && may_load(&capabilities, &url)
+                    {
                         send(PageEvent::Load(url));
                     }
                 }
             })
-            .with_ipc_handler(move |request| {
-                let message = request.into_body();
-                if message.len() > MESSAGE_LIMIT {
-                    tracing::warn!(
-                        "dropped a {} byte WebView message; the limit is {MESSAGE_LIMIT}",
-                        message.len()
-                    );
-                    return;
+            .with_ipc_handler({
+                let capabilities = capabilities.clone();
+                move |request| {
+                    // The URI is the sending document's, so a page reached
+                    // past the navigation check still cannot answer.
+                    let sender = request.uri().to_string();
+                    if !capabilities.may_get(&sender) {
+                        tracing::warn!(
+                            "dropped a WebView message from `{sender}`; it is not granted"
+                        );
+                        return;
+                    }
+                    let message = request.into_body();
+                    if message.len() > MESSAGE_LIMIT {
+                        tracing::warn!(
+                            "dropped a {} byte WebView message; the limit is {MESSAGE_LIMIT}",
+                            message.len()
+                        );
+                        return;
+                    }
+                    send(PageEvent::Message(message));
                 }
-                send(PageEvent::Message(message));
             });
         #[cfg(debug_assertions)]
         let builder = builder.with_devtools(true);
@@ -167,6 +208,7 @@ impl WebViewHandle {
 
         let this = Self {
             view,
+            capabilities,
             listeners,
             theme: Rc::default(),
             applied: Rc::default(),
@@ -191,11 +233,13 @@ impl WebViewHandle {
 /// Whether a document may load, from a script call or the page's own navigation.
 ///
 /// `about:` is allowed because the platform engines navigate to `about:blank`
-/// while they set up, and it carries nothing from outside the page.
-fn is_navigable(url: &str) -> bool {
-    if url.starts_with("about:") {
-        return true;
-    }
+/// while they set up, and it carries nothing from outside the page. Any other
+/// document needs the grant `fetch` would need to `GET` it.
+fn may_load(capabilities: &Capabilities, url: &str) -> bool {
+    url.starts_with("about:") || capabilities.may_get(url)
+}
+
+fn is_web_url(url: &str) -> bool {
     wry::http::Uri::try_from(url)
         .is_ok_and(|uri| matches!(uri.scheme_str(), Some("http" | "https")) && uri.host().is_some())
 }
@@ -214,10 +258,14 @@ fn creation_error(error: &anyhow::Error) -> String {
     reason
 }
 
-fn require_url(url: &str, context: &str) -> anyhow::Result<()> {
+fn require_url(capabilities: &Capabilities, url: &str, context: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
-        is_navigable(url),
+        url.starts_with("about:") || is_web_url(url),
         "{context} expects an http or https URL, got `{url}`"
+    );
+    anyhow::ensure!(
+        may_load(capabilities, url),
+        "{context} cannot load `{url}`; grant GET for it in capabilities.network.hosts or capabilities.network.http"
     );
     Ok(())
 }
@@ -239,7 +287,7 @@ fn state_methods() -> Vec<StateMethodDescriptor> {
             "(url: string): void",
             |state, arguments, _, cx| {
                 let url = string_argument(arguments, "WebViewState.load_url")?;
-                require_url(url, "WebViewState.load_url")?;
+                require_url(&state.capabilities, url, "WebViewState.load_url")?;
                 state.view.read(cx).raw().load_url(url)?;
                 Ok(ComponentDataValue::Null)
             },
@@ -301,7 +349,13 @@ fn state_methods() -> Vec<StateMethodDescriptor> {
             "(script: string): void",
             |state, arguments, _, cx| {
                 let script = string_argument(arguments, "WebViewState.evaluate_script")?;
-                state.view.read(cx).raw().evaluate_script(script)?;
+                let page = state.view.read(cx).raw();
+                let url = page.url()?;
+                anyhow::ensure!(
+                    may_load(&state.capabilities, &url),
+                    "WebViewState.evaluate_script cannot run in `{url}`; it is not granted"
+                );
+                page.evaluate_script(script)?;
                 Ok(ComponentDataValue::Null)
             },
         ),
@@ -362,8 +416,10 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             vec![ArgumentDescriptor::new("url", ArgumentSchema::String)],
             |args, window, cx| match args {
                 [ComponentArgument::String(url)] => {
-                    require_url(url, "WebViewState").map_err(|error| error.to_string())?;
-                    WebViewHandle::new(url, window, cx)
+                    let capabilities = gpui_shell::current_capabilities();
+                    require_url(&capabilities, url, "WebViewState")
+                        .map_err(|error| error.to_string())?;
+                    WebViewHandle::new(url, capabilities, window, cx)
                         .map(|state| Box::new(state) as _)
                         .map_err(|error| creation_error(&error))
                 }
@@ -372,7 +428,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
         )
         .with_methods(state_methods())
         .with_documentation(
-            "A retained native web page loaded from an http or https URL. The page posts text to the script with `window.ipc.postMessage(text)`.",
+            "A retained native web page loaded from an http or https URL. The application needs the network grant `fetch` would need to GET each page it shows. The page posts text to the script with `window.ipc.postMessage(text)`.",
         ),
     )?;
     registry.register(
@@ -433,13 +489,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_web_documents_are_navigable() {
+    fn only_granted_web_documents_load() {
+        let capabilities =
+            Capabilities::new().network_hosts(["gpui-kit.com".to_owned(), "localhost".to_owned()]);
         for allowed in [
             "https://gpui-kit.com",
             "http://localhost:3000/index.html",
             "about:blank",
         ] {
-            assert!(is_navigable(allowed), "refused {allowed}");
+            assert!(may_load(&capabilities, allowed), "refused {allowed}");
         }
         for denied in [
             "",
@@ -449,8 +507,21 @@ mod tests {
             "data:text/html,<p>x</p>",
             "mailto:me@example.com",
             "https://",
+            "http://127.0.0.1:8080/admin",
+            "http://169.254.169.254/latest/meta-data/",
         ] {
-            assert!(!is_navigable(denied), "accepted {denied}");
+            assert!(!may_load(&capabilities, denied), "accepted {denied}");
         }
+    }
+
+    #[test]
+    fn a_page_without_a_network_grant_does_not_load() {
+        let error =
+            require_url(&Capabilities::new(), "https://gpui-kit.com", "WebViewState").unwrap_err();
+        assert!(error.to_string().contains("capabilities.network"));
+
+        let error =
+            require_url(&Capabilities::new(), "file:///etc/passwd", "WebViewState").unwrap_err();
+        assert!(error.to_string().contains("http or https"));
     }
 }

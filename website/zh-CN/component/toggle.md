@@ -160,8 +160,9 @@ impl Render for FilterView {
 
 ### 分段样式 ToggleGroup
 
-使用 `segmented()` 可以把一组 Toggle 渲染成贴合的分段控件。这个样式只影响外观，
-交互语义仍然是当前的多选模型：`on_click` 会收到每一项最新状态组成的 `Vec<bool>`。
+使用 `segmented()` 可以把一组 Toggle 渲染成贴合的分段控件。这个样式只影响外观：
+`on_click` 仍然会收到每一项最新状态组成的 `Vec<bool>`，除非同时开启
+[单选模式](#单选模式)，否则每一项都独立切换。
 
 ```rust
 ToggleGroup::new("formatting")
@@ -194,8 +195,36 @@ ToggleGroup::new("quick-actions")
     .child(Toggle::new(2).label("Pin"))
 ```
 
-如果业务需要互斥选择，请继续在视图状态中自行保证只有一项 `checked(true)`，
-直到后续提供专门的单选 API。
+### 单选模式
+
+当一组 Toggle 表示的是"从中选一个"而不是多个独立开关时，调用 `single()`。
+点击未选中的项会选中它并清除其他项；再次点击已选中的项会取消选中，所以分组也可以
+处于无选中状态。`on_click` 仍然会收到每一项最新状态组成的 `Vec<bool>`，其中最多
+只有一项为 `true`。
+
+```rust
+struct ReportView {
+    period: Option<usize>,
+}
+
+impl Render for ReportView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        ToggleGroup::new("period")
+            .single()
+            .segmented()
+            .outline()
+            .child(Toggle::new(0).label("Day").checked(self.period == Some(0)))
+            .child(Toggle::new(1).label("Week").checked(self.period == Some(1)))
+            .child(Toggle::new(2).label("Month").checked(self.period == Some(2)))
+            .on_click(cx.listener(|view, states, _, cx| {
+                view.period = states.iter().position(|checked| *checked);
+                cx.notify();
+            }))
+    }
+}
+```
+
+分组不会自行纠正多项同时 `checked(true)` 的状态，请在视图状态中保证最多只有一项选中。
 
 ## 最佳实践
 

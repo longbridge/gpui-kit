@@ -4,7 +4,7 @@ use gpui::{
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, accesskit::Toggled, prelude::FluentBuilder as _,
 };
-use gpui_base::TestSupportExt as _;
+use gpui_base::{LogicalStyledExt as _, TestSupportExt as _};
 use smallvec::SmallVec;
 
 #[derive(IntoElement)]
@@ -25,7 +25,7 @@ impl MenuItemElement {
     pub(crate) fn new(id: impl Into<ElementId>) -> Self {
         let id: ElementId = id.into();
         Self {
-            id: id.clone(),
+            id,
             aria_label: None,
             style: StyleRefinement::default(),
             disabled: false,
@@ -102,6 +102,7 @@ impl ParentElement for MenuItemElement {
 impl RenderOnce for MenuItemElement {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         h_flex()
+            .flex_row_dir(cx)
             .id(self.id)
             .test_support()
             .role(Role::MenuItem)

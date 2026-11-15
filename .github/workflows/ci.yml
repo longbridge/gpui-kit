@@ -308,7 +308,12 @@ jobs:
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
+      - name: Verify Shell integration failure propagation
+        shell: bash
+        run: python script/tests/test_ci_shell.py
       - name: Test LLRT module integration
+        # PowerShell can hide an earlier native-command failure behind the last exit code.
+        shell: bash
         run: |
           cargo test -p gpui-shell --release tests::standard_runtime
           cargo test -p gpui-shell --release tests::fs

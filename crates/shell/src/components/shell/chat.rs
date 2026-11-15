@@ -487,13 +487,15 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                     if value.is_finite()
                         && value.fract() == 0.0
                         && *value >= 0.0
-                        && *value <= usize::MAX as f64 =>
+                        && *value <= MAX_MESSAGE_ROWS as f64 =>
                 {
                     Ok(Box::new(
                         cx.new(|cx| MessageScrollerState::new(*value as usize, cx)),
                     ))
                 }
-                _ => Err("MessageScrollerState expects a non-negative integer item_count".into()),
+                _ => Err(format!(
+                    "MessageScrollerState expects an integer item_count from 0 to {MAX_MESSAGE_ROWS}"
+                )),
             },
         )
         .with_methods(scroller_state_methods())
@@ -511,6 +513,19 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             ])
             .with_documentation("A virtualized message transcript with retained scroll and tail-following state."),
     )?;
+    Ok(())
+}
+
+/// The rows one transcript may hold. The virtual list keeps native state for
+/// every row, so a count the script got wrong would otherwise be an allocation
+/// that aborts the host.
+const MAX_MESSAGE_ROWS: usize = 1_000_000;
+
+fn check_row_total(total: usize, context: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        total <= MAX_MESSAGE_ROWS,
+        "{context} would leave {total} rows; a transcript holds at most {MAX_MESSAGE_ROWS}"
+    );
     Ok(())
 }
 
@@ -610,6 +625,7 @@ fn scroller_state_methods() -> Vec<StateMethodDescriptor> {
             "(item_count: number): void",
             |state, arguments, _, cx| {
                 let count = row_argument(arguments, "MessageScrollerState.reset")?;
+                check_row_total(count, "MessageScrollerState.reset")?;
                 state.update(cx, |state, cx| state.reset(count, cx));
                 Ok(ComponentDataValue::Null)
             },
@@ -627,6 +643,12 @@ fn scroller_state_methods() -> Vec<StateMethodDescriptor> {
                         "MessageScrollerState.splice expects an ItemRange and a non-negative integer count"
                     )
                 })?;
+                let current = state.read(cx).item_count();
+                let removed = range.end.min(current).saturating_sub(range.start);
+                check_row_total(
+                    (current - removed).saturating_add(count),
+                    "MessageScrollerState.splice",
+                )?;
                 Ok(ComponentDataValue::Boolean(
                     state.update(cx, |state, cx| state.splice(range, count, cx)),
                 ))
@@ -637,6 +659,10 @@ fn scroller_state_methods() -> Vec<StateMethodDescriptor> {
             "(count: number): boolean",
             |state, arguments, _, cx| {
                 let count = row_argument(arguments, "MessageScrollerState.append")?;
+                check_row_total(
+                    state.read(cx).item_count().saturating_add(count),
+                    "MessageScrollerState.append",
+                )?;
                 Ok(ComponentDataValue::Boolean(
                     state.update(cx, |state, cx| state.append(count, cx)),
                 ))
@@ -647,6 +673,10 @@ fn scroller_state_methods() -> Vec<StateMethodDescriptor> {
             "(count: number): boolean",
             |state, arguments, _, cx| {
                 let count = row_argument(arguments, "MessageScrollerState.prepend")?;
+                check_row_total(
+                    state.read(cx).item_count().saturating_add(count),
+                    "MessageScrollerState.prepend",
+                )?;
                 Ok(ComponentDataValue::Boolean(
                     state.update(cx, |state, cx| state.prepend(count, cx)),
                 ))
