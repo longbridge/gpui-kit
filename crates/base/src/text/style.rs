@@ -35,6 +35,9 @@ pub struct TextViewStyle {
     /// [`Self::on_text_color`] sets it, to let a table on an inverted surface
     /// show that surface.
     table_background: Option<Hsla>,
+    /// The background of a hovered table body row, or no hover highlight
+    /// when `None`.
+    table_row_hover: Option<Hsla>,
     is_dark: bool,
 }
 
@@ -58,6 +61,7 @@ impl PartialEq for TextViewStyle {
             && self.list_style == other.list_style
             && self.blockquote_style == other.blockquote_style
             && self.table_background == other.table_background
+            && self.table_row_hover == other.table_row_hover
             && self.is_dark == other.is_dark
     }
 }
@@ -104,6 +108,7 @@ impl TextViewStyle {
             list_style: StyleRefinement::default(),
             blockquote_style: StyleRefinement::default(),
             table_background: None,
+            table_row_hover: None,
             is_dark,
         }
     }
@@ -254,6 +259,15 @@ impl TextViewStyle {
         self
     }
 
+    /// Sets the background of a table body row while the pointer is over it.
+    ///
+    /// The header row does not highlight. Without this, table rows have no
+    /// hover highlight.
+    pub fn with_table_row_hover(mut self, color: Hsla) -> Self {
+        self.table_row_hover = Some(color);
+        self
+    }
+
     /// Sets whether content-specific assets should use their dark variant.
     pub fn with_dark(mut self, is_dark: bool) -> Self {
         self.is_dark = is_dark;
@@ -320,6 +334,11 @@ impl TextViewStyle {
         &self.table_cell
     }
 
+    /// The background of a hovered table body row, if rows highlight on hover.
+    pub fn table_row_hover(&self) -> Option<Hsla> {
+        self.table_row_hover
+    }
+
     /// The highlight style for inline code, before the code-background
     /// fallback in [`Self::inline_code_highlight`] applies.
     pub fn inline_code(&self) -> HighlightStyle {
@@ -367,8 +386,8 @@ impl TextViewStyle {
     /// The body text always takes `color`. When `color` is far from this
     /// style's foreground in lightness, the surface is inverted from the one
     /// this style was made for (a `primary` fill, say): the link, muted text,
-    /// code, border and selection colors would vanish on it, so they are all
-    /// derived from `color`, and [`Self::is_dark`] flips.
+    /// code, border, selection and table row hover colors would vanish on it,
+    /// so they are all derived from `color`, and [`Self::is_dark`] flips.
     pub(crate) fn on_text_color(&self, color: Hsla) -> Self {
         let style = self.clone().with_foreground(color);
         if !self.is_inverted_by(color) {
@@ -392,6 +411,7 @@ impl TextViewStyle {
             .with_table_head(table_head)
             .with_dark(!self.is_dark);
         style.table_background = Some(gpui::transparent_black());
+        style.table_row_hover = self.table_row_hover.map(|_| color.opacity(0.08));
         style
     }
 
@@ -463,6 +483,7 @@ mod tests {
         let mut table = StyleRefinement::default();
         table.text.white_space = Some(gpui::WhiteSpace::Nowrap);
         assert!(base != base.clone().with_table_cell(table));
+        assert!(base != base.clone().with_table_row_hover(gpui::red()));
 
         assert!(base != base.clone().with_dark(true));
         assert!(
@@ -523,6 +544,7 @@ mod tests {
         assert!(style.inline_code().background_color.is_some());
         assert!(style.code_background().a > 0.0);
         assert!(style.border().a > 0.0);
+        assert_eq!(style.table_row_hover(), None);
         assert_eq!(style.code_block().corner_radii.top_left, None);
         assert_eq!(style.code_block().corner_radii.top_right, None);
         assert_eq!(style.code_block().corner_radii.bottom_left, None);
@@ -617,7 +639,8 @@ mod tests {
 
     #[test]
     fn text_color_of_a_matching_surface_only_replaces_the_body_text() {
-        let style = TextViewStyle::from_colors(&ColorTokens::light(), false);
+        let style = TextViewStyle::from_colors(&ColorTokens::light(), false)
+            .with_table_row_hover(ColorTokens::light().muted);
         let destructive = ColorTokens::light().destructive;
 
         let adapted = style.on_text_color(destructive);
@@ -626,6 +649,7 @@ mod tests {
         assert_eq!(adapted.muted_foreground(), style.muted_foreground());
         assert_eq!(adapted.code_background(), style.code_background());
         assert_eq!(adapted.table_background(), None);
+        assert_eq!(adapted.table_row_hover(), style.table_row_hover());
         assert!(!adapted.is_dark());
     }
 
@@ -634,7 +658,10 @@ mod tests {
         for (colors, is_dark) in [(ColorTokens::light(), false), (ColorTokens::dark(), true)] {
             let style = TextViewStyle::from_colors(&colors, is_dark);
             let text = colors.primary_foreground;
+            // Rows without a hover highlight stay without one.
+            assert_eq!(style.on_text_color(text).table_row_hover(), None);
 
+            let style = style.with_table_row_hover(colors.muted);
             let adapted = style.on_text_color(text);
             assert_eq!(adapted.foreground(), text);
             assert_eq!(adapted.link(), text);
@@ -647,6 +674,7 @@ mod tests {
             assert_eq!(adapted.border(), text.opacity(0.2));
             assert_eq!(adapted.selection(), text.opacity(0.25));
             assert_eq!(adapted.table_background(), Some(gpui::transparent_black()));
+            assert_eq!(adapted.table_row_hover(), Some(text.opacity(0.08)));
             assert_eq!(adapted.table_head().text.color, Some(text));
             assert_eq!(adapted.is_dark(), !is_dark);
         }

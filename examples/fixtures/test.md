@@ -1,6 +1,6 @@
 # Hello, **World**!
 
-Inline image mix: larger PNG avatars <img src="https://avatars.githubusercontent.com/u/5518" alt="Jason Lee avatar" width="32" height="32" /> and <img src="https://avatars.githubusercontent.com/u/28998859" alt="GitHub avatar" width="32" height="32" /> stay inside the same text flow, and another SVG badge ![Rust](https://rust-lang.org/static/images/rust-logo-blk.svg) should wrap with nearby text when the window is resized.
+Inline image mix: larger PNG avatars <img src="https://avatars.githubusercontent.com/u/5518" alt="Jason Lee avatar" width="32" height="32" /> and <img src="https://avatars.githubusercontent.com/u/28998859" alt="GitHub avatar" width="32" height="32" /> stay inside the same text flow, and another SVG badge <img src="https://rust-lang.org/static/images/rust-logo-blk.svg" alt="Rust logo" width="20" height="20" /> should wrap with nearby text when the window is resized.
 
 This is first paragraph, there have **BOLD**, _italic_, and ~~strikethrough~~, `code` text [^1] [^2].
 
@@ -306,6 +306,22 @@ button:
 ### Mentions
 
 Ask [@huacnlee](mention:huacnlee) or [@madcodelife](mention:madcodelife) for a review. Hover over a mention to see the profile card.
+
+## Block surfaces
+
+The example registers two block surfaces, which open with a GitHub alert
+marker. Their blocks stay part of the document: select across a surface
+and copy it.
+
+> [!note]
+> Surfaces draw a blockquote's blocks in a container of your own, such as
+> this callout with an icon and a title.
+
+> [!card]
+> #### A card
+>
+> - Any block can go inside, **including** lists and `code`.
+> - Other renderers show this as a blockquote.
 
 ## Task markers
 

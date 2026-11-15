@@ -16,9 +16,10 @@ use gpui::{
     Anchor, AnyElement, AnyView, App, AppContext as _, Context, Div, Empty,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, ScrollHandle, SharedString,
     Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, rems,
 };
 use gpui_base::{
+    LogicalStyledExt as _,
     dock::{
         AnyDrag, DockPlacement, DragPanel, DropIndicator, NodeId, PaneNode, PaneRef, PanelId,
         TabGroupContext, TabGroupRenderer,
@@ -250,7 +251,11 @@ impl TabGroupSkin {
         }
 
         let is_open = area.is_dock_open(placement);
-        let icon = match (placement, is_open) {
+        // The icon shows the physical side the dock sits on.
+        let icon = match (
+            placement.physical(gpui_base::LayoutDirection::global(cx)),
+            is_open,
+        ) {
             (DockPlacement::Left, true) => IconName::PanelLeft,
             (DockPlacement::Left, false) => IconName::PanelLeftOpen,
             (DockPlacement::Right, true) => IconName::PanelRight,
@@ -384,13 +389,14 @@ impl TabGroupSkin {
         let drag = tab_drag(group, ix, cx);
 
         h_flex()
+            .flex_row_dir(cx)
             .justify_between()
             .h(px(30.))
             .py_2()
-            .pl_3()
-            .pr_2()
-            .when(left_button.is_some(), |this| this.pl_2())
-            .when(right_button.is_some(), |this| this.pr_2())
+            .ps(rems(0.75), cx)
+            .pe(rems(0.5), cx)
+            .when(left_button.is_some(), |this| this.ps(rems(0.5), cx))
+            .when(right_button.is_some(), |this| this.pe(rems(0.5), cx))
             .when_some(title_style, |this, style| {
                 this.bg(style.background).text_color(style.foreground)
             })
@@ -398,7 +404,7 @@ impl TabGroupSkin {
                 this.child(
                     h_flex()
                         .flex_shrink_0()
-                        .mr_1()
+                        .me(rems(0.25), cx)
                         .gap_1()
                         .children(left_button)
                         .children(bottom_button),
@@ -431,7 +437,7 @@ impl TabGroupSkin {
             .child(
                 h_flex()
                     .flex_shrink_0()
-                    .ml_1()
+                    .ms(rems(0.25), cx)
                     .gap_1()
                     .child(self.render_toolbar(group, window, cx))
                     .children(right_button),
@@ -486,9 +492,9 @@ impl TabGroupSkin {
                     h_flex()
                         .items_center()
                         .top_0()
-                        // Right -1 for avoid border overlap with the first tab
-                        .right(-px(1.))
-                        .border_r_1()
+                        // Overlap the first tab by 1px so their borders don't double up.
+                        .inset_e(-px(1.), cx)
+                        .border_e(px(1.), cx)
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
@@ -545,8 +551,8 @@ impl TabGroupSkin {
                                             // Offset the label's own 12px right
                                             // padding and the tab's 4px gap so the
                                             // text-to-icon distance is also 12px.
-                                            .ml(-px(8.))
-                                            .mr_2()
+                                            .ms(-px(8.), cx)
+                                            .me(rems(0.5), cx)
                                             .tab_stop(false)
                                             .debug_selector(|| CLOSE_BUTTON_SELECTOR.to_string())
                                             .on_click({
@@ -608,9 +614,9 @@ impl TabGroupSkin {
                                 })
                                 .when(droppable, |this| {
                                     this.drag_over::<DragPanel>(|this, _, _, cx| {
-                                        this.rounded_l_none()
-                                            .border_l_2()
-                                            .border_r_0()
+                                        this.rounded_s(px(0.), cx)
+                                            .border_s(px(2.), cx)
+                                            .border_e(px(0.), cx)
                                             .border_color(cx.theme().drag_border)
                                     })
                                     .on_drop({
@@ -626,9 +632,9 @@ impl TabGroupSkin {
                                         }
                                     })
                                     .drag_over::<AnyDrag>(|this, _, _, cx| {
-                                        this.rounded_l_none()
-                                            .border_l_2()
-                                            .border_r_0()
+                                        this.rounded_s(px(0.), cx)
+                                            .border_s(px(2.), cx)
+                                            .border_e(px(0.), cx)
                                             .border_color(cx.theme().drag_border)
                                     })
                                     .on_drop({
@@ -680,8 +686,8 @@ impl TabGroupSkin {
                     h_flex()
                         .items_center()
                         .top_0()
-                        .right_0()
-                        .border_l_1()
+                        .inset_e(px(0.), cx)
+                        .border_s(px(1.), cx)
                         .border_b_1()
                         .h_full()
                         .border_color(cx.theme().border)
@@ -975,7 +981,7 @@ mod tests {
         });
         cx.run_until_parked();
         log.borrow_mut().draggable.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             log.borrow().draggable,
@@ -1003,7 +1009,7 @@ mod tests {
         });
         cx.run_until_parked();
         log.borrow_mut().draggable.clear();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert_eq!(
             log.borrow().draggable,
@@ -1151,7 +1157,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         cx.debug_bounds(ZOOM_CONTROL_SELECTOR).is_some()
     }
 
@@ -1235,7 +1241,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let window_height = cx.update(|window, _| window.viewport_size().height);
         assert!(
@@ -1309,8 +1315,8 @@ mod tests {
         cx.run_until_parked();
         let draw = |cx: &mut VisualTestContext| {
             cx.update(|window, _| window.refresh());
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
         };
         draw(cx);
 
@@ -1471,7 +1477,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let window_height = cx.update(|window, _| window.viewport_size().height);
         let content = height.get();
@@ -1588,7 +1594,7 @@ mod tests {
                 area.update(cx, |area, cx| area.set_center(layout, window, cx));
             });
             cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
             height.get()
         };
 
@@ -1676,7 +1682,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         let button = cx.debug_bounds(CLOSE_BUTTON_SELECTOR);
         if enabled && closable {
             assert_eq!(
@@ -1738,7 +1744,7 @@ mod tests {
         for (visible, expected) in [(false, false), (true, true), (false, false)] {
             cx.update(|_, cx| skin.set_close_button_visible(visible, cx));
             cx.run_until_parked();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, cx| crate::test_redraw(window, cx));
             assert_eq!(cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(), expected);
         }
     }
@@ -1773,7 +1779,7 @@ mod tests {
             (ids.0, ids.1, activated)
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         assert!(
             cx.update(|_, cx| area.read(cx).panel(closable_id).is_some()),
@@ -1821,7 +1827,7 @@ mod tests {
             area.update(cx, |area, cx| area.set_center(layout, window, cx));
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         // `debug_bounds` takes a `'static` selector.
         let tab = |cx: &mut VisualTestContext, ix: usize| {
@@ -1841,7 +1847,7 @@ mod tests {
             clipped.origin + gpui::point(px(4.), px(16.)),
             Modifiers::none(),
         );
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert_eq!(first_left(cx), start, "the first frame has not snapped");
 
         let mut lefts = Vec::new();
@@ -1850,7 +1856,7 @@ mod tests {
                 .advance_clock(std::time::Duration::from_millis(16));
             cx.update(|window, cx| {
                 window.simulate_next_frame(cx);
-                window.draw(cx).clear(cx);
+                crate::test_redraw(window, cx);
             });
             lefts.push(first_left(cx));
         }
@@ -1888,7 +1894,7 @@ mod tests {
             .detach();
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
 
         let selector = format!("{DOCK_TOGGLE_SELECTOR}-{:?}", DockPlacement::Left).leak();
         let button = cx
@@ -1940,7 +1946,7 @@ mod tests {
             .detach();
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(!cx.read(|cx| area.read(cx).is_dock_open(DockPlacement::Bottom)));
 
         let tab = cx
@@ -2012,7 +2018,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(),
             "an open group with two closable panels offers a close button"
@@ -2026,7 +2032,7 @@ mod tests {
             });
         });
         cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| crate::test_redraw(window, cx));
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_none(),
             "a collapsed group must not offer a close button"

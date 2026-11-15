@@ -587,7 +587,7 @@ mod tests {
             FilePresentation::prepare(&file, short, &mut SyntaxHighlighters::default(), None);
         assert!(names(&presentation, 0).is_empty());
 
-        let as_text = file.clone().with_language("text");
+        let as_text = file.with_language("text");
         let presentation =
             FilePresentation::prepare(&as_text, OPTIONS, &mut SyntaxHighlighters::default(), None);
         assert!(names(&presentation, 0).is_empty());

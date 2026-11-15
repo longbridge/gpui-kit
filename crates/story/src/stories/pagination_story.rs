@@ -104,7 +104,6 @@ impl Render for PaginationStory {
                         .total_pages(10)
                         .with_size(self.size)
                         .on_click({
-                            let entity = entity.clone();
                             move |page, _, cx| {
                                 entity.update(cx, |this, cx| {
                                     this.compact_page = *page;

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::{ActiveTheme, AxisExt, StyledExt, ThemeStyled as _};
 pub use gpui_base::slider::{SliderEvent, SliderScale, SliderState, SliderValue};
-use gpui_base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack, spring};
+use gpui_base::{
+    LogicalStyledExt as _, Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack, spring,
+};
 
 use gpui::{
     App, Axis, Background, Corners, DefiniteLength, ElementId, Entity, EntityId, Hsla,
@@ -40,8 +42,16 @@ impl ThumbInteraction {
 }
 
 impl ThumbRing {
-    /// Samples the ring for the `start` or end thumb of the slider `id`.
-    fn new(id: EntityId, start: bool, color: Hsla, window: &mut Window, cx: &mut App) -> Self {
+    /// Samples the ring for the `start` or end thumb of the slider `id`. The ring
+    /// also shows while the thumb is `focused`: the one the keys move.
+    fn new(
+        id: EntityId,
+        start: bool,
+        focused: bool,
+        color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
         let channel = if start { "start" } else { "end" };
         let interaction = window.use_keyed_state(
             ElementId::NamedChild(Arc::new(("slider-thumb-ring", id).into()), channel.into()),
@@ -50,7 +60,7 @@ impl ThumbRing {
         );
         let progress = spring(
             (("slider-thumb-ring", id), channel),
-            if interaction.read(cx).is_active() {
+            if focused || interaction.read(cx).is_active() {
                 1.
             } else {
                 0.
@@ -90,6 +100,8 @@ pub struct Slider {
     disabled: bool,
     accessibility_label: Option<SharedString>,
     reverse: bool,
+    tab_stop: bool,
+    tab_index: isize,
 }
 
 impl Slider {
@@ -102,6 +114,8 @@ impl Slider {
             disabled: false,
             accessibility_label: None,
             reverse: false,
+            tab_stop: true,
+            tab_index: 0,
         }
     }
 
@@ -126,6 +140,18 @@ impl Slider {
     /// Sets the label exposed to accessibility clients.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
+        self
+    }
+
+    /// Set the tab stop for the slider, default is true.
+    pub fn tab_stop(mut self, tab_stop: bool) -> Self {
+        self.tab_stop = tab_stop;
+        self
+    }
+
+    /// Set the tab index for the slider, default is 0.
+    pub fn tab_index(mut self, tab_index: isize) -> Self {
+        self.tab_index = tab_index;
         self
     }
 
@@ -201,8 +227,15 @@ impl RenderOnce for Slider {
 
         let ring_color = cx.theme().ring;
         let entity_id = self.state.entity_id();
-        let start_ring = is_range.then(|| ThumbRing::new(entity_id, true, ring_color, window, cx));
-        let end_ring = ThumbRing::new(entity_id, false, ring_color, window, cx);
+        let focus_handle = window
+            .use_keyed_state(("slider-focus", entity_id), cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+        let is_focused = focus_handle.is_focused(window);
+        let start_ring =
+            is_range.then(|| ThumbRing::new(entity_id, true, false, ring_color, window, cx));
+        // The keys move the end thumb, so it carries the focus ring.
+        let end_ring = ThumbRing::new(entity_id, false, is_focused, ring_color, window, cx);
 
         let thumb = |position: DefiniteLength, start: bool, ring: ThumbRing| {
             SliderThumb::new(&self.state)
@@ -212,7 +245,7 @@ impl RenderOnce for Slider {
                 .when(!self.disabled, |this| {
                     this.absolute()
                         .when(axis.is_horizontal(), |this| {
-                            this.top(px(-5.)).left(position).ml(-px(8.))
+                            this.top(px(-5.)).inset_s(position, cx).ms(-px(8.), cx)
                         })
                         .when(axis.is_vertical(), |this| {
                             this.bottom(position).left(px(-5.)).mb(-px(8.))
@@ -269,6 +302,15 @@ impl RenderOnce for Slider {
         BaseSlider::new(&self.state)
             .axis(axis)
             .disabled(self.disabled)
+            // Keep the current focus in the dispatch tree when the slider is
+            // disabled while focused, so Tab can still leave in either direction.
+            .when(!self.disabled || is_focused, |this| {
+                this.track_focus(
+                    &focus_handle
+                        .tab_index(self.tab_index)
+                        .tab_stop(self.tab_stop && !self.disabled),
+                )
+            })
             .when_some(self.accessibility_label, |this, label| {
                 this.accessibility_label(label)
             })
@@ -305,7 +347,8 @@ impl RenderOnce for Slider {
                                 div()
                                     .absolute()
                                     .when(axis.is_horizontal(), |this| {
-                                        this.h_full().left(bar_start).right(bar_end)
+                                        // The fill runs from the start edge: the right in RTL.
+                                        this.h_full().inset_s(bar_start, cx).inset_e(bar_end, cx)
                                     })
                                     .when(axis.is_vertical(), |this| {
                                         this.w_full().bottom(bar_start).top(bar_end)
@@ -359,6 +402,31 @@ mod tests {
         let (cx, state) = harness(cx, false);
         cx.simulate_click(point(px(50.), px(12.)), Modifiers::default());
         cx.update(|_, cx| assert!((state.read(cx).value().end() - 50.).abs() < 1.));
+    }
+
+    /// Moves focus as Tab does, then presses `keys`.
+    fn tab_then_press(cx: &mut gpui::VisualTestContext, keys: &str) {
+        cx.update(|window, cx| {
+            window.focus_next(cx);
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes(keys);
+    }
+
+    #[gpui::test]
+    fn tab_reaches_the_slider_and_keys_step_it(cx: &mut TestAppContext) {
+        let (cx, state) = harness(cx, false);
+        tab_then_press(cx, "right right");
+        cx.update(|_, cx| assert_eq!(state.read(cx).value(), SliderValue::Single(2.)));
+        cx.simulate_keystrokes("end");
+        cx.update(|_, cx| assert_eq!(state.read(cx).value(), SliderValue::Single(100.)));
+    }
+
+    #[gpui::test]
+    fn tab_skips_a_disabled_slider(cx: &mut TestAppContext) {
+        let (cx, state) = harness(cx, true);
+        tab_then_press(cx, "right end");
+        cx.update(|_, cx| assert_eq!(state.read(cx).value(), SliderValue::Single(0.)));
     }
 
     #[gpui::test]

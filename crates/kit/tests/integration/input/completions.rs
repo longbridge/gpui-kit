@@ -146,6 +146,7 @@ struct CompletionEditor {
     other: Entity<InputState>,
     readonly: bool,
     disabled: bool,
+    docked_to_bottom: bool,
 }
 
 impl Render for CompletionEditor {
@@ -155,12 +156,19 @@ impl Render for CompletionEditor {
             .p_4()
             .flex()
             .flex_col()
+            .when(self.docked_to_bottom, |this| this.justify_end())
             .child(Input::new(&self.other).id("other"))
             .child(
                 Editor::new(&self.state)
                     .readonly(self.readonly)
                     .disabled(self.disabled)
-                    .flex_1(),
+                    .map(|this| {
+                        if self.docked_to_bottom {
+                            this.h(px(60.))
+                        } else {
+                            this.flex_1()
+                        }
+                    }),
             )
     }
 }
@@ -201,6 +209,7 @@ impl Fixture {
                 cx.new(|cx| CompletionEditor {
                     readonly: false,
                     disabled: false,
+                    docked_to_bottom: false,
                     other: cx.new(|cx| InputState::new(window, cx)),
                     state: cx.new(|cx| {
                         let mut state = EditorState::new(window, cx).language("plaintext");
@@ -248,6 +257,28 @@ impl Fixture {
             cx.notify();
         });
         self.settle(cx);
+    }
+
+    fn dock_to_bottom(&self, cx: &mut TestAppContext) {
+        self.view.update(cx, |view, cx| {
+            view.docked_to_bottom = true;
+            cx.notify();
+        });
+        self.settle(cx);
+    }
+
+    /// The completion popup and the painted caret's top and bottom edges.
+    fn completion_and_caret(&self, cx: &mut TestAppContext) -> (Bounds<Pixels>, Pixels, Pixels) {
+        let popup = cx
+            .update_window(self.handle.into(), |_, window, _| {
+                window.find("completion-menu").bounds()
+            })
+            .unwrap();
+        self.state.read_with(cx, |state, _| {
+            let (caret, line_height) = state.cursor_layout().expect("painted caret");
+            let top = caret.origin.y + state.scroll_offset().y;
+            (popup, top, top + line_height)
+        })
     }
 
     fn settle(&self, cx: &mut TestAppContext) {
@@ -700,6 +731,38 @@ fn completion_popup_follows_caret_on_first_frame(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn completion_popup_opens_above_the_caret_when_it_does_not_fit_below(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.dock_to_bottom(cx);
+    fixture.start_completion(cx);
+
+    let (popup, caret_top, _) = fixture.completion_and_caret(cx);
+    let viewport = cx
+        .update_window(fixture.handle.into(), |_, window, _| window.viewport_size())
+        .unwrap();
+    assert!(
+        popup.bottom() <= viewport.height,
+        "popup {popup:?} must stay inside the {viewport:?} viewport"
+    );
+    assert!(
+        (popup.bottom() - (caret_top - px(4.))).abs() < px(2.),
+        "popup {popup:?} must sit just above the caret top {caret_top:?}"
+    );
+}
+
+#[gpui_kit::test]
+fn completion_popup_stays_below_the_caret_when_it_fits(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.start_completion(cx);
+
+    let (popup, _, caret_bottom) = fixture.completion_and_caret(cx);
+    assert!(
+        (popup.origin.y - (caret_bottom + px(4.))).abs() < px(2.),
+        "popup {popup:?} must sit just below the caret bottom {caret_bottom:?}"
+    );
+}
+
+#[gpui_kit::test]
 fn ordinary_input_schedules_no_followup_frame(cx: &mut TestAppContext) {
     // The caret-anchored popup fix must not cost ordinary inputs an extra
     // frame: geometry changes notify during paint, but nothing may schedule
@@ -715,8 +778,12 @@ fn ordinary_input_schedules_no_followup_frame(cx: &mut TestAppContext) {
     })
     .unwrap();
 
+    // A moved caret is reported to the platform's IME on the next frame; run
+    // those reports, then draw a frame in which nothing moves.
     let callbacks = cx
         .update_window(fixture.handle.into(), |_, window, cx| {
+            window.simulate_next_frame(cx);
+            window.draw(cx).clear(cx);
             window.simulate_next_frame(cx)
         })
         .unwrap();
@@ -776,10 +843,14 @@ fn completion_popup_anchors_to_wrapped_and_scrolled_caret_on_first_frame(cx: &mu
                 );
             }
             assert!((popup.origin.x - (caret.origin.x - px(4.))).abs() < px(2.));
-            assert!(
-                (popup.origin.y - (caret.origin.y + scroll.y + line_height + px(4.))).abs()
-                    < px(2.)
-            );
+            let caret_top = caret.origin.y + scroll.y;
+            // Scrolled to the end, the caret is on the window's last line, so
+            // the popup opens above it.
+            if scrolled {
+                assert!((popup.bottom() - (caret_top - px(4.))).abs() < px(2.));
+            } else {
+                assert!((popup.origin.y - (caret_top + line_height + px(4.))).abs() < px(2.));
+            }
         });
     }
 }

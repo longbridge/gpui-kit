@@ -179,7 +179,7 @@ source of truth over this guide.
 - `os.homedir()`, `process.dataDir` (the `${dataDir}` directory) and
   `import.meta.url` (a `file:` URL) tell an application where things are.
   `process.env` holds common variables (`HOME`, `USER`, `HOSTNAME`, `LANG`,
-  `TZ`, `PATH`, `EDITOR`, `DISPLAY`, `HTTP_PROXY`, the XDG directories…) by
+  `TZ`, `PATH`, `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories…) by
   default, matched regardless of case; any other variable
   must be listed in `"process": { "env": ["MY_APP_MODE"] }`.
 - An application with a manifest keeps its data under its `id`, whether run

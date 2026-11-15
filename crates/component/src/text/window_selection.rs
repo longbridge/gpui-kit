@@ -89,7 +89,8 @@ mod tests {
             self.selection.register(
                 TextSelectionRegistration::new(hitbox.clone(), bounds)
                     .with_document_order(self.document_order)
-                    .with_text_bounds(vec![bounds]),
+                    .with_text_bounds(vec![bounds])
+                    .with_rendered_element(&self.selection, window, cx),
                 window,
                 cx,
             );
@@ -2098,7 +2099,6 @@ mod tests {
         let b_notified = Rc::new(Cell::new(false));
         let _subscription = cx.update({
             let b_notified = b_notified.clone();
-            let second = second.clone();
             move |_, cx| cx.observe(&second, move |_, _| b_notified.set(true))
         });
         b_notified.set(false);

@@ -350,7 +350,7 @@ Handlers run on the UI thread with an async `cx`, as a `cx.spawn` task's do, so 
 
 `spawn` takes the same grant as `run`, resolves the command on the host PATH the same way, and starts it with the same empty environment.
 
-It is gated on an execute grant, which is one of three: denied (the default), an allowlist of command names, or unrestricted. A denied command **throws at the call** rather than rejecting, like a denied `fs` path — a rejected promise nobody awaited is a denial nobody sees.
+It is gated on an execute grant, which is one of three: denied (the default), an allowlist of command names, or unrestricted. A manifest writes the allowlist as `"execute": ["git"]` and unrestricted as `"execute": "*"`; any other string, such as `"git"`, is refused when the manifest is read. A denied command **throws at the call** rather than rejecting, like a denied `fs` path — a rejected promise nobody awaited is a denial nobody sees.
 
 `process.exit` is **a request, never `exit(2)`** inside the runtime. It hands the code to a handler the host installed, which decides what to do — close the plugin's panel, close the window, end the process. One plugin must not be able to take the host process down, and the host may have unsaved state.
 
@@ -371,13 +371,13 @@ import.meta.url; // "file:///…/main.js", the running module
 process.env.EDITOR; // a default; other variables only when the manifest lists them
 ```
 
-None of the paths needs a grant: a path says where something is, and reading or writing there is still the `fs` grant's decision. The environment is different, because a variable's _value_ can be a token handed to the host rather than to every script it runs. `process.env` therefore holds a fixed set of variables that describe the user's machine, session and preferences — `HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`, `EDITOR`, `DISPLAY`, the proxy settings, the XDG directories and their Windows counterparts — but never tokens, keys or passwords, plus the ones `capabilities.process.env` names, and only those that are set:
+None of the paths needs a grant: a path says where something is, and reading or writing there is still the `fs` grant's decision. The environment is different, because a variable's _value_ can be a token handed to the host rather than to every script it runs. `process.env` therefore holds a fixed set of variables that describe the user's machine, session and preferences — `HOME`, `USER`, `HOSTNAME`, `LANG`, `TZ`, `PATH`, `EDITOR`, `DISPLAY`, `NO_PROXY`, the XDG directories and their Windows counterparts — but never tokens, keys or passwords, plus the ones `capabilities.process.env` names, and only those that are set:
 
 ```json
 "process": { "env": ["MY_APP_MODE"] }
 ```
 
-Names match regardless of case, so listing `HTTP_PROXY` also shows `http_proxy`, under the spelling the environment uses. The default set is maintained in [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env).
+Names match regardless of case, so listing `HTTP_PROXY` also shows `http_proxy`, under the spelling the environment uses. The proxy URLs (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) are not defaults, because they can carry a user name and password; an application that honours a proxy lists them. The default set is maintained in [`default-env`](https://github.com/longbridge/gpui-kit/blob/main/crates/shell/src/default-env).
 
 It is always an object, so `process.env.X ?? fallback` works without a grant.
 
@@ -393,15 +393,17 @@ Beyond the capability grants, the runtime trims the language itself. All of it a
 
 **Resource limits**, so a runaway script reports rather than taking the window with it:
 
-| Limit                                                         | Value                                                                      |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Heap                                                          | 256 MiB — a leak becomes a catchable JavaScript exception, not an OOM kill |
-| Interpreter stack                                             | 1 MiB — deep recursion becomes a `RangeError`, not a native stack overflow |
-| Loaded JavaScript module                                      | 8 MiB per source file                                                      |
-| Outstanding host tasks                                        | 1,024 per runtime                                                          |
-| Time in one call: render and layout                           | 50 ms                                                                      |
-| Time in one call: event and task                              | 500 ms                                                                     |
-| Time in one call: outside any call, such as module evaluation | 5 s                                                                        |
+| Limit                                                         | Value                                                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Heap                                                          | 256 MiB — a leak becomes a catchable JavaScript exception, not an OOM kill                                                            |
+| Interpreter stack                                             | 1 MiB — deep script recursion becomes a `RangeError`, not a native stack overflow                                                     |
+| Element nesting                                               | 64 levels — the call that would nest deeper throws, so a deep tree cannot overflow the native stack when drawn                        |
+| View nesting                                                  | 65 levels across Views mounted inside one another — a mount past it, or a View mounted inside itself, draws nothing and logs an error |
+| Loaded JavaScript module                                      | 8 MiB per source file                                                                                                                 |
+| Outstanding host tasks                                        | 1,024 per runtime                                                                                                                     |
+| Time in one call: render and layout                           | 50 ms                                                                                                                                 |
+| Time in one call: event and task                              | 500 ms                                                                                                                                |
+| Time in one call: outside any call, such as module evaluation | 5 s                                                                                                                                   |
 
 The clock restarts on every host call, which is what lets the render path have a tighter budget than an event handler. **The interrupt cannot be swallowed by a `catch` block** — that is measured by a test, because if it could be, the interrupt would not be a defence at all. Each WebSocket also has an 8-command queue shared by `read`, `write`, and `close`; when full, a new operation rejects and tells the caller to wait for outstanding work.
 

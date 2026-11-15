@@ -91,6 +91,11 @@ let style = TextViewStyle::default().with_heading(|level| match level {
 
 `TextViewStyle::from_theme(&theme)` maps the semantic colors from a `gpui_kit::base::Theme`. Applications using the higher-level component theme can use `gpui_kit::component::text::text_view_style(cx.theme())`.
 
+Table body rows have no hover highlight by default. `with_table_row_hover(color)`
+fills the body row under the pointer with `color`; the header row keeps its own
+background. GPUI Component sets it to the theme's `table_hover`, the color the
+`Table` component highlights its rows with.
+
 A text view without an explicit `.style()` can follow the text color its
 container sets, so rich text stays readable on a filled surface such as a chat
 bubble. Turn it on in the application defaults:
@@ -223,6 +228,51 @@ Selection treats the rendered element as a whole. Double-click selects an object
 For asynchronous resources, retain a `TextViewState`, update the application-owned cache, then call `state.invalidate_inline_layout(cx)` through the view's weak entity. This remeasures inline content and virtual-list heights without reparsing or dropping the current logical selection. Associate results with source/font/theme keys and discard obsolete completions. Render callbacks should read prepared resources; do not run an equation engine synchronously during layout. `examples/markdown` contains the formula implementation and a preview zoom control.
 
 Inline math syntax is parsed by default. Register a plugin to customize its rendering; no separate syntax switch is needed. Inline code continues to protect dollar signs from math parsing. When no plugin claims a math node, TextView renders its original `$...$` source as literal text, so prose that merely contains dollar signs — `spent $5 and $10` — reads and copies back unchanged. Block math is parsed too: a `$$` fence becomes a block node, which a block plugin (`is_block() == true`) renders, and which falls back to a code block when no plugin claims it.
+
+## Block surfaces
+
+A block surface draws a blockquote's blocks inside a container of your own,
+such as a callout or a tinted summary panel, while they stay part of one
+document. Register it by name and open a top-level blockquote with the marker
+`[!name]` on a line of its own, as a [GitHub alert](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts)
+does:
+
+```rust
+use gpui::{ParentElement as _, Styled as _, div, px};
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().block_surface("summary", |_, cx| {
+    div()
+        // Read your theme here, so a theme change needs no new parse.
+        .bg(summary_background(cx))
+        .rounded(px(12.))
+        .p(px(16.))
+        .child("Summary")
+});
+
+TextView::markdown(
+    "note",
+    "Intro\n\n> [!summary]\n> - First point\n> - Second point\n\nOutro",
+)
+.markdown_extensions(extensions)
+```
+
+Names match ASCII-case-insensitively, so `> [!NOTE]` opens a surface registered
+as `note`. Renderers that don't know the name show an ordinary blockquote. The
+blocks are appended to the container the callback returns, after anything it
+shows itself; neither that nor the marker line is document text. Selection,
+find, range highlights and reveals work across and inside the surface. A
+select-all copies the source verbatim, and a partial source copy is quoted
+under the marker line, as a blockquote copy is quoted.
+
+Only a top-level blockquote with a registered name becomes a surface. A nested
+one stays a blockquote, and so does one with text after the marker on its line,
+such as Obsidian's `> [!note] Title`: the container shows its own title.
+Surfaces do not nest. A surface is one row of a scrollable view, so keep it to a
+few screens. While a streaming view appends to a surface, each append parses
+and measures the whole surface again, so streaming a long one costs time
+quadratic in its length; until its marker line is complete, it shows as a
+blockquote.
 
 ## Retained state and streaming updates
 

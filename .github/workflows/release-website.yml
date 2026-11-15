@@ -55,8 +55,8 @@ jobs:
 
       - name: Setup nightly Rust for GPUI Base WASM
         run: |
-          rustup toolchain install nightly --profile minimal
-          rustup target add wasm32-unknown-unknown --toolchain nightly
+          rustup toolchain install nightly-2026-10-31 --profile minimal
+          rustup target add wasm32-unknown-unknown --toolchain nightly-2026-10-31
 
       - name: Install wasm-bindgen-cli
         # Keep the CLI version in sync with the `wasm-bindgen` crate in Cargo.lock

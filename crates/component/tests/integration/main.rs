@@ -3,6 +3,7 @@
 //! Each file under `tests/` is a binary of its own, linked with GPUI and
 //! every component, so these are modules of one.
 
+mod accent_fill_rows;
 mod base_compat;
 mod controlled_change_callbacks;
 mod legacy_button_compat;

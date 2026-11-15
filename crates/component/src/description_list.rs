@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, App, Axis, DefiniteLength, IntoElement, ParentElement, RenderOnce, SharedString,
     Styled, Window, div, prelude::FluentBuilder as _, px, relative,
 };
+use gpui_base::LogicalStyledExt as _;
 
 use crate::{ActiveTheme as _, AxisExt, Sizable, Size, h_flex, text::Text, v_flex};
 
@@ -290,6 +291,7 @@ impl RenderOnce for DescriptionList {
             .children(rows.into_iter().enumerate().map(|(ix, items)| {
                 let is_last = ix == rows_len - 1;
                 h_flex()
+                    .flex_row_dir(cx)
                     .when(self.bordered && !is_last, |this| {
                         this.border_b_1().border_color(cx.theme().border)
                     })
@@ -302,7 +304,7 @@ impl RenderOnce for DescriptionList {
                                     let el = if self.layout.is_vertical() {
                                         v_flex()
                                     } else {
-                                        div().flex().flex_row().h_full()
+                                        div().flex_row_dir(cx).h_full()
                                     };
 
                                     el.flex_1()
@@ -321,9 +323,9 @@ impl RenderOnce for DescriptionList {
                                                 .py(padding_y)
                                                 .when(self.bordered, |this| {
                                                     this.when(self.layout.is_horizontal(), |this| {
-                                                        this.border_r_1()
+                                                        this.border_e(px(1.), cx)
                                                             .when(!is_first_col, |this| {
-                                                                this.border_l_1()
+                                                                this.border_s(px(1.), cx)
                                                             })
                                                     })
                                                     .when(self.layout.is_vertical(), |this| {

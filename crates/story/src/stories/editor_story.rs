@@ -493,8 +493,11 @@ impl Render for EditorStory {
                         .gap_2()
                         .child(
                             self.styled_editor(&self.syntax_styling_state)
-                                // Share Options with the other tabs so only captured
-                                // syntax ranges override the selected typography.
+                                // Keep Theme default proportional so the captured
+                                // monospace style is visible, while honoring Options.
+                                .when(self.font_family.is_none(), |editor| {
+                                    editor.font_family(cx.theme().font_family.clone())
+                                })
                                 .flex_1()
                                 .min_h_0(),
                         )

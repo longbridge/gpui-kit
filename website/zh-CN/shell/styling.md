@@ -153,6 +153,28 @@ renderSave(cx) {
 - **`active` 与 `focus` 需要稳定的元素身份。** 普通 `div` 会按需获得一个，由它在描述中的位置推出；只要树是稳定的，这个身份跨渲染就是稳定的。`Button`、`Checkbox` 与 `Input` 本来就有。
 - **`Switch` 会忽略状态样式。** switch 的根节点不是可交互元素——它的 track 才是——所以挂在根上的状态样式无处落地。运行时会记一条警告，提示改为给它外面那一行加样式，而不是不声不响地丢掉这条声明。
 
+### Group hover
+
+`hover` 作用于指针下方的那个元素。要在指针悬停在某个祖先元素上时给元素加样式，先用 `group(name)` 给祖先命名，再在它里面的元素上声明 `group_hover(name, declare)`：
+
+```js
+renderRow(row, cx) {
+  return h_flex()
+    .group("row")
+    .justify_between()
+    .child(row.title)
+    .child(
+      div()
+        .text_color(cx.theme().colors.muted_foreground)
+        .opacity(0)
+        .group_hover("row", (style) => style.opacity(1))
+        .child(row.id),
+    );
+}
+```
+
+group hover 跟随同名的最近祖先，所以列表的每一行都可以用同一个名字。它和 `hover` 一样在原生层解析，不执行脚本；它是样式而不是 handler，所以虚拟列表的 item 渲染器也可以声明它。会改变元素尺寸或位置的 group hover 需要稳定的身份 `.id(name)`，因为 GPUI 依据元素自己的状态来布局它；只影响绘制的，比如 opacity 或颜色，则不需要。
+
 ## 滚动溢出内容
 
 滚动属于元素行为，不是样式声明。先为 viewport 设置有限的宽度或高度，再指定它负责的滚动方向：

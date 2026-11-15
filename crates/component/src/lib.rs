@@ -48,6 +48,7 @@ pub mod diff;
 pub mod dock;
 pub mod empty;
 pub mod form;
+pub mod grid_layout;
 pub mod group_box;
 pub mod highlighter;
 pub mod history;
@@ -119,7 +120,7 @@ pub use theme::*;
 pub use time::{calendar, date_picker, time_field};
 pub use title_bar::*;
 pub use virtual_list::{VirtualList, VirtualListScrollHandle, h_virtual_list, v_virtual_list};
-pub use window_border::{WindowBorder, window_border, window_paddings};
+pub use window_border::{WindowBorder, window_border, window_corner_radii, window_paddings};
 pub use window_ext::WindowExt;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -168,4 +169,13 @@ pub fn set_locale(locale: &str) {
 pub(crate) fn measure_enable() -> bool {
     static MEASURE_ENABLED: LazyLock<bool> = LazyLock::new(gpui_base::measurement_enabled);
     *MEASURE_ENABLED
+}
+
+/// Draws a frame that re-renders every view. GPUI Fast replays retained
+/// subtrees when nothing was invalidated, so a bare `window.draw` in a test
+/// would skip `render`/`paint` and any side-channel recording they do.
+#[cfg(test)]
+pub(crate) fn test_redraw(window: &mut gpui::Window, cx: &mut gpui::App) {
+    window.refresh();
+    window.draw(cx).clear(cx);
 }

@@ -89,7 +89,7 @@ export default class LazyPopover extends View {
     let loaded = runtime
         .load_application(&app.0, "main.js")
         .expect("load application");
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         Host(
             runtime_for_window
@@ -168,7 +168,7 @@ export default class LazyHoverCard extends View {
     let loaded = runtime
         .load_application(&app.0, "main.js")
         .expect("load application");
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         Host(
             runtime_for_window
@@ -227,7 +227,7 @@ export default class LazyMenu extends View {
     );
     let runtime = gpui_shell::components::new_isolated_runtime().expect("runtime");
     let loaded = runtime.load_application(&app.0, "main.js").expect("load");
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         Host(
             runtime_for_window

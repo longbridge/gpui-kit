@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod block_surface_tests;
 mod document;
 pub mod editor_host;
 mod editor_seam;
@@ -21,7 +23,6 @@ mod utils;
 
 use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window};
 pub use inline::InlineHighlight;
-pub(crate) use inline::combine_highlights;
 pub(crate) use inline::text_runs;
 pub use inline_element::*;
 pub use markdown_ext::*;

@@ -385,7 +385,7 @@ window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
 | `input_focus.rs` | 带静态前后缀的输入框反复 Tab/Shift-Tab 遍历、前后缀按钮的焦点与激活，以及点击 Textarea/Editor 正文后的焦点和编辑 |
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
-| `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
+| `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动、Tab 移出表格与滚轮滚动 |
 | `query_helpers.rs` | 精确无障碍标签和角色、作用域歧义、不可见注册元素与不可变快照 |
 | `event_helpers.rs` | 分步鼠标和按键事件、自动重复与保持修饰键 |
 | `control_steps.rs` | Button 移出释放取消、Checkbox 按键重复及 Switch 在按键释放前禁用 |

@@ -164,11 +164,11 @@ where
                             })
                             .detach();
 
-                        menu.clone()
+                        menu
                     }
                 };
 
-                menu.clone()
+                menu
             })
     }
 }

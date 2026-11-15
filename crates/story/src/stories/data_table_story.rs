@@ -353,7 +353,6 @@ impl StockTableDelegate {
                     .width(100.)
                     .fixed(ColumnFixed::Left)
                     .sortable(),
-                Column::new("price", "Price").sortable().text_right().p_0(),
                 Column::new("change", "Chg").sortable().text_right().p_0(),
                 Column::new("change_percent", "Chg%")
                     .sortable()
@@ -403,6 +402,11 @@ impl StockTableDelegate {
                 Column::new("day_30_ranking", "30d Ranking").text_right(),
                 Column::new("day_120_ranking", "120d Ranking").text_right(),
                 Column::new("day_250_ranking", "250d Ranking").text_right(),
+                Column::new("price", "Price")
+                    .fixed_right()
+                    .sortable()
+                    .text_right()
+                    .p_0(),
             ],
             extra_columns_count: 0,
             loading: false,
@@ -413,6 +417,29 @@ impl StockTableDelegate {
             visible_rows: Range::default(),
             _load_task: Task::ready(()),
         }
+    }
+
+    /// Maps a table column to its index in `columns`, or to the number of the
+    /// extra column it shows.
+    ///
+    /// Extra columns go before the right-fixed columns, which must stay last.
+    fn source_col_ix(&self, col_ix: usize) -> Result<usize, usize> {
+        let right_fixed_start = self
+            .columns
+            .iter()
+            .position(|col| col.fixed == Some(ColumnFixed::Right))
+            .unwrap_or(self.columns.len());
+        if col_ix < right_fixed_start {
+            Ok(col_ix)
+        } else if col_ix < right_fixed_start + self.extra_columns_count {
+            Err(col_ix - right_fixed_start + 1)
+        } else {
+            Ok(col_ix - self.extra_columns_count)
+        }
+    }
+
+    fn source_column(&self, col_ix: usize) -> Option<&Column> {
+        self.columns.get(self.source_col_ix(col_ix).ok()?)
     }
 
     fn set_stocks(&mut self, stocks: Vec<Stock>) {
@@ -469,11 +496,9 @@ impl TableDelegate for StockTableDelegate {
     }
 
     fn column(&self, col_ix: usize, _cx: &App) -> Column {
-        if let Some(col) = self.columns.get(col_ix) {
-            col.clone()
-        } else {
-            let n = col_ix - self.columns.len() + 1;
-            Column::new(format!("extra_{n}"), format!("Column {n}"))
+        match self.source_col_ix(col_ix) {
+            Ok(ix) => self.columns[ix].clone(),
+            Err(n) => Column::new(format!("extra_{n}"), format!("Column {n}")),
         }
     }
 
@@ -564,7 +589,7 @@ impl TableDelegate for StockTableDelegate {
                 },
                 ColumnGroup {
                     label: "Market Data".into(),
-                    span: 10,
+                    span: 9,
                 },
                 ColumnGroup {
                     label: "Quotes".into(),
@@ -582,6 +607,10 @@ impl TableDelegate for StockTableDelegate {
                     label: "Shares & Rankings".into(),
                     span: 8 + trailing,
                 },
+                ColumnGroup {
+                    label: "Quote".into(),
+                    span: 1,
+                },
             ],
             vec![
                 ColumnGroup {
@@ -589,8 +618,8 @@ impl TableDelegate for StockTableDelegate {
                     span: 4,
                 },
                 ColumnGroup {
-                    label: "Price & Change".into(),
-                    span: 3,
+                    label: "Change".into(),
+                    span: 2,
                 },
                 ColumnGroup {
                     label: "Turnover".into(),
@@ -632,6 +661,10 @@ impl TableDelegate for StockTableDelegate {
                     label: "Rankings".into(),
                     span: 5 + trailing,
                 },
+                ColumnGroup {
+                    label: "Last".into(),
+                    span: 1,
+                },
             ],
         ])
     }
@@ -655,7 +688,7 @@ impl TableDelegate for StockTableDelegate {
             .when(col.align == TextAlign::Right, |this| {
                 this.h_flex().w_full().justify_end()
             })
-            .child(col.name.clone())
+            .child(col.name)
     }
 
     fn context_menu(
@@ -698,7 +731,7 @@ impl TableDelegate for StockTableDelegate {
 
     fn cell_label(&self, row_ix: usize, col_ix: usize, _: &App) -> Option<SharedString> {
         let stock = self.stocks.get(row_ix)?;
-        let col = self.columns.get(col_ix)?;
+        let col = self.source_column(col_ix)?;
         let text = format_cell(stock, &col.key).map_or("--".to_string(), |(text, _)| text);
         Some(text.into())
     }
@@ -719,7 +752,7 @@ impl TableDelegate for StockTableDelegate {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let stock = self.stocks.get(row_ix).unwrap();
-        let Some(col) = self.columns.get(col_ix) else {
+        let Some(col) = self.source_column(col_ix) else {
             return div().child("--").into_any_element();
         };
 
@@ -775,8 +808,12 @@ impl TableDelegate for StockTableDelegate {
         _: &mut Window,
         _: &mut Context<TableState<Self>>,
     ) {
-        let col = self.columns.remove(col_ix);
-        self.columns.insert(to_ix, col);
+        // Extra columns are generated, so only moves between source columns
+        // are kept.
+        if let (Ok(col_ix), Ok(to_ix)) = (self.source_col_ix(col_ix), self.source_col_ix(to_ix)) {
+            let col = self.columns.remove(col_ix);
+            self.columns.insert(to_ix, col);
+        }
     }
 
     fn perform_sort(
@@ -786,7 +823,11 @@ impl TableDelegate for StockTableDelegate {
         _: &mut Window,
         _: &mut Context<TableState<Self>>,
     ) {
-        if let Some(col) = self.columns.get_mut(col_ix) {
+        if let Some(col) = self
+            .source_col_ix(col_ix)
+            .ok()
+            .and_then(|ix| self.columns.get_mut(ix))
+        {
             match col.key.as_ref() {
                 "id" => self.stocks.sort_by(|a, b| match sort {
                     ColumnSort::Descending => b.id.cmp(&a.id),
@@ -870,7 +911,7 @@ impl TableDelegate for StockTableDelegate {
         let Some(stock) = self.stocks.get(row_ix) else {
             return String::new();
         };
-        let Some(col) = self.columns.get(col_ix) else {
+        let Some(col) = self.source_column(col_ix) else {
             return String::new();
         };
 

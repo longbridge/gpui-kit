@@ -91,7 +91,7 @@ fn interactive_examples_keep_their_state_across_redraws(cx: &mut TestAppContext)
         .expect("load Story interaction fixture");
     let mounted = std::rc::Rc::new(std::cell::RefCell::new(None));
     let mounted_for_window = mounted.clone();
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         let view = runtime_for_window
             .mount_application(&loaded, window, cx)
@@ -136,7 +136,7 @@ fn input_story_accepts_text_and_keeps_it_across_redraws(cx: &mut TestAppContext)
         .expect("load Input Story fixture");
     let mounted = std::rc::Rc::new(std::cell::RefCell::new(None));
     let mounted_for_window = mounted.clone();
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         let view = runtime_for_window
             .mount_application(&loaded, window, cx)
@@ -173,7 +173,7 @@ fn dock_story_materializes_real_panels_dock_and_tabs(cx: &mut TestAppContext) {
         .expect("load Dock Story fixture");
     let mounted = std::rc::Rc::new(std::cell::RefCell::new(None));
     let mounted_for_window = mounted.clone();
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         let view = runtime_for_window
             .mount_application(&loaded, window, cx)
@@ -237,7 +237,7 @@ fn every_registered_story_example_materializes(cx: &mut TestAppContext) {
         .expect("load all Story examples fixture");
     let mounted = std::rc::Rc::new(std::cell::RefCell::new(None));
     let mounted_for_window = mounted.clone();
-    let runtime_for_window = runtime.clone();
+    let runtime_for_window = runtime;
     let window = cx.add_window(move |window, cx| {
         let view = runtime_for_window
             .mount_application(&loaded, window, cx)

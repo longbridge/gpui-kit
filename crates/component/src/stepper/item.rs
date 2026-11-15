@@ -3,7 +3,7 @@ use gpui::{
     Pixels, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
     div, prelude::FluentBuilder as _, px, relative,
 };
-use gpui_base::TestSupportExt as _;
+use gpui_base::{LogicalStyledExt as _, TestSupportExt as _};
 
 use crate::{
     ActiveTheme as _, AxisExt, Icon, Sizable, Size, StyledExt as _,
@@ -113,7 +113,7 @@ impl Styled for StepperItem {
 }
 
 impl RenderOnce for StepperItem {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_passed = self.step < self.checked_step;
         let icon_size = match self.size {
             Size::XSmall => px(8.),
@@ -128,7 +128,9 @@ impl RenderOnce for StepperItem {
             .role(Role::ListItem)
             .aria_position_in_set(self.step + 1)
             .relative()
-            .when(self.layout.is_horizontal(), |this| this.h_flex())
+            .when(self.layout.is_horizontal(), |this| {
+                this.h_flex().flex_row_dir(cx)
+            })
             .when(self.layout.is_vertical(), |this| this.v_flex())
             .when(!self.is_last, |this| this.flex_1())
             .when(self.text_center, |this| this.flex_1().justify_center())
@@ -240,16 +242,16 @@ impl RenderOnce for StepperSeparator {
             .when(self.layout.is_horizontal(), |this| {
                 this.h(separator_wide).mt(icon_size.half()).map(|this| {
                     if !text_center {
-                        this.ml(icon_size + gap).mr(gap).left_0().right_0()
+                        this.ms(icon_size + gap, cx).me(gap, cx).left_0().right_0()
                     } else {
                         this.mx(icon_size.half() + gap)
-                            .left(relative(0.5))
-                            .right(relative(-0.5))
+                            .inset_s(relative(0.5), cx)
+                            .inset_e(relative(-0.5), cx)
                     }
                 })
             })
             .when(self.layout.is_vertical(), |this| {
-                this.w(separator_wide).ml(icon_size.half()).map(|this| {
+                this.w(separator_wide).ms(icon_size.half(), cx).map(|this| {
                     if !text_center {
                         this.mt(icon_size + gap).mb(gap).top_0().bottom_0()
                     } else {

@@ -163,6 +163,7 @@ impl super::Story for DockStory {
 impl Render for DockStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close_button_visible = self.close_button_visible;
+        let collapsed_tab_bar_visible = self.skin.is_collapsed_tab_bar_visible();
         let story = cx.entity();
         v_flex()
             .size_full()
@@ -176,6 +177,15 @@ impl Render for DockStory {
                                 this.close_button_visible = !this.close_button_visible;
                                 this.skin
                                     .set_close_button_visible(this.close_button_visible, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .item(
+                        PopupMenuItem::new("Collapsed bottom tab bar")
+                            .checked(collapsed_tab_bar_visible)
+                            .on_click(window.listener_for(&story, |this, _, _, cx| {
+                                let visible = !this.skin.is_collapsed_tab_bar_visible();
+                                this.skin.set_collapsed_tab_bar_visible(visible, cx);
                                 cx.notify();
                             })),
                     )

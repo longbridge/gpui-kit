@@ -470,15 +470,19 @@ impl<'js> FromJs<'js> for FpsHudArgument {
             })?;
         }
         if let Some(millis) = object.get::<_, Option<f64>>("frame_budget")? {
-            if !(millis.is_finite() && millis > 0.) {
-                return Err(js_error::type_error(
-                    ctx,
-                    &format!(
-                        "{SHOW_FPS_MONITOR}: frame_budget must be a positive number of milliseconds"
-                    ),
-                ));
-            }
-            request.frame_budget = Some(std::time::Duration::from_secs_f64(millis / 1000.));
+            let budget = (millis > 0.)
+                .then(|| std::time::Duration::try_from_secs_f64(millis / 1000.).ok())
+                .flatten()
+                .ok_or_else(|| {
+                    js_error::type_error(
+                        ctx,
+                        &format!(
+                            "{SHOW_FPS_MONITOR}: frame_budget must be a positive number of \
+                             milliseconds that a Duration can hold"
+                        ),
+                    )
+                })?;
+            request.frame_budget = Some(budget);
         }
         Ok(Self(request))
     }
@@ -972,6 +976,21 @@ mod tests {
         let hidden_again: bool =
             eval(&runtime, cx, ScopePhase::Event, "__hide_fps_monitor()").expect("hide again");
         assert!(!hidden_again, "nothing was up to take down");
+    }
+
+    #[gpui::test]
+    fn a_hud_frame_budget_beyond_a_duration_is_refused(cx: &mut TestAppContext) {
+        let (runtime, root, cx) = shell(cx);
+
+        let error = eval::<()>(
+            &runtime,
+            cx,
+            ScopePhase::Event,
+            r#"__show_fps_monitor({ frame_budget: 1e300 })"#,
+        )
+        .expect_err("a budget no Duration holds must be refused");
+        assert!(error.to_string().contains("frame_budget"), "{error}");
+        assert!(!root.read_with(cx, |root, _| root.fps_monitor_visible()));
     }
 
     #[gpui::test]

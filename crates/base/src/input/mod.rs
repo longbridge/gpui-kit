@@ -43,6 +43,8 @@ pub use token_presentation::{
     InlineTokenClickEvent, InlineTokenClickListener, InlineTokenContext, InlineTokenHoverEvent,
     InlineTokenHoverListener, InlineTokenRenderer,
 };
+#[path = "base/a11y_text.rs"]
+mod a11y_text;
 #[path = "base/kind.rs"]
 mod kind;
 #[path = "editor/language.rs"]
@@ -99,13 +101,15 @@ pub use diagnostics::{
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
 pub use editor::{Editor, EditorState};
 pub use highlighting::{
-    DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,
-    InputHighlighterFactory, SharedHighlightStyleResolver, SyntaxContext, SyntaxContextProvider,
+    DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, HighlightStyleResolver,
+    InputEditorStyle, InputHighlighter, InputHighlighterFactory, SharedHighlightStyleResolver,
+    SyntaxContext, SyntaxContextProvider,
 };
 pub use indent::TabSize;
 pub use input::{Input, InputState};
 pub use kind::{
-    EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaMode,
+    EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaExtras,
+    TextareaMode,
 };
 pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};

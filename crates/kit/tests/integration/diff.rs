@@ -599,6 +599,42 @@ fn conflict_headings_resolve_from_their_buttons(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn vertical_scrollbar_works_at_the_visible_edge_of_a_wide_diff(cx: &mut TestAppContext) {
+    let text = (0..100)
+        .map(|ix| format!("{} {ix}\n", "wide line ".repeat(50)))
+        .collect::<String>();
+    for mode in [DiffMode::Unified, DiffMode::Split] {
+        for soft_wrap in [false, true] {
+            let (handle, state) =
+                viewer(cx, DiffFile::unchanged("wide.txt", &text), mode, soft_wrap);
+            cx.update(|cx| state.update(cx, |state, cx| state.set_context_lines(None, cx)));
+            cx.update(|cx| {
+                gpui_kit::component::Theme::set_scrollbar_mode(
+                    gpui_kit::component::scroll::ScrollbarMode::Always,
+                    cx,
+                );
+            });
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.render_frame(cx);
+                let before = window.find_all("source")[0].path().to_vec();
+                let body = window.find("diff-body").bounds();
+                window.click_at(
+                    "diff-body",
+                    point(body.size.width - px(5.), body.size.height - px(30.)),
+                    cx,
+                );
+                assert!(
+                    window.find_all("source").iter().all(|source| source.path() != before),
+                    "clicking the scrollbar should scroll the {mode:?} diff (soft_wrap={soft_wrap})",
+                );
+            })
+            .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
 fn soft_wrap_grows_rows_instead_of_scrolling(cx: &mut TestAppContext) {
     let long = "word ".repeat(60);
     let text = format!("short\n{long}\n");

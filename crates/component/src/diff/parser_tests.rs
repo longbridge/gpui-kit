@@ -151,6 +151,30 @@ fn malformed_hunks_fail_without_partial_documents() {
 }
 
 #[test]
+fn invalid_hunk_prefixes_return_an_error_without_slicing_unicode() {
+    for prefix in ["é", "中", "😀", "?"] {
+        let patch = format!("--- a/a\n+++ b/a\n@@ -1 +1 @@\n{prefix}invalid\n");
+        let error = DiffFile::parse(&patch)
+            .err()
+            .expect("reject a source line without a valid hunk prefix");
+        assert_eq!(error.line(), 4, "{prefix}");
+        assert_eq!(
+            error.message().as_str(),
+            "hunk ended before its declared line counts",
+            "{prefix}"
+        );
+    }
+}
+
+#[test]
+fn valid_hunk_prefixes_preserve_unicode_source() {
+    let patch = "--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n é\n-中\n+😀\n";
+    let files = DiffFile::parse(patch).unwrap();
+    assert_eq!(files[0].source(DiffSide::Original), "é\n中\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "é\n😀\n");
+}
+
+#[test]
 fn truncated_hunks_count_the_lines_present() {
     let truncated = DiffParseOptions::new().truncated_hunks(true);
     assert!(truncated.has_truncated_hunks());

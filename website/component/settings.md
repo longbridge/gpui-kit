@@ -94,6 +94,9 @@ Clearing the search keeps the current page rather than restoring an earlier
 selection. When no settings match, no page content is shown and the selection
 is retained for when results return.
 
+Escape in the search box clears a non-empty query. With an empty query, Escape
+reaches the enclosing dialog or window.
+
 ### Group Variants
 
 ```rust

@@ -115,6 +115,11 @@ impl RenderSnapshot {
         &self.inner.arena
     }
 
+    /// The levels this description spans, its root included.
+    pub(crate) fn height(&self) -> u8 {
+        self.inner.arena.height(self.inner.root)
+    }
+
     /// The shape of this description, with its values left out.
     ///
     /// Compared against its predecessor's by [`crate::view::ScriptView`] to

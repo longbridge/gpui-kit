@@ -408,6 +408,16 @@ PieChart::new(data)
     .inner_radius(60.)
 ```
 
+如果希望按圆环的比例而不是像素设置内径，请使用 `inner_radius_ratio`。圆环半径取自 `outer_radius`；未设置时为图表高度的 40%，因此在尺寸未知或会变化的面板中，环形图也能保持比例：
+
+```rust
+PieChart::new(data)
+    .value(|d| d.amount as f32)
+    .inner_radius_ratio(0.6) // 内径为圆环半径的 60%
+```
+
+`inner_radius` 与 `inner_radius_ratio` 会相互替换，以最后设置的为准；比例会被限制在 `0.` 到 `1.` 之间。与 Recharts 的 `innerRadius="60%"` 不同（它相对于图表较短边的一半），这里的比例相对于圆环自身的外半径。
+
 #### 自定义
 
 ```rust

@@ -427,6 +427,16 @@ image resolution and link activation locally. Reference links need definitions
 from the entire document, including blocks outside the viewport. Register them
 through `with_link_reference`.
 
+Host foregrounds are render-local presentation, supplied through
+`RenderContext::with_foreground_ranges` for keyed paragraph leaves. They use
+the same UTF-8 byte space as geometry, with U+FFFC for each inline object.
+They override glyph colors from marks and links; later supplied ranges win
+overlaps. Other mark properties and link activation remain intact. Uncovered
+text keeps normal inheritance. The node tree and its cached base mark styles
+never retain these colors: a host can change its theme/surface or remove the
+ranges next frame without rebuilding the document. Custom objects inherit an
+override only when their entire placeholder is covered; images are unchanged.
+
 ### Evolution boundary
 
 Keep the sink, layout caches, flow fragments and shaping implementations private.

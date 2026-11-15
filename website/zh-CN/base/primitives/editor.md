@@ -49,6 +49,16 @@ let editor = cx.new(|cx| {
 Editor::new(&editor)
 ```
 
+## 文字起点几何
+
+`EditorState::text_origin_offset(&self) -> Option<Pixels>` 读取从内容区域左边缘到未滚动、
+左对齐源码文字的水平偏移。它包含间距及可见的行号、折叠控件和装饰槽，不包含输入框
+内边距、滚动或文字对齐偏移。静态源码视图与编辑器对齐时，需另加输入框内边距。
+
+该值来自最近一次布局，首次布局前返回 `None`。对齐替代视图前需先布局编辑器，修改
+gutter 设置或字体后需重新渲染；不要为尚未布局的编辑器代入固定默认值。需要包含滚动
+和文字对齐的实际屏幕坐标时，使用 `range_to_bounds` 读取可见文字范围。
+
 ## 空白字符与装饰
 
 通过 `show_whitespaces(true)` 显示空白字符，通过 `create_decorations_collection` 创建随文本编辑自动跟踪范围的装饰集合。保留句柄用于更新或清空条目；丢弃句柄不会移除装饰。

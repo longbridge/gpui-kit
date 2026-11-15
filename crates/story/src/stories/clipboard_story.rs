@@ -8,7 +8,6 @@ use gpui_kit::component::{
     clipboard::Clipboard,
     h_flex,
     input::{Input, InputState},
-    label::Label,
     v_flex,
 };
 
@@ -66,27 +65,22 @@ impl Render for ClipboardStory {
                     .description("Copies a value supplied by the application.")
                     .w(px(480.))
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .child(Label::new("A clipboard button"))
-                            .child(
-                                Clipboard::new("clipboard1")
-                                    .value_fn({
-                                        let view = cx.entity().clone();
-                                        move |_, cx| {
-                                            SharedString::from(format!(
-                                                "masked :{}",
-                                                view.read(cx).masked
-                                            ))
-                                        }
-                                    })
-                                    .on_copied(|value, window, cx| {
-                                        window.push_notification(
-                                            format!("Copied value: {}", value),
-                                            cx,
-                                        )
-                                    }),
-                            ),
+                        h_flex().child(
+                            Clipboard::new("clipboard1")
+                                .label("Copy value")
+                                .value_fn({
+                                    let view = cx.entity();
+                                    move |_, cx| {
+                                        SharedString::from(format!(
+                                            "masked :{}",
+                                            view.read(cx).masked
+                                        ))
+                                    }
+                                })
+                                .on_copied(|value, window, cx| {
+                                    window.push_notification(format!("Copied value: {}", value), cx)
+                                }),
+                        ),
                     ),
             )
             .child(

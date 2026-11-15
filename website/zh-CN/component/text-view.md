@@ -174,6 +174,30 @@ TextView::new(&state).on_reveal(move |line, _, _| {
 
 handle 和菜单由 [`Root`](./root.md) 为整个窗口选区绘制，因此跨多个视图的选区也能覆盖到。点击其他位置会清除它们；手指滚动内容时菜单会暂时让开。
 
+## 任务列表
+
+Markdown 任务列表项（`- [ ]`、`- [x]`）会显示一个复选框，默认不可交互。使用
+`on_task_toggle` 让用户勾选或取消勾选，回调收到一个 `TaskToggleEvent`：
+
+- `checked()` 是该项现在应有的勾选状态。
+- `item_range()` 是被点击的列表项在源文本中的字节范围，包括嵌套的子列表。
+- `marker_range()` 是它的 `[ ]` 或 `[x]` 标记的字节范围。
+
+```rust
+use gpui_kit::component::text::markdown;
+
+let view = cx.entity().downgrade();
+markdown(self.source.clone()).on_task_toggle(move |event, _window, cx| {
+    _ = view.update(cx, |this, cx| {
+        let marker = if event.checked() { "[x]" } else { "[ ]" };
+        this.source.replace_range(event.marker_range(), marker);
+        cx.notify();
+    });
+})
+```
+
+`TextView` 不会修改自己的文本：源文本归应用所有，由应用替换标记并渲染新的文本。
+
 ## 图片
 
 Markdown 的 `![alt](src)` 和 HTML 的 `<img src>` 都通过 GPUI 的 `img` 元素渲染，

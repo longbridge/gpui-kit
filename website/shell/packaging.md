@@ -45,7 +45,7 @@ gpui-shell bundle -d clock
 
 The macOS and Linux bundles hold no `gpui-shell` binary, so they can be made on any platform and do not depend on the CPU architecture. The Windows bundle carries `gpui-shell.exe` for x86-64, which makes its zip about 20 MB; see [Windows](#windows) for where `bundle` gets it.
 
-The names come from the manifest: `name` names the `.app`, the Windows executable and the window title, a lowercase form of it (`clock`) names the command and the archives, `version` goes into the archive names and `Info.plist`, and `id` is the bundle identifier, the Linux install directory and desktop entry, and the window's application id. A bundle needs `gpui-shell.json` for all of this.
+The names come from the manifest: `name` names the `.app`, the Windows executable and the window title, a lowercase form of it (`clock`) names the command and the archives, `version` goes into the archive names and `Info.plist`, and `id` is the bundle identifier, the Linux install directory and desktop entry, and the window's application id. A bundle needs `gpui-shell.json` for all of this. The macOS and Linux bundles refuse a `name` or `--download-url` that holds a line break or another control character, because their launcher and installer scripts carry both.
 
 | Option                  | Meaning                                                                                   |
 | ----------------------- | ----------------------------------------------------------------------------------------- |

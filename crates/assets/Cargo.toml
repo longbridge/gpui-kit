@@ -9,10 +9,13 @@ repository = "https://github.com/longbridge/gpui-kit"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.8.1"
+version = "0.9.1"
 
 # Retain Cargo icon-directory metadata for existing build-script consumers.
 links = "gpui-kit-default-icons"
+
+[lints]
+workspace = true
 
 [dependencies]
 anyhow.workspace = true

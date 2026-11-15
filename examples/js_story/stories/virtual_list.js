@@ -21,7 +21,9 @@ export function renderVirtualListStory(story, cx) {
           div()
             .text_size(11)
             .text_color(colors.muted_foreground)
-            .child("Only visible rows are built; click a row to keep its domain ID selected."),
+            .child(
+              "Only visible rows are built; hover a row to see its domain ID, click it to keep that ID selected.",
+            ),
         ),
     )
     .child(
@@ -45,14 +47,27 @@ export function renderVirtualListStory(story, cx) {
                 const id = `project-${index + 1}`;
                 return div()
                   .id(id)
+                  .group("project-row")
                   .h(32)
                   .px(12)
                   .flex()
                   .items_center()
+                  .justify_between()
                   .border_b(1)
                   .border_color(colors.border)
                   .bg(story.selectedId === id ? colors.muted : colors.background)
-                  .child(`Project ${index + 1}`);
+                  .child(`Project ${index + 1}`)
+                  // A style rather than a handler, so a row built during
+                  // layout may carry it: the pointer crossing the list runs
+                  // no script.
+                  .child(
+                    div()
+                      .text_size(11)
+                      .text_color(colors.muted_foreground)
+                      .opacity(0)
+                      .group_hover("project-row", (el) => el.opacity(1))
+                      .child(id),
+                  );
               }),
           )
             .size_full()

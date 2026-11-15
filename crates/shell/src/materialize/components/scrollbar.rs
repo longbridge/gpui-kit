@@ -51,7 +51,7 @@ pub(in crate::materialize) fn scrollbar(
     // Its colors come from the theme's scrollbar tokens and the element around
     // it is a positioning box, so a state style here has nowhere to land.
     // Saying so beats dropping it without a word.
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+    if !states.is_empty() {
         tracing::warn!(
             "state styles on a Scrollbar are ignored; the bar's own colors come from the \
              theme's scrollbar tokens, and the element around it only positions it"

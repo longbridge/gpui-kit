@@ -233,6 +233,19 @@ Input::new(&input).context_menu(|menu, window, cx| {
 })
 ```
 
+A right-click outside the selection moves the cursor to the click. A right-click inside the selection keeps the selection and the cursor, so read `context_menu_offset()` to act on the text under the pointer, as a spelling menu does:
+
+```rust
+let state = input.clone();
+Input::new(&input).context_menu(move |menu, _, cx| {
+    // The UTF-8 offset under the pointer at the right-click that opened this menu.
+    let Some(offset) = state.read(cx).context_menu_offset() else {
+        return menu;
+    };
+    menu.menu(format!("Look up the word at {offset}"), Box::new(LookUp))
+})
+```
+
 ### Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps
@@ -496,6 +509,30 @@ an undoable plain-text replacement. Token edits,
 including adding a reference to existing text, emit `InputEvent::Change`.
 Programmatic setters can update readonly or disabled inputs, so check these
 states in application commands that should be unavailable to users.
+
+### Derive tokens from the text
+
+To show part of the typed text as a token, such as `**bold**` while the caret is
+elsewhere, pass the current text with its tokens to `set_tokens`. It keeps the
+text, the selections and the undo history, and does not emit `InputEvent::Change`:
+
+```rust
+use gpui_kit::component::input::{InlineToken, InputContent};
+
+input.update(cx, |state, cx| {
+    let content = InputContent::new(state.value())
+        .with_token(2..7, InlineToken::new("bold", "**b**"))
+        .expect("the text holds `**b**` at 2..7");
+    // Rejected while a caret is inside 2..7: the text stays plain.
+    state.set_tokens(content, cx).ok();
+});
+```
+
+`set_tokens` returns `TextMismatch` when the content holds other text and
+`SplitsSelection` when a token would cut through a selection or a caret; the
+tokens stay as they were. Undo and Redo replay the text with the tokens recorded
+for each edit and drop a token that an undone edit cuts through, so call
+`set_tokens` again after each change to keep derived tokens current.
 
 ### Validation and supported inputs
 

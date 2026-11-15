@@ -132,7 +132,7 @@ impl ThemeColorsStory {
             .map(|theme| ThemeItem::new(theme.name.clone(), theme.name == active_theme_name))
             .collect();
 
-        let current_theme = active_theme_name.clone();
+        let current_theme = active_theme_name;
         let selected_index = items.iter().position(|item| item.name == current_theme);
         let selected_path = selected_index.map(|idx| IndexPath::default().row(idx));
         let select_state = cx.new(|cx| SelectState::new(items, selected_path, window, cx));
@@ -379,7 +379,7 @@ impl ThemeColorsStory {
     fn render_left_panel(&self, _: &mut Window, cx: &mut Context<Self>) -> Sidebar<SidebarMenu> {
         let categories = &self.categories;
         let is_filtering = self.filter_by_value.is_some();
-        let entity_ref = cx.entity().clone();
+        let entity_ref = cx.entity();
 
         let expand_all = Rc::new(cx.listener(
             |this: &mut Self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
@@ -544,7 +544,7 @@ impl ThemeColorsStory {
                                                 .border_b_1()
                                                 .border_color(isolated_theme.border)
                                                 .text_color(isolated_theme.foreground)
-                                                .child(category_name.clone()),
+                                                .child(category_name),
                                         )
                                         .child(div().flex().flex_wrap().gap_4().children(
                                             colors.iter().map(|entry| {

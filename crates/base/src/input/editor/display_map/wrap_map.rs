@@ -108,6 +108,11 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.adjust_inline_metrics(range, new_text.len());
+        // Before the first layout the font is still the window default; layout shapes it all.
+        if !self.wrapper.is_prepared() {
+            self.wrapper.set_default_text(changed_text);
+            return;
+        }
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 

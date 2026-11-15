@@ -231,7 +231,7 @@ GPUI builds a **dispatch path** from the focused element through its ancestors. 
 
 ### Trace one shortcut
 
-Suppose the focused element is inside `Chat`, itself inside `Workspace`. A binding such as `KeyBinding::new("secondary-enter", SendMessage, Some("Chat"))` is eligible only while `Chat` appears on that focused path. GPUI chooses a matching binding, then dispatches its `SendMessage` value along that path. The `Chat` handler runs before a `Workspace` bubble handler. If no element on the route handles the Action, a global `cx.on_action` handler can receive it. The context chooses a **binding**; it does not select a handler by itself. [KeyBinding](./keybinding) explains competing bindings and predicate syntax.
+Suppose the focused element is inside `Chat`, itself inside `Workspace`. A binding such as `KeyBinding::new("ctrl-enter", SendMessage, Some("Chat"))` is eligible only while `Chat` appears on that focused path. GPUI chooses a matching binding, then dispatches its `SendMessage` value along that path. The `Chat` handler runs before a `Workspace` bubble handler. If no element on the route handles the Action, a global `cx.on_action` handler can receive it. The context chooses a **binding**; it does not select a handler by itself. [KeyBinding](./keybinding) explains competing bindings and predicate syntax.
 
 For a command triggered by a click, `window.dispatch_action(Box::new(SendMessage), cx)` uses the focus captured when called. Ensure the intended route has focus, or dispatch through a retained `FocusHandle`. A button's callback can also call the owning entity's method directly when no shared command route is needed.
 
@@ -323,6 +323,6 @@ Keep the handle, context, and handler with the region that owns the command. Use
 ## Practice with the Tree story
 
 1. **Follow the path.** Run `cargo run -p gpui-component-story -- Tree`, select a row, and press Enter. In `tree_story.rs`, find the binding, context, and handler. Which component owns the selected row, and which entity owns the command handler?
-2. **Change the input.** In your own branch, temporarily change the Tree story binding from `"enter"` to `"secondary-r"`. Re-run the Story Gallery. Verify that the new key invokes the same `Rename` handler and that Enter no longer does. Restore the source after the experiment.
+2. **Change the input.** In your own branch, temporarily change the Tree story binding from `"enter"` to `"ctrl-r"`. Re-run the Story Gallery. Verify that the new key invokes the same `Rename` handler and that Enter no longer does. Restore the source after the experiment.
 3. **Predict propagation.** Place `Rename` handlers on a child and its parent in a small view. Have the child call `cx.propagate()` only when it has no selection. Predict which handler runs in both cases, then test with visible output. A handler that returns without calling `cx.propagate()` consumes the Action.
 4. **Add a target.** Model an operation that must carry a row identifier as a data Action with `#[action(namespace = story, no_json)]`. Dispatch it from a row callback; keep the mutation in the owning handler. Compare this with `Rename`, which reads the currently selected row instead.

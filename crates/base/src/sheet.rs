@@ -252,7 +252,6 @@ mod tests {
         let focus = cx.update(|cx| cx.focus_handle());
         let events = Rc::new(RefCell::new(Vec::new()));
         let (_, cx) = cx.add_window_view({
-            let focus = focus.clone();
             let events = events.clone();
             move |_, _| Harness {
                 closable: true,

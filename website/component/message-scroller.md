@@ -66,6 +66,24 @@ after records are loaded. `reset(...)` replaces the known row count and
 re-engages tail following; call `scroll_to_item(...)` after it when the product
 needs a different initial row.
 
+`scroll_to_item(...)` puts the top of the row at the top of the viewport. To
+bring a reader back to the same pixel, save `logical_scroll_top()` when they
+leave and pass it to `scroll_to_offset(...)`:
+
+```rust
+// Leaving the thread.
+let saved = scroller.read(cx).logical_scroll_top();
+
+// Coming back, with the same rows.
+scroller.update(cx, |state, cx| {
+    state.reset(messages.len(), cx);
+    let _ = state.scroll_to_offset(saved, cx);
+});
+```
+
+If rows were added or removed before `saved.item_ix` in between, move the
+index by that count first.
+
 ## Render rows and an empty state
 
 Pass an indexed renderer. GPUI virtualizes the rows, so the closure is called
@@ -387,6 +405,7 @@ model around this component.
 | `remeasure(cx)` | — | Remeasure all rows after global layout changes. |
 | `remeasure_items(range, cx)` | `true` if valid | Remeasure selected dynamic rows. |
 | `scroll_to_item(index, cx)` | `false` if out of range | Navigate to an arbitrary row index. |
+| `scroll_to_offset(offset, cx)` | `false` if out of range | Restore a position `logical_scroll_top()` returned, to the pixel. |
 | `scroll_to_end(cx)` | tail following enabled | Move to the latest row and resume following. |
 
 ### `MessageScroller`
