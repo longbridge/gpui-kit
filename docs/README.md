@@ -14,3 +14,6 @@ rather than project-progress logs.
 
 For component-level APIs and runnable examples, see the
 [gpui-base documentation](../website/base/index.md).
+
+For how GPUI Kit relates to Zed's GPUI, the `gpui-pre` crates and GPUI Fast,
+see the [FAQ](../website/docs/faq.md).

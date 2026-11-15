@@ -146,6 +146,15 @@ NumberInput::new(&input)
 NumberInput::new(&input).small()
 ```
 
+### Stepper Buttons
+
+The increment and decrement buttons are rendered by default. Omit them with
+`.stepper(false)`; Up and Down keys continue to step the value:
+
+```rust
+NumberInput::new(&input).stepper(false)
+```
+
 ### With Prefix and Suffix
 
 ```rust
@@ -259,6 +268,7 @@ NumberInput::decrement(&number_input, window, cx);
 | `size(size)`                   | Set input size (small, medium, large)      |
 | `prefix(el)`                   | Add prefix element                         |
 | `suffix(el)`                   | Add suffix element                         |
+| `stepper(bool)`                | Render or omit the increment/decrement buttons |
 | `appearance(bool)`             | Enable/disable default styling             |
 | `accessibility_label(str)`     | Name announced by screen readers           |
 | `disabled(bool)`               | Set disabled state                         |

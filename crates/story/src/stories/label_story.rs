@@ -167,9 +167,7 @@ impl Render for LabelStory {
                                     )
                                     // Keeps the mixed ASCII/CJK matching regression visible.
                                     .child(
-                                        Label::new("AAA中文BB")
-                                            .highlights(ht.clone())
-                                            .masked(self.masked),
+                                        Label::new("AAA中文BB").highlights(ht).masked(self.masked),
                                     ),
                             ),
                     ),

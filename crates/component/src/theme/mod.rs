@@ -142,6 +142,17 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
         })
 }
 
+/// Windows reveals auto-hidden scrollbars on hover and otherwise always shows
+/// them; macOS reveals auto-hidden ones only while scrolling.
+fn system_scrollbar_mode(auto_hide: bool, is_windows: bool) -> ScrollbarMode {
+    match (auto_hide, is_windows) {
+        (true, true) => ScrollbarMode::Hover,
+        (true, false) => ScrollbarMode::Scrolling,
+        (false, true) => ScrollbarMode::Always,
+        (false, false) => ScrollbarMode::Hover,
+    }
+}
+
 /// The global theme configuration.
 ///
 /// Construct with [`Theme::default`] and assign fields; new fields may be
@@ -189,6 +200,8 @@ pub struct Theme {
     pub radius: Pixels,
     /// Radius for the large elements, e.g.: Dialog, Notification border radius.
     pub radius_lg: Pixels,
+    /// Corner radius of client-decorated windows, default 0 (square).
+    pub window_radius: Pixels,
     pub shadow: bool,
     /// Whether focused controls draw a ring outside their border, default true.
     ///
@@ -371,11 +384,10 @@ impl Theme {
 
     /// Sync the Scrollbar showing behavior with the system
     pub fn sync_scrollbar_appearance(cx: &mut App) {
-        let mode = if cx.should_auto_hide_scrollbars() {
-            ScrollbarMode::Scrolling
-        } else {
-            ScrollbarMode::Hover
-        };
+        let mode = system_scrollbar_mode(
+            cx.should_auto_hide_scrollbars(),
+            cfg!(target_os = "windows"),
+        );
         Self::set_scrollbar_mode(mode, cx);
     }
 
@@ -684,7 +696,7 @@ impl Theme {
 mod semantic_token_tests {
     use gpui::{Hsla, IsZero as _, px};
 
-    use super::{RADIUS_FULL, Theme};
+    use super::{RADIUS_FULL, ScrollbarMode, Theme, system_scrollbar_mode};
 
     #[test]
     fn semantic_colors_are_a_live_projection_of_legacy_fields() {
@@ -757,6 +769,14 @@ mod semantic_token_tests {
     }
 
     #[test]
+    fn system_scrollbar_mode_follows_the_platform_convention() {
+        assert_eq!(system_scrollbar_mode(true, true), ScrollbarMode::Hover);
+        assert_eq!(system_scrollbar_mode(false, true), ScrollbarMode::Always);
+        assert_eq!(system_scrollbar_mode(true, false), ScrollbarMode::Scrolling);
+        assert_eq!(system_scrollbar_mode(false, false), ScrollbarMode::Hover);
+    }
+
+    #[test]
     fn disabled_legacy_shadows_project_to_empty_elevations() {
         let mut theme = Theme::default();
         theme.shadow = false;
@@ -779,6 +799,7 @@ impl From<&ThemeColor> for Theme {
             mono_font_size: px(13.),
             radius: px(6.),
             radius_lg: px(8.),
+            window_radius: px(0.),
             shadow: true,
             focus_ring: true,
             scrollbar_mode: ScrollbarMode::default(),

@@ -33,6 +33,8 @@ The authoritative module is [`components/number_input.rs`](https://github.com/lo
 ## State and events
 
 The backing input state owns numeric text/value; step actions apply the configured limits.
+Use `.stepper(false)` to omit the increment and decrement buttons while keeping Up/Down keyboard
+stepping on the spinbutton.
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.
 

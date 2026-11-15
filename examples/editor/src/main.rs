@@ -559,7 +559,7 @@ impl CodeActionProvider for TextConvertor {
             edit: Some(WorkspaceEdit {
                 changes: Some(
                     std::iter::once((
-                        document_uri.clone(),
+                        document_uri,
                         vec![TextEdit {
                             range,
                             new_text: old_text

@@ -234,7 +234,6 @@ impl SettingsStory {
                                     }
                                 },
                                 {
-                                    let view = view.clone();
                                     move |val: SharedString, cx: &mut App| {
                                         view.update(cx, |view, cx| {
                                             view.size = Size::from_str(val.as_str());

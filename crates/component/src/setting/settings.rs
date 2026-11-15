@@ -195,8 +195,12 @@ impl Settings {
                     let groups = &filter.groups[page_ix];
                     let is_page_active = selected_index.page_ix == page_ix
                         && (selected_index.group_ix.is_none() || groups.len() == 1);
+                    // Going to a page opens its groups; clicking the title of
+                    // the page on display again folds or unfolds them.
+                    let is_page_shown = selected_index.page_ix == page_ix;
                     SidebarMenuItem::new(page.title.clone())
-                        .click_to_open(true)
+                        .click_to_open(!is_page_shown)
+                        .click_to_toggle(is_page_shown)
                         .when_some(page.icon.clone(), |this, icon| this.icon(icon))
                         .default_open(page.default_open)
                         .active(is_page_active)

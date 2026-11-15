@@ -105,6 +105,23 @@ Label::new("Small").text_sm()
 Label::new("Extra Small").text_xs()
 ```
 
+### 无障碍
+
+Label 会作为 `Label` 节点暴露给屏幕阅读器，节点的值就是它的文本（包含次要文本）。掩码状态或没有文本的 Label 不产生节点，因此被隐藏的文本不会进入无障碍树。
+
+每个 Label 的 id 默认取自调用 `Label::new` 的那一行代码。如果同一行代码创建了多个同级的 Label，请为每个 Label 指定各自的 id。否则屏幕阅读器只能读到其中第一个，并且在连接了辅助技术时，GPUI 的 debug 构建会因 id 重复而 panic：
+
+```rust
+v_flex().children(
+    names
+        .iter()
+        .enumerate()
+        .map(|(ix, name)| Label::new(name.clone()).id(("name", ix))),
+)
+```
+
+如果父元素各自带有 id（例如 `List` 的行），其中的 Label 已经互不相同。
+
 ## API 参考
 
 ### Label
@@ -112,6 +129,7 @@ Label::new("Extra Small").text_xs()
 | 方法 | 说明 |
 | ------------------- | ------------------------------------------------------------- |
 | `new(text)` | 使用文本创建标签 |
+| `id(id)` | 设置元素 id，用于循环中创建的标签 |
 | `secondary(text)` | 添加次要文本，常用于 optional 或 required 标识 |
 | `masked(bool)` | 使用圆点字符隐藏文本 |
 | `highlights(match)` | 高亮匹配内容 |

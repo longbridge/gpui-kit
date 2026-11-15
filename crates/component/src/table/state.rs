@@ -1555,11 +1555,12 @@ where
         _row_ix: Option<usize>,
         col_ix: usize,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Div {
         let Some(col_group) = self.col_groups.get(col_ix) else {
             return div();
         };
+        let is_rtl = gpui_base::LayoutDirection::global(cx).is_rtl();
 
         let col_width = col_group.width;
         let col_padding = col_group.column.paddings;
@@ -1573,9 +1574,11 @@ where
             .table_cell_size(self.options.size)
             // Text alignment is inherited, so this aligns the header name and
             // the delegate's cell text without changing how cells lay out.
-            .map(|this| match col_group.column.align {
-                TextAlign::Center => this.text_center(),
-                TextAlign::Right => this.text_right(),
+            // `Left`/`Right` read as start/end, so they swap right to left.
+            .map(|this| match (col_group.column.align, is_rtl) {
+                (TextAlign::Center, _) => this.text_center(),
+                (TextAlign::Right, false) | (TextAlign::Left, true) => this.text_right(),
+                (TextAlign::Right, true) => this.text_left(),
                 _ => this,
             })
             .map(|this| match col_padding {
@@ -1938,6 +1941,14 @@ where
             .h_full()
             .child(
                 self.render_cell(None, col_ix, window, cx)
+                    // A header given its own height may be shorter than a
+                    // row, with no room for a row's padding above and below
+                    // the name, so the name centres in it instead. A column's
+                    // own paddings still apply.
+                    .when(
+                        self.options.header_row_height.is_some() && paddings.is_none(),
+                        |this| this.py_0(),
+                    )
                     .id(("col-header", col_ix))
                     .role(gpui::Role::ColumnHeader)
                     .aria_label(name.clone())
@@ -2006,7 +2017,7 @@ where
             .child(self.render_leading_resize_handle(col_ix, window, cx))
             // to save the bounds of this col.
             .on_prepaint({
-                let view = cx.entity().clone();
+                let view = cx.entity();
                 move |bounds, _, cx| view.update(cx, |r, _| r.col_groups[col_ix].bounds = bounds)
             })
     }
@@ -2264,7 +2275,7 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let header_row_height = self.header_row_height();
         let layout = self.header_layout.clone();
 
@@ -2332,7 +2343,7 @@ where
         // `selected_row()` is `None` outside row mode, so a selected cell or
         // column never highlights its row.
         let is_selected = self.selected_row() == Some(row_ix);
-        let view = cx.entity().clone();
+        let view = cx.entity();
         let row_height = self.options.size.table_row_height();
 
         if row_ix < rows_count {
@@ -2449,10 +2460,18 @@ where
                                                         ))
                                                         .when(is_cell_selected, |this| {
                                                             this.child(
-                                                                div().absolute().inset_0().bg(cx
-                                                                    .theme()
-                                                                    .tokens
-                                                                    .table_active),
+                                                                div()
+                                                                    .absolute()
+                                                                    .inset_0()
+                                                                    .bg(cx
+                                                                        .theme()
+                                                                        .tokens
+                                                                        .table_active)
+                                                                    .border_1()
+                                                                    .border_color(
+                                                                        cx.theme()
+                                                                            .table_active_border,
+                                                                    ),
                                                             )
                                                         })
                                                         .when(
@@ -2616,7 +2635,9 @@ where
                                 div()
                                     .absolute()
                                     .inset_0()
-                                    .bg(cx.theme().tokens.table_active),
+                                    .bg(cx.theme().tokens.table_active)
+                                    .border_1()
+                                    .border_color(cx.theme().table_active_border),
                             )
                         })
                         .when(is_cell_right_clicked && !is_cell_selected, |this| {
@@ -2726,6 +2747,7 @@ where
                 .child(
                     Scrollbar::vertical(&self.vertical_scroll_handle)
                         .viewport_from_layout()
+                        .when_some(self.options.scrollbar_mode, |this, mode| this.mode(mode))
                         .max_fps(60),
                 ),
         )
@@ -2742,7 +2764,11 @@ where
             .right(self.fixed_right_head_cols_bounds.size.width)
             .bottom_0()
             .h(Scrollbar::width())
-            .child(Scrollbar::horizontal(&self.horizontal_scroll_handle).viewport_from_layout())
+            .child(
+                Scrollbar::horizontal(&self.horizontal_scroll_handle)
+                    .viewport_from_layout()
+                    .when_some(self.options.scrollbar_mode, |this, mode| this.mode(mode)),
+            )
     }
 }
 
@@ -2818,7 +2844,7 @@ where
             .overflow_hidden()
             .child(self.render_table_header(scrollable_cols.clone(), window, cx))
             .context_menu({
-                let view = cx.entity().clone();
+                let view = cx.entity();
                 move |this, window: &mut Window, cx: &mut Context<PopupMenu>| {
                     if let Some(row_ix) = view.read(cx).right_clicked_row {
                         view.update(cx, |menu, cx| {
@@ -2870,14 +2896,8 @@ where
                                             cx,
                                         );
 
-                                        if visible_range.end > rows_count {
-                                            table.scroll_to_row(
-                                                std::cmp::min(
-                                                    visible_range.start,
-                                                    rows_count.saturating_sub(1),
-                                                ),
-                                                cx,
-                                            );
+                                        if visible_range.start >= rows_count {
+                                            table.scroll_to_row(rows_count.saturating_sub(1), cx);
                                         }
 
                                         let mut items = Vec::with_capacity(
@@ -2973,7 +2993,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use gpui::{App, Entity, TestAppContext};
+    use gpui::{AnyView, App, Entity, StyleRefinement, TestAppContext};
 
     use super::*;
 
@@ -3070,6 +3090,81 @@ mod tests {
                 .y)
                 > end
         );
+    }
+
+    struct ThreeRowsDelegate;
+
+    impl TableDelegate for ThreeRowsDelegate {
+        fn columns_count(&self, _: &App) -> usize {
+            1
+        }
+        fn rows_count(&self, _: &App) -> usize {
+            3
+        }
+        fn column(&self, _: usize, _: &App) -> Column {
+            Column::new("value", "Value")
+        }
+        fn render_td(
+            &mut self,
+            row: usize,
+            _: usize,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) -> impl IntoElement {
+            div().child(row.to_string())
+        }
+    }
+
+    /// Holds the table, and counts how often it is drawn.
+    struct StripedPanel {
+        table: Entity<TableState<ThreeRowsDelegate>>,
+        renders: usize,
+    }
+
+    impl Render for StripedPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders += 1;
+            div()
+                .size_full()
+                .child(DataTable::new(&self.table).stripe(true))
+        }
+    }
+
+    /// Draws the panel as a cached view, the way `TabPanel` draws a dock panel.
+    struct CachedPanel(Entity<StripedPanel>);
+
+    impl Render for CachedPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(240.))
+                .h(px(400.))
+                .child(AnyView::from(self.0.clone()).cached(StyleRefinement::default().size_full()))
+        }
+    }
+
+    /// The filler rows a striped table adds below its last row must not make
+    /// it scroll, and so notify, every time it is drawn. That kept a cached
+    /// view holding the table from ever being reused.
+    #[gpui::test]
+    fn striped_table_with_few_rows_lets_a_cached_view_be_reused(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let table = cx.new(|cx| TableState::new(ThreeRowsDelegate, window, cx));
+            CachedPanel(cx.new(|_| StripedPanel { table, renders: 0 }))
+        });
+        let panel = view.read_with(cx, |view, _| view.0.clone());
+        let table = panel.read_with(cx, |panel, _| panel.table.clone());
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        };
+        draw(cx);
+        // Drawn again now that it knows its height, with the filler rows.
+        table.update(cx, |_, cx| cx.notify());
+        draw(cx);
+        let renders = panel.read_with(cx, |panel, _| panel.renders);
+        draw(cx);
+        draw(cx);
+        assert_eq!(panel.read_with(cx, |panel, _| panel.renders), renders);
     }
 
     impl TableDelegate for WidthsDelegate {

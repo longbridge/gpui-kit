@@ -167,7 +167,7 @@ impl DiffFile {
         // The marker-delimited part being read, with the open region's ranges.
         let mut open: Option<(ConflictPart, DiffConflict)> = None;
         for (ix, range) in line_ranges(text).into_iter().enumerate() {
-            let line = &text[range.clone()];
+            let line = &text[range];
             let content = line.trim_end_matches(['\n', '\r']);
             let marker = |prefix: &str| {
                 content

@@ -208,6 +208,7 @@ where
         render_items: Box::new(render_range),
         sizing_behavior: ListSizingBehavior::default(),
         item_to_measure_index: 0,
+        measure_cross_axis: true,
     }
 }
 
@@ -224,6 +225,9 @@ pub struct VirtualList {
     >,
     sizing_behavior: ListSizingBehavior,
     item_to_measure_index: usize,
+    /// Whether to render and lay out an item each frame to infer the
+    /// cross-axis content size.
+    measure_cross_axis: bool,
 }
 
 impl Styled for VirtualList {
@@ -254,10 +258,16 @@ impl VirtualList {
     /// Specify for table.
     ///
     /// Table is special, because the `scroll_handle` is based on Table head (That is not a virtual list).
+    ///
+    /// Such a list only follows the shared handle along its axis and never
+    /// scrolls across it: it fills the size its parent gives it, so the
+    /// cross-axis content size is not measured. That saves rendering and
+    /// laying out one extra item per list every frame, i.e. one per table row.
     #[doc(hidden)]
     pub fn with_scroll_handle(mut self, scroll_handle: &VirtualListScrollHandle) -> Self {
         self.base = div().id(self.id.clone()).size_full();
         self.scroll_handle = scroll_handle.clone();
+        self.measure_cross_axis = false;
         self
     }
 
@@ -317,7 +327,7 @@ impl VirtualList {
         window: &mut Window,
         cx: &mut App,
     ) -> Size<Pixels> {
-        if self.items_count == 0 {
+        if self.items_count == 0 || !self.measure_cross_axis {
             return Size::default();
         }
 

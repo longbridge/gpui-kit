@@ -85,7 +85,10 @@ shows which dependencies enable the backend's features; check for `font-kit`.
 Replace `src/main.rs` with:
 
 ```rust
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{
+    button::{Button, ButtonVariants},
+    label::Label,
+};
 use gpui_kit::*;
 
 struct HelloWorld;
@@ -99,7 +102,7 @@ impl Render for HelloWorld {
             .items_center()
             .justify_center()
             .gap_2()
-            .child("Hello, World!")
+            .child(Label::new("Hello, World!"))
             .child(
                 Button::new("hello")
                     .primary()
@@ -124,6 +127,8 @@ fn main() {
 ```
 
 Run `cargo run` from the project directory. A window shows the label and button; clicking the button prints `Clicked!` in the terminal.
+
+The greeting is a `Label` rather than a bare string. `Label` exposes its text in the accessibility tree, so screen readers can read it. A bare string such as `.child("Hello")` renders the same but is not exposed to assistive technology.
 
 The startup sequence has three parts:
 

@@ -1,3 +1,4 @@
+use gpui_base::LogicalStyledExt as _;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use gpui::{
@@ -163,6 +164,8 @@ impl RenderOnce for Toggle {
         let pressed_background = cx.theme().tokens.accent;
         let pressed_foreground = cx.theme().accent_foreground;
         let instance_style = self.style.clone();
+        let (border_corners, border_edges) =
+            super::logical_corners_edges(self.border_corners, self.border_edges, cx);
 
         BaseToggle::new(self.id)
             .pressed(checked)
@@ -174,8 +177,7 @@ impl RenderOnce for Toggle {
             .when_some(self.on_click, |this, on_click| {
                 this.on_change(move |next, _, window, cx| on_click(&next, window, cx))
             })
-            .flex()
-            .flex_row()
+            .flex_row_dir(cx)
             .line_height(relative(1.25))
             .items_center()
             .justify_center()
@@ -185,23 +187,17 @@ impl RenderOnce for Toggle {
                 Size::Large => this.min_w_9().h_9().px_3().text_base(),
                 _ => this.min_w_8().h_8().px_2().text_sm(),
             })
-            .when(self.border_corners.top_left, |this| {
-                this.rounded_tl(rounding)
-            })
-            .when(self.border_corners.top_right, |this| {
-                this.rounded_tr(rounding)
-            })
-            .when(self.border_corners.bottom_left, |this| {
-                this.rounded_bl(rounding)
-            })
-            .when(self.border_corners.bottom_right, |this| {
+            .when(border_corners.top_left, |this| this.rounded_tl(rounding))
+            .when(border_corners.top_right, |this| this.rounded_tr(rounding))
+            .when(border_corners.bottom_left, |this| this.rounded_bl(rounding))
+            .when(border_corners.bottom_right, |this| {
                 this.rounded_br(rounding)
             })
             .when(self.variant == ToggleVariant::Outline, |this| {
-                this.when(self.border_edges.left, |this| this.border_l_1())
-                    .when(self.border_edges.right, |this| this.border_r_1())
-                    .when(self.border_edges.top, |this| this.border_t_1())
-                    .when(self.border_edges.bottom, |this| this.border_b_1())
+                this.when(border_edges.left, |this| this.border_l_1())
+                    .when(border_edges.right, |this| this.border_r_1())
+                    .when(border_edges.top, |this| this.border_t_1())
+                    .when(border_edges.bottom, |this| this.border_b_1())
                     .border_color(cx.theme().border)
                     .bg(cx.theme().tokens.background)
             })
@@ -334,7 +330,7 @@ impl Styled for ToggleGroup {
 }
 
 impl RenderOnce for ToggleGroup {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let disabled = self.disabled;
         let single = self.single;
         let items_len = self.items.len();
@@ -349,6 +345,7 @@ impl RenderOnce for ToggleGroup {
             .axis(Axis::Horizontal)
             .child(
                 crate::h_flex()
+                    .flex_row_dir(cx)
                     .items_center()
                     .when(!self.segmented, |this| this.gap_2())
                     .refine_style(&self.style)

@@ -1,0 +1,14 @@
+[package]
+name = "example-link-tooltip"
+version = "0.9.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]

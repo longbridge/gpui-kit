@@ -38,6 +38,7 @@ mod history;
 mod hover_card;
 mod index_path;
 pub mod input;
+mod layout_direction;
 mod link;
 mod list_settings;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -128,6 +129,7 @@ pub use history::History;
 pub use hover_card::{HoverCard, HoverCardState};
 pub use index_path::IndexPath;
 pub use input::{Editor, Input, InputBase, InputStyles, Textarea};
+pub use layout_direction::{LayoutDirection, LogicalStyledExt};
 pub use link::{Link, LinkStyles};
 pub use list_settings::ListSettings;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -141,8 +143,8 @@ pub use motion::{
     KeyframeError, Keyframes, LinearStop, MotionPhase, MotionReveal, MotionStatus, MotionTransform,
     MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, ReducedMotion,
     Sequence, SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger,
-    StaggerOrigin, StepPosition, Timing, TimingSample, Transition, TransitionId, animate_keyframes,
-    spring, transition, transition_with_status,
+    StaggerOrigin, StepPosition, Timing, TimingSample, Transition, TransitionId, TransitionState,
+    animate_keyframes, spring, transition, transition_with_status,
 };
 pub use nav_stack::{NavMotion, NavOperation, NavPage, NavStack, NavStackEvent, NavStackState};
 pub use number_input::{
@@ -154,12 +156,14 @@ pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
 pub use plot::PlotMotion;
 pub use popover::{Popover, PopoverState};
-pub use popup::{POPUP_PRIORITY, Popup};
+pub use popup::{POPUP_PRIORITY, Popup, logical_anchor};
 pub use positioner::{Align, Positioner, ResolvedPosition};
 pub use progress::{Progress, ProgressIndicator, ProgressTrack};
 pub use radio::{Radio, RadioStyles};
 pub use radio_group::RadioGroup;
-pub use reduce_motion::apply_system_reduce_motion;
+pub use reduce_motion::{
+    ReduceMotionPreference, apply_system_reduce_motion, set_reduce_motion_preference,
+};
 #[doc(hidden)]
 pub use resizable::PANEL_MIN_SIZE;
 pub use resizable::{
@@ -244,6 +248,7 @@ pub fn init(cx: &mut App) {
     let _ = Theme::global_mut(cx);
     GlobalState::init(cx);
     reduce_motion::init(cx);
+    layout_direction::init(cx);
     dialog::init(cx);
     focus_trap::init(cx);
     popover::init(cx);

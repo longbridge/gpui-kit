@@ -1,5 +1,6 @@
 use crate::theme::ActiveTheme;
 use crate::{Disableable, Icon, IconName, Sizable, Size, StyledExt, h_flex};
+use gpui_base::LogicalStyledExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -136,6 +137,7 @@ impl RenderOnce for Rating {
         let value = state.read(cx).value;
 
         h_flex()
+            .flex_row_dir(cx)
             .id(id)
             .flex_nowrap()
             .refine_style(&self.style)

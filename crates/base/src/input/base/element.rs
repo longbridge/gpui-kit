@@ -711,6 +711,28 @@ pub(super) fn reveal_row(
         .min(px(0.))
 }
 
+/// `height` rounded up to a whole device pixel.
+fn ceil_to_device_pixel(height: Pixels, scale_factor: f32) -> Pixels {
+    px((f32::from(height) * scale_factor).ceil() / scale_factor)
+}
+
+/// Scrollable height for content of `content_height` in a viewport of
+/// `viewport_height`. Content that occupies no more device pixels than the
+/// viewport fits: layout snaps bounds to device pixels (and its f32 math can
+/// land a few ulps short), so a sub-device-pixel excess is not scrollable.
+fn fit_content_height(
+    content_height: Pixels,
+    viewport_height: Pixels,
+    scale_factor: f32,
+) -> Pixels {
+    let device = |h: Pixels| (f32::from(h) * scale_factor).round();
+    if device(content_height) <= device(viewport_height) {
+        viewport_height
+    } else {
+        content_height
+    }
+}
+
 /// Pixel height of the empty area below the last line in the editor's
 /// scrollable region. Backs [`InputBaseState::scroll_beyond_last_line`].
 ///
@@ -2880,7 +2902,7 @@ impl<M: InputModeKind> TextElement<M> {
             styles = compose_decoration_collections(
                 styles,
                 state.extras.decoration_layers().into_iter(),
-                visible_byte_range.clone(),
+                visible_byte_range,
             )
             .unwrap_or_default();
         }
@@ -3139,7 +3161,11 @@ impl<M: InputModeKind> Element for TextElement<M> {
             // At least `rows` tall (auto grow: the content's rows, capped at
             // `max_rows`); a taller parent still fills it.
             let rows = state.mode.max_rows().min(state.mode.rows());
-            style.min_size.height = (rows * line_height).into();
+            // Round up to a whole device pixel: taffy snaps lengths to the
+            // nearest device pixel, which at fractional scales (e.g. 5/3)
+            // would make the box shorter than its rows.
+            style.min_size.height =
+                ceil_to_device_pixel(rows * line_height, window.scale_factor()).into();
         } else {
             // For single-line inputs, the minimum height should be the line height
             style.size.height = line_height.into();
@@ -3476,9 +3502,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
             } else {
                 longest_line_width
             },
-            (total_wrapped_lines as f32 * line_height
-                + empty_bottom_height.max(ghost_lines_height))
-            .max(bounds.size.height),
+            fit_content_height(
+                total_wrapped_lines as f32 * line_height
+                    + empty_bottom_height.max(ghost_lines_height),
+                bounds.size.height,
+                window.scale_factor(),
+            ),
         );
 
         // TODO: should be add some gap to right, to convenient to focus on boundary position
@@ -4412,6 +4441,108 @@ mod tests {
         assert_eq!(displayed_line_number(10_000_000), 9_999_999);
     }
 
+    #[test]
+    fn fit_content_height_ignores_sub_device_pixel_excess() {
+        // 5/3: a 20px row in a box taffy snapped to 33 device px (19.8px).
+        assert_eq!(fit_content_height(px(20.), px(19.8), 5. / 3.), px(19.8));
+        // 1.2: f32 layout gives 59.999996px for three 20px rows.
+        assert_eq!(
+            fit_content_height(px(60.), px(59.999996), 1.2),
+            px(59.999996)
+        );
+        // A full device pixel more is real overflow.
+        assert_eq!(fit_content_height(px(21.), px(19.8), 5. / 3.), px(21.));
+        assert_eq!(fit_content_height(px(80.), px(60.), 1.2), px(80.));
+        // Short content still fills the viewport.
+        assert_eq!(fit_content_height(px(10.), px(60.), 1.), px(60.));
+    }
+
+    #[test]
+    fn ceil_to_device_pixel_never_shrinks() {
+        assert_eq!(ceil_to_device_pixel(px(20.), 1.), px(20.));
+        let h = ceil_to_device_pixel(px(20.), 5. / 3.);
+        assert!(h >= px(20.), "{h:?}");
+        assert_eq!((f32::from(h) * 5. / 3.).round(), 34.);
+    }
+
+    struct ScaledTextareaHarness(Entity<crate::input::TextareaState>);
+
+    impl Render for ScaledTextareaHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().child(
+                div()
+                    .w(px(240.))
+                    .child(crate::input::Textarea::new(&self.0)),
+            )
+        }
+    }
+
+    fn textarea_layout(
+        cx: &mut TestAppContext,
+        scale: f32,
+        text: &str,
+        min_rows: usize,
+        max_rows: usize,
+    ) -> (Pixels, Pixels, Pixels) {
+        cx.update(crate::init);
+        let text = text.to_string();
+        let (view, cx) = cx.add_window_view(move |window, cx| {
+            ScaledTextareaHarness(cx.new(|cx| {
+                crate::input::TextareaState::new(window, cx)
+                    .auto_grow(min_rows, max_rows)
+                    .default_value(text)
+            }))
+        });
+        cx.simulate_scale_factor_change(scale);
+        let field = view.read_with(cx, |view, _| view.0.clone());
+        for _ in 0..2 {
+            cx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+        }
+        field.read_with(cx, |field, _| {
+            (
+                field.text_bounds().unwrap().size.height,
+                field.scroll_size.height,
+                field.line_height().unwrap(),
+            )
+        })
+    }
+
+    #[gpui::test]
+    fn empty_auto_grow_textarea_fits_its_line_at_fractional_scale(cx: &mut TestAppContext) {
+        let (height, scroll, line) = textarea_layout(cx, 5. / 3., "", 1, 8);
+        assert!(
+            height >= line && height < line * 2.,
+            "{height:?} for {line:?}"
+        );
+        assert!(scroll <= height, "scrollable {scroll:?} in {height:?}");
+    }
+
+    #[gpui::test]
+    fn multi_line_auto_grow_textarea_does_not_scroll_at_1_2(cx: &mut TestAppContext) {
+        let (height, scroll, line) = textarea_layout(cx, 1.2, "a\nb\nc", 1, 8);
+        assert!(
+            height >= line * 3. - px(0.01) && height < line * 4.,
+            "{height:?}"
+        );
+        assert!(scroll <= height, "scrollable {scroll:?} in {height:?}");
+    }
+
+    #[gpui::test]
+    fn auto_grow_textarea_at_its_cap_does_not_scroll(cx: &mut TestAppContext) {
+        let (height, scroll, _) = textarea_layout(cx, 5. / 3., "1\n2\n3", 1, 3);
+        assert!(scroll <= height, "scrollable {scroll:?} in {height:?}");
+    }
+
+    #[gpui::test]
+    fn auto_grow_textarea_past_its_cap_still_scrolls(cx: &mut TestAppContext) {
+        let (height, scroll, line) = textarea_layout(cx, 5. / 3., "1\n2\n3\n4\n5", 1, 3);
+        assert!(height < line * 4., "{height:?}");
+        assert!(scroll > height, "scrollable {scroll:?} in {height:?}");
+    }
+
     struct DecorationHarness(Entity<EditorState>);
 
     impl Render for DecorationHarness {
@@ -4438,6 +4569,150 @@ mod tests {
             DecorationHarness(state)
         });
         (editor.unwrap(), window)
+    }
+
+    #[gpui::test]
+    fn a_tab_indicator_is_clipped_to_its_tab(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut editor = None;
+        let window = cx.open_window(size(px(240.), px(140.)), |window, cx| {
+            let state = cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .show_whitespaces(true)
+                    .tab_size(crate::input::TabSize {
+                        tab_size: 2,
+                        hard_tabs: true,
+                    })
+                    .default_value("a\tb\nname\tvalue")
+            });
+            editor = Some(state.clone());
+            DecorationHarness(state)
+        });
+        let editor = editor.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            for (line, tab_ix) in [(0, 1), (1, 4)] {
+                let line_layout = &layout.lines[line];
+                let wrapped = &line_layout.wrapped_lines[0];
+                let (_, x, width) = line_layout
+                    .whitespace_chars
+                    .iter()
+                    .copied()
+                    .find(|(_, _, width)| width.is_some())
+                    .expect("the tab is marked");
+                let width = width.unwrap();
+                assert_eq!(x, wrapped.x_for_index(tab_ix));
+                assert!(width > px(0.));
+                assert_eq!(
+                    x + width,
+                    wrapped.x_for_index(tab_ix + 1),
+                    "the indicator on line {line} ends where the next character starts"
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn text_origin_offset_tracks_rendered_gutter_and_scrolling(cx: &mut TestAppContext) {
+        let line = format!("{}\n", "source text ".repeat(20));
+        let text = line.repeat(80);
+        cx.update(crate::init);
+        cx.open_window(size(px(240.), px(140.)), |window, cx| {
+            let _editor = cx.new(|cx| {
+                let state = EditorState::new(window, cx);
+                assert_eq!(state.text_origin_offset(), None);
+                state
+            });
+            gpui::EmptyView
+        });
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_scroll_bounce(false, cx);
+                state.set_editor_paddings(Edges {
+                    left: px(11.),
+                    ..Default::default()
+                });
+            });
+
+            for font_size in [14., 18., 24.] {
+                window.set_rem_size(px(font_size));
+                for (numbers, folding) in
+                    [(false, false), (true, false), (true, true), (false, false)]
+                {
+                    editor.update(cx, |state, cx| {
+                        state.set_line_number(numbers, window, cx);
+                        state.set_folding(folding, window, cx);
+                        state.set_scroll_offset(Point::default(), cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let offset = state.text_origin_offset().unwrap();
+                    let first = state.range_to_bounds(&(0..3)).unwrap();
+                    assert!(
+                        (first.origin.x - state.input_bounds().left() - offset).abs() < px(0.001)
+                    );
+                    assert!(first.size.width > px(0.));
+                    if numbers || folding {
+                        assert!(offset > LINE_NUMBER_RIGHT_MARGIN);
+                    } else {
+                        assert_eq!(offset, LINE_NUMBER_RIGHT_MARGIN);
+                    }
+
+                    let height = state.line_height().unwrap();
+                    editor.update(cx, |state, cx| {
+                        state.set_scroll_offset(point(px(-25.), -height * 10.), cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    assert!(state.scroll_offset().x < px(0.));
+                    assert!(state.scroll_offset().y < px(0.));
+                    assert_eq!(state.text_origin_offset(), Some(offset));
+                    let row = state.visible_row_range().unwrap().start;
+                    assert!(row > 0);
+                    let start = row * line.len();
+                    let visible = state.range_to_bounds(&(start..start + 3)).unwrap();
+                    // Screen coordinates use f32; allow only subpixel roundoff.
+                    assert!(
+                        (visible.origin.x
+                            - (state.input_bounds().left() + offset + state.scroll_offset().x))
+                            .abs()
+                            < px(0.001)
+                    );
+                    // Subtracting scrolled f32 coordinates can round differently.
+                    assert!((visible.size.width - first.size.width).abs() < px(0.001));
+                }
+            }
+
+            let without = editor.read(cx).text_origin_offset().unwrap();
+            let collection = editor.update(cx, |state, cx| {
+                state.create_gutter_decorations_collection(Vec::new(), cx)
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let with = state.text_origin_offset().unwrap();
+            assert!(
+                with > without,
+                "decoration lanes contribute to the text origin"
+            );
+            let row = state.visible_row_range().unwrap().start;
+            let start = row * line.len();
+            assert!(
+                (state.range_to_bounds(&(start..start + 3)).unwrap().origin.x
+                    - (state.input_bounds().left() + with + state.scroll_offset().x))
+                    .abs()
+                    < px(0.001)
+            );
+            collection.dispose(cx);
+            window.draw(cx).clear(cx);
+            assert_eq!(editor.read(cx).text_origin_offset(), Some(without));
+        });
     }
 
     /// A list as tall as the window, whose second item is an input that
@@ -6317,10 +6592,7 @@ mod tests {
                 ..run.clone()
             },
             // this-is-test
-            TextRun {
-                len: 12,
-                ..run.clone()
-            },
+            TextRun { len: 12, ..run },
         ];
 
         #[track_caller]
@@ -6569,10 +6841,7 @@ mod tests {
                 len: 7,
                 ..run.clone()
             },
-            TextRun {
-                len: 24,
-                ..run.clone()
-            },
+            TextRun { len: 24, ..run },
         ];
 
         let bg_segments = vec![(8..12, gpui::red()), (12..18, gpui::blue())];

@@ -279,6 +279,7 @@ Base 还提供以下选择：
 | 退出完成前继续挂载 | `Presence` | 逻辑关闭后继续采样，直到 `should_render()` 为 false 才停止渲染。退出中重新打开会从当前值反向。 |
 | 列表条目错峰 | `Stagger` | 根据索引和起点计算延迟；不持有列表及其 ID。 |
 | 展开未知高度的内容 | `MotionReveal` | 测量 child，再按调用方提供的进度裁剪可见高度；它本身不采样或推进进度。 |
+| 比元素存活更久的过渡，如虚拟列表中的行 | `TransitionState` | 由调用方持有状态；`sample(target, policy, window, cx)` 的行为与 `transition_with_status` 相同，状态为 `Delayed` 或 `Running` 时同样请求帧。 |
 
 [Base Motion 指南](../base/motion.md)列出完整签名、参数校验、示例与基准测试。这里的 `Transition` 不同于旧的 `gpui_kit::base::animation::EffectTransition`：后者包装 GPUI `with_animation`，直接应用预设的淡入、滑动、宽度和高度效果。新的目标驱动动效优先使用 `base::motion` primitive，再自行应用采样值。
 

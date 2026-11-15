@@ -101,4 +101,14 @@ export const stories = [
     availability: "pending",
     api: "Scrollbar",
   }),
+  pendingStory({
+    id: "layout-direction",
+    title: "Layout Direction",
+    group: "Layout & advanced",
+    rustStory: "LayoutDirectionStory",
+    description: "Global right-to-left layout direction.",
+    states: ["left to right", "right to left"],
+    availability: "infrastructure",
+    api: "LayoutDirection",
+  }),
 ];

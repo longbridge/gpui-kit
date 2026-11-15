@@ -139,7 +139,7 @@ fn panel(parts: NodeParts) -> ResizablePanel {
     if let Some(size) = behavior.panel_size {
         panel = panel.size(size);
     }
-    if let Some(range) = behavior.size_range.clone() {
+    if let Some(range) = behavior.size_range {
         panel = panel.size_range(range);
     }
 

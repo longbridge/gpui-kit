@@ -674,7 +674,7 @@ fn a_registered_slot_factory_rebuilds_after_its_request_and_snapshot_owner_retur
         SELF_FACTORY.with(|held| held.borrow_mut().take());
 
         let panics = Rc::new(Cell::new(true));
-        let panic_flag = panics.clone();
+        let panic_flag = panics;
         let panic_factory = ComponentElementFactory::new(move |_, _| {
             if panic_flag.replace(false) {
                 panic!("synthetic factory panic");
@@ -2699,12 +2699,12 @@ fn a_view_renders_through_gpui(cx: &mut TestAppContext) {
 
     // The view is constructed inside the window builder, because `init` may
     // create retained state and that needs a live `Window`.
-    let runtime_for_view = runtime.clone();
+    let runtime_for_view = runtime;
     let window = cx.add_window(|window, cx| {
         let object = runtime_for_view
             .instantiate(&view_type, window, cx)
             .expect("instantiate");
-        ScriptView::new(runtime_for_view.clone(), object)
+        ScriptView::new(runtime_for_view, object)
     });
     let mut context = VisualTestContext::from_window(*window.deref(), cx);
 
@@ -5819,7 +5819,7 @@ export default class ThemeSwitch extends View {
 }
 "##;
     let view_type = runtime.load_source("theme-switch", source).expect("load");
-    let loaded = runtime.clone();
+    let loaded = runtime;
     let window = cx.add_window(move |window, cx| {
         let object = loaded.instantiate(&view_type, window, cx).unwrap();
         ScriptView::new(loaded, object)
@@ -5873,7 +5873,7 @@ export default class TypeScale extends View {
 }
 "##;
     let view_type = runtime.load_source("type-scale", source).expect("load");
-    let loaded = runtime.clone();
+    let loaded = runtime;
     let window = cx.add_window(move |window, cx| {
         let object = loaded.instantiate(&view_type, window, cx).unwrap();
         ScriptView::new(loaded, object)
@@ -5882,7 +5882,7 @@ export default class TypeScale extends View {
     context.update(|window, cx| window.draw(cx).clear(cx));
 
     context.update(|_, cx| {
-        let typography = gpui_base::Theme::global(cx).tokens.typography.clone();
+        let typography = gpui_base::Theme::global(cx).tokens.typography;
         assert_eq!(
             typography.md.size,
             gpui::px(12.),
@@ -5940,7 +5940,7 @@ export default class ZeroScale extends View {
 }
 "##;
     let view_type = runtime.load_source("zero-scale", source).expect("load");
-    let loaded = runtime.clone();
+    let loaded = runtime;
     let window = cx.add_window(move |window, cx| {
         let object = loaded.instantiate(&view_type, window, cx).unwrap();
         ScriptView::new(loaded, object)

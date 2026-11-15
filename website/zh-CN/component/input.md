@@ -217,6 +217,19 @@ Input::new(&input).context_menu(|menu, window, cx| {
 })
 ```
 
+在选区外右键会把光标移到点击位置；在选区内右键会保留选区和光标。要处理指针下的文字（例如拼写建议菜单），读取 `context_menu_offset()`：
+
+```rust
+let state = input.clone();
+Input::new(&input).context_menu(move |menu, _, cx| {
+    // 打开此菜单的那次右键点击时，指针下的 UTF-8 偏移。
+    let Some(offset) = state.read(cx).context_menu_offset() else {
+        return menu;
+    };
+    menu.menu(format!("Look up the word at {offset}"), Box::new(LookUp))
+})
+```
+
 ### 触摸选择
 
 在触摸屏上，长按会选中手指下的单词，手指按住不放时选区跟随手指移动。抬起手指后，选区上方会出现编辑菜单，列出当前可用的命令——`剪切`、`复制`、`粘贴` 和 `全选`——并在选区两端各显示一个拖动 handle。拖动 handle 会移动对应的一端，另一端保持不动；多行输入框在手指到达边缘时会自动滚动。长按空白处或空输入框时会放置光标，菜单只提供 `粘贴` 和 `全选`。
@@ -415,6 +428,24 @@ let draft = InputContent::new("Ask @alice")
 提交时重新读取 `content()`：`text()` 是消息文本，`tokens()` 是其中仍然存在的引用。根据 token ID 查找资源，并在发送前处理资源已不存在的情况。
 
 `set_value` 清空撤销历史，不触发 `InputEvent::Change`。传入纯文本会移除全部 token，即使文字未变；传入 content 则恢复其中的 token（无法显示 token 的模式除外）。需要可撤销的纯文本替换时使用 `replace_all`。token 编辑会触发 `InputEvent::Change`，包括为已有文本添加引用。程序化 setter 可以修改只读或禁用的输入，因此不应对用户开放的应用命令需要自行检查这些状态。
+
+### 由文本派生 token
+
+要把用户输入的部分文本显示为 token（例如光标不在附近时的 `**bold**`），将当前文本连同它的 token 传给 `set_tokens`。它保留文本、选区和撤销历史，不触发 `InputEvent::Change`：
+
+```rust
+use gpui_kit::component::input::{InlineToken, InputContent};
+
+input.update(cx, |state, cx| {
+    let content = InputContent::new(state.value())
+        .with_token(2..7, InlineToken::new("bold", "**b**"))
+        .expect("the text holds `**b**` at 2..7");
+    // 光标位于 2..7 内时会被拒绝：文本保持原样。
+    state.set_tokens(content, cx).ok();
+});
+```
+
+content 中的文本不同时，`set_tokens` 返回 `TextMismatch`；token 会切开某个选区或光标时返回 `SplitsSelection`；失败时 token 保持原样。撤销/重做会按每次编辑记录的 token 重放文本，并丢弃被撤销的编辑切开的 token，因此每次变更后都应再次调用 `set_tokens`，使派生的 token 保持最新。
 
 ### 校验与适用范围
 
