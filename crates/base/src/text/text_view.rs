@@ -639,6 +639,14 @@ impl TextView {
         self
     }
 
+    /// Set whether raw HTML in Markdown renders as HTML (the default) or
+    /// shows as the text it is written as. See [`MarkdownExtensions::raw_html`].
+    pub fn markdown_raw_html(mut self, enabled: bool) -> Self {
+        let extensions = Arc::make_mut(&mut self.markdown_extensions);
+        *extensions = extensions.clone().raw_html(enabled);
+        self
+    }
+
     /// Register a custom block-level Markdown parser.
     ///
     /// The parser runs during Markdown AST conversion and must be independent
