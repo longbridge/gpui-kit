@@ -2844,6 +2844,45 @@ mod tests {
     }
 
     #[test]
+    fn raw_html_off_keeps_html_as_text() {
+        let source = "a <b>bold</b> <img src=\"https://example.com/x.png\"> <https://example.com>\n\n<div>block</div>";
+
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(bold_runs(paragraph), ["bold"]);
+
+        let mut cx = NodeContext {
+            markdown_extensions: Arc::new(MarkdownExtensions::default().raw_html(false)),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let text = paragraph.text();
+        assert!(
+            text.starts_with(r#"a <b>bold</b> <img src="https://example.com/x.png"> "#),
+            "{text}"
+        );
+        assert!(bold_runs(paragraph).is_empty());
+        assert!(paragraph.children.iter().all(|child| child.image.is_none()));
+        assert!(
+            paragraph
+                .children
+                .iter()
+                .any(|child| child.marks.iter().any(|(_, mark)| mark.link.is_some())),
+            "an autolink is not HTML and stays a link"
+        );
+        let BlockNode::Paragraph(block) = &document.blocks[1] else {
+            panic!("expected the HTML block as a paragraph");
+        };
+        assert_eq!(block.text(), "<div>block</div>");
+    }
+
+    #[test]
     fn inline_html_formatting_tags_pair_across_siblings() {
         let source = "a <strong>b *c* <em>d</em></strong> e <b>f</b> <i>g</i> <del>h</del> <br> <strong>unclosed";
         let mut cx = NodeContext::default();

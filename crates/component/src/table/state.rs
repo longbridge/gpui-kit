@@ -2896,14 +2896,8 @@ where
                                             cx,
                                         );
 
-                                        if visible_range.end > rows_count {
-                                            table.scroll_to_row(
-                                                std::cmp::min(
-                                                    visible_range.start,
-                                                    rows_count.saturating_sub(1),
-                                                ),
-                                                cx,
-                                            );
+                                        if visible_range.start >= rows_count {
+                                            table.scroll_to_row(rows_count.saturating_sub(1), cx);
                                         }
 
                                         let mut items = Vec::with_capacity(
@@ -2999,7 +2993,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use gpui::{App, Entity, TestAppContext};
+    use gpui::{AnyView, App, Entity, StyleRefinement, TestAppContext};
 
     use super::*;
 
@@ -3096,6 +3090,81 @@ mod tests {
                 .y)
                 > end
         );
+    }
+
+    struct ThreeRowsDelegate;
+
+    impl TableDelegate for ThreeRowsDelegate {
+        fn columns_count(&self, _: &App) -> usize {
+            1
+        }
+        fn rows_count(&self, _: &App) -> usize {
+            3
+        }
+        fn column(&self, _: usize, _: &App) -> Column {
+            Column::new("value", "Value")
+        }
+        fn render_td(
+            &mut self,
+            row: usize,
+            _: usize,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) -> impl IntoElement {
+            div().child(row.to_string())
+        }
+    }
+
+    /// Holds the table, and counts how often it is drawn.
+    struct StripedPanel {
+        table: Entity<TableState<ThreeRowsDelegate>>,
+        renders: usize,
+    }
+
+    impl Render for StripedPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders += 1;
+            div()
+                .size_full()
+                .child(DataTable::new(&self.table).stripe(true))
+        }
+    }
+
+    /// Draws the panel as a cached view, the way `TabPanel` draws a dock panel.
+    struct CachedPanel(Entity<StripedPanel>);
+
+    impl Render for CachedPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(240.))
+                .h(px(400.))
+                .child(AnyView::from(self.0.clone()).cached(StyleRefinement::default().size_full()))
+        }
+    }
+
+    /// The filler rows a striped table adds below its last row must not make
+    /// it scroll, and so notify, every time it is drawn. That kept a cached
+    /// view holding the table from ever being reused.
+    #[gpui::test]
+    fn striped_table_with_few_rows_lets_a_cached_view_be_reused(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let table = cx.new(|cx| TableState::new(ThreeRowsDelegate, window, cx));
+            CachedPanel(cx.new(|_| StripedPanel { table, renders: 0 }))
+        });
+        let panel = view.read_with(cx, |view, _| view.0.clone());
+        let table = panel.read_with(cx, |panel, _| panel.table.clone());
+        let draw = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        };
+        draw(cx);
+        // Drawn again now that it knows its height, with the filler rows.
+        table.update(cx, |_, cx| cx.notify());
+        draw(cx);
+        let renders = panel.read_with(cx, |panel, _| panel.renders);
+        draw(cx);
+        draw(cx);
+        assert_eq!(panel.read_with(cx, |panel, _| panel.renders), renders);
     }
 
     impl TableDelegate for WidthsDelegate {
