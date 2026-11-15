@@ -6,6 +6,7 @@
 //! Note: diagnostics.rs is available in WASM, only syntax highlighting requires stubs.
 
 use gpui::{HighlightStyle, SharedString};
+use gpui_base::text::InlineHighlight;
 use std::ops::Range;
 use std::time::Duration;
 
@@ -31,9 +32,9 @@ impl SyntaxHighlighter {
         &self,
         range: &Range<usize>,
         _theme: &HighlightTheme,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         // If the matched styles is empty, return a default range.
-        vec![(range.clone(), HighlightStyle::default())]
+        vec![(range.clone(), InlineHighlight::default())]
     }
 
     pub fn update(
@@ -148,17 +149,20 @@ pub enum FontWeightContent {
     Black = 900,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ThemeStyle {
+    /// Keep typography on the captured style so it follows the same binding
+    /// as color and weight instead of a separate scope-to-font configuration.
+    pub font_family: Option<SharedString>,
     pub color: Option<gpui::Hsla>,
     pub font_style: Option<FontStyle>,
     pub font_weight: Option<FontWeightContent>,
 }
 
-impl From<ThemeStyle> for HighlightStyle {
+impl From<ThemeStyle> for InlineHighlight {
     fn from(style: ThemeStyle) -> Self {
-        HighlightStyle {
+        Self::from(HighlightStyle {
             color: style.color,
             font_weight: style.font_weight.map(|w| match w {
                 FontWeightContent::Thin => gpui::FontWeight::THIN,
@@ -177,7 +181,8 @@ impl From<ThemeStyle> for HighlightStyle {
                 FontStyle::Underline => gpui::FontStyle::Normal,
             }),
             ..Default::default()
-        }
+        })
+        .with_font_family(style.font_family)
     }
 }
 
@@ -245,67 +250,73 @@ pub struct SyntaxColors {
 }
 
 impl SyntaxColors {
-    pub fn style(&self, name: &str) -> Option<HighlightStyle> {
+    pub fn style(&self, name: &str) -> Option<InlineHighlight> {
+        self.get_style(name).cloned().map(Into::into)
+    }
+
+    fn get_style(&self, name: &str) -> Option<&ThemeStyle> {
         if name.is_empty() {
             return None;
         }
 
         let style = match name {
-            "attribute" => self.attribute,
-            "boolean" => self.boolean,
-            "comment" => self.comment,
-            "comment.doc" => self.comment_doc,
-            "constant" => self.constant,
-            "constructor" => self.constructor,
-            "embedded" => self.embedded,
-            "emphasis" => self.emphasis,
-            "emphasis.strong" => self.emphasis_strong,
-            "enum" => self.enum_,
-            "function" => self.function,
-            "hint" => self.hint,
-            "keyword" => self.keyword,
-            "label" => self.label,
-            "link_text" => self.link_text,
-            "link_uri" => self.link_uri,
-            "number" => self.number,
-            "operator" => self.operator,
-            "predictive" => self.predictive,
-            "preproc" => self.preproc,
-            "primary" => self.primary,
-            "property" => self.property,
-            "punctuation" => self.punctuation,
-            "punctuation.bracket" => self.punctuation_bracket,
-            "punctuation.delimiter" => self.punctuation_delimiter,
-            "punctuation.list_marker" => self.punctuation_list_marker,
-            "punctuation.special" => self.punctuation_special,
-            "string" => self.string,
-            "string.escape" => self.string_escape,
-            "string.regex" => self.string_regex,
-            "string.special" => self.string_special,
-            "string.special.symbol" => self.string_special_symbol,
-            "tag" => self.tag,
-            "tag.doctype" => self.tag_doctype,
-            "text.code.span" => self.text_code_span,
-            "text.literal" => self.text_literal,
-            "title" => self.title,
-            "type" => self.type_,
-            "variable" => self.variable,
-            "variable.special" => self.variable_special,
-            "variant" => self.variant,
-            _ => None,
+            "attribute" => &self.attribute,
+            "boolean" => &self.boolean,
+            "comment" => &self.comment,
+            "comment.doc" => &self.comment_doc,
+            "constant" => &self.constant,
+            "constructor" => &self.constructor,
+            "embedded" => &self.embedded,
+            "emphasis" => &self.emphasis,
+            "emphasis.strong" => &self.emphasis_strong,
+            "enum" => &self.enum_,
+            "function" => &self.function,
+            "hint" => &self.hint,
+            "keyword" => &self.keyword,
+            "label" => &self.label,
+            "link_text" => &self.link_text,
+            "link_uri" => &self.link_uri,
+            "number" => &self.number,
+            "operator" => &self.operator,
+            "predictive" => &self.predictive,
+            "preproc" => &self.preproc,
+            "primary" => &self.primary,
+            "property" => &self.property,
+            "punctuation" => &self.punctuation,
+            "punctuation.bracket" => &self.punctuation_bracket,
+            "punctuation.delimiter" => &self.punctuation_delimiter,
+            "punctuation.list_marker" => &self.punctuation_list_marker,
+            "punctuation.special" => &self.punctuation_special,
+            "string" => &self.string,
+            "string.escape" => &self.string_escape,
+            "string.regex" => &self.string_regex,
+            "string.special" => &self.string_special,
+            "string.special.symbol" => &self.string_special_symbol,
+            "tag" => &self.tag,
+            "tag.doctype" => &self.tag_doctype,
+            "text.code.span" => &self.text_code_span,
+            "text.literal" => &self.text_literal,
+            "title" => &self.title,
+            "type" => &self.type_,
+            "variable" => &self.variable,
+            "variable.special" => &self.variable_special,
+            "variant" => &self.variant,
+            _ => &None,
         }
-        .map(|s| s.into());
+        .as_ref();
 
         if style.is_some() {
             style
         } else if name.contains('.') {
-            name.split('.').next().and_then(|prefix| self.style(prefix))
+            name.split('.')
+                .next()
+                .and_then(|prefix| self.get_style(prefix))
         } else {
             None
         }
     }
 
-    pub fn style_for_index(&self, index: usize) -> Option<HighlightStyle> {
+    pub fn style_for_index(&self, index: usize) -> Option<InlineHighlight> {
         const HIGHLIGHT_NAMES: [&str; 41] = [
             "attribute",
             "boolean",
@@ -480,7 +491,7 @@ impl HighlightTheme {
 }
 
 impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
-    fn style(&self, name: &str) -> Option<HighlightStyle> {
+    fn style(&self, name: &str) -> Option<InlineHighlight> {
         self.style.syntax.style(name)
     }
 }

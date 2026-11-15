@@ -292,6 +292,246 @@ mod rendering {
         );
     }
 
+    #[cfg(feature = "tree-sitter-markdown")]
+    struct SyntaxEditor {
+        state: Entity<gpui_kit::component::input::EditorState>,
+        font: gpui_kit::Font,
+    }
+
+    #[cfg(feature = "tree-sitter-markdown")]
+    impl Render for SyntaxEditor {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().bg(cx.theme().background).child(
+                gpui_kit::component::input::Editor::new(&self.state)
+                    .font_family(self.font.family.clone())
+                    .font_weight(self.font.weight)
+                    .when(self.font.style == gpui_kit::FontStyle::Italic, |editor| {
+                        editor.italic()
+                    })
+                    .text_size(px(24.))
+                    .appearance(false)
+                    .bordered(false)
+                    .readonly(true)
+                    .size_full(),
+            )
+        }
+    }
+
+    #[cfg(feature = "tree-sitter-markdown")]
+    fn syntax_typography_reaches_only_the_code_block_pixels() {
+        use gpui_kit::component::{ThemeRegistry, input::EditorState};
+
+        let mut cx = context(Arc::new(Assets));
+        cx.update(|cx| {
+            Theme::update(cx, |theme| {
+                Arc::make_mut(&mut theme.highlight_theme)
+                    .style
+                    .syntax
+                    .text_literal = None;
+            })
+        });
+        let create_editor = |cx: &mut HeadlessAppContext, language: &'static str| {
+            let (handle, view) = cx.update(|cx| {
+                gpui_kit::open_window(
+                    gpui_kit::WindowOptions {
+                        window_bounds: Some(gpui_kit::WindowBounds::Windowed(Bounds::new(
+                            Default::default(),
+                            size(px(600.), px(240.)),
+                        ))),
+                        focus: false,
+                        show: false,
+                        ..Default::default()
+                    },
+                    cx,
+                    |window, cx| {
+                        cx.new(|cx| SyntaxEditor {
+                            state: cx.new(|cx| {
+                                EditorState::new(window, cx)
+                                    .language(language)
+                                    .line_number(false)
+                                    .folding(false)
+                                    .default_value(
+                                        "iiii WWWW ffi 0123\n\n```\niiii WWWW ffi 0123\n```",
+                                    )
+                            }),
+                            font: gpui_kit::font(cx.theme().font_family.clone()),
+                        })
+                    },
+                )
+                .unwrap()
+            });
+            cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            (handle.into(), view)
+        };
+        let (actual_window, actual_view) = create_editor(&mut cx, "markdown");
+        let (reference_window, reference_view) = create_editor(&mut cx, "text");
+        let (body_bounds, code_bounds) = cx.update(|cx| {
+            let state = actual_view.read(cx).state.read(cx);
+            let bounds = state.input_bounds();
+            let height = state.line_height().expect("the editor must be laid out");
+            (
+                Bounds::new(bounds.origin, size(bounds.size.width, height)),
+                Bounds::new(
+                    bounds.origin + gpui_kit::point(px(0.), height * 3.),
+                    size(bounds.size.width, height),
+                ),
+            )
+        });
+        let mut previous = Capture::take(&mut cx, actual_window);
+        for (weight, style) in [(400, "normal"), (700, "normal"), (700, "italic")] {
+            let expected_font = cx.update(|cx| {
+                let mut font = gpui_kit::font(cx.theme().mono_font_family.clone());
+                font.weight = gpui_kit::FontWeight(weight as f32);
+                font.style = match style {
+                    "italic" => gpui_kit::FontStyle::Italic,
+                    _ => gpui_kit::FontStyle::Normal,
+                };
+                let mut registry = ThemeRegistry::default();
+                registry
+                    .load_themes_from_str(&format!(
+                        r#"{{"themes":[{{
+                    "name":"Typography", "highlight":{{"syntax":{{"text.literal":{{
+                        "font_weight":{weight}, "font_style":"{style}"
+                    }}}}}}
+                }}]}}"#
+                    ))
+                    .unwrap();
+                let mut literal_style = registry.themes()["Typography"]
+                    .highlight
+                    .as_ref()
+                    .unwrap()
+                    .syntax
+                    .text_literal
+                    .clone()
+                    .unwrap();
+                literal_style.font_family = Some(font.family.clone());
+                Theme::update(cx, |theme| {
+                    Arc::make_mut(&mut theme.highlight_theme)
+                        .style
+                        .syntax
+                        .text_literal = Some(literal_style);
+                });
+                font
+            });
+            cx.update_window(reference_window, |_, _, cx| {
+                reference_view.update(cx, |view, cx| {
+                    view.font = expected_font;
+                    cx.notify();
+                });
+            })
+            .unwrap();
+            for handle in [actual_window, reference_window] {
+                cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+                    .unwrap();
+            }
+            let actual = Capture::take(&mut cx, actual_window);
+            let reference = Capture::take(&mut cx, reference_window);
+            // Compare actual glyph pixels to the public Editor font API. Keeping
+            // ink color fixed prevents a color-only change from passing this test.
+            assert!(
+                actual.changes(&previous, code_bounds, true, Pixels::ZERO) > 0,
+                "the code glyphs must change for {weight:?}, {style:?}"
+            );
+            assert_eq!(
+                actual.changes(&reference, code_bounds, true, Pixels::ZERO),
+                0,
+                "syntax typography must match the requested font's rendered glyphs"
+            );
+            assert_eq!(
+                actual.changes(&previous, body_bounds, true, Pixels::ZERO),
+                0,
+                "syntax typography must leave ordinary text unchanged"
+            );
+            previous = actual;
+        }
+
+        // Compare wrapping through the production Editor, then change and
+        // remove the override at the same width to catch stale wrap caches.
+        let text = format!("```\n{}{}\n```", "i".repeat(80), "W".repeat(32));
+        for (handle, view) in [
+            (actual_window, &actual_view),
+            (reference_window, &reference_view),
+        ] {
+            cx.update_window(handle, |_, window, cx| {
+                let state = view.read(cx).state.clone();
+                state.update(cx, |state, cx| {
+                    state.set_soft_wrap(true, window, cx);
+                    state.set_value(text.clone(), window, cx);
+                });
+            })
+            .unwrap();
+        }
+        cx.run_until_parked();
+        let families = cx.update(|cx| {
+            [
+                Some(cx.theme().mono_font_family.clone()),
+                Some(cx.theme().font_family.clone()),
+                Some(cx.theme().mono_font_family.clone()),
+                None,
+            ]
+        });
+        for family in families {
+            let expected_font = cx.update(|cx| {
+                let expected_font = gpui_kit::font(
+                    family
+                        .clone()
+                        .unwrap_or_else(|| cx.theme().font_family.clone()),
+                );
+                Theme::update(cx, |theme| {
+                    let mut style = gpui_kit::component::highlighter::ThemeStyle::default();
+                    style.font_family = family;
+                    Arc::make_mut(&mut theme.highlight_theme)
+                        .style
+                        .syntax
+                        .text_literal = Some(style);
+                });
+                expected_font
+            });
+            cx.update_window(reference_window, |_, _, cx| {
+                reference_view.update(cx, |view, cx| {
+                    view.font = expected_font;
+                    cx.notify();
+                });
+            })
+            .unwrap();
+            for handle in [actual_window, reference_window] {
+                cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+                    .unwrap();
+            }
+            let code_bounds = cx.update(|cx| {
+                let actual = actual_view.read(cx).state.read(cx);
+                let reference = reference_view.read(cx).state.read(cx);
+                let closing = text.len() - 3..text.len();
+                let actual_end = actual.range_to_bounds(&closing).unwrap().top();
+                assert_eq!(
+                    actual_end,
+                    reference.range_to_bounds(&closing).unwrap().top(),
+                    "syntax fonts must produce the same wrap rows as explicit Editor fonts"
+                );
+                let start = actual.range_to_bounds(&(4..4)).unwrap().origin;
+                assert!(
+                    actual_end - start.y > actual.line_height().unwrap(),
+                    "the sample must wrap"
+                );
+                Bounds::new(
+                    start,
+                    size(actual.input_bounds().size.width, actual_end - start.y),
+                )
+            });
+            let actual = Capture::take(&mut cx, actual_window);
+            let reference = Capture::take(&mut cx, reference_window);
+            assert_eq!(
+                actual.changes(&reference, code_bounds, true, Pixels::ZERO),
+                0,
+                "wrapped syntax text must match explicitly styled glyphs at every row"
+            );
+        }
+    }
+
     // CJK full-width punctuation shapes wider mid-line than on its own, and the
     // inline code routes the paragraph through the inline flow's own wrapping.
     const CJK_WITH_CODE: &str = "行情显示 HUT 近 5 日下跌约 18%，成交放大到均量的 2.4 倍。\
@@ -1007,6 +1247,12 @@ mod rendering {
     }
 
     pub fn run() {
+        #[cfg(feature = "tree-sitter-markdown")]
+        {
+            println!("running syntax_typography_reaches_only_the_code_block_pixels");
+            syntax_typography_reaches_only_the_code_block_pixels();
+            println!("passed syntax_typography_reaches_only_the_code_block_pixels");
+        }
         println!("running pixels_detect_missing_check_even_when_checked_state_is_correct");
         pixels_detect_missing_check_even_when_checked_state_is_correct();
         println!("passed pixels_detect_missing_check_even_when_checked_state_is_correct");
@@ -1043,6 +1289,6 @@ mod rendering {
             table_shows_keyboard_focus_only(focus_ring);
             println!("passed table_shows_keyboard_focus_only (focus_ring = {focus_ring})");
         }
-        println!("rendering: 13 passed (real offscreen renderer)");
+        println!("rendering: passed (real offscreen renderer)");
     }
 }

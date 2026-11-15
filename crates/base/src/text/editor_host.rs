@@ -26,9 +26,9 @@
 use std::{cell::RefCell, collections::HashMap, ops::Range, rc::Rc, sync::Arc};
 
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, ElementId, HighlightStyle, Hsla, ImageSource,
-    InteractiveElement as _, IntoElement as _, ParentElement as _, Pixels, Point, SharedString,
-    SharedUri, TextLayout, Window, WrappedLineLayout, div, point, px,
+    AnyElement, App, Bounds, ClickEvent, ElementId, Hsla, ImageSource, InteractiveElement as _,
+    IntoElement as _, ParentElement as _, Pixels, Point, SharedString, SharedUri, TextLayout,
+    Window, WrappedLineLayout, div, point, px,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -83,7 +83,7 @@ impl RenderContext {
     /// Replaces code highlighting for this context only.
     pub fn with_code_block_highlighter<F>(mut self, highlighter: F) -> Self
     where
-        F: Fn(&CodeBlock) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync + 'static,
+        F: Fn(&CodeBlock) -> Vec<(Range<usize>, super::InlineHighlight)> + Send + Sync + 'static,
     {
         self.node.code_block_highlighter = Some(Arc::new(highlighter));
         self

@@ -15,11 +15,12 @@ use std::{
     cell::RefCell, collections::HashMap, ops::Range, rc::Rc, sync::LazyLock, time::Duration,
 };
 
-use gpui::{HighlightStyle, SharedString, Task};
+use gpui::{SharedString, Task};
 use gpui_base::input::{
     EditorState, FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter,
     InputHighlighterFactory,
 };
+use gpui_base::text::InlineHighlight;
 use ropey::Rope;
 use syntect::{
     parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet},
@@ -51,7 +52,7 @@ pub(crate) fn highlight_code(
     language: &str,
     code: &str,
     resolver: &dyn HighlightStyleResolver,
-) -> Vec<(Range<usize>, HighlightStyle)> {
+) -> Vec<(Range<usize>, InlineHighlight)> {
     let Some(syntax) = find_syntax(language) else {
         return Vec::new();
     };
@@ -275,7 +276,7 @@ fn resolve_styles(
     highlights: &[(Range<usize>, &'static str)],
     range: &Range<usize>,
     resolver: &dyn HighlightStyleResolver,
-) -> Vec<(Range<usize>, HighlightStyle)> {
+) -> Vec<(Range<usize>, InlineHighlight)> {
     let first = highlights.partition_point(|(highlight, _)| highlight.end <= range.start);
     let mut runs = Vec::new();
     let mut cursor = range.start;
@@ -290,14 +291,14 @@ fn resolve_styles(
             continue;
         }
         if cursor < start {
-            runs.push((cursor..start, HighlightStyle::default()));
+            runs.push((cursor..start, InlineHighlight::default()));
         }
         runs.push((start..end, resolver.style(name).unwrap_or_default()));
         cursor = end;
     }
 
     if cursor < range.end {
-        runs.push((cursor..range.end, HighlightStyle::default()));
+        runs.push((cursor..range.end, InlineHighlight::default()));
     }
     runs
 }
@@ -403,7 +404,7 @@ impl InputHighlighter for SyntectInputHighlighter {
         &self,
         range: &Range<usize>,
         resolver: &dyn HighlightStyleResolver,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         resolve_styles(&self.highlights.borrow(), range, resolver)
     }
 
@@ -546,8 +547,8 @@ mod tests {
     fn style_runs_cover_the_range_without_gaps() {
         struct Named;
         impl HighlightStyleResolver for Named {
-            fn style(&self, _: &str) -> Option<HighlightStyle> {
-                Some(HighlightStyle::default())
+            fn style(&self, _: &str) -> Option<InlineHighlight> {
+                Some(InlineHighlight::default())
             }
         }
         let runs = resolve_styles(&[(2..4, "keyword"), (6..8, "string")], &(0..10), &Named);

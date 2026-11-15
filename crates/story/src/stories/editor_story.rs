@@ -14,6 +14,42 @@ use crate::story_toolbar_group;
 
 const EXAMPLE_CODE: &str = include_str!("./editor_preview.rs");
 
+const SYNTAX_STYLING_EXAMPLE: &str = r#"# Syntax Styling
+
+These two lines have the same number of characters but different widths.
+
+iiiiiiiiiiiiiiiiiiiiiiii
+WWWWWWWWWWWWWWWWWWWWWWWW
+
+In code block, these should have equal widths.
+
+```rust
+// iiiiiiiiiiiiiiiiiiiiiiii
+// WWWWWWWWWWWWWWWWWWWWWWWW
+
+Theme::update(cx, |theme| {
+    let mono_font = theme.mono_font_family.clone();
+    let style = serde_json::from_value::<ThemeStyle>(serde_json::json!({
+        "font_family": mono_font,
+        "color": theme.danger,
+        "font_weight": FontWeightContent::Bold,
+        "font_style": FontStyle::Normal,
+    })).expect("valid syntax style");
+
+    Arc::make_mut(&mut theme.highlight_theme)
+        .style.syntax.text_literal = Some(style);
+});
+```
+
+Inline `iii WWW` keeps its own syntax style.
+
+An indented code block uses the same style:
+
+    iii WWW 0123456789
+
+[Link text](https://example.com "iii WWW 0123456789")
+"#;
+
 /// Words chosen so `fl` and `log` light up different spans under each highlighter.
 const COMPLETION_WORDS: [&str; 6] = [
     "flag",
@@ -101,6 +137,7 @@ pub struct EditorStory {
     editor_state: Entity<EditorState>,
     decorations_state: Entity<EditorState>,
     completions_state: Entity<EditorState>,
+    syntax_styling_state: Entity<EditorState>,
     _decorations: TextDecorationCollection,
     _range_decorations: RangeDecorationCollection,
     _gutter_decorations: GutterDecorationCollection,
@@ -135,6 +172,15 @@ impl EditorStory {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let syntax_styling_state = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("markdown")
+                .tab_size(TabSize {
+                    tab_size: 4,
+                    ..Default::default()
+                })
+                .default_value(SYNTAX_STYLING_EXAMPLE)
+        });
         let editor_state = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("rust")
@@ -292,6 +338,7 @@ impl EditorStory {
             editor_state,
             decorations_state,
             completions_state,
+            syntax_styling_state,
             _decorations: decorations,
             _range_decorations: range_decorations,
             _gutter_decorations: gutter_decorations,
@@ -421,7 +468,7 @@ impl Render for EditorStory {
                     .justify_between()
                     .child(
                         TabBar::new("editor-story-tabs")
-                            .w(px(420.))
+                            .w(px(560.))
                             .underline()
                             .selected_index(self.active_tab)
                             .on_click(cx.listener(|this, selected: &usize, _, cx| {
@@ -430,7 +477,8 @@ impl Render for EditorStory {
                             }))
                             .child("Code")
                             .child("Decorations")
-                            .child("Completions"),
+                            .child("Completions")
+                            .child("Syntax Styling"),
                     )
                     .child(self.render_toolbar(cx)),
             )
@@ -439,6 +487,17 @@ impl Render for EditorStory {
                     0 => self.styled_editor(&self.editor_state).into_any_element(),
                     1 => self
                         .styled_editor(&self.decorations_state)
+                        .into_any_element(),
+                    3 => v_flex()
+                        .size_full()
+                        .gap_2()
+                        .child(
+                            self.styled_editor(&self.syntax_styling_state)
+                                // Share Options with the other tabs so only captured
+                                // syntax ranges override the selected typography.
+                                .flex_1()
+                                .min_h_0(),
+                        )
                         .into_any_element(),
                     _ => v_flex()
                         .size_full()
@@ -488,8 +547,9 @@ impl CompletionProvider for StoryCompletions {
 mod syntect_highlighter {
     use std::{collections::HashMap, ops::Range, sync::LazyLock};
 
+    use gpui_kit::base::text::InlineHighlight;
     use gpui_kit::component::input::*;
-    use gpui_kit::{Context, HighlightStyle, SharedString, Window};
+    use gpui_kit::{Context, SharedString, Window};
     use syntect::{
         parsing::{ParseState, Scope, ScopeStack, SyntaxSet},
         util::LinesWithEndings,
@@ -585,7 +645,7 @@ mod syntect_highlighter {
             &self,
             range: &Range<usize>,
             resolver: &dyn HighlightStyleResolver,
-        ) -> Vec<(Range<usize>, HighlightStyle)> {
+        ) -> Vec<(Range<usize>, InlineHighlight)> {
             resolve_styles(&self.highlights, range, resolver)
         }
 
@@ -613,7 +673,7 @@ mod syntect_highlighter {
         highlights: &[(Range<usize>, &'static str)],
         range: &Range<usize>,
         resolver: &dyn HighlightStyleResolver,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         let first = highlights.partition_point(|(highlight, _)| highlight.end <= range.start);
         let mut runs = Vec::new();
         let mut cursor = range.start;
@@ -629,14 +689,14 @@ mod syntect_highlighter {
                 continue;
             }
             if cursor < start {
-                runs.push((cursor..start, HighlightStyle::default()));
+                runs.push((cursor..start, InlineHighlight::default()));
             }
             runs.push((start..end, resolver.style(name).unwrap_or_default()));
             cursor = end;
         }
 
         if cursor < range.end {
-            runs.push((cursor..range.end, HighlightStyle::default()));
+            runs.push((cursor..range.end, InlineHighlight::default()));
         }
         runs
     }

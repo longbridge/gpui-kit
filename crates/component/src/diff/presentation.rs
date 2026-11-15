@@ -159,7 +159,9 @@ impl FilePresentation {
             .iter()
             .filter_map(|(range, paint)| {
                 let style = match paint {
-                    SyntaxPaint::Name(name) => theme.style(&self.names[*name as usize])?,
+                    SyntaxPaint::Name(name) => {
+                        theme.style(&self.names[*name as usize])?.get_style()
+                    }
                     SyntaxPaint::Style(style) => *style,
                 };
                 Some((
@@ -352,6 +354,8 @@ pub(crate) fn detected_language(path: &str) -> SharedString {
 
 #[cfg(test)]
 mod tests {
+    use gpui_base::text::InlineHighlight;
+
     use super::*;
 
     const OPTIONS: PresentationOptions = PresentationOptions {
@@ -455,7 +459,7 @@ mod tests {
 
         struct NoTheme;
         impl HighlightStyleResolver for NoTheme {
-            fn style(&self, _: &str) -> Option<HighlightStyle> {
+            fn style(&self, _: &str) -> Option<InlineHighlight> {
                 None
             }
         }

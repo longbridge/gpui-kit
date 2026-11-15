@@ -264,6 +264,8 @@ fn base_input_frames_accept_application_owned_content() {
 
 #[test]
 fn base_input_accepts_application_owned_highlighters() {
+    use gpui_base::text::InlineHighlight;
+
     struct CustomHighlighter;
 
     impl gpui_base::input::InputHighlighter for CustomHighlighter {
@@ -285,7 +287,7 @@ fn base_input_accepts_application_owned_highlighters() {
             &self,
             _: &std::ops::Range<usize>,
             _: &dyn gpui_base::input::HighlightStyleResolver,
-        ) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> {
+        ) -> Vec<(std::ops::Range<usize>, InlineHighlight)> {
             Vec::new()
         }
 

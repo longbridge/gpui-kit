@@ -38,11 +38,11 @@ use crate::{
 
 /// The style applied to one range of inline text.
 ///
-/// A [`HighlightStyle`] carries no font family, so the family an inline code
-/// span is set in rides beside it; `None` keeps the family of the enclosing
-/// text style.
+/// Keep syntax typography with the other captured styles so shaping does not
+/// need a separate list of font ranges or another pass over syntax captures.
+/// `None` keeps the family of the enclosing text style.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(super) struct InlineHighlight {
+pub struct InlineHighlight {
     pub(super) style: HighlightStyle,
     pub(super) font_family: Option<SharedString>,
     pub(super) font_size_scale: Option<f32>,
@@ -51,6 +51,19 @@ pub(super) struct InlineHighlight {
 }
 
 impl InlineHighlight {
+    pub fn with_font_family(mut self, font_family: Option<SharedString>) -> Self {
+        self.font_family = font_family;
+        self
+    }
+
+    pub fn get_font_family(&self) -> Option<&SharedString> {
+        self.font_family.as_ref()
+    }
+
+    pub fn get_style(&self) -> HighlightStyle {
+        self.style
+    }
+
     pub(super) fn font_size(&self, body: Pixels, rem_size: Pixels) -> Pixels {
         self.code_style
             .as_ref()
@@ -133,7 +146,7 @@ impl From<HighlightStyle> for InlineHighlight {
 /// Merges two highlight lists over one text into non-overlapping ranges,
 /// cutting at every endpoint of every input range. Same sweep as
 /// [`gpui::combine_highlights`], for [`InlineHighlight`] payloads.
-pub(super) fn combine_highlights(
+pub(crate) fn combine_highlights(
     a: impl IntoIterator<Item = (Range<usize>, InlineHighlight)>,
     b: impl IntoIterator<Item = (Range<usize>, InlineHighlight)>,
 ) -> Vec<(Range<usize>, InlineHighlight)> {
@@ -162,6 +175,9 @@ pub(super) fn combine_highlights(
         ix = position;
         if is_start {
             active.push(id);
+            // Input order defines layer precedence, even when a lower layer
+            // starts a new range inside an already active higher layer.
+            active.sort_unstable();
         } else {
             active.retain(|active_id| *active_id != id);
         }
@@ -222,7 +238,7 @@ pub(super) fn fade_highlights(
 /// Builds the [`TextRun`]s for `text_len` bytes of inline text: each
 /// highlight refines `default_style` over its range, and a highlight that
 /// names a font family shapes its run in that family.
-pub(super) fn text_runs(
+pub(crate) fn text_runs(
     text_len: usize,
     default_style: &TextStyle,
     highlights: &[(Range<usize>, InlineHighlight)],

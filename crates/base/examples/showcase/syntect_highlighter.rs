@@ -4,6 +4,7 @@ use gpui::{Context, HighlightStyle, SharedString, Window};
 use gpui_base::input::{
     EditorState, FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope,
 };
+use gpui_base::text::InlineHighlight;
 use syntect::{
     parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet},
     util::LinesWithEndings,
@@ -108,7 +109,7 @@ impl InputHighlighter for SyntectHighlighter {
         &self,
         range: &Range<usize>,
         resolver: &dyn HighlightStyleResolver,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         resolve_styles(&self.highlights, range, resolver)
     }
 
@@ -129,7 +130,7 @@ fn resolve_styles(
     highlights: &[(Range<usize>, &'static str)],
     range: &Range<usize>,
     resolver: &dyn HighlightStyleResolver,
-) -> Vec<(Range<usize>, HighlightStyle)> {
+) -> Vec<(Range<usize>, InlineHighlight)> {
     let first = highlights.partition_point(|(highlight, _)| highlight.end <= range.start);
     let mut runs = Vec::new();
     let mut cursor = range.start;
@@ -145,14 +146,14 @@ fn resolve_styles(
             continue;
         }
         if cursor < start {
-            runs.push((cursor..start, HighlightStyle::default()));
+            runs.push((cursor..start, InlineHighlight::default()));
         }
         runs.push((start..end, resolver.style(name).unwrap_or_default()));
         cursor = end;
     }
 
     if cursor < range.end {
-        runs.push((cursor..range.end, HighlightStyle::default()));
+        runs.push((cursor..range.end, InlineHighlight::default()));
     }
     runs
 }
@@ -228,7 +229,7 @@ fn brace_fold_ranges(text: &str) -> Vec<FoldRange> {
 pub(super) struct ShowcaseHighlightStyles;
 
 impl HighlightStyleResolver for ShowcaseHighlightStyles {
-    fn style(&self, name: &str) -> Option<HighlightStyle> {
+    fn style(&self, name: &str) -> Option<InlineHighlight> {
         let color = match name.split('.').next()? {
             "comment" => 0x007fff,
             "string" => 0x036a07,
@@ -239,10 +240,13 @@ impl HighlightStyleResolver for ShowcaseHighlightStyles {
             "variable" => 0x333333,
             _ => return None,
         };
-        Some(HighlightStyle {
-            color: Some(super::example_rgb(color).into()),
-            ..Default::default()
-        })
+        Some(
+            HighlightStyle {
+                color: Some(super::example_rgb(color).into()),
+                ..Default::default()
+            }
+            .into(),
+        )
     }
 }
 

@@ -8668,7 +8668,6 @@ mod tests {
     #[gpui::test]
     fn test_replace_text_in_ranges_drives_the_highlighter_once(cx: &mut TestAppContext) {
         use crate::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter};
-        use gpui::HighlightStyle;
         use std::cell::RefCell;
 
         struct RecordingHighlighter(Rc<RefCell<Vec<Vec<String>>>>);
@@ -8704,8 +8703,8 @@ mod tests {
                 &self,
                 range: &Range<usize>,
                 _: &dyn HighlightStyleResolver,
-            ) -> Vec<(Range<usize>, HighlightStyle)> {
-                vec![(range.clone(), HighlightStyle::default())]
+            ) -> Vec<(Range<usize>, crate::text::InlineHighlight)> {
+                vec![(range.clone(), crate::text::InlineHighlight::default())]
             }
 
             fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {

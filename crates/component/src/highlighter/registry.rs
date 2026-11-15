@@ -1,4 +1,5 @@
 use gpui::{App, FontWeight, HighlightStyle, Hsla, SharedString};
+use gpui_base::text::InlineHighlight;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -223,94 +224,98 @@ impl From<FontWeightContent> for FontWeight {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ThemeStyle {
+    /// Keep typography on the captured style so it follows the same binding
+    /// as color and weight instead of a separate scope-to-font configuration.
+    pub font_family: Option<SharedString>,
     color: Option<Hsla>,
     font_style: Option<FontStyle>,
     font_weight: Option<FontWeightContent>,
 }
 
-impl From<ThemeStyle> for HighlightStyle {
+impl From<ThemeStyle> for InlineHighlight {
     fn from(style: ThemeStyle) -> Self {
-        HighlightStyle {
+        Self::from(HighlightStyle {
             color: style.color,
             font_weight: style.font_weight.map(Into::into),
             font_style: style.font_style.map(Into::into),
             ..Default::default()
-        }
+        })
+        .with_font_family(style.font_family)
     }
 }
 
 impl SyntaxColors {
-    pub fn style(&self, name: &str) -> Option<HighlightStyle> {
+    pub fn style(&self, name: &str) -> Option<InlineHighlight> {
+        self.get_style(name).cloned().map(Into::into)
+    }
+
+    fn get_style(&self, name: &str) -> Option<&ThemeStyle> {
         if name.is_empty() {
             return None;
         }
 
         let style = match name {
-            "attribute" => self.attribute,
-            "boolean" => self.boolean,
-            "comment" => self.comment,
-            "comment.doc" => self.comment_doc,
-            "constant" => self.constant,
-            "constructor" => self.constructor,
-            "embedded" => self.embedded,
-            "emphasis" => self.emphasis,
-            "emphasis.strong" => self.emphasis_strong,
-            "enum" => self.enum_,
-            "function" => self.function,
-            "hint" => self.hint,
-            "keyword" => self.keyword,
-            "label" => self.label,
-            "link_text" => self.link_text,
-            "link_uri" => self.link_uri,
-            "number" => self.number,
-            "operator" => self.operator,
-            "predictive" => self.predictive,
-            "preproc" => self.preproc,
-            "primary" => self.primary,
-            "property" => self.property,
-            "punctuation" => self.punctuation,
-            "punctuation.bracket" => self.punctuation_bracket,
-            "punctuation.delimiter" => self.punctuation_delimiter,
-            "punctuation.list_marker" => self.punctuation_list_marker,
-            "punctuation.special" => self.punctuation_special,
-            "string" => self.string,
-            "string.escape" => self.string_escape,
-            "string.regex" => self.string_regex,
-            "string.special" => self.string_special,
-            "string.special.symbol" => self.string_special_symbol,
-            "tag" => self.tag,
-            "tag.doctype" => self.tag_doctype,
-            "text.code.span" => self.text_code_span,
-            "text.literal" => self.text_literal,
-            "title" => self.title,
-            "type" => self.type_,
-            "variable" => self.variable,
-            "variable.special" => self.variable_special,
-            "variant" => self.variant,
-            _ => None,
+            "attribute" => &self.attribute,
+            "boolean" => &self.boolean,
+            "comment" => &self.comment,
+            "comment.doc" => &self.comment_doc,
+            "constant" => &self.constant,
+            "constructor" => &self.constructor,
+            "embedded" => &self.embedded,
+            "emphasis" => &self.emphasis,
+            "emphasis.strong" => &self.emphasis_strong,
+            "enum" => &self.enum_,
+            "function" => &self.function,
+            "hint" => &self.hint,
+            "keyword" => &self.keyword,
+            "label" => &self.label,
+            "link_text" => &self.link_text,
+            "link_uri" => &self.link_uri,
+            "number" => &self.number,
+            "operator" => &self.operator,
+            "predictive" => &self.predictive,
+            "preproc" => &self.preproc,
+            "primary" => &self.primary,
+            "property" => &self.property,
+            "punctuation" => &self.punctuation,
+            "punctuation.bracket" => &self.punctuation_bracket,
+            "punctuation.delimiter" => &self.punctuation_delimiter,
+            "punctuation.list_marker" => &self.punctuation_list_marker,
+            "punctuation.special" => &self.punctuation_special,
+            "string" => &self.string,
+            "string.escape" => &self.string_escape,
+            "string.regex" => &self.string_regex,
+            "string.special" => &self.string_special,
+            "string.special.symbol" => &self.string_special_symbol,
+            "tag" => &self.tag,
+            "tag.doctype" => &self.tag_doctype,
+            "text.code.span" => &self.text_code_span,
+            "text.literal" => &self.text_literal,
+            "title" => &self.title,
+            "type" => &self.type_,
+            "variable" => &self.variable,
+            "variable.special" => &self.variable_special,
+            "variant" => &self.variant,
+            _ => &None,
         }
-        .map(|s| s.into());
+        .as_ref();
 
         if style.is_some() {
             style
+        } else if name.contains('.') {
+            name.split('.')
+                .next()
+                .and_then(|prefix| self.get_style(prefix))
         } else {
-            // Fallback `keyword.modifier` to `keyword`
-            if name.contains(".") {
-                if let Some(prefix) = name.split(".").next() {
-                    return self.style(prefix);
-                }
-
-                None
-            } else {
-                None
-            }
+            None
         }
     }
 
     #[inline]
-    pub fn style_for_index(&self, index: usize) -> Option<HighlightStyle> {
+    pub fn style_for_index(&self, index: usize) -> Option<InlineHighlight> {
         HIGHLIGHT_NAMES.get(index).and_then(|name| self.style(name))
     }
 }
@@ -521,7 +526,7 @@ impl HighlightTheme {
 }
 
 impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
-    fn style(&self, name: &str) -> Option<HighlightStyle> {
+    fn style(&self, name: &str) -> Option<InlineHighlight> {
         self.style.syntax.style(name)
     }
 }
@@ -661,6 +666,34 @@ impl LanguageRegistry {
 #[cfg(test)]
 mod tests {
     use crate::highlighter::GrammarConfig;
+
+    #[test]
+    fn syntax_scope_font_family_follows_exact_and_fallback_names() {
+        let syntax = super::SyntaxColors {
+            keyword: Some(super::ThemeStyle {
+                font_family: Some("JetBrains Mono".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            syntax
+                .style("keyword")
+                .unwrap()
+                .get_font_family()
+                .map(|font| font.as_ref()),
+            Some("JetBrains Mono")
+        );
+        assert_eq!(
+            syntax
+                .style("keyword.modifier")
+                .unwrap()
+                .get_font_family()
+                .map(|font| font.as_ref()),
+            Some("JetBrains Mono")
+        );
+    }
 
     #[test]
     fn registrations_preserve_exact_names_before_alias_fallback() {

@@ -1,24 +1,25 @@
 use std::{ops::Range, rc::Rc, sync::Arc};
 
-use gpui::{AnyElement, Context, HighlightStyle, Hsla, SharedString, Window};
+use gpui::{AnyElement, Context, Hsla, SharedString, Window};
 use ropey::Rope;
 
 use super::{EditorState, FoldRange, InputEdit};
 use crate::SemanticThemeTokens;
+use crate::text::InlineHighlight;
 
 /// Resolves semantic highlight names into renderable GPUI styles.
 ///
 /// Base deliberately knows nothing about a concrete syntax theme. UI crates and
 /// applications can provide any resolver, independently of their parser.
 pub trait HighlightStyleResolver: Send + Sync {
-    fn style(&self, name: &str) -> Option<HighlightStyle>;
+    fn style(&self, name: &str) -> Option<InlineHighlight>;
 }
 
 #[derive(Default)]
 struct NoHighlightStyles;
 
 impl HighlightStyleResolver for NoHighlightStyles {
-    fn style(&self, _: &str) -> Option<HighlightStyle> {
+    fn style(&self, _: &str) -> Option<InlineHighlight> {
         None
     }
 }
@@ -58,12 +59,12 @@ pub trait InputHighlighter {
     }
 
     /// Return ordered, non-overlapping style runs that fully cover `range`.
-    /// Use [`HighlightStyle::default`] for text without a semantic style.
+    /// Use [`InlineHighlight::default`] for text without a semantic style.
     fn styles(
         &self,
         range: &Range<usize>,
         resolver: &dyn HighlightStyleResolver,
-    ) -> Vec<(Range<usize>, HighlightStyle)>;
+    ) -> Vec<(Range<usize>, InlineHighlight)>;
 
     fn fold_ranges(&self, text: &Rope) -> Vec<FoldRange>;
 

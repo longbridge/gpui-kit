@@ -1,6 +1,7 @@
 use gpui::{App, Div, Entity, InteractiveElement as _, IntoElement, RenderOnce, Stateful, Window};
 
 use super::{EditorMode, InputBaseState, InputModeKind};
+use crate::text::InlineHighlight;
 
 /// State for source-code editing.
 ///
@@ -276,7 +277,7 @@ impl crate::input::InputExtras for super::EditorExtras {
         text: &ropey::Rope,
         range: &std::ops::Range<usize>,
         resolver: &dyn crate::input::HighlightStyleResolver,
-    ) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> {
+    ) -> Vec<(std::ops::Range<usize>, InlineHighlight)> {
         self.lsp.semantic_tokens_for_range(text, range, resolver)
     }
 

@@ -3,8 +3,11 @@ use crate::highlighter::HighlightTheme;
 use crate::highlighter::LanguageRegistry;
 
 use anyhow::{Context, Result, anyhow};
-use gpui::{HighlightStyle, SharedString};
+#[cfg(test)]
+use gpui::HighlightStyle;
+use gpui::SharedString;
 use gpui_base::input::RopeExt as _;
+use gpui_base::text::InlineHighlight;
 use ropey::{ChunkCursor, Rope};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1182,7 +1185,7 @@ impl SyntaxHighlighter {
         &self,
         range: &Range<usize>,
         theme: &dyn gpui_base::input::HighlightStyleResolver,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         let mut styles = vec![];
         let start_offset = range.start;
 
@@ -1215,14 +1218,14 @@ impl SyntaxHighlighter {
 
         // If the matched styles is empty, return a default range.
         if styles.len() == 0 {
-            return vec![(start_offset..range.end, HighlightStyle::default())];
+            return vec![(start_offset..range.end, InlineHighlight::default())];
         }
 
         let styles = unique_styles(&range, styles);
 
         // NOTE: DO NOT remove this comment, it is used for debugging.
         // for style in &styles {
-        //     println!("---- style: {:?} - {:?}", style.0, style.1.color);
+        //     println!("---- style: {:?} - {:?}", style.0, style.1.get_style().color);
         // }
         // println!("--------------------------------");
 
@@ -1246,8 +1249,8 @@ impl SyntaxHighlighter {
 /// AABCCDDCEEEE
 pub(crate) fn unique_styles(
     total_range: &Range<usize>,
-    styles: Vec<(Range<usize>, HighlightStyle)>,
-) -> Vec<(Range<usize>, HighlightStyle)> {
+    styles: Vec<(Range<usize>, InlineHighlight)>,
+) -> Vec<(Range<usize>, InlineHighlight)> {
     let styles: Vec<_> = styles
         .into_iter()
         .filter(|(range, _)| !range.is_empty())
@@ -1277,7 +1280,7 @@ pub(crate) fn unique_styles(
         significant_intervals.insert(range.end);
     }
 
-    let mut result: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
+    let mut result: Vec<(Range<usize>, InlineHighlight)> = Vec::new();
     let mut active_styles: Vec<usize> = Vec::new();
     let mut last_pos = total_range.start;
 
@@ -1288,9 +1291,9 @@ pub(crate) fn unique_styles(
         if pos > last_pos {
             let interval = last_pos..pos;
             let combined_style = if active_styles.is_empty() {
-                HighlightStyle::default()
+                InlineHighlight::default()
             } else {
-                let mut combined = HighlightStyle::default();
+                let mut combined = InlineHighlight::default();
                 for &idx in &active_styles {
                     merge_highlight_style(&mut combined, &styles[idx].1);
                 }
@@ -1311,7 +1314,7 @@ pub(crate) fn unique_styles(
     }
 
     // Merge adjacent ranges with the same style, but not across significant boundaries
-    let mut merged: Vec<(Range<usize>, HighlightStyle)> = Vec::with_capacity(result.len());
+    let mut merged: Vec<(Range<usize>, InlineHighlight)> = Vec::with_capacity(result.len());
     for (range, style) in result {
         if let Some((last_range, last_style)) = merged.last_mut() {
             if last_range.end == range.start
@@ -1330,28 +1333,33 @@ pub(crate) fn unique_styles(
 }
 
 /// Merge other style (Other on top)
-fn merge_highlight_style(style: &mut HighlightStyle, other: &HighlightStyle) {
+fn merge_highlight_style(style: &mut InlineHighlight, other: &InlineHighlight) {
+    let font_family = other.get_font_family().or(style.get_font_family()).cloned();
+    let mut merged = style.get_style();
+    let other = other.get_style();
+    let color_style = &mut merged;
     if let Some(color) = other.color {
-        style.color = Some(color);
+        color_style.color = Some(color);
     }
     if let Some(font_weight) = other.font_weight {
-        style.font_weight = Some(font_weight);
+        color_style.font_weight = Some(font_weight);
     }
     if let Some(font_style) = other.font_style {
-        style.font_style = Some(font_style);
+        color_style.font_style = Some(font_style);
     }
     if let Some(background_color) = other.background_color {
-        style.background_color = Some(background_color);
+        color_style.background_color = Some(background_color);
     }
     if let Some(underline) = other.underline {
-        style.underline = Some(underline);
+        color_style.underline = Some(underline);
     }
     if let Some(strikethrough) = other.strikethrough {
-        style.strikethrough = Some(strikethrough);
+        color_style.strikethrough = Some(strikethrough);
     }
     if let Some(fade_out) = other.fade_out {
-        style.fade_out = Some(fade_out);
+        color_style.fade_out = Some(fade_out);
     }
+    *style = InlineHighlight::from(merged).with_font_family(font_family);
 }
 
 #[cfg(test)]
@@ -1365,6 +1373,26 @@ mod tests {
         let mut style = HighlightStyle::default();
         style.color = Some(color);
         style
+    }
+
+    #[test]
+    fn syntax_styles_keep_font_family_with_the_captured_style() {
+        // The font must survive capture binding and style merging in the same
+        // result as the palette's color, without a separate font-range pass.
+        let mut theme = (*HighlightTheme::default_dark()).clone();
+        theme.style.syntax.number.as_mut().unwrap().font_family = Some("JetBrains Mono".into());
+        let expected = theme.style("number").unwrap();
+        let text = Rope::from("42");
+        let mut highlighter = SyntaxHighlighter::new("json");
+        assert!(highlighter.update(None, &text, None));
+
+        let styles = highlighter.styles(&(0..text.len()), &theme);
+
+        assert_eq!(styles, vec![(0..text.len(), expected)]);
+        assert_eq!(
+            styles[0].1.get_font_family().map(|font| font.as_ref()),
+            Some("JetBrains Mono")
+        );
     }
 
     #[test]
@@ -1420,7 +1448,7 @@ mod tests {
 
         let theme = HighlightTheme::default_dark();
         let styles = highlighter.styles(&(0..rope.len()), theme.as_ref());
-        assert_eq!(styles, vec![(0..rope.len(), HighlightStyle::default())]);
+        assert_eq!(styles, vec![(0..rope.len(), InlineHighlight::default())]);
 
         // Unregistered languages fall back to plain text.
         let mut highlighter = SyntaxHighlighter::new("no-such-language");
@@ -1495,21 +1523,26 @@ mod tests {
             }
         }
 
-        let left = unique_styles(&range, left);
+        let left = unique_styles(
+            &range,
+            left.into_iter()
+                .map(|(range, style)| (range, style.into()))
+                .collect(),
+        );
         if left.len() != right.len() {
             println!("\n---------------------------------------------");
             for (range, style) in left.iter() {
-                println!("({:?}, {})", range, color_name(style.color));
+                println!("({:?}, {})", range, color_name(style.get_style().color));
             }
             println!("---------------------------------------------");
             panic!("left {} styles, right {} styles", left.len(), right.len());
         }
         for (left, right) in left.into_iter().zip(right) {
-            if left.1.color != right.1.color || left.0 != right.0 {
+            if left.1.get_style().color != right.1.color || left.0 != right.0 {
                 panic!(
                     "\n left: ({:?}, {})\nright: ({:?}, {})\n",
                     left.0,
-                    color_name(left.1.color),
+                    color_name(left.1.get_style().color),
                     right.0,
                     color_name(right.1.color)
                 );
@@ -1625,11 +1658,13 @@ console.log(answer);
         let theme = HighlightTheme::default_dark();
         let styles = highlighter.styles(&(0..markdown.len()), theme.as_ref());
         let keyword_start = markdown.find("fn first").unwrap();
-        let keyword_color = theme.style("keyword").and_then(|style| style.color);
+        let keyword_color = theme
+            .style("keyword")
+            .and_then(|style| style.get_style().color);
         assert!(styles.iter().any(|(range, style)| {
             range.start <= keyword_start
                 && range.end >= keyword_start + 2
-                && style.color == keyword_color
+                && style.get_style().color == keyword_color
         }));
     }
 
@@ -1918,8 +1953,8 @@ $x = 1;
                 styles.iter().any(|(range, style)| {
                     range.start <= start
                         && range.end >= end
-                        && style.font_weight == Some(gpui::FontWeight::BOLD)
-                        && style.font_style == Some(gpui::FontStyle::Italic)
+                        && style.get_style().font_weight == Some(gpui::FontWeight::BOLD)
+                        && style.get_style().font_style == Some(gpui::FontStyle::Italic)
                 }),
                 "{text:?} should combine bold and italic styles"
             );

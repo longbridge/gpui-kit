@@ -1,4 +1,5 @@
 use super::inline_line::InputLine;
+use crate::input::element::{align_runs_to_char_boundaries, runs_for_range};
 mod measurements;
 mod wrap_width;
 use gpui::Half;
@@ -354,6 +355,8 @@ pub(crate) struct TextWrapper {
     pub(crate) lines: SumTree<LineItem>,
 
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
+    /// Absent for uniform typography; only the wrapper retains styled measurement runs.
+    font_runs: Option<Rc<[gpui::TextRun]>>,
     /// Exact native widths avoid reshaping the same prefix when a drag crosses wrap thresholds.
     width_measurements: Rc<std::cell::RefCell<WidthMeasurements>>,
     _initialized: bool,
@@ -371,6 +374,7 @@ impl TextWrapper {
             tab_size: TabSize::default().tab_size,
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
+            font_runs: None,
             width_measurements: Rc::default(),
             _initialized: false,
         }
@@ -496,6 +500,16 @@ impl TextWrapper {
         self.update_all(&self.text.clone(), cx);
     }
 
+    pub(crate) fn set_font_runs(&mut self, runs: Option<Rc<[gpui::TextRun]>>, cx: &mut App) {
+        if self.font_runs == runs {
+            return;
+        }
+        // Syntax/provider/theme updates can change fonts without changing text
+        // or viewport width, so both breaks and measured widths must expire.
+        self.font_runs = runs;
+        self.update_all(&self.text.clone(), cx);
+    }
+
     pub(crate) fn prepare_if_need(&mut self, text: &Rope, cx: &mut App) -> bool {
         if self._initialized {
             return false;
@@ -521,6 +535,11 @@ impl TextWrapper {
         new_text: &Rope,
         cx: &mut App,
     ) {
+        // Absolute style ranges belong to the previous text revision. The
+        // renderer supplies freshly resolved runs before the next layout.
+        if &self.text != changed_text {
+            self.font_runs = None;
+        }
         self.update_wrapped(changed_text, range, new_text, false, cx);
     }
 
@@ -537,6 +556,7 @@ impl TextWrapper {
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
+        let font_runs = self.font_runs.clone();
         let measurements = self.width_measurements.clone();
         if !reuse_widths {
             measurements.borrow_mut().clear();
@@ -576,6 +596,16 @@ impl TextWrapper {
                 }
                 if fragments.is_empty() {
                     return measured_wrap(line_str, wrap_width, wrapping_indent, |text| {
+                        if let Some(runs) = &font_runs {
+                            // Prefixes and suffixes borrow this line. Their byte
+                            // offsets distinguish identical text with different fonts.
+                            let start =
+                                line_start + text.as_ptr() as usize - line_str.as_ptr() as usize;
+                            let runs = runs_for_range(runs, 0, &(start..start + text.len()));
+                            let runs = align_runs_to_char_boundaries(text, &runs).unwrap_or(runs);
+                            let layout = text_system.layout_line(text, font_size, &runs, None);
+                            return expanded_width(&layout, text, tab_stop);
+                        }
                         measurements.borrow_mut().measure(text, || {
                             let layout = text_system.layout_line(
                                 text,

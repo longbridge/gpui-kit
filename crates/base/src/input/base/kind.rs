@@ -33,6 +33,7 @@ use crate::input::{
     RangeDecoration, SyntaxContext, TextDecoration,
 };
 use crate::input::{HoverPopoverState, Lsp};
+use crate::text::InlineHighlight;
 use gpui::Task;
 
 use super::InputBaseState;
@@ -117,7 +118,7 @@ pub trait InputExtras: Default + 'static {
         _text: &Rope,
         _range: &std::ops::Range<usize>,
         _resolver: &dyn HighlightStyleResolver,
-    ) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> {
+    ) -> Vec<(std::ops::Range<usize>, InlineHighlight)> {
         Vec::new()
     }
 

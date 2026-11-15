@@ -1,12 +1,13 @@
 use std::ops::Range;
 
 use anyhow::Result;
-use gpui::{App, Context, HighlightStyle, SharedString, Task, Window};
+use gpui::{App, Context, SharedString, Task, Window};
 use instant::Duration;
 use lsp_types::{Position, SemanticTokens, SemanticTokensLegend};
 use ropey::Rope;
 
 use crate::input::{EditorMode, HighlightStyleResolver, InputBaseState, Lsp, RopeExt};
+use crate::text::InlineHighlight;
 
 /// A provider of semantic highlighting tokens, layered on top of the
 /// built-in tree-sitter [`SyntaxHighlighter`](crate::highlighter::SyntaxHighlighter).
@@ -71,7 +72,7 @@ impl Lsp {
         text: &Rope,
         visible_range: &Range<usize>,
         theme: &dyn HighlightStyleResolver,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         if self.semantic_tokens.is_empty() {
             return Vec::new();
         }
@@ -99,6 +100,8 @@ impl Lsp {
                     return None;
                 }
 
+                // Keep typography until shaping; extracting GPUI's color style
+                // here discards the family selected by the semantic capture.
                 let style = theme.style(name.as_ref())?;
                 Some((start..end, style))
             })
@@ -195,7 +198,7 @@ fn decode_semantic_tokens(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::hsla;
+    use gpui::{HighlightStyle, hsla};
     use lsp_types::{SemanticToken, SemanticTokenType, SemanticTokensLegend};
 
     fn legend() -> SemanticTokensLegend {
@@ -208,11 +211,14 @@ mod tests {
     struct TestTheme;
 
     impl HighlightStyleResolver for TestTheme {
-        fn style(&self, name: &str) -> Option<HighlightStyle> {
-            (name == "keyword" || name == "comment").then_some(HighlightStyle {
-                color: Some(hsla(0.5, 0.5, 0.5, 1.)),
-                ..Default::default()
-            })
+        fn style(&self, name: &str) -> Option<crate::text::InlineHighlight> {
+            (name == "keyword" || name == "comment").then_some(
+                InlineHighlight::from(HighlightStyle {
+                    color: Some(hsla(0.5, 0.5, 0.5, 1.)),
+                    ..Default::default()
+                })
+                .with_font_family(Some("Semantic".into())),
+            )
         }
     }
 
@@ -298,8 +304,12 @@ mod tests {
             "only the line-0 token should be windowed in"
         );
         assert_eq!(styles[0].0, 0..6, "keyword token maps to bytes 0..6");
+        assert_eq!(
+            styles[0].1.get_font_family().map(|family| family.as_ref()),
+            Some("Semantic")
+        );
         assert!(
-            styles[0].1 != HighlightStyle::default(),
+            styles[0].1.get_style() != HighlightStyle::default(),
             "'keyword' should resolve to a non-default style on default-dark"
         );
     }

@@ -77,7 +77,8 @@ impl Render for CompatibleSelectionView {
                                     gpui_kit::HighlightStyle {
                                         background_color: Some(gpui_kit::rgb(color).into()),
                                         ..Default::default()
-                                    },
+                                    }
+                                    .into(),
                                 )]
                             })
                         }),

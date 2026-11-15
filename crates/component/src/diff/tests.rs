@@ -559,15 +559,19 @@ fn patch_navigation_and_selection_use_supplied_source_coordinates(cx: &mut TestA
 fn setting_or_clearing_a_syntax_highlighter_prepares_the_files_again(cx: &mut TestAppContext) {
     use gpui::{FontStyle, FontWeight, HighlightStyle};
     use gpui_base::input::HighlightStyleResolver;
+    use gpui_base::text::InlineHighlight;
     use std::ops::Range;
 
     /// Paints GPUI Kit's `keyword` captures italic and nothing else.
     struct KeywordTheme;
     impl HighlightStyleResolver for KeywordTheme {
-        fn style(&self, name: &str) -> Option<HighlightStyle> {
-            (name == "keyword").then(|| HighlightStyle {
-                font_style: Some(FontStyle::Italic),
-                ..Default::default()
+        fn style(&self, name: &str) -> Option<InlineHighlight> {
+            (name == "keyword").then(|| {
+                HighlightStyle {
+                    font_style: Some(FontStyle::Italic),
+                    ..Default::default()
+                }
+                .into()
             })
         }
     }

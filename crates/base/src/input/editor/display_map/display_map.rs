@@ -254,6 +254,16 @@ impl DisplayMap {
     }
 
     /// Set font parameters
+    pub(crate) fn set_font_runs(
+        &mut self,
+        runs: Option<std::rc::Rc<[gpui::TextRun]>>,
+        cx: &mut App,
+    ) {
+        self.wrap_map.set_font_runs(runs, cx);
+        self.rebuild_fold_projection();
+    }
+
+    /// Set font parameters
     pub fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrap_map.set_font(font, font_size, cx);
         self.rebuild_fold_projection();

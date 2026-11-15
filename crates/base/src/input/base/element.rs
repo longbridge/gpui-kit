@@ -74,10 +74,10 @@ const FOLD_CHEVRON_RIGHT_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg
 const FOLD_CHEVRON_DOWN_SVG: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 
 fn compose_decorations(
-    mut styles: Vec<(Range<usize>, HighlightStyle)>,
+    mut styles: Vec<(Range<usize>, crate::text::InlineHighlight)>,
     decorations: impl IntoIterator<Item = (Range<usize>, HighlightStyle)>,
     visible_byte_range: Range<usize>,
-) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
+) -> Option<Vec<(Range<usize>, crate::text::InlineHighlight)>> {
     let mut visible_decorations = decorations
         .into_iter()
         .filter_map(|(range, style)| {
@@ -91,19 +91,25 @@ fn compose_decorations(
         return (!styles.is_empty()).then_some(styles);
     }
     if styles.is_empty() {
-        styles.push((visible_byte_range.clone(), HighlightStyle::default()));
+        styles.push((
+            visible_byte_range.clone(),
+            crate::text::InlineHighlight::default(),
+        ));
     }
 
     // Decorations are application-authored overrides and must win over syntax
     // and semantic highlighting when both set the same style property.
-    Some(gpui::combine_highlights(styles, visible_decorations).collect())
+    Some(crate::text::combine_highlights(
+        styles,
+        visible_decorations.map(|(range, style)| (range, style.into())),
+    ))
 }
 
 fn compose_decoration_collections<'a>(
-    mut styles: Vec<(Range<usize>, HighlightStyle)>,
+    mut styles: Vec<(Range<usize>, crate::text::InlineHighlight)>,
     collections: impl IntoIterator<Item = &'a [TextDecoration]>,
     visible_byte_range: Range<usize>,
-) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
+) -> Option<Vec<(Range<usize>, crate::text::InlineHighlight)>> {
     // Apply collections in reverse creation order so the first collection is
     // composed last and retains its documented precedence.
     let collections = collections.into_iter().collect::<Vec<_>>();
@@ -2577,11 +2583,11 @@ impl<M: InputModeKind> TextElement<M> {
     /// First usize is the offset of skipped.
     fn highlight_lines(
         &mut self,
-        visible_buffer_lines: &[usize],
+        visible_buffer_lines: impl ExactSizeIterator<Item = usize>,
         _visible_top: Pixels,
         visible_byte_range: Range<usize>,
         cx: &mut App,
-    ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
+    ) -> Option<Vec<(Range<usize>, crate::text::InlineHighlight)>> {
         let state = self.state.read(cx);
         let text = &state.text;
         let is_multi_line = state.is_multi_line();
@@ -2604,17 +2610,9 @@ impl<M: InputModeKind> TextElement<M> {
                     .flatten();
             }
         };
-        let Some(highlighter) = highlighter.as_mut() else {
-            return (!state.masked)
-                .then(|| {
-                    compose_decoration_collections(
-                        Vec::new(),
-                        state.extras.decoration_layers().into_iter(),
-                        visible_byte_range,
-                    )
-                })
-                .flatten();
-        };
+        // Semantic tokens can style an editor without a parser; they still
+        // need base coverage to reach the same composition and shaping path.
+        let highlighter = highlighter.as_mut();
 
         let mut styles = Vec::with_capacity(visible_buffer_lines.len());
         // Byte ranges of the flushed line groups; the composed styles are
@@ -2633,10 +2631,13 @@ impl<M: InputModeKind> TextElement<M> {
                 } else {
                     text.line_end_offset(end_line)
                 };
-                let range_styles = if skip {
-                    vec![(byte_start..byte_end, HighlightStyle::default())]
+                let range_styles = if skip || highlighter.is_none() {
+                    vec![(
+                        byte_start..byte_end,
+                        crate::text::InlineHighlight::default(),
+                    )]
                 } else {
-                    highlighter.styles(
+                    highlighter.as_ref().unwrap().styles(
                         &(byte_start..byte_end),
                         state.editor_style.highlight_styles.as_ref(),
                     )
@@ -2647,10 +2648,10 @@ impl<M: InputModeKind> TextElement<M> {
             };
 
         // Group contiguous visible lines into ranges and call styles() once per range
-        let mut visible_iter = visible_buffer_lines.iter().peekable();
+        let mut visible_iter = visible_buffer_lines.peekable();
         let mut range_start: Option<usize> = None;
 
-        while let Some(&line) = visible_iter.next() {
+        while let Some(line) = visible_iter.next() {
             // Check if this line is too long for highlighting
             let line_len = text.slice_line(line).len();
             if line_len > MAX_HIGHLIGHT_LINE_LENGTH {
@@ -2668,7 +2669,7 @@ impl<M: InputModeKind> TextElement<M> {
             // Check if next line is contiguous, if so keep accumulating
             if visible_iter
                 .peek()
-                .map(|&&next| next == line + 1)
+                .map(|&next| next == line + 1)
                 .unwrap_or(false)
             {
                 continue;
@@ -2701,11 +2702,11 @@ impl<M: InputModeKind> TextElement<M> {
 
         // hover definition style
         if let Some(hover_style) = M::hover_definition_style(self.state.read(cx), cx) {
-            styles.push(hover_style);
+            styles.push((hover_style.0, hover_style.1.into()));
         }
 
         // Compose tree-sitter, semantic, application, then diagnostic styles.
-        styles = gpui::combine_highlights(custom_styles, styles).collect();
+        styles = crate::text::combine_highlights(styles, custom_styles);
         if !state.masked {
             styles = compose_decoration_collections(
                 styles,
@@ -2714,7 +2715,12 @@ impl<M: InputModeKind> TextElement<M> {
             )
             .unwrap_or_default();
         }
-        styles = gpui::combine_highlights(diagnostic_styles, styles).collect();
+        styles = crate::text::combine_highlights(
+            styles,
+            diagnostic_styles
+                .into_iter()
+                .map(|(range, style)| (range, style.into())),
+        );
 
         // Some sources reach outside the flushed groups — a diagnostic
         // straddling the viewport edge, or any range inside a folded region —
@@ -3077,6 +3083,30 @@ impl<M: InputModeKind> Element for TextElement<M> {
         );
         let state = self.state.read(cx);
 
+        // Wrapping must see the same resolved typography as painting, including
+        // offscreen rows. Otherwise scrolling exposes stale base-font breaks.
+        let font_runs = if M::CODE_EDITOR && state.soft_wrap && !state.masked {
+            let styles = self.highlight_lines(0..text.lines_len(), px(0.), 0..text.len(), cx);
+            let mut runs =
+                crate::text::text_runs(text.len(), &text_style, styles.as_deref().unwrap_or(&[]));
+            let mut changes_font = false;
+            for run in &mut runs {
+                changes_font |= run.font != text_style.font();
+                // Color and decoration changes do not invalidate glyph widths.
+                run.color = gpui::black();
+                run.background_color = None;
+                run.underline = None;
+                run.strikethrough = None;
+            }
+            changes_font.then(|| Rc::from(runs))
+        } else {
+            None
+        };
+        self.state.update(cx, |state, cx| {
+            state.display_map.set_font_runs(font_runs, cx)
+        });
+        let state = self.state.read(cx);
+
         let (visible_range, visible_buffer_lines, visible_top) =
             self.calculate_visible_range(&state, line_height, bounds.size.height);
         let visible_start_offset = state.text.line_start_offset(visible_range.start);
@@ -3085,7 +3115,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             .line_end_offset(visible_range.end.saturating_sub(1));
 
         let highlight_styles = self.highlight_lines(
-            &visible_buffer_lines,
+            visible_buffer_lines.iter().copied(),
             visible_top,
             visible_start_offset..visible_end_offset,
             cx,
@@ -3163,7 +3193,13 @@ impl<M: InputModeKind> Element for TextElement<M> {
             let mut runs = Vec::with_capacity(highlight_styles.len() + 2);
 
             for (range, style) in &highlight_styles {
-                let mut run = text_style.clone().highlight(*style).to_run(range.len());
+                // Keep typography on the syntax style through shaping, rather
+                // than collecting and joining a second set of font ranges.
+                let mut styled_text = text_style.clone().highlight(style.get_style());
+                if let Some(family) = style.get_font_family() {
+                    styled_text.font_family = family.clone();
+                }
+                let mut run = styled_text.to_run(range.len());
                 if disabled {
                     run.color = run.color.opacity(0.5);
                 }
@@ -3970,9 +4006,9 @@ pub(super) fn runs_for_range(
 /// Clip sorted `styles` to the sorted, disjoint `ranges`, splitting styles
 /// that span several ranges and dropping coverage in the gaps between them.
 fn clip_styles_to_ranges(
-    styles: Vec<(Range<usize>, HighlightStyle)>,
+    styles: Vec<(Range<usize>, crate::text::InlineHighlight)>,
     ranges: &[Range<usize>],
-) -> Vec<(Range<usize>, HighlightStyle)> {
+) -> Vec<(Range<usize>, crate::text::InlineHighlight)> {
     let mut result = Vec::with_capacity(styles.len());
     let mut range_ix = 0;
 
@@ -3986,7 +4022,7 @@ fn clip_styles_to_ranges(
             let start = style_range.start.max(ranges[ix].start);
             let end = style_range.end.min(ranges[ix].end);
             if start < end {
-                result.push((start..end, style));
+                result.push((start..end, style.clone()));
             }
             ix += 1;
         }
@@ -5634,9 +5670,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0..2, 2..5, 5..10]
         );
-        assert_eq!(styles[0].1, HighlightStyle::default());
-        assert_eq!(styles[1].1.background_color, Some(gpui::red()));
-        assert_eq!(styles[2].1, HighlightStyle::default());
+        assert_eq!(styles[0].1.get_style(), HighlightStyle::default());
+        assert_eq!(styles[1].1.get_style().background_color, Some(gpui::red()));
+        assert_eq!(styles[2].1.get_style(), HighlightStyle::default());
     }
 
     #[test]
@@ -5660,7 +5696,7 @@ mod tests {
             compose_decoration_collections(Vec::new(), [&first[..], &second[..]], 0..4).unwrap();
 
         assert_eq!(styles.len(), 1);
-        assert_eq!(styles[0].1.background_color, Some(gpui::red()));
+        assert_eq!(styles[0].1.get_style().background_color, Some(gpui::red()));
     }
 
     #[test]
@@ -5670,7 +5706,8 @@ mod tests {
             HighlightStyle {
                 color: Some(gpui::blue()),
                 ..Default::default()
-            },
+            }
+            .into(),
         )];
         let decoration = HighlightStyle {
             color: Some(gpui::red()),
@@ -5681,8 +5718,35 @@ mod tests {
         let styles = compose_decorations(syntax, [(2..6, decoration)], 0..8).unwrap();
 
         assert_eq!(styles[1].0, 2..6);
-        assert_eq!(styles[1].1.color, Some(gpui::red()));
-        assert_eq!(styles[1].1.font_style, Some(gpui::FontStyle::Italic));
+        assert_eq!(styles[1].1.get_style().color, Some(gpui::red()));
+        assert_eq!(
+            styles[1].1.get_style().font_style,
+            Some(gpui::FontStyle::Italic)
+        );
+
+        // A later syntax boundary must not rise above an active decoration.
+        let syntax = [0..5, 5..10].map(|range| {
+            (
+                range,
+                crate::text::InlineHighlight::from(HighlightStyle {
+                    color: Some(gpui::blue()),
+                    ..Default::default()
+                })
+                .with_font_family(Some("Syntax".into())),
+            )
+        });
+        let styles = compose_decorations(syntax.into(), [(2..8, decoration)], 0..10).unwrap();
+        for (range, style) in styles
+            .iter()
+            .filter(|(range, _)| range.start >= 2 && range.end <= 8)
+        {
+            assert_eq!(style.get_style().color, Some(gpui::red()), "{range:?}");
+            assert_eq!(style.get_style().font_style, Some(gpui::FontStyle::Italic));
+            assert_eq!(
+                style.get_font_family().map(|family| family.as_ref()),
+                Some("Syntax")
+            );
+        }
     }
 
     #[test]
@@ -5989,7 +6053,11 @@ mod tests {
     #[test]
     fn test_clip_styles_to_ranges() {
         let style = HighlightStyle::default();
-        let styles = vec![(0..4, style), (4..10, style), (12..20, style)];
+        let styles = vec![
+            (0..4, style.into()),
+            (4..10, style.into()),
+            (12..20, style.into()),
+        ];
 
         // Ranges with a gap (a folded region) drop the gap coverage and split
         // styles that span a range edge.
@@ -6013,7 +6081,7 @@ mod tests {
         );
 
         // A single style spanning several ranges splits into one piece per range.
-        let clipped = clip_styles_to_ranges(vec![(0..30, style)], &[5..10, 20..25]);
+        let clipped = clip_styles_to_ranges(vec![(0..30, style.into())], &[5..10, 20..25]);
         assert_eq!(
             clipped
                 .iter()

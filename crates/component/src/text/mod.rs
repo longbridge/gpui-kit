@@ -24,6 +24,8 @@ use std::collections::HashMap;
 use gpui::Styled as _;
 #[cfg(feature = "tree-sitter")]
 use gpui_base::input::{InputEdit, Point, RopeExt as _};
+#[cfg(any(feature = "tree-sitter", feature = "syntect"))]
+use gpui_base::text::{CodeBlock, InlineHighlight};
 #[cfg(feature = "tree-sitter")]
 use ropey::Rope;
 
@@ -82,10 +84,7 @@ pub(crate) fn install_text_view_defaults(theme: &crate::Theme, cx: &mut gpui::Ap
 #[cfg(feature = "tree-sitter")]
 pub(crate) fn component_code_block_highlighter(
     highlight_theme: std::sync::Arc<crate::highlighter::HighlightTheme>,
-) -> impl Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
-+ Send
-+ Sync
-+ 'static {
+) -> impl Fn(&CodeBlock) -> Vec<(std::ops::Range<usize>, InlineHighlight)> + Send + Sync + 'static {
     move |block| {
         thread_local! {
             static HIGHLIGHTERS: RefCell<HashMap<gpui::SharedString, SyntaxHighlighter>> =
@@ -93,7 +92,7 @@ pub(crate) fn component_code_block_highlighter(
         }
 
         let Some(lang) = block.lang() else {
-            return Vec::new();
+            return Default::default();
         };
         let code = block.code();
         HIGHLIGHTERS.with(|cache| {
@@ -129,25 +128,21 @@ pub(crate) fn component_code_block_highlighter(
 #[cfg(all(feature = "syntect", not(feature = "tree-sitter")))]
 pub(crate) fn component_code_block_highlighter(
     highlight_theme: std::sync::Arc<crate::highlighter::HighlightTheme>,
-) -> impl Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
-+ Send
-+ Sync
-+ 'static {
+) -> impl Fn(&CodeBlock) -> Vec<(std::ops::Range<usize>, InlineHighlight)> + Send + Sync + 'static {
     move |block| match block.lang() {
         Some(lang) => crate::highlighter::highlight_code(
             lang.as_ref(),
             block.code().as_ref(),
             highlight_theme.as_ref(),
         ),
-        None => Vec::new(),
+        None => Default::default(),
     }
 }
 
 /// The type [`shared_code_block_highlighter`] returns.
 #[cfg(any(feature = "tree-sitter", feature = "syntect"))]
-pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
-    + Send
-    + Sync;
+pub(crate) type SharedCodeBlockHighlighter =
+    dyn Fn(&CodeBlock) -> Vec<(std::ops::Range<usize>, InlineHighlight)> + Send + Sync;
 
 /// The [`component_code_block_highlighter`] for `highlight_theme`, built once
 /// and handed out again for the same theme.
@@ -244,7 +239,7 @@ mod tests {
         assert!(
             styles
                 .iter()
-                .any(|(range, style)| range.contains(&string) && style.color.is_some()),
+                .any(|(range, style)| range.contains(&string) && style.get_style().color.is_some()),
             "the string must be colored: {styles:?}"
         );
         assert_eq!(
@@ -259,8 +254,8 @@ mod tests {
     mod code_block_highlighter {
         use std::ops::Range;
 
-        use gpui::{HighlightStyle, Hsla, SharedString};
-        use gpui_base::text::CodeBlock;
+        use gpui::{Hsla, SharedString};
+        use gpui_base::text::{CodeBlock, InlineHighlight};
 
         use crate::highlighter::{HighlightTheme, LanguageConfig, LanguageRegistry};
 
@@ -279,13 +274,13 @@ mod tests {
         }
 
         fn color_at(
-            styles: &[(Range<usize>, HighlightStyle)],
+            styles: &[(Range<usize>, InlineHighlight)],
             range: Range<usize>,
         ) -> Option<Hsla> {
             styles
                 .iter()
                 .find(|(span, _)| span.start <= range.start && span.end >= range.end)
-                .and_then(|(_, style)| style.color)
+                .and_then(|(_, style)| style.get_style().color)
         }
 
         #[test]
@@ -319,8 +314,12 @@ mod tests {
 
             let light = HighlightTheme::default_light();
             let dark = HighlightTheme::default_dark();
-            let light_number = light.style("number").and_then(|style| style.color);
-            let dark_number = dark.style("number").and_then(|style| style.color);
+            let light_number = light
+                .style("number")
+                .and_then(|style| style.get_style().color);
+            let dark_number = dark
+                .style("number")
+                .and_then(|style| style.get_style().color);
             assert_ne!(
                 light_number, dark_number,
                 "the default themes must use different number colors"

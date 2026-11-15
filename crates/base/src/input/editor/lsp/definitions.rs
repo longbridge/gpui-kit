@@ -213,7 +213,11 @@ impl InputBaseState<EditorMode> {
             return None;
         };
 
-        let mut highlight_style = editor.editor_style.highlight_styles.style("link_text")?;
+        let mut highlight_style = editor
+            .editor_style
+            .highlight_styles
+            .style("link_text")?
+            .get_style();
 
         highlight_style.underline = Some(UnderlineStyle {
             thickness: px(1.),

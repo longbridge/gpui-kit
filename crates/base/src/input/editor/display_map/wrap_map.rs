@@ -135,6 +135,15 @@ impl WrapMap {
     }
 
     /// Set font parameters
+    pub(super) fn set_font_runs(
+        &mut self,
+        runs: Option<std::rc::Rc<[gpui::TextRun]>>,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_font_runs(runs, cx);
+    }
+
+    /// Set font parameters
     pub(super) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrapper.set_font(font, font_size, cx);
     }

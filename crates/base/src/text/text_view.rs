@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use crate::StyledExt;
+use crate::text::InlineHighlight;
 use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
@@ -22,7 +23,7 @@ pub(crate) type CodeBlockActionsFn =
     dyn Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
 pub(crate) type CodeBlockHighlighterFn =
-    dyn Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync;
+    dyn Fn(&CodeBlock) -> Vec<(Range<usize>, InlineHighlight)> + Send + Sync;
 
 /// Application-wide defaults for TextViews that do not provide explicit
 /// presentation or syntax-highlighting overrides.
@@ -60,7 +61,7 @@ impl TextViewDefaults {
     /// Sets the syntax highlighter used for fenced code blocks.
     pub fn with_code_block_highlighter<F>(mut self, highlighter: F) -> Self
     where
-        F: Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync + 'static,
+        F: Fn(&CodeBlock) -> Vec<(Range<usize>, InlineHighlight)> + Send + Sync + 'static,
     {
         self.code_block_highlighter = Some(Arc::new(highlighter));
         self
@@ -398,7 +399,7 @@ impl TextView {
     /// ranges are discarded. Without this callback, code is unhighlighted.
     pub fn code_block_highlighter<F>(mut self, highlighter: F) -> Self
     where
-        F: Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync + 'static,
+        F: Fn(&CodeBlock) -> Vec<(Range<usize>, InlineHighlight)> + Send + Sync + 'static,
     {
         self.code_block_highlighter = Some(Arc::new(highlighter));
         self
@@ -413,9 +414,7 @@ impl TextView {
     #[doc(hidden)]
     pub fn shared_code_block_highlighter(
         mut self,
-        highlighter: Arc<
-            dyn Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync,
-        >,
+        highlighter: Arc<dyn Fn(&CodeBlock) -> Vec<(Range<usize>, InlineHighlight)> + Send + Sync>,
     ) -> Self {
         self.code_block_highlighter = Some(highlighter);
         self
@@ -2339,7 +2338,8 @@ mod tests {
                 gpui::HighlightStyle {
                     color: Some(gpui::rgb(0x3366ff).into()),
                     ..Default::default()
-                },
+                }
+                .into(),
             )]
         });
         assert!(view.code_block_highlighter.is_some());

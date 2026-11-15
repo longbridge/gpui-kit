@@ -2340,7 +2340,7 @@ pub struct CodeBlock {
 
 struct CachedCodeBlockHighlights {
     highlighter: Arc<CodeBlockHighlighterFn>,
-    styles: Vec<(Range<usize>, HighlightStyle)>,
+    styles: Vec<(Range<usize>, InlineHighlight)>,
 }
 
 impl std::fmt::Debug for CachedCodeBlockHighlights {
@@ -2453,7 +2453,7 @@ impl CodeBlock {
     fn highlighted_styles(
         &self,
         highlighter: &Arc<CodeBlockHighlighterFn>,
-    ) -> Vec<(Range<usize>, HighlightStyle)> {
+    ) -> Vec<(Range<usize>, InlineHighlight)> {
         if let Ok(cache) = self.highlight_cache.lock()
             && let Some(cache) = cache.as_ref()
             && Arc::ptr_eq(&cache.highlighter, highlighter)
@@ -2580,10 +2580,7 @@ impl CodeBlock {
                             .code_block_highlighter
                             .as_ref()
                             .map(|highlighter| self.highlighted_styles(highlighter))
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|(range, style)| (range, InlineHighlight::from(style)))
-                            .collect(),
+                            .unwrap_or_default(),
                         node_cx.stream_fades(leaf_key),
                     ),
                     node_cx.link_click_handler.clone(),
@@ -5031,7 +5028,7 @@ mod tests {
         let calls_for_highlighter = calls.clone();
         let highlighter: Arc<CodeBlockHighlighterFn> = Arc::new(move |_| {
             calls_for_highlighter.fetch_add(1, Ordering::Relaxed);
-            Vec::new()
+            Default::default()
         });
         let block = CodeBlock::new("fn main() {}".into(), Some("rust".into()), None::<Span>);
 
@@ -5039,7 +5036,7 @@ mod tests {
         block.highlighted_styles(&highlighter);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
 
-        let replacement: Arc<CodeBlockHighlighterFn> = Arc::new(|_| Vec::new());
+        let replacement: Arc<CodeBlockHighlighterFn> = Arc::new(|_| Default::default());
         block.highlighted_styles(&replacement);
         assert!(Arc::ptr_eq(
             &block
@@ -5064,7 +5061,8 @@ mod tests {
                 HighlightStyle {
                     color: Some(gpui::rgb(0x0000ff).into()),
                     ..Default::default()
-                },
+                }
+                .into(),
             )]
         });
         let dark: Arc<CodeBlockHighlighterFn> = Arc::new(|_| {
@@ -5073,7 +5071,8 @@ mod tests {
                 HighlightStyle {
                     color: Some(gpui::rgb(0xffff00).into()),
                     ..Default::default()
-                },
+                }
+                .into(),
             )]
         });
         let block = CodeBlock::from_code("42", Some("json"));
@@ -5081,8 +5080,14 @@ mod tests {
         let light_styles = block.highlighted_styles(&light);
         let dark_styles = block.highlighted_styles(&dark);
 
-        assert_eq!(light_styles[0].1.color, Some(gpui::rgb(0x0000ff).into()));
-        assert_eq!(dark_styles[0].1.color, Some(gpui::rgb(0xffff00).into()));
+        assert_eq!(
+            light_styles[0].1.get_style().color,
+            Some(gpui::rgb(0x0000ff).into())
+        );
+        assert_eq!(
+            dark_styles[0].1.get_style().color,
+            Some(gpui::rgb(0xffff00).into())
+        );
         assert_eq!(block.code(), "42", "the document must survive the swap");
     }
 

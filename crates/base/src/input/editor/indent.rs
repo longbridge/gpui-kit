@@ -1,11 +1,10 @@
 use crate::input::InputModeKind;
 use crate::input::{
     Indent, IndentInline, InputBaseState, Outdent, OutdentInline, RopeExt, cursor::CursorSelection,
-    element::TextElement, layout::LastLayout, mode::LayoutMode,
+    display_map::LineLayout, element::TextElement, layout::LastLayout, mode::LayoutMode,
 };
 use gpui::{
-    Bounds, Context, Hsla, Path, PathBuilder, Pixels, SharedString, TextRun, TextStyle, Window,
-    point, px,
+    Bounds, Context, Path, PathBuilder, Pixels, SharedString, TextStyle, Window, point, px,
 };
 use ropey::RopeSlice;
 
@@ -85,24 +84,17 @@ impl LayoutMode {
 }
 
 impl<M: InputModeKind> TextElement<M> {
-    /// Measure the indent width in pixels for given column count.
-    fn measure_indent_width(&self, style: &TextStyle, column: usize, window: &Window) -> Pixels {
-        let font_size = style.font_size.to_pixels(window.rem_size());
-        let layout = window.text_system().shape_line(
-            SharedString::from(" ".repeat(column)),
-            font_size,
-            &[TextRun {
-                len: column,
-                font: style.font(),
-                color: Hsla::default(),
-                background_color: None,
-                strikethrough: None,
-                underline: None,
-            }],
-            None,
-        );
-
-        layout.width
+    /// Use shaped glyph positions so syntax typography cannot diverge from guide placement.
+    fn measure_indent_width(
+        &self,
+        line_layout: &LineLayout,
+        byte_offset: usize,
+        last_layout: &LastLayout,
+    ) -> Pixels {
+        line_layout
+            .position_for_index(byte_offset, last_layout, false)
+            .expect("leading whitespace must have a laid-out position")
+            .x
     }
 
     pub(super) fn layout_indent_guides(
@@ -110,15 +102,12 @@ impl<M: InputModeKind> TextElement<M> {
         state: &InputBaseState<M>,
         bounds: &Bounds<Pixels>,
         last_layout: &LastLayout,
-        text_style: &TextStyle,
-        window: &mut Window,
+        _text_style: &TextStyle,
+        _window: &mut Window,
     ) -> Option<Path<Pixels>> {
         if !state.is_multi_line() || !state.mode.has_indent_guides() {
             return None;
         }
-
-        let indent_width =
-            self.measure_indent_width(text_style, state.mode.tab_size().tab_size, window);
 
         let tab_size = state.mode.tab_size();
         let line_height = last_layout.line_height;
@@ -134,13 +123,19 @@ impl<M: InputModeKind> TextElement<M> {
             let line = state.text.slice_line(buffer_line);
             let mut current_indents = vec![];
             if line.len() > 0 {
-                let indent_count = tab_size.indent_count(&line);
-                for offset in (0..indent_count).step_by(tab_size.tab_size) {
-                    let x = if indent_count > 0 {
-                        indent_width * offset as f32 / tab_size.tab_size as f32
-                    } else {
-                        px(0.)
+                let mut column = 0;
+                for (byte_offset, byte) in line.bytes().enumerate() {
+                    let columns = match byte {
+                        b' ' => 1,
+                        b'\t' => tab_size.tab_size - column % tab_size.tab_size,
+                        _ => break,
                     };
+                    let draw_guide = column % tab_size.tab_size == 0;
+                    column += columns;
+                    if !draw_guide {
+                        continue;
+                    }
+                    let x = self.measure_indent_width(line_layout, byte_offset, last_layout);
 
                     let pos = point(x + last_layout.line_number_width, offset_y);
 
