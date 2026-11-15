@@ -3408,12 +3408,22 @@ fn schedule_selection_frame(
     }
 }
 
+fn press_is_in_viewport(position: Point<Pixels>, window: &Window) -> bool {
+    Bounds::new(Point::default(), window.viewport_size()).contains(&position)
+}
+
 fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Window, cx: &mut App) {
     schedule_selection_frame(state, window, cx);
 
     let mouse_down_state = state.downgrade();
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
         if event.button != MouseButton::Left {
+            return;
+        }
+        // Windows reports presses on the native title bar and resize frame
+        // in client coordinates outside the viewport. Those start a window
+        // move or resize, never a text selection, and must not clear one.
+        if !press_is_in_viewport(event.position, window) {
             return;
         }
         let Some(state) = mouse_down_state.upgrade() else {
@@ -5900,6 +5910,41 @@ mod tests {
             let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
             assert!(!snapshot.is_selecting());
             assert_eq!((snapshot.anchor(), snapshot.cursor()), before);
+        });
+    }
+
+    #[gpui::test]
+    fn selection_layer_ignores_presses_on_the_native_window_frame(cx: &mut TestAppContext) {
+        let (text, layout) = laid_out_runs(&["alpha bravo charlie delta"], cx)
+            .pop()
+            .unwrap();
+        let (view, cx) = cx.add_window_view(|_, cx| DoubleSelectionElementView {
+            selection: TextSelectionHandle::new("", cx),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            let selection = view.read(cx).selection.clone();
+            selection.update_runs(&[text_run(0, text.clone(), layout.clone())], cx);
+        });
+        let start = layout.position_for_index(1).unwrap();
+        let selected_to = layout.position_for_index(7).unwrap();
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_up(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        let selected = cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            (snapshot.anchor(), snapshot.cursor())
+        });
+        // A press on the native title bar arrives above the client area and
+        // the move loop swallows its release.
+        let title_bar = point(start.x, px(-12.));
+        cx.simulate_mouse_down(title_bar, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, None, gpui::Modifiers::default());
+        cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(!snapshot.is_selecting());
+            assert_eq!((snapshot.anchor(), snapshot.cursor()), selected);
         });
     }
 
