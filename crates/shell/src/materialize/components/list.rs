@@ -457,6 +457,7 @@ fn search_order(index: usize, old_count: usize, new_count: usize) -> impl Iterat
         .filter(move |candidate| *candidate < new_count)
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for KeyedList {
     type Element = Self;
 

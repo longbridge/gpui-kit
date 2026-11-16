@@ -8,7 +8,7 @@
 
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Pixels, Point, Size, Style, WeakEntity, Window, px,
+    InspectorElementId, LayoutId, Pixels, Point, Size, Style, WeakEntity, Window, px,
 };
 
 use crate::input::{EditorState, PrepaintCaretGeometry};
@@ -143,7 +143,8 @@ impl Element for CaretAnchoredPopup {
     }
 }
 
-impl IntoElement for CaretAnchoredPopup {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for CaretAnchoredPopup {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {

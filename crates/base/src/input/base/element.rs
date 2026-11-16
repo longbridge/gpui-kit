@@ -268,6 +268,7 @@ impl<M: InputModeKind> EditorScrollbar<M> {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<M: InputModeKind> IntoElement for EditorScrollbar<M> {
     type Element = Self;
 
@@ -2994,6 +2995,7 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<M: InputModeKind> IntoElement for TextElement<M> {
     type Element = Self;
 

@@ -4,8 +4,8 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
-    InspectorElementId, IntoElement, LayoutId, LongPressEvent, MouseMoveEvent, Pixels, Point, Size,
-    Style, TouchPhase, Window,
+    InspectorElementId, LayoutId, LongPressEvent, MouseMoveEvent, Pixels, Point, Size, Style,
+    TouchPhase, Window,
 };
 
 use super::{Plot, PlotAppear, appear::track_appear, hover::track_hover};
@@ -46,7 +46,8 @@ impl<P: Plot + 'static> PlotElement<P> {
     }
 }
 
-impl<P: Plot + 'static> IntoElement for PlotElement<P> {
+#[cfg(not(feature = "gpui-fast"))]
+impl<P: Plot + 'static> gpui::IntoElement for PlotElement<P> {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {

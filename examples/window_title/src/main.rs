@@ -1,8 +1,9 @@
 use gpui_kit::component::{
     TitleBar,
     button::{Button, ButtonVariants},
+    h_flex,
     label::Label,
-    h_flex, v_flex,
+    v_flex,
 };
 use gpui_kit::*;
 
