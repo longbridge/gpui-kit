@@ -35,6 +35,9 @@ mod indent;
 #[path = "base/inline_tokens.rs"]
 mod inline_tokens;
 mod input;
+#[path = "base/input_transform.rs"]
+mod input_transform;
+pub use input_transform::InputEditProposal;
 #[path = "base/token_presentation.rs"]
 mod token_presentation;
 pub use inline_tokens::{InlineToken, InlineTokenError, InlineTokenSpan, InputContent};

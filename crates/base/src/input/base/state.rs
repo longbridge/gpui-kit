@@ -32,6 +32,7 @@ use super::{
         EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, OverviewRulerRows, TextElement,
         clamp_horizontal_scroll_offset,
     },
+    input_transform::{InputEditProposal, InputTransform, replacement},
     kind::InputModeKind,
     mask_pattern::normalize_number_input,
     mode::LayoutMode,
@@ -48,6 +49,12 @@ use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
 
 pub(super) const EDITOR_ELEMENT_ID: &str = "input-state";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InputCompositionEnd {
+    Unmark,
+    Cancel,
+}
 
 /// Vertical clearance to retain when revealing a text position.
 pub(crate) enum ScrollPadding {
@@ -484,6 +491,10 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) ime_marked_range: Option<CursorSelection>,
     /// Text before an unannounced IME composition, until the next change.
     ime_original_text: Option<Rope>,
+    ime_original_selection: Option<CursorSelection>,
+    ime_composition_end: Option<InputCompositionEnd>,
+    input_transform: Option<InputTransform>,
+    programmatic_edit: bool,
     pub(super) last_layout: Option<LastLayout>,
     /// Fresh caret geometry stashed during prepaint for caret-anchored popups.
     ///
@@ -1007,6 +1018,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             selected_word_range: None,
             ime_marked_range: None,
             ime_original_text: None,
+            ime_original_selection: None,
+            ime_composition_end: None,
+            input_transform: None,
+            programmatic_edit: false,
             input_bounds: Bounds::default(),
             selecting: false,
             touch_selection: Default::default(),
@@ -1188,9 +1203,27 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(gpui::accesskit::ActionData::Value(value)) = data else {
             return;
         };
-        // The action may have been queued before editability changed.
-        if self.is_editable() {
-            self.replace_all(value.to_string(), window, cx);
+        self.replace_accessible_value(value.as_ref(), window, cx);
+    }
+
+    /// Apply an accessibility client's full-value replacement as a user edit.
+    /// Read-only and disabled inputs decline the request. A single-line input
+    /// with an input transform passes the proposed value through it.
+    pub fn replace_accessible_value(
+        &mut self,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_editable() {
+            return;
+        }
+        if self.transforms_input() {
+            self.undo_manager.set_pending_intent(EditIntent::Atomic);
+            let range = self.range_to_utf16(&(0..self.text.len()));
+            self.replace_text_in_range_silent(Some(range), value, window, cx);
+        } else {
+            self.replace_all(value.to_owned(), window, cx);
         }
     }
 
@@ -1302,6 +1335,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.emit_events = false;
         self.replace_text(content.text().clone(), window, cx);
         self.ime_original_text = None;
+        self.ime_original_selection = None;
         self.install_tokens(content);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
@@ -1343,9 +1377,12 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// user, the programmatic APIs must always be able to update the text.
     pub(super) fn with_edits_allowed(&mut self, f: impl FnOnce(&mut Self)) {
         let (was_disabled, was_readonly) = (self.disabled, self.readonly);
+        let was_programmatic = self.programmatic_edit;
+        self.programmatic_edit = true;
         (self.disabled, self.readonly) = (false, false);
         f(self);
         (self.disabled, self.readonly) = (was_disabled, was_readonly);
+        self.programmatic_edit = was_programmatic;
     }
 
     /// Insert text at the current cursor position.
@@ -1694,6 +1731,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Report the change with its own snapshot before the legacy notification.
     fn emit_change(&mut self, cx: &mut Context<Self>) {
+        self.ime_original_selection = None;
         if let Some(original) = self.ime_original_text.take() {
             self.last_input_edits = vec![(
                 Self::full_input_edit(&original, &self.text),
@@ -4257,6 +4295,27 @@ impl<M: InputModeKind> InputBaseState<M> {
         pattern.is_match(new_text)
     }
 
+    fn transforms_input(&self) -> bool {
+        self.input_transform.is_some()
+            && self.mask_pattern.is_none()
+            && self.token_spans().is_empty()
+            && !self.programmatic_edit
+            && !self.undo_manager.is_ignoring()
+    }
+
+    fn finish_marked_input(
+        &mut self,
+        end: InputCompositionEnd,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mark = self.ime_marked_range.expect("finishing a marked input");
+        let text = self.text.slice(mark).to_string();
+        self.ime_composition_end = Some(end);
+        self.replace_text_in_range_silent(None, &text, window, cx);
+        self.ime_composition_end = None;
+    }
+
     /// Set the mask pattern for formatting the input text.
     ///
     /// The pattern can contain:
@@ -4712,7 +4771,15 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             .map(|range| self.range_to_utf16(&range.into()))
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_editable()
+            && self.ime_original_selection.is_some()
+            && self.ime_marked_range.is_some()
+        {
+            self.finish_marked_input(InputCompositionEnd::Unmark, window, cx);
+            return;
+        }
+        self.ime_original_selection = None;
         self.ime_marked_range = None;
         self.undo_manager.commit_transaction();
         // Unmarking keeps the preedit as committed text, which marked edits
@@ -4853,6 +4920,55 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         // Single-line path
         let old_text = self.text.clone();
+        let original_selection = self.ime_original_selection.take();
+        let transform_edit = self.transforms_input();
+        let mut transformed_text = None;
+        let mut transformed_selection = None;
+        if transform_edit {
+            let before = old_text.to_string();
+            let previous = self
+                .ime_original_text
+                .as_ref()
+                .unwrap_or(&old_text)
+                .to_string();
+            let mut proposed = before.clone();
+            proposed.replace_range(range.clone(), new_text);
+            let end = range.start + new_text.len();
+            let selection = if self.ime_composition_end == Some(InputCompositionEnd::Unmark) {
+                self.selected_range()
+            } else {
+                end..end
+            };
+            let mut edit = InputEditProposal {
+                previous_text: &previous,
+                text: proposed,
+                selection,
+            };
+            let transform = self
+                .input_transform
+                .as_ref()
+                .expect("enabled input transform");
+            let accepted = self.ime_composition_end != Some(InputCompositionEnd::Cancel)
+                && transform(&mut edit)
+                && edit.is_valid()
+                && (self.is_valid_input(&edit.text, cx) || !self.is_valid_input(&previous, cx));
+            if accepted {
+                transformed_selection = Some(edit.selection);
+                transformed_text = Some(edit.text);
+            } else if let Some(selection) = original_selection {
+                transformed_selection = Some(selection.into());
+                transformed_text = Some(previous);
+            } else {
+                return;
+            }
+        }
+        let before;
+        let (range, new_text) = if let Some(text) = &transformed_text {
+            before = old_text.to_string();
+            replacement(&before, text)
+        } else {
+            (range, new_text)
+        };
         // Token-aware history replay applies several replacements but emits one
         // `Change` at the end, so its edits accumulate instead of being
         // discarded with each silent replacement.
@@ -4877,6 +4993,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             // trapping a pre-existing invalid text (e.g. a `default_value`
             // that does not conform), the user can still edit to fix it.
             if !self.replaying_history
+                && !transform_edit
                 && !self.validated_token_edit
                 && !self.is_valid_input(&pending_text, cx)
                 && self.is_valid_input(&old_text.to_string(), cx)
@@ -4902,7 +5019,21 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         } else {
             M::adjust_annotations(self, &range, new_text.len());
         }
-        if mask_changed {
+        if let (Some(selection), Some(original)) =
+            (original_selection, self.ime_original_text.clone())
+        {
+            self.undo_manager.clear_pending_composition();
+            let value = self.text.to_string();
+            let (original_range, final_text) = replacement(&original.to_string(), &value);
+            self.push_history(
+                &original,
+                &original_range,
+                final_text,
+                Some(EditIntent::Atomic),
+                selection,
+                transformed_selection.clone().map(Into::into),
+            );
+        } else if mask_changed {
             // A segment-based history entry no longer matches the masked
             // document, record a whole-document change instead, so that
             // undo/redo can restore the text exactly.
@@ -4921,7 +5052,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 &new_text,
                 requested_intent,
                 selection_before,
-                None,
+                transformed_selection.clone().map(Into::into),
             );
         }
         if let Some(diagnostics) = self.mode.diagnostics_mut() {
@@ -4958,6 +5089,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         self.update_fold_candidates_incremental(&range, new_text);
         M::refresh_language_features(self, window, cx);
         self.set_cursor_to(new_offset);
+        if let Some(selection) = transformed_selection {
+            self.set_selection(selection.start, selection.end);
+        }
         self.ime_marked_range.take();
         // A commit ends the IME composition: macOS delivers `insertText:` for
         // the confirmed candidate without a following `unmarkText`, so close
@@ -4965,8 +5099,10 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         // edit into the same change, which then carries the text and selection
         // of the first composition.
         if ends_composition {
-            self.undo_manager
-                .record_selections(vec![selection_before], vec![*self.active_selection()]);
+            self.undo_manager.record_selections(
+                vec![original_selection.unwrap_or(selection_before)],
+                vec![*self.active_selection()],
+            );
             self.undo_manager.commit_transaction();
         }
         self.update_preferred_column();
@@ -4978,7 +5114,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.silent_replace_text {
             M::on_text_typed(self, &range, &new_text, window, cx);
         }
-        if self.emit_events {
+        if transform_edit && self.ime_original_text.as_ref().unwrap_or(&old_text) == &self.text {
+            self.ime_original_text = None;
+        } else if self.emit_events {
             self.emit_change(cx);
         }
         cx.notify();
@@ -4995,6 +5133,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
     ) {
         let requested_intent = self.undo_manager.take_pending_intent();
         if !self.is_editable() {
+            return;
+        }
+        if new_text.is_empty()
+            && self.ime_original_selection.is_some()
+            && self.ime_marked_range.is_some()
+        {
+            self.finish_marked_input(InputCompositionEnd::Cancel, window, cx);
             return;
         }
         let selection_before = *self.active_selection();
@@ -5038,7 +5183,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         self.mode.adjust_auto_closed_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
-        if self.is_single_line() {
+        if self.is_single_line() && !self.transforms_input() {
             let pending_text = self.text.to_string();
             // See the same NOTE in `replace_text_in_range`.
             if !self.replaying_history
@@ -5056,6 +5201,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         if self.ime_original_text.is_none() {
             self.ime_original_text = Some(old_text.clone());
+            if self.transforms_input() {
+                self.ime_original_selection = Some(selection_before);
+            }
         }
         M::adjust_annotations(self, &range, new_text.len());
         if let Some(diagnostics) = self.mode.diagnostics_mut() {
@@ -5463,6 +5611,73 @@ mod tests {
         state.read_with(cx, |state, _| {
             assert_eq!(state.value(), "hello");
             assert_eq!(state.display_map().wrap_row_count(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn input_transform_rewrites_user_edits_and_finalizes_ime_once(cx: &mut TestAppContext) {
+        let calls = Rc::new(Cell::new(0));
+        let transform_calls = calls.clone();
+        let view = InputView::build(cx, |state| {
+            state.default_value("a").input_transform(move |edit| {
+                transform_calls.set(transform_calls.get() + 1);
+                if edit.text().contains('!') {
+                    return false;
+                }
+                if edit.text().contains("🦀") {
+                    edit.replace(edit.text().replace("🦀", "é"), 1..3);
+                }
+                true
+            })
+        });
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(Some(1..1), "🦀", window, cx);
+                assert_eq!(state.value(), "aé");
+                assert_eq!(state.selected_range(), 1..3);
+                state.undo(&Undo, window, cx);
+                assert_eq!(state.value(), "a");
+                state.redo(&Redo, window, cx);
+                assert_eq!(state.selected_range(), 1..3);
+                assert_eq!(calls.get(), 1);
+
+                state.replace_all("a", window, cx);
+                assert_eq!(calls.get(), 1);
+                state.insert_clipboard(ClipboardItem::new_string("🦀".into()), window, cx);
+                assert_eq!(state.value(), "aé");
+                assert_eq!(calls.get(), 2);
+                state.replace_accessible_value("a🦀", window, cx);
+                assert_eq!(state.selected_range(), 1..3);
+                assert_eq!(calls.get(), 3);
+
+                for explicit in [false, true] {
+                    state.set_value("a", window, cx);
+                    let previous_calls = calls.get();
+                    state.replace_and_mark_text_in_range(Some(1..1), "🦀", None, window, cx);
+                    assert_eq!(state.value(), "a🦀");
+                    assert_eq!(calls.get(), previous_calls);
+                    if explicit {
+                        state.replace_text_in_range(None, "🦀", window, cx);
+                    }
+                    state.unmark_text(window, cx);
+                    assert_eq!(calls.get(), previous_calls + 1);
+                    assert_eq!(state.value(), "aé");
+                    assert_eq!(state.selected_range(), 1..3);
+                    state.undo(&Undo, window, cx);
+                    assert_eq!(state.value(), "a");
+                    assert_eq!(state.selected_range(), 1..1);
+                    state.redo(&Redo, window, cx);
+                    assert_eq!(state.value(), "aé");
+                    assert_eq!(state.selected_range(), 1..3);
+                }
+                state.set_value("a", window, cx);
+                state.replace_and_mark_text_in_range(Some(1..1), "!", None, window, cx);
+                state.unmark_text(window, cx);
+                assert_eq!(state.value(), "a");
+                assert!(!state.undo_manager.has_undos());
+                assert!(state.ime_marked_range.is_none());
+            });
         });
     }
 
@@ -13175,6 +13390,18 @@ impl InputBaseState<crate::input::InputMode> {
     /// Set with password masked state.
     pub fn masked(mut self, masked: bool) -> Self {
         self.masked = masked;
+        self
+    }
+
+    /// Accept, reject or rewrite a proposed user edit. The transform runs
+    /// before validation and after a composition is finalized. Return false
+    /// to decline the edit. Programmatic updates and undo/redo bypass it.
+    /// Inputs using a mask pattern or inline tokens use their own edit policy.
+    pub fn input_transform(
+        mut self,
+        transform: impl Fn(&mut InputEditProposal<'_>) -> bool + 'static,
+    ) -> Self {
+        self.input_transform = Some(Box::new(transform));
         self
     }
 

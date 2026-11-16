@@ -141,6 +141,15 @@ impl UndoManager {
         }
     }
 
+    /// Replace a single-line composition's transient edits with its final edit.
+    pub(super) fn clear_pending_composition(&mut self) {
+        if let Some(pending) = &mut self.pending {
+            pending.changes.clear();
+            pending.selections_before = None;
+            pending.selections_after = None;
+        }
+    }
+
     pub(super) fn commit_transaction(&mut self) {
         if self.transaction_depth == 0 {
             return;

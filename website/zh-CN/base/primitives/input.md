@@ -37,6 +37,14 @@ input.update(cx, |state, cx| state.set_value("Grace", window, cx));
 
 ## 掩码与验证
 
+`input_transform` 在提交用户编辑前运行，可接受、拒绝或修改拟议文本和选区。适用于键入、粘贴、无障碍设值和 IME 确认提交。程序设值与撤销重做会绕过此转换。此示例拒绝会让文本超过 12 个字符的编辑：
+
+```rust
+let input = cx.new(|cx| {
+    InputState::new(window, cx).input_transform(|edit| edit.text().chars().count() <= 12)
+});
+```
+
 ```rust
 let password = cx.new(|cx| {
     InputState::new(window, cx)

@@ -45,6 +45,18 @@ input.update(cx, |state, cx| {
 
 ## Masking and validation
 
+Use `input_transform` to accept, reject, or rewrite a proposed user edit and
+its selection before commit. It runs for typing, paste, accessibility value
+replacement, and finalized IME composition. Programmatic setters and history
+replay bypass the transform. This example rejects a proposed edit
+that would exceed 12 characters:
+
+```rust
+let input = cx.new(|cx| {
+    InputState::new(window, cx).input_transform(|edit| edit.text().chars().count() <= 12)
+});
+```
+
 ```rust
 let password = cx.new(|cx| {
     InputState::new(window, cx)
