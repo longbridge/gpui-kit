@@ -841,7 +841,7 @@ impl SyntaxHighlighter {
 
             if language_name.is_none() {
                 language_name = query_match
-                    .captures
+                    .captures()
                     .iter()
                     .find(|cap| Some(cap.index) == data.language_capture_index)
                     .and_then(|capture| {
@@ -865,7 +865,7 @@ impl SyntaxHighlighter {
             };
 
             let mut ranges = query_match
-                .captures
+                .captures()
                 .iter()
                 .filter(|cap| Some(cap.index) == data.content_capture_index)
                 .map(|capture| capture.node.range())
@@ -1068,7 +1068,7 @@ impl SyntaxHighlighter {
                     .iter()
                     .any(|prop| prop.key.as_ref() == "highlight.allow-overlap");
 
-                for cap in m.captures {
+                for cap in m.captures() {
                     let node_range = cap.node.start_byte()..cap.node.end_byte();
 
                     if !allow_overlapping_captures && node_range.start < last_end {
@@ -1094,7 +1094,7 @@ impl SyntaxHighlighter {
         let mut matches = query_cursor.matches(query, root_node, TextProvider(source));
 
         while let Some(query_match) = matches.next() {
-            for cap in query_match.captures {
+            for cap in query_match.captures() {
                 let node = cap.node;
 
                 let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
