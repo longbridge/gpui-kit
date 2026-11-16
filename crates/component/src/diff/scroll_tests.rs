@@ -196,3 +196,53 @@ fn split_columns_keep_half_the_viewport_beside_a_long_line(cx: &mut TestAppConte
         "the code of both columns scrolls: {before:?} -> {after:?}"
     );
 }
+
+#[cfg(feature = "test-support")]
+#[gpui::test]
+fn file_headers_stay_in_the_viewport_under_horizontal_scrolling(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let original = format!("{}\nshared\n", "long ".repeat(200));
+    let modified = "short\nshared\n";
+    for mode in [super::DiffMode::Unified, super::DiffMode::Split] {
+        let state = cx.new(|cx| {
+            let mut state =
+                DiffState::new([fixture::modified("long.txt", &original, modified)], cx);
+            state.set_mode(mode, cx);
+            state
+        });
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| Host { state }
+        });
+        for _ in 0..3 {
+            draw(cx);
+        }
+        let header = |cx: &mut VisualTestContext| {
+            cx.update(|window, _| {
+                gpui_base::test_support::find(window, &[], &"file-header".into())
+                    .expect("the file header is rendered")
+                    .bounds()
+            })
+        };
+        let before = header(cx);
+        assert!(
+            before.left() >= px(0.) && before.right() <= px(400.),
+            "{mode:?}: the header fits the 400px viewport: {before:?}"
+        );
+
+        cx.simulate_event(ScrollEvent {
+            position: point(px(100.), px(60.)),
+            delta: ScrollDelta::Pixels(point(px(-200.), px(0.))),
+            ..Default::default()
+        });
+        for _ in 0..2 {
+            draw(cx);
+        }
+        let offset = cx.update(|_, cx| state.read(cx).horizontal_scroll().offset().x);
+        assert!(
+            offset < px(0.),
+            "{mode:?}: the long line scrolls: {offset:?}"
+        );
+        assert_eq!(header(cx), before, "{mode:?}: the header stays in place");
+    }
+}
