@@ -1001,6 +1001,10 @@ impl<M: InputModeKind> TextElement<M> {
                 selected_range.start = masked_display_offset(&state.text, selected_range.start);
                 selected_range.end = masked_display_offset(&state.text, selected_range.end);
                 cursor = masked_display_offset(&state.text, cursor);
+            } else {
+                selected_range.start = last_layout.display_offset(selected_range.start);
+                selected_range.end = last_layout.display_offset(selected_range.end);
+                cursor = last_layout.display_offset(cursor);
             }
 
             let affinity = is_active && state.cursor_line_end_affinity;
@@ -1357,6 +1361,9 @@ impl<M: InputModeKind> TextElement<M> {
             if state.masked {
                 selected_range.start = masked_display_offset(&state.text, selected_range.start);
                 selected_range.end = masked_display_offset(&state.text, selected_range.end);
+            } else {
+                selected_range.start = last_layout.display_offset(selected_range.start);
+                selected_range.end = last_layout.display_offset(selected_range.end);
             }
 
             let (start_ix, end_ix) = if selected_range.start < selected_range.end {
@@ -3216,6 +3223,11 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let text = state.text.clone();
         let is_empty = text.len() == 0;
         let placeholder = self.placeholder.clone();
+        let transformed = state
+            .display_transform
+            .as_ref()
+            .filter(|_| !is_empty && !state.masked && !state.tokens_visible())
+            .and_then(|transform| transform(&text.to_string()).resolve(&text));
 
         let text_style = window.text_style();
         let disabled = state.disabled;
@@ -3231,6 +3243,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 &Rope::from(MASK_CHAR.to_string().repeat(text.chars().count())),
                 fg,
             )
+        } else if let Some((display_text, _)) = &transformed {
+            (display_text, fg)
         } else {
             (&text, fg)
         };
@@ -3307,6 +3321,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
             let range_offset = masked_display_offset(&text, visible_start_offset)
                 ..masked_display_offset(&text, visible_end_offset);
             (offsets, range_offset)
+        } else if transformed.is_some() {
+            (visible_line_byte_offsets, 0..display_text.len())
         } else {
             (
                 visible_line_byte_offsets,
@@ -3315,6 +3331,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         };
 
         let mut last_layout = LastLayout {
+            display_offsets: None,
             visible_range,
             visible_buffer_lines,
             visible_line_byte_offsets,
@@ -3356,9 +3373,18 @@ impl<M: InputModeKind> Element for TextElement<M> {
             &text,
             state.ime_marked_range.as_ref().map(|m| m.start..m.end),
             state.masked,
-        );
+        )
+        .map(|range| {
+            if let Some((_, offsets)) = &transformed {
+                offsets.display_offset(range.start)..offsets.display_offset(range.end)
+            } else {
+                range
+            }
+        });
 
-        let runs = if let (false, Some(highlight_styles)) = (is_empty, highlight_styles) {
+        let runs = if let (false, false, Some(highlight_styles)) =
+            (is_empty, transformed.is_some(), highlight_styles)
+        {
             let mut runs = Vec::with_capacity(highlight_styles.len() + 2);
 
             for (range, style) in &highlight_styles {
@@ -3407,7 +3433,9 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let mut longest_line_width = wrap_width.unwrap_or(px(0.));
         // 1. Single line
         // 2. Multi-line with soft wrap disabled.
-        if state.is_single_line() || !state.soft_wrap {
+        if transformed.is_some() {
+            longest_line_width = lines.first().map_or(px(0.), |line| line.longest_width);
+        } else if state.is_single_line() || !state.soft_wrap {
             // The longest line by byte length is only a candidate: a shorter
             // line can render wider (wide glyphs, proportional fonts). The
             // visible lines have already been shaped, so keep their widest
@@ -3476,6 +3504,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             };
         }
         last_layout.lines = Rc::new(lines);
+        last_layout.display_offsets = transformed.map(|(_, offsets)| Rc::new(offsets));
 
         let (ghost_first_line, ghost_lines) = Self::layout_inline_completion(
             state,

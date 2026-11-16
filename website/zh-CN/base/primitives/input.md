@@ -37,6 +37,28 @@ input.update(cx, |state, cx| state.set_value("Grace", window, cx));
 
 ## 掩码与验证
 
+`display_transform` 可设置显示格式，编辑和复制仍使用原值。例如，以下代码只在屏幕上的第二个字符后添加分隔符：
+
+```rust
+use gpui_kit::base::input::InputDisplayText;
+
+let input = cx.new(|cx| {
+    InputState::new(window, cx).display_transform(|value| {
+        let mut displayed = String::new();
+        let mut offsets = vec![0];
+        for (index, ch) in value.chars().enumerate() {
+            if index == 2 {
+                displayed.push('-');
+                offsets[index] = displayed.len();
+            }
+            displayed.push(ch);
+            offsets.push(displayed.len());
+        }
+        InputDisplayText::new(displayed, offsets)
+    })
+});
+```
+
 ```rust
 let password = cx.new(|cx| {
     InputState::new(window, cx)

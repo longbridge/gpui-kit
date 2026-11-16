@@ -2,7 +2,7 @@ use std::{ops::Range, rc::Rc};
 
 use gpui::{Bounds, Half, Pixels, ShapedLine, TextAlign, px};
 
-use super::{WrappingIndent, display_map::LineLayout};
+use super::{WrappingIndent, display_map::LineLayout, display_text::InputDisplayOffsets};
 
 #[derive(Clone, Default)]
 pub(crate) struct WhitespaceIndicators {
@@ -12,6 +12,7 @@ pub(crate) struct WhitespaceIndicators {
 
 #[derive(Clone)]
 pub(super) struct LastLayout {
+    pub(super) display_offsets: Option<Rc<InputDisplayOffsets>>,
     pub(super) visible_range: Range<usize>,
     pub(super) visible_buffer_lines: Vec<usize>,
     pub(super) visible_line_byte_offsets: Vec<usize>,
@@ -33,6 +34,18 @@ pub(super) struct LastLayout {
 }
 
 impl LastLayout {
+    pub(super) fn display_offset(&self, source_offset: usize) -> usize {
+        self.display_offsets
+            .as_ref()
+            .map_or(source_offset, |map| map.display_offset(source_offset))
+    }
+
+    pub(super) fn source_offset(&self, display_offset: usize) -> usize {
+        self.display_offsets
+            .as_ref()
+            .map_or(display_offset, |map| map.source_offset(display_offset))
+    }
+
     pub(crate) fn line(&self, row: usize) -> Option<&LineLayout> {
         let pos = self.visible_buffer_lines.binary_search(&row).ok()?;
         self.lines.get(pos)

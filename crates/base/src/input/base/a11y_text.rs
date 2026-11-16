@@ -38,7 +38,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             && self.last_layout.as_ref().is_some_and(|layout| {
                 layout.lines.len() == 1
                     && layout.visible_line_byte_offsets.first() == Some(&0)
-                    && layout.lines[0].len() == text.len()
+                    && layout.display_offsets.as_ref().map_or_else(
+                        || layout.lines[0].len() == text.len(),
+                        |map| map.matches_source(&self.text),
+                    )
             });
         A11yTextRuns::capture(&text, selection, window.scale_factor(), |bytes| {
             has_layout.then(|| self.range_to_bounds(&bytes)).flatten()

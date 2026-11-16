@@ -25,6 +25,9 @@ mod decorations;
 mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
+#[path = "base/display_text.rs"]
+mod display_text;
+pub use display_text::InputDisplayText;
 mod editor;
 #[path = "base/element.rs"]
 mod element;

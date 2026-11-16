@@ -512,6 +512,7 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(crate) readonly: bool,
     pub(crate) text_align: TextAlign,
     pub(super) masked: bool,
+    pub(super) display_transform: Option<super::display_text::InputDisplayTransform>,
     pub(super) clean_on_escape: bool,
     pub(super) submit_on_enter: bool,
     /// Overrides for [`Self::text_input_configuration`].
@@ -1014,6 +1015,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             readonly: false,
             text_align: TextAlign::Left,
             masked: false,
+            display_transform: None,
             clean_on_escape: false,
             submit_on_enter: false,
             input_action: None,
@@ -1268,7 +1270,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             let buffer_line = last_layout.visible_buffer_lines[vi];
             if buffer_line == target_row {
                 let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
-                let local_offset = offset.saturating_sub(prev_lines_offset).min(line.len());
+                let local_offset = last_layout
+                    .display_offset(offset)
+                    .saturating_sub(prev_lines_offset)
+                    .min(line.len());
                 let pos = line
                     .position_for_index(local_offset, last_layout, false)
                     .unwrap_or_else(|| point(px(0.), px(0.)));
@@ -3166,7 +3171,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             .position(|&line| line == row)
         {
             let line = &last_layout.lines[vi];
-            let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
+            let local_offset = last_layout
+                .display_offset(offset)
+                .saturating_sub(last_layout.visible_line_byte_offsets[vi]);
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
                 let bounds_width = bounds.size.width - last_layout.line_number_width;
                 let col_offset_x = pos.x;
@@ -3851,6 +3858,10 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Map a display byte index back to a text offset, undoing the mask expansion when the input
     /// is masked.
     fn resolve_index(&self, index: usize) -> usize {
+        let index = self
+            .last_layout
+            .as_ref()
+            .map_or(index, |layout| layout.source_offset(index));
         if self.masked {
             self.text.char_index_to_offset(index / MASK_CHAR.len_utf8())
         } else {
@@ -5158,7 +5169,10 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             let index_offset = last_layout.visible_line_byte_offsets[vi];
 
             if start_origin.is_none() && buffer_line == start_row {
-                let local_offset = range.start.saturating_sub(index_offset).min(line.len());
+                let local_offset = last_layout
+                    .display_offset(range.start)
+                    .saturating_sub(index_offset)
+                    .min(line.len());
                 let p = line
                     .position_for_index(local_offset, last_layout, false)
                     .unwrap_or_else(|| point(px(0.), px(0.)));
@@ -5166,7 +5180,10 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }
 
             if end_origin.is_none() && buffer_line == end_row {
-                let local_offset = range.end.saturating_sub(index_offset).min(line.len());
+                let local_offset = last_layout
+                    .display_offset(range.end)
+                    .saturating_sub(index_offset)
+                    .min(line.len());
                 let p = line
                     .position_for_index(local_offset, last_layout, false)
                     .unwrap_or_else(|| point(px(0.), px(0.)));
@@ -5463,6 +5480,40 @@ mod tests {
         state.read_with(cx, |state, _| {
             assert_eq!(state.value(), "hello");
             assert_eq!(state.display_map().wrap_row_count(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn display_transform_maps_unicode_caret_and_ime_geometry(cx: &mut TestAppContext) {
+        let view = InputView::build(cx, |state| {
+            state.default_value("a🦀b").display_transform(|_| {
+                super::super::InputDisplayText::new("a🦀-b", vec![0, 1, 6, 7])
+            })
+        });
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            view.input.update(cx, |state, cx| {
+                let layout = state.last_layout.as_ref().unwrap();
+                let position = layout.lines[0]
+                    .position_for_index(6, layout, false)
+                    .unwrap();
+                let rendered = state.range_to_bounds(&(5..5)).unwrap();
+                assert_eq!(
+                    rendered.left(),
+                    state.last_bounds.unwrap().left() + position.x
+                );
+                let bounds = state.last_bounds.unwrap();
+                let ime = state.bounds_for_range(3..3, bounds, window, cx).unwrap();
+                assert_eq!(ime.left(), rendered.left());
+                let hit = state.character_index_for_point(
+                    rendered.origin + point(px(0.), rendered.size.height * 0.5),
+                    window,
+                    cx,
+                );
+                assert_eq!(hit, Some(3));
+                assert_eq!(state.value(), "a🦀b");
+            });
         });
     }
 
@@ -13175,6 +13226,17 @@ impl InputBaseState<crate::input::InputMode> {
     /// Set with password masked state.
     pub fn masked(mut self, masked: bool) -> Self {
         self.masked = masked;
+        self
+    }
+
+    /// Format single-line input for display. Editing, clipboard operations and
+    /// accessibility values still operate on the source text. Empty, masked
+    /// and inline-token values use their normal presentation.
+    pub fn display_transform(
+        mut self,
+        transform: impl Fn(&str) -> super::InputDisplayText + 'static,
+    ) -> Self {
+        self.display_transform = Some(Box::new(transform));
         self
     }
 
