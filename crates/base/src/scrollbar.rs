@@ -9,11 +9,10 @@ use crate::{
 };
 use gpui::{
     Anchor, App, Axis, Background, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element,
-    ElementId, EntityId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    IntoElement, IsZero, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, Position, ScrollEvent, ScrollHandle, Size, Style, TouchDragEvent,
-    TouchPhase, UniformListScrollHandle, Window, fill, point, prelude::FluentBuilder, px, relative,
-    size,
+    ElementId, EntityId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IsZero,
+    LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    Position, ScrollEvent, ScrollHandle, Size, Style, TouchDragEvent, TouchPhase,
+    UniformListScrollHandle, Window, fill, point, prelude::FluentBuilder, px, relative, size,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1241,7 +1240,8 @@ impl Scrollbar {
     }
 }
 
-impl IntoElement for Scrollbar {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for Scrollbar {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -2400,7 +2400,7 @@ mod tests {
     }
 
     impl Render for ScrollbarHarness {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
             let mut scrollbar = Scrollbar::new(&self.handle)
                 .axis(self.axis)
                 .placement(self.placement)
@@ -2670,7 +2670,7 @@ mod tests {
     ) {
         struct FixedGutterHarness(TestHandle);
         impl Render for FixedGutterHarness {
-            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
                 div().relative().size(px(100.)).child(
                     Scrollbar::new(&self.0)
                         .mode(ScrollbarMode::Always)
@@ -2918,7 +2918,7 @@ mod tests {
     }
 
     impl Render for CoveredHarness {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
             div()
                 .relative()
                 .size(px(100.))
@@ -3113,7 +3113,8 @@ mod tests {
             scrollbar: Scrollbar,
             painted: Rc<Cell<Bounds<Pixels>>>,
         }
-        impl IntoElement for Probe {
+        #[cfg(not(feature = "gpui-fast"))]
+        impl gpui::IntoElement for Probe {
             type Element = Self;
             fn into_element(self) -> Self {
                 self
@@ -3173,7 +3174,7 @@ mod tests {
             viewport: Bounds<Pixels>,
         }
         impl Render for Root {
-            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
                 div().size(px(400.)).child(Probe {
                     scrollbar: Scrollbar::new(&self.handle)
                         .axis(self.axis)

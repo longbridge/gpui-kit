@@ -1,7 +1,7 @@
 [package]
 name = "example-editor-spacers"
 description = "Two versions of a text side by side, wrapped and padded level with spacer rows."
-version = "0.9.1"
+version = "0.10.0"
 publish = false
 edition.workspace = true
 

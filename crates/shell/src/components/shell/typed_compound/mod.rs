@@ -141,6 +141,7 @@ impl<T: gpui::IntoElement + 'static> TypedChildElement<T> {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<T: gpui::IntoElement + 'static> gpui::IntoElement for TypedChildElement<T> {
     type Element = Self;
 

@@ -10,9 +10,8 @@ use std::{
 
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, HighlightStyle, Hitbox,
-    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, ListState, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, StyledText,
-    TextLayout, Window, px,
+    HitboxBehavior, InspectorElementId, LayoutId, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, StyledText, TextLayout, Window, px,
 };
 use gpui_base::{
     ScrollbarHandle, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
@@ -246,7 +245,8 @@ impl CodeText {
     }
 }
 
-impl IntoElement for CodeText {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for CodeText {
     type Element = Self;
     fn into_element(self) -> Self {
         self
@@ -439,7 +439,8 @@ impl SelectionLayer {
     }
 }
 
-impl IntoElement for SelectionLayer {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for SelectionLayer {
     type Element = Self;
     fn into_element(self) -> Self {
         self

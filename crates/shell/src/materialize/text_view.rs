@@ -40,6 +40,7 @@ struct PolicyTextView {
     policy: Rc<Policy>,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for PolicyTextView {
     type Element = Self;
 

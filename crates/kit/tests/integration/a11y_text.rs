@@ -1,5 +1,7 @@
 use crate::common;
-use gpui_kit::{AppContext, Context, TestAppContext, Window, component::label::Label, div, prelude::*};
+use gpui_kit::{
+    AppContext, Context, TestAppContext, Window, component::label::Label, div, prelude::*,
+};
 
 /// The Quick Start renders its greeting with `Label`, which exposes its text in
 /// the accessibility tree. GPUI only adds elements with an ID to the tree, so a
