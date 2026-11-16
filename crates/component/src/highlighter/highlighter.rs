@@ -5,9 +5,10 @@ use crate::highlighter::LanguageRegistry;
 use anyhow::{Context, Result, anyhow};
 use gpui::{HighlightStyle, SharedString};
 use gpui_base::input::RopeExt as _;
+use instant::Instant;
 use ropey::{ChunkCursor, Rope};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{
     collections::{BTreeSet, HashMap},
     ops::{ControlFlow, Range},

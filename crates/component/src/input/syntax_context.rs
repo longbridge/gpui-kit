@@ -84,7 +84,7 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
             .as_ref()
             .is_none_or(|(cached_text, _)| cached_text != text)
         {
-            let start = std::time::Instant::now();
+            let start = instant::Instant::now();
             let mut progress = |_: &tree_sitter::ParseState| -> ControlFlow<()> {
                 if start.elapsed() > Self::PARSE_BUDGET {
                     ControlFlow::Break(())
