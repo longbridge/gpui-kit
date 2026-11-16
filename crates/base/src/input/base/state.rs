@@ -957,6 +957,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
             // Blink the cursor when the window is active, pause when it's not.
             cx.observe_window_activation(window, |input, window, cx| {
+                if !window.is_window_active() {
+                    input.cancel_mouse_gesture(cx);
+                }
                 if window.is_window_active() {
                     let focus_handle = input.focus_handle.clone();
                     if focus_handle.is_focused(window) {
@@ -966,6 +969,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     }
                 }
             }),
+            cx.observe_window_bounds(window, |input, _, cx| input.cancel_mouse_gesture(cx)),
             cx.on_focus(&focus_handle, window, Self::on_focus),
             cx.on_blur(&focus_handle, window, Self::on_blur),
         ];
@@ -3335,7 +3339,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !self.is_multi_line() {
             new_text = new_text.replace('\n', "");
             self.replace_text_in_range_silent(None, &new_text, window, cx);
-            self.scroll_to(self.cursor(), None, cx);
             return;
         }
 
@@ -3523,8 +3526,8 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     /// Restore a set of selections captured in a transaction, clamping offsets
-    /// to the current text length. `None` leaves the current selections as the
-    /// replay left them.
+    /// to the current text length and out of tokens. `None` leaves the current
+    /// selections as the replay left them.
     fn restore_selections(&mut self, selections: Option<Vec<CursorSelection>>) {
         let Some(selections) = selections else {
             return;
@@ -3534,8 +3537,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         let restored: Vec<CursorSelection> = selections
             .into_iter()
             .map(|mut sel| {
-                sel.start = sel.start.min(len);
-                sel.end = sel.end.min(len);
+                let (start, end) = (sel.start.min(len), sel.end.min(len));
+                let start_bias = if start == end {
+                    Bias::Right
+                } else {
+                    Bias::Left
+                };
+                sel.start = self.token_boundary(start, start_bias);
+                sel.end = self.token_boundary(end, Bias::Right);
                 sel
             })
             .collect();
@@ -4074,6 +4083,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_mouse_gesture(cx);
         self.revealed_viewport = None;
         if M::is_context_menu_open(self, cx) {
             return;
@@ -4139,12 +4149,26 @@ impl<M: InputModeKind> InputBaseState<M> {
         });
     }
 
+    pub(super) fn cancel_mouse_gesture(&mut self, cx: &mut Context<Self>) {
+        let was_dragging = self.selecting || self.column_select_start.is_some();
+        self.selecting = false;
+        self.column_select_start = None;
+        self.auto_scroll.stop();
+        if was_dragging {
+            cx.notify();
+        }
+    }
+
     pub(super) fn on_drag_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.cancel_mouse_gesture(cx);
+            return;
+        }
         if self.text.len() == 0 {
             return;
         }
@@ -4688,9 +4712,17 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             .map(|range| self.range_to_utf16(&range.into()))
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.ime_marked_range = None;
         self.undo_manager.commit_transaction();
+        // Unmarking keeps the preedit as committed text, which marked edits
+        // never reported. Android keyboards compose every word and often end
+        // with only this call (hiding the keyboard, moving the caret).
+        if self.ime_original_text.as_ref() == Some(&self.text) {
+            self.ime_original_text = None;
+        } else if self.ime_original_text.is_some() && self.emit_events {
+            self.emit_change(cx);
+        }
     }
 
     /// Replace text in range.
@@ -5689,6 +5721,148 @@ mod tests {
                 state
             });
             gpui::EmptyView
+        });
+    }
+
+    #[gpui::test]
+    fn test_set_tokens_keeps_text_selection_and_history(cx: &mut TestAppContext) {
+        use crate::input::{InlineToken, InlineTokenError, InputContent};
+        let view = InputView::build_textarea(cx, |state| state.default_value("a **b** c"));
+        let bold = |text: &str| {
+            InputContent::new(text.to_string())
+                .with_token(2..7, InlineToken::new("bold", "**b**"))
+                .unwrap()
+        };
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    state.set_selected_range(9..9, cx);
+                    state.insert("!", window, cx);
+                    state.set_selected_range(9..9, cx);
+                    state.set_tokens(bold("a **b** c!"), cx).unwrap();
+                    assert_eq!(state.value(), "a **b** c!");
+                    assert_eq!(state.selected_range(), 9..9);
+                    assert_eq!(state.tokens().len(), 1);
+
+                    assert_eq!(
+                        state.set_tokens(bold("a **b** c"), cx),
+                        Err(InlineTokenError::TextMismatch)
+                    );
+                    state
+                        .set_tokens(InputContent::new("a **b** c!"), cx)
+                        .unwrap();
+                    assert!(state.tokens().is_empty());
+                    state.set_selected_range(4..4, cx);
+                    assert_eq!(
+                        state.set_tokens(bold("a **b** c!"), cx),
+                        Err(InlineTokenError::SplitsSelection)
+                    );
+                    state.undo(&Undo, window, cx);
+                    assert_eq!(state.value(), "a **b** c");
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn test_set_tokens_rejects_a_token_through_any_cursor(cx: &mut TestAppContext) {
+        use crate::input::{InlineToken, InlineTokenError, InputContent};
+        let view = InputView::build_textarea(cx, |state| state.default_value("a **b** c"));
+        view.window_handle
+            .update(cx, |_, _, cx| {
+                view.input.update(cx, |state, cx| {
+                    state.set_selected_range(9..9, cx);
+                    let id = state.selections.generate_id();
+                    state.selections.add(CursorSelection::new(id, 4, 4));
+                    let content = InputContent::new("a **b** c")
+                        .with_token(2..7, InlineToken::new("bold", "**b**"))
+                        .unwrap();
+                    assert_eq!(
+                        state.set_tokens(content, cx),
+                        Err(InlineTokenError::SplitsSelection)
+                    );
+                    assert!(state.tokens().is_empty());
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn test_set_tokens_undo_redo_replays_edits_inside_and_before_a_token(cx: &mut TestAppContext) {
+        use crate::input::{InlineToken, InputContent};
+        let view = InputView::build_textarea(cx, |state| state.default_value("a **** c"));
+        let bold = |text: &str, range: Range<usize>| {
+            InputContent::new(text.to_string())
+                .with_token(range, InlineToken::new("bold", "**b**"))
+                .unwrap()
+        };
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    state.set_selected_range(4..4, cx);
+                    state.insert("b", window, cx);
+                    state.set_selected_range(9..9, cx);
+                    state.set_tokens(bold("a **b** c", 2..7), cx).unwrap();
+
+                    state.undo(&Undo, window, cx);
+                    assert_eq!(state.value(), "a **** c");
+                    assert!(state.tokens().is_empty());
+                    state.redo(&Redo, window, cx);
+                    assert_eq!(state.value(), "a **b** c");
+                    assert!(state.tokens().is_empty());
+                    assert_eq!(state.selected_range(), 5..5);
+
+                    state.set_selected_range(0..0, cx);
+                    state.insert("z", window, cx);
+                    state.set_selected_range(10..10, cx);
+                    state.set_tokens(bold("za **b** c", 3..8), cx).unwrap();
+
+                    state.undo(&Undo, window, cx);
+                    assert_eq!(state.value(), "a **b** c");
+                    let ranges: Vec<_> = state.tokens().iter().map(|s| s.range()).collect();
+                    assert_eq!(ranges, vec![2..7]);
+                    state.redo(&Redo, window, cx);
+                    assert_eq!(state.value(), "za **b** c");
+                    let ranges: Vec<_> = state.tokens().iter().map(|s| s.range()).collect();
+                    assert_eq!(ranges, vec![3..8]);
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn test_set_tokens_refreshes_the_token_layout(cx: &mut TestAppContext) {
+        use crate::input::{InlineToken, InputContent};
+        let view = InputView::build_textarea(cx, |state| state.default_value("@a x @a y"));
+        let mention = || InlineToken::new("a", "@a");
+        view.window_handle
+            .update(cx, |_, _, cx| {
+                view.input.update(cx, |state, cx| {
+                    let content = InputContent::new("@a x @a y")
+                        .with_token(0..2, mention())
+                        .and_then(|content| content.with_token(5..7, mention()))
+                        .unwrap();
+                    state.set_tokens(content, cx).unwrap();
+                });
+            })
+            .unwrap();
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        view.input.update(&mut visual, |state, cx| {
+            let content = InputContent::new("@a x @a y")
+                .with_token(5..7, mention())
+                .unwrap();
+            state.set_tokens(content, cx).unwrap();
+        });
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        view.input.read_with(&visual, |state, _| {
+            let cache = state.token_layout_cache.as_ref().unwrap();
+            let ranges: Vec<_> = cache
+                .metrics
+                .iter()
+                .map(|(range, _)| range.clone())
+                .collect();
+            assert_eq!(ranges, vec![5..7]);
         });
     }
 
@@ -8851,6 +9025,43 @@ mod tests {
         });
     }
 
+    /// Pasting past the right edge of a single-line input scrolls the caret
+    /// into view in the paint that lays the pasted text out.
+    #[gpui::test]
+    fn test_paste_reveals_caret_single_line(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+        cx.run_until_parked();
+
+        let value = format!("https://example.com/v1/users?{}", "x=1&".repeat(120));
+        cx.update(|window, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+            input.update(cx, |state, cx| state.paste(&Paste, window, cx));
+        });
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| {
+                assert!(
+                    state.scroll_size.width > state.input_bounds.size.width,
+                    "value must overflow the input width or this test is vacuous"
+                );
+                let caret = state
+                    .last_layout
+                    .as_ref()
+                    .and_then(|layout| layout.cursor_bounds)
+                    .expect("a caret");
+                assert!(
+                    caret.left() >= state.input_bounds.left()
+                        && caret.right() <= state.input_bounds.right(),
+                    "the caret at {caret:?} should be inside {:?}",
+                    state.input_bounds
+                );
+            });
+        });
+    }
+
     #[gpui::test]
     fn test_single_line_removes_newlines(cx: &mut TestAppContext) {
         let input_view = InputView::build(cx, |state| state.default_value("default\nvalue"));
@@ -10410,6 +10621,34 @@ mod tests {
         view.input.read_with(&cx, |state, _| {
             let ranges: Vec<_> = state.selections.iter().map(|s| (s.start, s.end)).collect();
             assert_eq!(ranges, vec![(1, 5), (8, 9)]);
+        });
+    }
+
+    #[gpui::test]
+    fn test_lost_mouse_release_ends_selection_on_plain_motion(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|alpha bravo charlie delta");
+        let (start, end, beyond) = view.input.read_with(&cx, |state, _| {
+            (
+                state.range_to_bounds(&(0..1)).unwrap().center(),
+                state.range_to_bounds(&(6..7)).unwrap().center(),
+                state.range_to_bounds(&(18..19)).unwrap().center(),
+            )
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
+        let selected = view.input.read_with(&cx, |state, _| {
+            assert!(state.selecting);
+            let text = state.selected_value();
+            assert!(!text.is_empty());
+            text
+        });
+        cx.simulate_mouse_move(beyond, None, gpui::Modifiers::default());
+        view.input.read_with(&cx, |state, _| {
+            assert!(!state.selecting);
+            assert_eq!(state.selected_value(), selected);
         });
     }
 

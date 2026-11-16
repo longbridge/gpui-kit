@@ -34,6 +34,17 @@ pub trait SearchableListItem: Clone {
         self.title()
     }
 
+    /// Render this item's row content with the text matching `query`
+    /// highlighted. Used instead of [`Self::render`] when the component
+    /// enables `highlight_matches`.
+    ///
+    /// The default renders `title()` with every case-insensitive occurrence
+    /// of `query` highlighted. Override it together with `render` to keep a
+    /// custom row when highlighting is enabled.
+    fn render_highlighted(&self, query: &str, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        crate::label::highlight_matches(self.title(), query, cx)
+    }
+
     /// The value that identifies this item.
     fn value(&self) -> &Self::Value;
 

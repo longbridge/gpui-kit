@@ -520,7 +520,7 @@ mod tests {
         #[test]
         fn test_native_menu_icon_data_replaces_path_and_survives_clone() {
             let icon = Icon::default().path("icons/previous.png").data(FILE_SVG);
-            let image = resolve_icon_image(&icon.clone(), &TestAssetSource(None))
+            let image = resolve_icon_image(&icon, &TestAssetSource(None))
                 .expect("SVG data should resolve without an asset source");
             assert_eq!(image.format, ImageFormat::Svg);
             assert_eq!(image.bytes, FILE_SVG);

@@ -10,8 +10,9 @@ use gpui::{
     App, AppContext as _, Bounds, Context, Element, ElementId, Entity, EntityId, EventEmitter,
     Global, GlobalElementId, Half, Hitbox, HitboxBehavior, Hsla, InputEvent as _,
     InspectorElementId, IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, SharedString, Style,
-    Subscription, TextLayout, TouchDragEvent, TouchPhase, WeakEntity, Window, point, px,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
+    SharedString, Style, Subscription, TextLayout, TouchDragEvent, TouchPhase, WeakEntity, Window,
+    point, px,
 };
 
 use crate::text_boundary::{line_range_at, word_range_at};
@@ -1376,6 +1377,7 @@ struct WindowSelectionState {
     #[cfg(test)]
     snapshot_visits: Cell<usize>,
     mouse_down_prepared: bool,
+    mouse_lifecycle: Vec<Subscription>,
     auto_scroll: AutoScroll,
     /// Where the anchor's text was when the last synthetic wheel went out,
     /// and how many went out without moving it. A container at its end
@@ -1383,6 +1385,12 @@ struct WindowSelectionState {
     /// bounces stretch and snap back on every tick.
     auto_scroll_stall: (Option<(Bounds<Pixels>, Point<Pixels>)>, u8),
     touch: TouchSelection,
+    /// The hitboxes where a press keeps the selection, by element (see
+    /// [`crate::ElementExt::keep_text_selection`]). One drawn from an earlier
+    /// frame (a cached view) keeps its hitbox, and one no longer drawn never
+    /// hits again. GPUI cannot tell the two apart, so an entry stays for the
+    /// window's lifetime: one per element id.
+    keep_regions: HashMap<GlobalElementId, Hitbox>,
     /// This entity, so that touch changes can notify observers from paths that
     /// only hold an [`App`].
     entity_id: Option<EntityId>,
@@ -2016,6 +2024,17 @@ impl WindowSelectionState {
     /// Records where the menu is painted this frame.
     fn register_touch_ui(&mut self, bounds: Bounds<Pixels>) {
         self.touch.ui_bounds.push(bounds);
+    }
+
+    /// Whether a press at `position` acts on the selection instead of
+    /// replacing it: one on a touch handle, the edit menu or an element
+    /// marked with [`crate::ElementExt::keep_text_selection`].
+    fn keeps_selection_at(&self, position: Point<Pixels>, window: &Window) -> bool {
+        // the bounds first: each hit test walks the frame's hitboxes
+        self.touch.covers(position)
+            || self.keep_regions.values().any(|hitbox| {
+                hitbox.bounds.contains(&position) && hitbox.is_hovered_at(position, window)
+            })
     }
 
     /// Whether `bounds` are where `participant` painted its handles last.
@@ -2889,11 +2908,13 @@ impl TextSelection {
     /// selection scope do not match. A containing control can yield a long press
     /// to the window's text selection before claiming the gesture itself.
     /// Call during pointer dispatch with the event's position, so the hitboxes
-    /// reflect the point being queried. Touch-selection controls do not match.
+    /// reflect the point being queried. Touch-selection controls and the
+    /// elements marked with [`crate::ElementExt::keep_text_selection`] do not
+    /// match.
     pub fn is_selectable_at(position: Point<Pixels>, window: &Window, cx: &mut App) -> bool {
         live_text_selection_state(window, cx).is_some_and(|state| {
             state.update(cx, |state, cx| {
-                !state.touch.covers(position)
+                !state.keeps_selection_at(position, window)
                     && state.endpoint(position, Some(window), cx).inside_text
             })
         })
@@ -3037,6 +3058,84 @@ impl TextSelection {
 /// element identity retains the window-local selection entity across frames.
 pub struct TextSelectionLayer;
 
+pub(crate) fn keep_text_selection(id: ElementId) -> impl IntoElement {
+    KeepTextSelection { id }
+}
+
+/// Covers its parent with a hitbox where a press keeps the selection.
+struct KeepTextSelection {
+    id: ElementId,
+}
+
+#[cfg(not(feature = "gpui-fast"))]
+impl IntoElement for KeepTextSelection {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for KeepTextSelection {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        // Without an inset, an absolute child starts after the padding but is
+        // still sized to the padding box, overhanging the far edges.
+        let mut style = Style::default();
+        style.position = gpui::Position::Absolute;
+        style.inset.top = px(0.).into();
+        style.inset.left = px(0.).into();
+        style.size = gpui::size(gpui::relative(1.).into(), gpui::relative(1.).into());
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        // `Normal`: the element under it is still hovered and clicked.
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        if let (Some(id), Some(state)) = (id, WindowSelectionState::existing(window, cx)) {
+            state.update(cx, |state, _| {
+                state.keep_regions.insert(id.clone(), hitbox);
+            });
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        _: &mut Window,
+        _: &mut App,
+    ) {
+    }
+}
+
 pub(crate) fn text_selection_scope(
     scope: TextSelectionScopeId,
     element: impl IntoElement,
@@ -3052,6 +3151,7 @@ struct TextSelectionScopeMarker<E> {
     element: E,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<E: Element> IntoElement for TextSelectionScopeMarker<E> {
     type Element = Self;
 
@@ -3129,6 +3229,7 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
 #[doc(hidden)]
 pub struct TextSelectionLayerPrepaintState(Entity<WindowSelectionState>);
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for TextSelectionLayer {
     type Element = Self;
 
@@ -3221,6 +3322,18 @@ fn retain_text_selection_state(
             .0
             .insert(window_id, state.downgrade());
     }
+    state.update(cx, |state, cx| {
+        if state.mouse_lifecycle.is_empty() {
+            state.mouse_lifecycle = vec![
+                cx.observe_window_bounds(window, |state, _, cx| state.end(cx)),
+                cx.observe_window_activation(window, |state, window, cx| {
+                    if !window.is_window_active() {
+                        state.end(cx);
+                    }
+                }),
+            ];
+        }
+    });
     state
 }
 
@@ -3298,6 +3411,10 @@ fn schedule_selection_frame(
     }
 }
 
+fn press_is_in_viewport(position: Point<Pixels>, window: &Window) -> bool {
+    Bounds::new(Point::default(), window.viewport_size()).contains(&position)
+}
+
 fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Window, cx: &mut App) {
     schedule_selection_frame(state, window, cx);
 
@@ -3306,12 +3423,18 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         if event.button != MouseButton::Left {
             return;
         }
+        // Windows reports presses on the native title bar and resize frame
+        // in client coordinates outside the viewport. Those start a window
+        // move or resize, never a text selection, and must not clear one.
+        if !press_is_in_viewport(event.position, window) {
+            return;
+        }
         let Some(state) = mouse_down_state.upgrade() else {
             return;
         };
-        // A press on a handle or on the edit menu acts on the selection; it
-        // must not clear it.
-        if state.read(cx).touch.covers(event.position) {
+        // A press on a handle, the edit menu or a control acts on the
+        // selection; it must not clear it.
+        if state.read(cx).keeps_selection_at(event.position, window) {
             return;
         }
         if phase.capture() {
@@ -3375,7 +3498,9 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         };
         if event.phase == TouchPhase::Started {
             if window.default_prevented()
-                || state.read(cx).touch.covers(event.start_position)
+                || state
+                    .read(cx)
+                    .keeps_selection_at(event.start_position, window)
                 || !state.update(cx, |state, cx| {
                     state
                         .endpoint(event.start_position, Some(window), cx)
@@ -3463,7 +3588,14 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
 
     let mouse_move_state = state.downgrade();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        if phase.capture() && event.pressed_button != Some(MouseButton::Left) {
+            if let Some(state) = mouse_move_state.upgrade() {
+                state.update(cx, |state, cx| state.end(cx));
+            }
+            return;
+        }
         if phase.bubble()
+            && event.pressed_button == Some(MouseButton::Left)
             && let Some(state) = mouse_move_state.upgrade()
             // Moving the pointer only moves a selection being made.
             && state.read(cx).is_selecting
@@ -3477,6 +3609,15 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
                 state.update_in_window(event.position, window, cx)
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    });
+
+    let mouse_exit_state = state.downgrade();
+    window.on_mouse_event(move |_: &MouseExitEvent, phase, _, cx| {
+        if phase.capture()
+            && let Some(state) = mouse_exit_state.upgrade()
+        {
+            state.update(cx, |state, cx| state.end(cx));
         }
     });
 
@@ -5741,6 +5882,73 @@ mod tests {
         );
         cx.update(|window, cx| assert!(TextSelection::has_selection(window, cx)));
         assert_eq!(clear_count.get(), 3);
+    }
+
+    #[gpui::test]
+    fn selection_layer_ends_a_mouse_gesture_when_the_release_is_lost(cx: &mut TestAppContext) {
+        let (text, layout) = laid_out_runs(&["alpha bravo charlie delta"], cx)
+            .pop()
+            .unwrap();
+        let (view, cx) = cx.add_window_view(|_, cx| DoubleSelectionElementView {
+            selection: TextSelectionHandle::new("", cx),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            let selection = view.read(cx).selection.clone();
+            selection.update_runs(&[text_run(0, text.clone(), layout.clone())], cx);
+        });
+        let start = layout.position_for_index(1).unwrap();
+        let selected_to = layout.position_for_index(7).unwrap();
+        let beyond = layout.position_for_index(18).unwrap();
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        let before = cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(snapshot.is_selecting());
+            (snapshot.anchor(), snapshot.cursor())
+        });
+        // No MouseUp: its delivery was consumed by a compositor resize grab.
+        cx.simulate_mouse_move(beyond, None, gpui::Modifiers::default());
+        cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(!snapshot.is_selecting());
+            assert_eq!((snapshot.anchor(), snapshot.cursor()), before);
+        });
+    }
+
+    #[gpui::test]
+    fn selection_layer_ignores_presses_on_the_native_window_frame(cx: &mut TestAppContext) {
+        let (text, layout) = laid_out_runs(&["alpha bravo charlie delta"], cx)
+            .pop()
+            .unwrap();
+        let (view, cx) = cx.add_window_view(|_, cx| DoubleSelectionElementView {
+            selection: TextSelectionHandle::new("", cx),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            let selection = view.read(cx).selection.clone();
+            selection.update_runs(&[text_run(0, text.clone(), layout.clone())], cx);
+        });
+        let start = layout.position_for_index(1).unwrap();
+        let selected_to = layout.position_for_index(7).unwrap();
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_up(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        let selected = cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            (snapshot.anchor(), snapshot.cursor())
+        });
+        // A press on the native title bar arrives above the client area and
+        // the move loop swallows its release.
+        let title_bar = point(start.x, px(-12.));
+        cx.simulate_mouse_down(title_bar, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, None, gpui::Modifiers::default());
+        cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(!snapshot.is_selecting());
+            assert_eq!((snapshot.anchor(), snapshot.cursor()), selected);
+        });
     }
 
     #[gpui::test]

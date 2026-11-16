@@ -262,7 +262,8 @@ Diff::new(&self.diff)
 - `hover_highlight` 强调指针下的行、行号或两者。
 - `soft_wrap(true)` 在列宽处自动换行，行高随内容增加，不再横向滚动。
 - `split_ratio` 设置 Split 模式中原始列所占的宽度比例（默认 0.5，限制在 0.1–0.9），
-  例如由应用提供的可拖动分隔线控制。未启用自动换行时，每一列都不会窄于其最长的行。
+  例如由应用提供的可拖动分隔线控制。未启用自动换行时，每一列保持该比例并裁剪过长的行，
+  两列的代码一起横向滚动，行号保持不动。
 
 组件根据每个文件的路径识别语法语言；`DiffFile::with_language` 可以用 `rust` 等高亮语言名覆盖识别结果。
 启用相应的 Cargo grammar feature，例如 `tree-sitter-rust`；`tree-sitter-languages`

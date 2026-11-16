@@ -214,7 +214,7 @@ impl RenderOnce for WindowBorder {
             .when(!tiling.bottom, |div| div.pb(visual_shadow))
             .when(!tiling.left, |div| div.pl(visual_shadow))
             .when(!tiling.right, |div| div.pr(visual_shadow))
-            .on_mouse_down(MouseButton::Left, move |_, window, _| {
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 let Decorations::Client { tiling } = window.window_decorations() else {
                     return;
                 };
@@ -229,7 +229,12 @@ impl RenderOnce for WindowBorder {
                 let insets = client_frame_insets(platform_inset, &tiling);
 
                 match resize_edge(pos, size, insets, &tiling, resize_hit_size) {
-                    Some(edge) => window.start_window_resize(edge),
+                    Some(edge) => {
+                        gpui_base::TextSelection::end(window, cx);
+                        cx.stop_active_drag(window);
+                        cx.stop_propagation();
+                        window.start_window_resize(edge);
+                    }
                     None => {}
                 };
             })

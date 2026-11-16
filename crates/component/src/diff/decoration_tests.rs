@@ -87,7 +87,7 @@ impl Render for Host {
                     div()
                         .id(marker.id().clone())
                         .size_3()
-                        .debug_selector(move || selector.clone())
+                        .debug_selector(move || selector)
                         .on_click(move |_, _, _| clicked.borrow_mut().push(target.clone()))
                 }),
         )

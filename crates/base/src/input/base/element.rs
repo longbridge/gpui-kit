@@ -268,6 +268,7 @@ impl<M: InputModeKind> EditorScrollbar<M> {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<M: InputModeKind> IntoElement for EditorScrollbar<M> {
     type Element = Self;
 
@@ -848,11 +849,21 @@ impl<M: InputModeKind> TextElement<M> {
         window.on_mouse_event({
             let state = self.state.clone();
 
-            move |event: &MouseMoveEvent, _, window, cx| {
+            move |event: &MouseMoveEvent, phase, window, cx| {
                 if event.pressed_button == Some(MouseButton::Left) {
                     state.update(cx, |state, cx| {
                         state.on_drag_move(event, window, cx);
                     });
+                } else if phase.capture() {
+                    state.update(cx, |state, cx| state.cancel_mouse_gesture(cx));
+                }
+            }
+        });
+        window.on_mouse_event({
+            let state = self.state.clone();
+            move |_: &gpui::MouseExitEvent, phase, _, cx| {
+                if phase.capture() {
+                    state.update(cx, |state, cx| state.cancel_mouse_gesture(cx));
                 }
             }
         });
@@ -2984,6 +2995,7 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<M: InputModeKind> IntoElement for TextElement<M> {
     type Element = Self;
 
@@ -4559,6 +4571,50 @@ mod tests {
             DecorationHarness(state)
         });
         (editor.unwrap(), window)
+    }
+
+    #[gpui::test]
+    fn a_tab_indicator_is_clipped_to_its_tab(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut editor = None;
+        let window = cx.open_window(size(px(240.), px(140.)), |window, cx| {
+            let state = cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .show_whitespaces(true)
+                    .tab_size(crate::input::TabSize {
+                        tab_size: 2,
+                        hard_tabs: true,
+                    })
+                    .default_value("a\tb\nname\tvalue")
+            });
+            editor = Some(state.clone());
+            DecorationHarness(state)
+        });
+        let editor = editor.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            for (line, tab_ix) in [(0, 1), (1, 4)] {
+                let line_layout = &layout.lines[line];
+                let wrapped = &line_layout.wrapped_lines[0];
+                let (_, x, width) = line_layout
+                    .whitespace_chars
+                    .iter()
+                    .copied()
+                    .find(|(_, _, width)| width.is_some())
+                    .expect("the tab is marked");
+                let width = width.unwrap();
+                assert_eq!(x, wrapped.x_for_index(tab_ix));
+                assert!(width > px(0.));
+                assert_eq!(
+                    x + width,
+                    wrapped.x_for_index(tab_ix + 1),
+                    "the indicator on line {line} ends where the next character starts"
+                );
+            }
+        });
     }
 
     #[gpui::test]

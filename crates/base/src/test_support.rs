@@ -4,8 +4,8 @@
 //! identified GPUI elements with `.test_support()`, without supplying test-only state.
 use gpui::{
     App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, ImageSource,
-    InspectorElementId, InteractiveElement, IntoElement, LayoutId, Pixels, SharedString,
-    SharedUri, Visibility, Window, px,
+    InspectorElementId, InteractiveElement, LayoutId, Pixels, SharedString, SharedUri, Visibility,
+    Window, px,
 };
 use image::{Frame, RgbaImage};
 use smallvec::SmallVec;
@@ -453,7 +453,10 @@ impl<E: Element> Observed<E> {
         }
     }
 }
-impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> IntoElement for Observed<E> {
+#[cfg(not(feature = "gpui-fast"))]
+impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> gpui::IntoElement
+    for Observed<E>
+{
     type Element = Self;
     fn into_element(self) -> Self {
         self
@@ -647,7 +650,8 @@ impl<E: Element> ObservedText<E> {
         ObservedText::new(self.inner.id(id), self.text, self.alternative)
     }
 }
-impl<E: Element> IntoElement for ObservedText<E> {
+#[cfg(not(feature = "gpui-fast"))]
+impl<E: Element> gpui::IntoElement for ObservedText<E> {
     type Element = Self;
     fn into_element(self) -> Self {
         self

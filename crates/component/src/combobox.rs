@@ -20,6 +20,7 @@ use crate::{
     searchable_list::{
         SearchableListAdapter, SearchableListChange, SearchableListDelegate, SearchableListItem,
         SearchableListState,
+        state::{MenuSide, menu_popup},
     },
     sizing::DROPDOWN_LIST_PADDING,
     v_flex,
@@ -77,6 +78,7 @@ struct ComboboxOptions {
     cleanable: bool,
     placeholder: Option<SharedString>,
     search_placeholder: Option<SharedString>,
+    highlight_matches: bool,
     menu_width: Length,
     menu_max_h: Length,
     disabled: bool,
@@ -94,6 +96,7 @@ impl Default for ComboboxOptions {
             cleanable: false,
             placeholder: None,
             search_placeholder: None,
+            highlight_matches: false,
             menu_width: Length::Auto,
             menu_max_h: rems(20.).into(),
             disabled: false,
@@ -554,6 +557,14 @@ where
     }
 
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if self.state.open && !open {
+            self.state.menu_side.reset();
+            // Deferred: `set_open` may run inside a list update.
+            let list = self.state.list.downgrade();
+            cx.defer(move |cx| {
+                _ = list.update(cx, |list, _| list.reset_held_items_height());
+            });
+        }
         self.state.open = open;
         self.state.deferred_context = open.then(|| GlobalState::register_deferred_popover(cx));
 
@@ -632,6 +643,7 @@ where
         self.state.list.update(cx, |list, cx| {
             list.set_searchable(searchable, cx);
             list.delegate_mut().size = self.state.size;
+            list.delegate_mut().highlight_matches = self.state.highlight_matches;
             list.delegate_mut().check_icon = self.check_icon.clone();
         });
 
@@ -721,6 +733,7 @@ where
                             self.state.search_placeholder.clone(),
                             self.state.size,
                             self.state.menu_max_h,
+                            &self.state.menu_side,
                             bounds,
                             footer_el,
                             dismiss_handler,
@@ -824,6 +837,16 @@ where
     /// Override the trailing check icon shown next to selected items.
     pub fn check_icon(mut self, icon: impl Into<Icon>) -> Self {
         self.options.check_icon = Some(icon.into());
+        self
+    }
+
+    /// Highlight the part of each row that matches the search query, default is `false`.
+    ///
+    /// Rows render with [`SearchableListItem::render_highlighted`]; the default
+    /// highlights the matched text of `title()` in the theme's
+    /// `list_highlight_foreground` color.
+    pub fn highlight_matches(mut self, highlight: bool) -> Self {
+        self.options.highlight_matches = highlight;
         self
     }
 
@@ -938,6 +961,7 @@ where
             this.state.cleanable = opts.cleanable;
             this.state.placeholder = opts.placeholder;
             this.state.search_placeholder = opts.search_placeholder;
+            this.state.highlight_matches = opts.highlight_matches;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
             this.state.disabled = opts.disabled;
@@ -1058,6 +1082,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
     search_placeholder: Option<SharedString>,
     size: Size,
     menu_max_h: Length,
+    menu_side: &MenuSide,
     bounds: Bounds<Pixels>,
     footer_el: Option<AnyElement>,
     dismiss_handler: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
@@ -1065,7 +1090,8 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
 ) -> AnyElement {
     let has_footer = footer_el.is_some();
 
-    crate::popover::dropdown_popup(
+    menu_popup(
+        menu_side,
         id,
         bounds,
         v_flex()
@@ -1082,6 +1108,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
                     })
                     .with_size(size)
                     .max_h(menu_max_h)
+                    .hold_items_height(menu_side.is_above())
                     .paddings(Edges::all(DROPDOWN_LIST_PADDING)),
             )
             .when(has_footer, |this| {

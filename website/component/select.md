@@ -99,6 +99,8 @@ Select::new(&state)
     .icon(IconName::Search) // Shows search icon
 ```
 
+Use `.highlight_matches(true)` to highlight the part of each row that matches the query (off by default). Rows render through `SelectItem::render_highlighted`; an item with a custom row overrides it as well as `render`.
+
 ### Impl SelectItem
 
 By default, we have implmemented `SelectItem` for common types like `String`, `SharedString` and `&'static str`. You can also create your own item types by implementing the `SelectItem` trait.
