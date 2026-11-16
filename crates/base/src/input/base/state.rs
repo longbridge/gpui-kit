@@ -50,12 +50,6 @@ use crate::{AutoScroll, StepAction, TestSupportExt as _};
 
 pub(super) const EDITOR_ELEMENT_ID: &str = "input-state";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum InputCompositionEnd {
-    Unmark,
-    Cancel,
-}
-
 /// Vertical clearance to retain when revealing a text position.
 pub(crate) enum ScrollPadding {
     Minimal,
@@ -492,7 +486,7 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Text before an unannounced IME composition, until the next change.
     ime_original_text: Option<Rope>,
     ime_original_selection: Option<CursorSelection>,
-    ime_composition_end: Option<InputCompositionEnd>,
+    ime_unmarking: bool,
     input_transform: Option<InputTransform>,
     programmatic_edit: bool,
     pub(super) last_layout: Option<LastLayout>,
@@ -1019,7 +1013,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             ime_marked_range: None,
             ime_original_text: None,
             ime_original_selection: None,
-            ime_composition_end: None,
+            ime_unmarking: false,
             input_transform: None,
             programmatic_edit: false,
             input_bounds: Bounds::default(),
@@ -1484,6 +1478,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.disabled = disabled;
         if disabled {
+            self.cancel_transformed_preedit(cx);
             M::hide_context_menu(self, cx);
             M::clear_inline_completion(self, cx);
         }
@@ -1510,6 +1505,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.readonly = readonly;
         if readonly {
+            self.cancel_transformed_preedit(cx);
             M::hide_context_menu(self, cx);
             M::clear_inline_completion(self, cx);
             self.search_session.replace_mode = false;
@@ -4299,21 +4295,25 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.input_transform.is_some()
             && self.mask_pattern.is_none()
             && self.token_spans().is_empty()
+            && (self.ime_marked_range.is_none() || self.ime_original_selection.is_some())
             && !self.programmatic_edit
             && !self.undo_manager.is_ignoring()
     }
 
-    fn finish_marked_input(
-        &mut self,
-        end: InputCompositionEnd,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let mark = self.ime_marked_range.expect("finishing a marked input");
-        let text = self.text.slice(mark).to_string();
-        self.ime_composition_end = Some(end);
-        self.replace_text_in_range_silent(None, &text, window, cx);
-        self.ime_composition_end = None;
+    fn cancel_transformed_preedit(&mut self, cx: &mut Context<Self>) {
+        let Some(selection) = self.ime_original_selection.take() else {
+            return;
+        };
+        self.text = self.ime_original_text.take().expect("preedit source text");
+        self.ime_marked_range = None;
+        self.undo_manager.clear_pending_composition();
+        self.undo_manager.commit_transaction();
+        *self.active_selection_mut() = selection;
+        self.document_revision = self.document_revision.wrapping_add(1);
+        self.display_map.set_text(&self.text, cx);
+        self.update_preferred_column();
+        self.update_search(cx);
+        cx.notify();
     }
 
     /// Set the mask pattern for formatting the input text.
@@ -4340,7 +4340,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.mask_pattern = pattern.into();
+        let pattern = pattern.into();
+        if !pattern.is_none() {
+            self.cancel_transformed_preedit(cx);
+        }
+        self.mask_pattern = pattern;
         self.mask_pattern_set = true;
         if let Some(placeholder) = self.mask_pattern.placeholder() {
             self.placeholder = placeholder.into();
@@ -4772,11 +4776,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_editable()
+        if let Some(mark) = self.ime_marked_range
             && self.ime_original_selection.is_some()
-            && self.ime_marked_range.is_some()
         {
-            self.finish_marked_input(InputCompositionEnd::Unmark, window, cx);
+            let text = self.text.slice(mark).to_string();
+            self.ime_unmarking = true;
+            self.replace_text_in_range_silent(None, &text, window, cx);
+            self.ime_unmarking = false;
             return;
         }
         self.ime_original_selection = None;
@@ -4920,21 +4926,20 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         // Single-line path
         let old_text = self.text.clone();
-        let original_selection = self.ime_original_selection.take();
         let transform_edit = self.transforms_input();
+        let original_selection = self.ime_original_selection.take();
         let mut transformed_text = None;
         let mut transformed_selection = None;
         if transform_edit {
-            let before = old_text.to_string();
             let previous = self
                 .ime_original_text
                 .as_ref()
                 .unwrap_or(&old_text)
                 .to_string();
-            let mut proposed = before.clone();
+            let mut proposed = old_text.to_string();
             proposed.replace_range(range.clone(), new_text);
             let end = range.start + new_text.len();
-            let selection = if self.ime_composition_end == Some(InputCompositionEnd::Unmark) {
+            let selection = if self.ime_unmarking {
                 self.selected_range()
             } else {
                 end..end
@@ -4948,8 +4953,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 .input_transform
                 .as_ref()
                 .expect("enabled input transform");
-            let accepted = self.ime_composition_end != Some(InputCompositionEnd::Cancel)
-                && transform(&mut edit)
+            let accepted = transform(&mut edit)
                 && edit.is_valid()
                 && (self.is_valid_input(&edit.text, cx) || !self.is_valid_input(&previous, cx));
             if accepted {
@@ -5135,12 +5139,14 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        if new_text.is_empty()
-            && self.ime_original_selection.is_some()
-            && self.ime_marked_range.is_some()
-        {
-            self.finish_marked_input(InputCompositionEnd::Cancel, window, cx);
-            return;
+        if new_text.is_empty() {
+            if self.ime_original_selection.is_some() {
+                self.cancel_transformed_preedit(cx);
+                return;
+            }
+            if self.transforms_input() {
+                return;
+            }
         }
         let selection_before = *self.active_selection();
 
@@ -5677,6 +5683,109 @@ mod tests {
                 assert_eq!(state.value(), "a");
                 assert!(!state.undo_manager.has_undos());
                 assert!(state.ime_marked_range.is_none());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn invalid_input_transform_proposals_leave_value_and_history_intact(cx: &mut TestAppContext) {
+        let view = InputView::build(cx, |state| state.default_value("a"));
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                for (replacement, start, end) in
+                    [("é", 1, 2), ("é", 0, 3), ("é", 2, 0), ("a\nb", 3, 3)]
+                {
+                    state.set_input_transform(
+                        move |edit| {
+                            edit.replace(replacement, start..end);
+                            true
+                        },
+                        cx,
+                    );
+                    state.replace_text_in_range(Some(1..1), "b", window, cx);
+                    assert_eq!(state.value(), "a");
+                    assert!(!state.undo_manager.has_undos());
+                }
+                state.clear_input_transform(cx);
+                state.replace_text_in_range(Some(1..1), "b", window, cx);
+                assert_eq!(state.value(), "ab");
+                state.undo(&Undo, window, cx);
+                assert_eq!(state.value(), "a");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn input_transform_resumes_after_removing_mask_pattern_and_tokens(cx: &mut TestAppContext) {
+        use crate::input::{InlineToken, InputContent};
+
+        let calls = Rc::new(Cell::new(0));
+        let transform_calls = calls.clone();
+        let view = InputView::build(cx, |state| {
+            state.default_value("1").input_transform(move |_| {
+                transform_calls.set(transform_calls.get() + 1);
+                true
+            })
+        });
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_mask_pattern("999", window, cx);
+                state.replace_text_in_range(Some(1..1), "2", window, cx);
+                assert_eq!(state.value(), "12");
+                assert_eq!(calls.get(), 0);
+                state.set_mask_pattern(MaskPattern::None, window, cx);
+                state.replace_text_in_range(Some(2..2), "3", window, cx);
+                assert_eq!(calls.get(), 1);
+
+                let content = InputContent::new(state.value())
+                    .with_token(0..1, InlineToken::new("one", "1"))
+                    .unwrap();
+                state.set_tokens(content, cx).unwrap();
+                state.replace_text_in_range(Some(3..3), "4", window, cx);
+                assert_eq!(state.tokens().len(), 1);
+                assert_eq!(calls.get(), 1);
+                state
+                    .set_tokens(InputContent::new(state.value()), cx)
+                    .unwrap();
+                state.replace_text_in_range(Some(4..4), "5", window, cx);
+                assert_eq!(state.value(), "12345");
+                assert_eq!(calls.get(), 2);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn input_transform_cancels_multi_update_preedit_on_policy_changes(cx: &mut TestAppContext) {
+        let view = InputView::build(cx, |state| state.default_value("abc"));
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                for cancel in 0..4 {
+                    state.set_input_transform(|_| panic!("canceled preedit must not commit"), cx);
+                    state.set_selected_range_with_direction(1..2, true, cx);
+                    state.replace_and_mark_text_in_range(None, "h", None, window, cx);
+                    state.replace_and_mark_text_in_range(None, "候補", None, window, cx);
+                    assert_eq!(state.value(), "a候補c");
+                    match cancel {
+                        0 => state.replace_and_mark_text_in_range(None, "", None, window, cx),
+                        1 => state.set_disabled(true, cx),
+                        2 => state.set_readonly(true, cx),
+                        _ => state.clear_input_transform(cx),
+                    }
+                    if cancel == 1 || cancel == 2 {
+                        state.replace_text_in_range(None, "late commit", window, cx);
+                    }
+                    state.unmark_text(window, cx);
+                    assert_eq!(state.value(), "abc");
+                    assert_eq!(state.selected_range(), 1..2);
+                    assert!(state.is_selection_reversed());
+                    assert!(state.ime_marked_range.is_none());
+                    assert!(!state.undo_manager.has_undos());
+                    state.set_disabled(false, cx);
+                    state.set_readonly(false, cx);
+                }
             });
         });
     }
@@ -13403,6 +13512,23 @@ impl InputBaseState<crate::input::InputMode> {
     ) -> Self {
         self.input_transform = Some(Box::new(transform));
         self
+    }
+
+    /// Replace the user edit transform. An active transformed preedit is
+    /// canceled, restoring the committed text and selection.
+    pub fn set_input_transform(
+        &mut self,
+        transform: impl Fn(&mut InputEditProposal<'_>) -> bool + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_transformed_preedit(cx);
+        self.input_transform = Some(Box::new(transform));
+    }
+
+    /// Clear the user edit transform and cancel an active transformed preedit.
+    pub fn clear_input_transform(&mut self, cx: &mut Context<Self>) {
+        self.cancel_transformed_preedit(cx);
+        self.input_transform = None;
     }
 
     /// Set the password masked state of the input field.

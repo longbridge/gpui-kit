@@ -48,7 +48,11 @@ input.update(cx, |state, cx| {
 Use `input_transform` to accept, reject, or rewrite a proposed user edit and
 its selection before commit. It runs for typing, paste, accessibility value
 replacement, and finalized IME composition. Programmatic setters and history
-replay bypass the transform. This example rejects a proposed edit
+replay bypass the transform. A mask pattern or inline tokens take precedence
+while present. Change the policy on a retained input with `set_input_transform`
+or `clear_input_transform`. Changing the policy, disabling the input, or
+switching it to read-only cancels an active transformed preedit and restores
+the last committed text and selection. This example rejects a proposed edit
 that would exceed 12 characters:
 
 ```rust
