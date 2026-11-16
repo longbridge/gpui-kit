@@ -2049,7 +2049,7 @@ mod line_bounds_tests {
                     let styled =
                         StyledText::new(SharedString::from(text.to_string())).with_runs(runs);
                     let layout = styled.layout().clone();
-                    let mut element = styled.into_any_element();
+                    let mut element = gpui::IntoElement::into_any_element(styled);
                     element.layout_as_root(
                         size(
                             AvailableSpace::Definite(px(wrap_width)),
@@ -2140,7 +2140,7 @@ mod range_highlight_tests {
                 &[],
             ));
             let layout = styled.layout().clone();
-            let mut element = styled.into_any_element();
+            let mut element = gpui::IntoElement::into_any_element(styled);
             element.layout_as_root(
                 size(
                     AvailableSpace::Definite(px(wrap_width)),
@@ -2193,7 +2193,7 @@ mod range_highlight_tests {
                     let styled =
                         StyledText::new(SharedString::from(text.to_string())).with_runs(runs);
                     let layout = styled.layout().clone();
-                    let mut element = styled.into_any_element();
+                    let mut element = gpui::IntoElement::into_any_element(styled);
                     element.layout_as_root(
                         size(
                             AvailableSpace::Definite(px(wrap_width)),
