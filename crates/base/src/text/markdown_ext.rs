@@ -484,13 +484,12 @@ impl MarkdownExtensions {
 
     /// Whether the HTML block parsers match, so an HTML document need not be
     /// reparsed when render handles are refreshed.
+    ///
+    /// Length-only, mirroring the Markdown block-parser shape check: render
+    /// methods commonly rebuild equivalent parser closures every frame, and
+    /// fresh `Arc`s must not read as a configuration change.
     pub(crate) fn has_same_html_block_parsers(&self, other: &Self) -> bool {
         self.html_block_parsers.len() == other.html_block_parsers.len()
-            && self
-                .html_block_parsers
-                .iter()
-                .zip(other.html_block_parsers.iter())
-                .all(|(a, b)| Arc::ptr_eq(a, b))
     }
 
     /// Offer an element to the custom HTML block parsers; the first
