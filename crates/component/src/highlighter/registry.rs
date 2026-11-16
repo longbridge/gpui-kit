@@ -543,9 +543,8 @@ pub struct LanguageRegistry {
 }
 
 impl LanguageRegistry {
-    /// Returns the singleton instance of the `LanguageRegistry` with default languages and themes.
-    pub fn singleton() -> &'static LazyLock<LanguageRegistry> {
-        static INSTANCE: LazyLock<LanguageRegistry> = LazyLock::new(|| LanguageRegistry {
+    fn with_default_languages() -> Self {
+        Self {
             languages: Mutex::new(
                 languages::Language::all()
                     .map(|language| (language.name().into(), language.config()))
@@ -553,8 +552,27 @@ impl LanguageRegistry {
             ),
             parser_factories: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
-        });
+        }
+    }
+
+    /// Returns the singleton instance of the `LanguageRegistry` with default languages and themes.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn singleton() -> &'static LazyLock<LanguageRegistry> {
+        static INSTANCE: LazyLock<LanguageRegistry> =
+            LazyLock::new(LanguageRegistry::with_default_languages);
         &INSTANCE
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn singleton() -> &'static LazyLock<LanguageRegistry> {
+        thread_local! {
+            static INSTANCE: &'static LazyLock<LanguageRegistry> = {
+                let registry: LazyLock<LanguageRegistry> =
+                    LazyLock::new(LanguageRegistry::with_default_languages);
+                Box::leak(Box::new(registry))
+            };
+        }
+        INSTANCE.with(|registry| *registry)
     }
 
     /// Registers a new language configuration to the registry.
