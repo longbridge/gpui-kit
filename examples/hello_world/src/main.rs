@@ -1,6 +1,6 @@
 use gpui_kit::component::button::*;
-use gpui_kit::component::*;
 use gpui_kit::component::label::Label;
+use gpui_kit::component::*;
 use gpui_kit::*;
 
 pub struct Example;

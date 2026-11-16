@@ -24,6 +24,7 @@ impl<T: 'static> Carrier<T> {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<T: 'static> gpui::IntoElement for Carrier<T> {
     type Element = Self;
 

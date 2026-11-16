@@ -244,6 +244,7 @@ impl SharedHandleState {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<T: 'static, E: 'static + Render> IntoElement for ResizeHandle<T, E> {
     type Element = ResizeHandle<T, E>;
     fn into_element(self) -> Self::Element {

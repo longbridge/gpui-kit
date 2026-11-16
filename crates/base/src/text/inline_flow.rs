@@ -376,6 +376,7 @@ impl InlineFlow {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for InlineFlow {
     type Element = Self;
 
