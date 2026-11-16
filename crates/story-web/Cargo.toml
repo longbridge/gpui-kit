@@ -24,3 +24,4 @@ workspace = true
 
 [features]
 gpui-fast = ["gpui-kit/gpui-fast"]
+tree-sitter = ["gpui-component-story/tree-sitter"]

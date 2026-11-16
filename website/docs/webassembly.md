@@ -94,6 +94,8 @@ source script/wasm-cc-env
 cargo build --target wasm32-unknown-unknown --release
 ```
 
+To try it in the gallery, build it with its `tree-sitter` feature from `crates/story-web`: `FEATURES=tree-sitter make dev`. The published gallery highlights with `syntect`.
+
 Eight languages are not available on WebAssembly yet, because their grammar crates do not build for that target. Their features are accepted there and add no language, so `tree-sitter-languages` still builds; text in those languages is shown without highlighting.
 
 | Feature | Why the grammar does not build for WebAssembly |

@@ -94,6 +94,8 @@ source script/wasm-cc-env
 cargo build --target wasm32-unknown-unknown --release
 ```
 
+如需在画廊中试用，在 `crates/story-web` 中启用它的 `tree-sitter` feature 构建：`FEATURES=tree-sitter make dev`。已发布的画廊仍使用 `syntect` 高亮。
+
 有八种语言目前无法在 WebAssembly 上使用，原因是它们的 grammar crate 无法为该目标构建。在 WebAssembly 上可以启用这些 feature，但不会添加对应语言，所以 `tree-sitter-languages` 仍能构建；这些语言的文本显示为无高亮的纯文本。
 
 | Feature | grammar 无法为 WebAssembly 构建的原因 |
