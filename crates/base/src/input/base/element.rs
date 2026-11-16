@@ -624,28 +624,26 @@ fn layout_overview_ruler<M: InputModeKind>(
         .collect()
 }
 
-use super::MASK_CHAR;
-
 /// Convert a byte offset in the original text to a byte offset in the masked display string.
 ///
-/// The masked string consists of `MASK_CHAR` repeated once per character in the original text.
-/// Since `MASK_CHAR` may be multi-byte in UTF-8, the byte offset in the masked string is
-/// `char_index * MASK_CHAR.len_utf8()`.
-fn masked_display_offset(text: &Rope, original_offset: usize) -> usize {
-    text.offset_to_char_index(original_offset) * MASK_CHAR.len_utf8()
+fn masked_display_offset(text: &Rope, original_offset: usize, character: char) -> usize {
+    text.offset_to_char_index(original_offset) * character.len_utf8()
 }
 
 /// Move the IME marked range (tracked against the original text) into the display text
-/// coordinate space, so that a run boundary can't land inside a multi-byte `MASK_CHAR`
+/// coordinate space, so that a run boundary can't land inside a multi-byte mask character
 /// and panic text shaping on a non-char-boundary slice.
 fn ime_marked_display_range(
     text: &Rope,
     marked_range: Option<Range<usize>>,
-    masked: bool,
+    mask_character: Option<char>,
 ) -> Option<Range<usize>> {
     let marked = marked_range?;
-    if masked {
-        Some(masked_display_offset(text, marked.start)..masked_display_offset(text, marked.end))
+    if let Some(character) = mask_character {
+        Some(
+            masked_display_offset(text, marked.start, character)
+                ..masked_display_offset(text, marked.end, character),
+        )
     } else {
         Some(marked)
     }
@@ -998,9 +996,11 @@ impl<M: InputModeKind> TextElement<M> {
             let sel_start_row = state.text.offset_to_point(selected_range.start).row;
             let sel_end_row = state.text.offset_to_point(selected_range.end).row;
             if state.masked {
-                selected_range.start = masked_display_offset(&state.text, selected_range.start);
-                selected_range.end = masked_display_offset(&state.text, selected_range.end);
-                cursor = masked_display_offset(&state.text, cursor);
+                selected_range.start =
+                    masked_display_offset(&state.text, selected_range.start, state.mask_character);
+                selected_range.end =
+                    masked_display_offset(&state.text, selected_range.end, state.mask_character);
+                cursor = masked_display_offset(&state.text, cursor, state.mask_character);
             }
 
             let affinity = is_active && state.cursor_line_end_affinity;
@@ -1355,8 +1355,10 @@ impl<M: InputModeKind> TextElement<M> {
             }
 
             if state.masked {
-                selected_range.start = masked_display_offset(&state.text, selected_range.start);
-                selected_range.end = masked_display_offset(&state.text, selected_range.end);
+                selected_range.start =
+                    masked_display_offset(&state.text, selected_range.start, state.mask_character);
+                selected_range.end =
+                    masked_display_offset(&state.text, selected_range.end, state.mask_character);
             }
 
             let (start_ix, end_ix) = if selected_range.start < selected_range.end {
@@ -3228,7 +3230,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
             )
         } else if state.masked {
             (
-                &Rope::from(MASK_CHAR.to_string().repeat(text.chars().count())),
+                &Rope::from(
+                    state
+                        .mask_character
+                        .to_string()
+                        .repeat(text.chars().count()),
+                ),
                 fg,
             )
         } else {
@@ -3302,10 +3309,11 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let (visible_line_byte_offsets, visible_range_offset) = if state.masked {
             let offsets = visible_line_byte_offsets
                 .iter()
-                .map(|&o| masked_display_offset(&text, o))
+                .map(|&o| masked_display_offset(&text, o, state.mask_character))
                 .collect();
-            let range_offset = masked_display_offset(&text, visible_start_offset)
-                ..masked_display_offset(&text, visible_end_offset);
+            let range_offset =
+                masked_display_offset(&text, visible_start_offset, state.mask_character)
+                    ..masked_display_offset(&text, visible_end_offset, state.mask_character);
             (offsets, range_offset)
         } else {
             (
@@ -3355,7 +3363,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let ime_marked_range = ime_marked_display_range(
             &text,
             state.ime_marked_range.as_ref().map(|m| m.start..m.end),
-            state.masked,
+            state.masked.then_some(state.mask_character),
         );
 
         let runs = if let (false, Some(highlight_styles)) = (is_empty, highlight_styles) {
@@ -6677,24 +6685,28 @@ mod tests {
             color: Some(gpui::black()),
             wavy: false,
         };
-        let text = Rope::from("abcdef");
-        let mask_len = MASK_CHAR.len_utf8();
+        let text = Rope::from("a🦀cdef");
+        let mask_character = '🟊';
+        let mask_len = mask_character.len_utf8();
 
         assert_eq!(
-            ime_marked_display_range(&text, Some(4..6), false),
-            Some(4..6)
+            ime_marked_display_range(&text, Some(7..9), None),
+            Some(7..9)
         );
-        assert_eq!(ime_marked_display_range(&text, None, true), None);
         assert_eq!(
-            ime_marked_display_range(&text, Some(4..6), true),
+            ime_marked_display_range(&text, None, Some(mask_character)),
+            None
+        );
+        assert_eq!(
+            ime_marked_display_range(&text, Some(7..9), Some(mask_character)),
             Some(4 * mask_len..6 * mask_len)
         );
 
-        let display_text = MASK_CHAR.to_string().repeat(text.chars().count());
+        let display_text = mask_character.to_string().repeat(text.chars().count());
         let runs = split_run_for_ime_underline(
             TextStyle::default().to_run(display_text.len()),
             0..display_text.len(),
-            ime_marked_display_range(&text, Some(4..6), true),
+            ime_marked_display_range(&text, Some(7..9), Some(mask_character)),
             Some(underline),
         );
 

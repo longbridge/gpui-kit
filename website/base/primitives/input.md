@@ -49,10 +49,17 @@ input.update(cx, |state, cx| {
 let password = cx.new(|cx| {
     InputState::new(window, cx)
         .placeholder("Password")
+        .secure(true)
         .masked(true)
         .validate(|value, _| value.chars().count() >= 8)
 });
 ```
+
+Use `.secure(true)` to keep the value out of Copy, Cut, and accessibility text,
+and to give the platform IME only redacted surrounding text. The policy still
+applies when `set_masked(false, window, cx)` reveals the value on screen. Use
+`.mask_character('*')` to change the display glyph from its default `•`.
+The application can still read the original value through the state.
 
 For formatted values, combine `mask_pattern`, `pattern`, `min`, `max`, `step`,
 or `step_by` as appropriate. `unmask_value()` returns the underlying value of a

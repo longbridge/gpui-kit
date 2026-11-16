@@ -265,6 +265,30 @@ fn masking_blocks_clipboard_until_revealed_and_preserves_the_value(cx: &mut Test
 }
 
 #[gpui_kit::test]
+fn secure_input_keeps_clipboard_and_accessibility_private_after_reveal(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| input.secure(true).masked(true));
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.mask_toggle = true;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        window.within("constrained").click("toggle-mask", cx);
+        window.click("constrained", cx);
+        clipboard(cx, "sëcret🦀");
+        shortcut(window, "v", cx);
+        shortcut(window, "a", cx);
+        clipboard(cx, "sentinel");
+        for key in ["c", "x"] {
+            shortcut(window, key, cx);
+            assert_clipboard(cx, "sentinel");
+            assert_eq!(window.find("constrained").value(), None);
+        }
+    });
+    assert_owner(handle, &view, cx, "sëcret🦀", 1);
+}
+
+#[gpui_kit::test]
 fn component_id_preserves_supported_content_type_roles(cx: &mut TestAppContext) {
     let (handle, view) = fixture(cx, |input| input.default_value("contact"));
     for (kind, role) in [

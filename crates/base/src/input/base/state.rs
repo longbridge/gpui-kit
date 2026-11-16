@@ -512,6 +512,8 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(crate) readonly: bool,
     pub(crate) text_align: TextAlign,
     pub(super) masked: bool,
+    pub(super) mask_character: char,
+    secure: bool,
     pub(super) clean_on_escape: bool,
     pub(super) submit_on_enter: bool,
     /// Overrides for [`Self::text_input_configuration`].
@@ -871,9 +873,13 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Whether the user is allowed to copy the selection out.
     ///
-    /// A masked input keeps its value out of the clipboard.
+    /// Masked and secure inputs keep their values out of the clipboard.
     pub fn is_copyable(&self) -> bool {
-        self.selections.iter().any(|sel| !sel.is_empty()) && !self.masked
+        self.selections.iter().any(|sel| !sel.is_empty()) && !self.protects_value()
+    }
+
+    pub(super) fn protects_value(&self) -> bool {
+        self.masked || self.secure
     }
 
     pub fn context_menu_capabilities(&self) -> InputContextMenuCapabilities {
@@ -884,6 +890,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             .code_editor(self.is_code_editor())
             .selection(!self.active_selection().is_empty())
             .masked(self.masked)
+            .secure(self.secure)
             .go_to_definition(go_to_definition)
             .code_actions(code_actions)
     }
@@ -1014,6 +1021,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             readonly: false,
             text_align: TextAlign::Left,
             masked: false,
+            mask_character: MASK_CHAR,
+            secure: false,
             clean_on_escape: false,
             submit_on_enter: false,
             input_action: None,
@@ -1552,7 +1561,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Masking is a presentation choice, not a reliable content type: a
         // revealed password must not acquire text assistance. Keep assistance
         // opt-in for structured fields such as passwords, email and URLs.
-        let autocorrect = self.autocorrect.unwrap_or(false);
+        let autocorrect = !self.secure && self.autocorrect.unwrap_or(false);
         let input_action =
             self.input_action
                 .unwrap_or(if self.is_multi_line() && !self.submit_on_enter {
@@ -1562,7 +1571,10 @@ impl<M: InputModeKind> InputBaseState<M> {
                 });
         TextInputConfiguration {
             autocorrect,
-            autocapitalize: self.autocapitalize.unwrap_or(Autocapitalize::None),
+            autocapitalize: self
+                .autocapitalize
+                .filter(|_| !self.secure)
+                .unwrap_or(Autocapitalize::None),
             suggestions: autocorrect,
             input_action,
         }
@@ -3852,7 +3864,8 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// is masked.
     fn resolve_index(&self, index: usize) -> usize {
         if self.masked {
-            self.text.char_index_to_offset(index / MASK_CHAR.len_utf8())
+            self.text
+                .char_index_to_offset(index / self.mask_character.len_utf8())
         } else {
             index.min(self.text.len())
         }
@@ -4654,7 +4667,14 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         let range = self.range_from_utf16(&range_utf16);
-        adjusted_range.replace(self.range_to_utf16(&range));
+        let utf16_range = self.range_to_utf16(&range);
+        let utf16_len = utf16_range.len();
+        adjusted_range.replace(utf16_range);
+        if self.protects_value() {
+            // Platform text clients, including the Web IME mirror, use these
+            // same UTF-16 offsets to place selections and send edits.
+            return Some(MASK_CHAR.to_string().repeat(utf16_len));
+        }
         Some(self.text.slice(range).to_string())
     }
 
@@ -5279,7 +5299,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                     })
                     .when(
                         accessibility.value_exposed
-                            && !self.masked
+                            && !self.protects_value()
                             && (window.is_a11y_active() || cfg!(feature = "test-support")),
                         |this| this.aria_value(self.text.to_string()),
                     )
@@ -8663,6 +8683,30 @@ mod tests {
                 assert_eq!(
                     cx.read_from_clipboard().and_then(|item| item.text()),
                     Some("hunter2".to_string())
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn secure_input_redacts_ime_text_while_visually_revealed(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| {
+            state.secure(true).masked(true).default_value("a🦀b")
+        });
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            input_view.input.update(cx, |state, cx| {
+                state.toggle_masked(window, cx);
+                let mut adjusted = None;
+                assert_eq!(
+                    state.text_for_range(0..4, &mut adjusted, window, cx),
+                    Some("••••".into())
+                );
+                assert_eq!(adjusted, Some(0..4));
+                state.set_secure(false, cx);
+                assert_eq!(
+                    state.text_for_range(0..4, &mut adjusted, window, cx),
+                    Some("a🦀b".into())
                 );
             });
         });
@@ -13182,6 +13226,31 @@ impl InputBaseState<crate::input::InputMode> {
     pub fn set_masked(&mut self, masked: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.masked = masked;
         cx.notify();
+    }
+
+    /// Protect the value from clipboard, accessibility text and platform IME
+    /// queries, even during a visual reveal. Defaults to false. The application
+    /// can still read the value. Use [`Self::masked`] to control its visibility.
+    pub fn secure(mut self, secure: bool) -> Self {
+        self.secure = secure;
+        self
+    }
+
+    /// Update the policy configured by [`Self::secure`].
+    pub fn set_secure(&mut self, secure: bool, cx: &mut Context<Self>) {
+        self.secure = secure;
+        cx.notify();
+    }
+
+    /// Choose the visual mask character. The default is `•`; whitespace and
+    /// control characters fall back to the default.
+    pub fn mask_character(mut self, character: char) -> Self {
+        self.mask_character = if character.is_whitespace() || character.is_control() {
+            MASK_CHAR
+        } else {
+            character
+        };
+        self
     }
 
     /// Set the regular expression pattern of the input field.

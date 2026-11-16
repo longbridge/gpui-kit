@@ -22,7 +22,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// client, or a masked or unexposed value.
     pub(super) fn accessibility_text_runs(&self, window: &Window) -> Option<A11yTextRuns> {
         let accessibility = self.accessibility.as_ref()?;
-        if !window.is_a11y_active() || !accessibility.value_exposed() || self.masked {
+        if !window.is_a11y_active() || !accessibility.value_exposed() || self.protects_value() {
             return None;
         }
         let text = self.text.to_string();

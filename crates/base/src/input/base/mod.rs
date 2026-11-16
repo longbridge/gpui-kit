@@ -28,6 +28,7 @@ pub struct InputContextMenuCapabilities {
     code_editor: bool,
     selection: bool,
     masked: bool,
+    secure: bool,
     go_to_definition: bool,
     code_actions: bool,
 }
@@ -61,6 +62,11 @@ impl InputContextMenuCapabilities {
     /// Set whether the input renders its value masked.
     pub fn masked(mut self, masked: bool) -> Self {
         self.masked = masked;
+        self
+    }
+
+    pub(super) fn secure(mut self, secure: bool) -> Self {
+        self.secure = secure;
         self
     }
 
@@ -104,10 +110,9 @@ impl InputContextMenuCapabilities {
 
     /// Returns true if the user is allowed to copy the text out.
     ///
-    /// A masked input keeps its value out of the clipboard, so Copy and Cut
-    /// are both unavailable while the value is hidden.
+    /// Masked and secure inputs keep their values out of the clipboard.
     pub fn is_copyable(&self) -> bool {
-        self.selection && !self.masked
+        self.selection && !self.masked && !self.secure
     }
 
     pub fn has_definition(&self) -> bool {
