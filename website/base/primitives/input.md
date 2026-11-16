@@ -59,7 +59,9 @@ Use `.secure(true)` to keep the value out of Copy, Cut, and accessibility text,
 and to give the platform IME only redacted surrounding text. The policy still
 applies when `set_masked(false, window, cx)` reveals the value on screen. Use
 `.mask_character('*')` to change the display glyph from its default `•`.
-The application can still read the original value through the state.
+The application can still read the original value through the state. The
+security policy and mask character are provided by the Rust `InputState` API.
+GPUI Shell exposes `set_masked` for display masking.
 
 For formatted values, combine `mask_pattern`, `pattern`, `min`, `max`, `step`,
 or `step_by` as appropriate. `unmask_value()` returns the underlying value of a

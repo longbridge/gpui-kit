@@ -49,6 +49,8 @@ let password = cx.new(|cx| {
 
 使用 `.secure(true)` 可阻止复制、剪切和无障碍接口读出原值，平台 IME 也只会收到遮蔽后的上下文。调用 `set_masked(false, window, cx)` 在屏幕上显示原值时，这些保护仍然生效。默认遮蔽字符是 `•`，可用 `.mask_character('*')` 更改。应用仍可通过状态读取原值。
 
+安全策略和遮蔽字符由 Rust 的 `InputState` API 提供。GPUI Shell 提供 `set_masked` 来控制显示遮蔽。
+
 格式化值可按需组合 `mask_pattern`、`pattern`、`min`、`max`、`step` 或 `step_by`。`unmask_value()` 返回掩码输入的底层值。
 
 ## 事件
