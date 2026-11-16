@@ -69,6 +69,14 @@ let input = cx.new(|cx| {
 });
 ```
 
+On a retained input, use `set_display_transform` to replace the formatter
+and `clear_display_transform` to return to the source presentation. Both
+refresh layout and preserve the value, selection and undo history.
+
+Hit testing within a displayed prefix or suffix resolves to the beginning
+or end of the source. If multiple source boundaries share a displayed
+position, a hit at that position selects the last of those boundaries.
+
 ```rust
 let password = cx.new(|cx| {
     InputState::new(window, cx)

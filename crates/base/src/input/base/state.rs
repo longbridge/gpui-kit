@@ -5518,6 +5518,59 @@ mod tests {
     }
 
     #[gpui::test]
+    fn changing_display_transform_refreshes_geometry_and_keeps_history(cx: &mut TestAppContext) {
+        use crate::input::InputDisplayText;
+
+        let view = InputView::build(cx, |state| state.default_value("a🦀"));
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(Some(3..3), "b", window, cx);
+                state.set_selected_range(1..5, cx);
+                state.set_display_transform(
+                    |_| InputDisplayText::new("[a🦀b]", vec![1, 2, 6, 7]),
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            view.input.update(cx, |state, cx| {
+                assert_eq!(state.last_layout.as_ref().unwrap().display_offset(0), 1);
+                assert_eq!(state.selected_range(), 1..5);
+                state
+                    .set_display_transform(|_| InputDisplayText::new("aé-b", vec![0, 2, 4, 5]), cx);
+                assert!(state.range_to_bounds(&(0..0)).is_none());
+            });
+            window.draw(cx).clear(cx);
+            view.input.update(cx, |state, cx| {
+                // Byte 2 is inside é, so layout must shape the source instead.
+                let layout = state.last_layout.as_ref().unwrap();
+                assert!(layout.display_offsets.is_none());
+                assert_eq!(layout.lines[0].len(), "a🦀b".len());
+                state.set_display_transform(
+                    |_| InputDisplayText::new("a🦀-b", vec![0, 1, 6, 7]),
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            view.input.update(cx, |state, cx| {
+                assert_eq!(state.last_layout.as_ref().unwrap().display_offset(5), 6);
+                state.clear_display_transform(cx);
+                assert!(state.range_to_bounds(&(0..0)).is_none());
+            });
+            window.draw(cx).clear(cx);
+            view.input.update(cx, |state, cx| {
+                assert_eq!(state.last_layout.as_ref().unwrap().display_offset(5), 5);
+                assert_eq!(state.value(), "a🦀b");
+                assert_eq!(state.selected_range(), 1..5);
+                state.undo(&Undo, window, cx);
+                assert_eq!(state.value(), "a🦀");
+                state.redo(&Redo, window, cx);
+                assert_eq!(state.value(), "a🦀b");
+            });
+        });
+    }
+
+    #[gpui::test]
     fn accessibility_actions_recheck_live_editability(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (state, cx) = cx.add_window_view(|window, cx| {
@@ -13238,6 +13291,32 @@ impl InputBaseState<crate::input::InputMode> {
     ) -> Self {
         self.display_transform = Some(Box::new(transform));
         self
+    }
+
+    /// Replace the formatter and refresh geometry, keeping the source,
+    /// selection and undo history.
+    pub fn set_display_transform(
+        &mut self,
+        transform: impl Fn(&str) -> super::InputDisplayText + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        self.display_transform = Some(Box::new(transform));
+        self.invalidate_display_geometry(cx);
+    }
+
+    /// Restore the source presentation, keeping the selection and undo history.
+    pub fn clear_display_transform(&mut self, cx: &mut Context<Self>) {
+        if self.display_transform.take().is_some() {
+            self.invalidate_display_geometry(cx);
+        }
+    }
+
+    fn invalidate_display_geometry(&mut self, cx: &mut Context<Self>) {
+        self.last_layout = None;
+        self.last_selected_range = None;
+        self.prepaint_caret_geometry = None;
+        self.ime_anchor = None;
+        cx.notify();
     }
 
     /// Set the password masked state of the input field.

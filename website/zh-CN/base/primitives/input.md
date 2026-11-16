@@ -59,6 +59,10 @@ let input = cx.new(|cx| {
 });
 ```
 
+对于已创建的输入状态，可调用 `set_display_transform` 更换格式化逻辑，或调用 `clear_display_transform` 恢复原文显示。这两个方法都会刷新布局，并保留原值、选区和撤销历史。
+
+点击显示用的前缀或后缀时，光标定位到原文的开头或末尾。如果多个原文边界对应同一个显示位置，点击该位置时取最后一个边界。
+
 ```rust
 let password = cx.new(|cx| {
     InputState::new(window, cx)

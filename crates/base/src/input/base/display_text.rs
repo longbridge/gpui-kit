@@ -11,6 +11,12 @@ impl InputDisplayText {
     /// source, including the start and end. Offsets must be nondecreasing and
     /// land on character boundaries in the displayed text. Input falls back to
     /// the source if the map is invalid or the result contains line breaks.
+    ///
+    /// Hit testing before the first mapped offset or after the last maps to
+    /// the source start or end, allowing a displayed prefix or suffix.
+    /// Boundaries that share a display offset resolve to the last source
+    /// boundary at that offset. Between mapped offsets, the nearest offset
+    /// wins, with ties going to the earlier display offset.
     pub fn new(text: impl Into<String>, offsets: Vec<usize>) -> Self {
         Self {
             text: text.into(),
@@ -67,5 +73,23 @@ impl InputDisplayOffsets {
             (None, _) => 0,
         };
         self.source.char_index_to_offset(index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hit_testing_clamps_prefix_suffix_and_prefers_last_duplicate() {
+        let source = Rope::from("a🦀b");
+        let (_, offsets) = InputDisplayText::new("[aa]", vec![1, 2, 2, 3])
+            .resolve(&source)
+            .unwrap();
+
+        assert_eq!(offsets.source_offset(0), 0);
+        assert_eq!(offsets.source_offset(2), 5);
+        assert_eq!(offsets.source_offset(4), 6);
+        assert_eq!(offsets.display_offset(1), offsets.display_offset(5));
     }
 }
