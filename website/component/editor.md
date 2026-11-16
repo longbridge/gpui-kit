@@ -122,6 +122,10 @@ gpui-kit = { version = "{{gpui_kit_version}}", features = ["syntect"] }
 
 With both enabled, `tree-sitter` is used.
 
+Both build for WebAssembly. There the `tree-sitter` grammars need a C toolchain
+that targets wasm32, and eight of them are not available yet; see
+[WebAssembly](../docs/webassembly.md#syntax-highlighting).
+
 ## Editor options
 
 ```rust
