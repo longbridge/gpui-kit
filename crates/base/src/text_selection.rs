@@ -10,8 +10,9 @@ use gpui::{
     App, AppContext as _, Bounds, Context, Element, ElementId, Entity, EntityId, EventEmitter,
     Global, GlobalElementId, Half, Hitbox, HitboxBehavior, Hsla, InputEvent as _,
     InspectorElementId, IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, SharedString, Style,
-    Subscription, TextLayout, TouchDragEvent, TouchPhase, WeakEntity, Window, point, px,
+    MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent,
+    SharedString, Style, Subscription, TextLayout, TouchDragEvent, TouchPhase, WeakEntity, Window,
+    point, px,
 };
 
 use crate::text_boundary::{line_range_at, word_range_at};
@@ -1376,6 +1377,7 @@ struct WindowSelectionState {
     #[cfg(test)]
     snapshot_visits: Cell<usize>,
     mouse_down_prepared: bool,
+    mouse_lifecycle: Vec<Subscription>,
     auto_scroll: AutoScroll,
     /// Where the anchor's text was when the last synthetic wheel went out,
     /// and how many went out without moving it. A container at its end
@@ -3065,6 +3067,7 @@ struct KeepTextSelection {
     id: ElementId,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for KeepTextSelection {
     type Element = Self;
 
@@ -3148,6 +3151,7 @@ struct TextSelectionScopeMarker<E> {
     element: E,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<E: Element> IntoElement for TextSelectionScopeMarker<E> {
     type Element = Self;
 
@@ -3225,6 +3229,7 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
 #[doc(hidden)]
 pub struct TextSelectionLayerPrepaintState(Entity<WindowSelectionState>);
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for TextSelectionLayer {
     type Element = Self;
 
@@ -3317,6 +3322,18 @@ fn retain_text_selection_state(
             .0
             .insert(window_id, state.downgrade());
     }
+    state.update(cx, |state, cx| {
+        if state.mouse_lifecycle.is_empty() {
+            state.mouse_lifecycle = vec![
+                cx.observe_window_bounds(window, |state, _, cx| state.end(cx)),
+                cx.observe_window_activation(window, |state, window, cx| {
+                    if !window.is_window_active() {
+                        state.end(cx);
+                    }
+                }),
+            ];
+        }
+    });
     state
 }
 
@@ -3394,12 +3411,22 @@ fn schedule_selection_frame(
     }
 }
 
+fn press_is_in_viewport(position: Point<Pixels>, window: &Window) -> bool {
+    Bounds::new(Point::default(), window.viewport_size()).contains(&position)
+}
+
 fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Window, cx: &mut App) {
     schedule_selection_frame(state, window, cx);
 
     let mouse_down_state = state.downgrade();
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
         if event.button != MouseButton::Left {
+            return;
+        }
+        // Windows reports presses on the native title bar and resize frame
+        // in client coordinates outside the viewport. Those start a window
+        // move or resize, never a text selection, and must not clear one.
+        if !press_is_in_viewport(event.position, window) {
             return;
         }
         let Some(state) = mouse_down_state.upgrade() else {
@@ -3561,7 +3588,14 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
 
     let mouse_move_state = state.downgrade();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        if phase.capture() && event.pressed_button != Some(MouseButton::Left) {
+            if let Some(state) = mouse_move_state.upgrade() {
+                state.update(cx, |state, cx| state.end(cx));
+            }
+            return;
+        }
         if phase.bubble()
+            && event.pressed_button == Some(MouseButton::Left)
             && let Some(state) = mouse_move_state.upgrade()
             // Moving the pointer only moves a selection being made.
             && state.read(cx).is_selecting
@@ -3575,6 +3609,15 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
                 state.update_in_window(event.position, window, cx)
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    });
+
+    let mouse_exit_state = state.downgrade();
+    window.on_mouse_event(move |_: &MouseExitEvent, phase, _, cx| {
+        if phase.capture()
+            && let Some(state) = mouse_exit_state.upgrade()
+        {
+            state.update(cx, |state, cx| state.end(cx));
         }
     });
 
@@ -5839,6 +5882,73 @@ mod tests {
         );
         cx.update(|window, cx| assert!(TextSelection::has_selection(window, cx)));
         assert_eq!(clear_count.get(), 3);
+    }
+
+    #[gpui::test]
+    fn selection_layer_ends_a_mouse_gesture_when_the_release_is_lost(cx: &mut TestAppContext) {
+        let (text, layout) = laid_out_runs(&["alpha bravo charlie delta"], cx)
+            .pop()
+            .unwrap();
+        let (view, cx) = cx.add_window_view(|_, cx| DoubleSelectionElementView {
+            selection: TextSelectionHandle::new("", cx),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            let selection = view.read(cx).selection.clone();
+            selection.update_runs(&[text_run(0, text.clone(), layout.clone())], cx);
+        });
+        let start = layout.position_for_index(1).unwrap();
+        let selected_to = layout.position_for_index(7).unwrap();
+        let beyond = layout.position_for_index(18).unwrap();
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        let before = cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(snapshot.is_selecting());
+            (snapshot.anchor(), snapshot.cursor())
+        });
+        // No MouseUp: its delivery was consumed by a compositor resize grab.
+        cx.simulate_mouse_move(beyond, None, gpui::Modifiers::default());
+        cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(!snapshot.is_selecting());
+            assert_eq!((snapshot.anchor(), snapshot.cursor()), before);
+        });
+    }
+
+    #[gpui::test]
+    fn selection_layer_ignores_presses_on_the_native_window_frame(cx: &mut TestAppContext) {
+        let (text, layout) = laid_out_runs(&["alpha bravo charlie delta"], cx)
+            .pop()
+            .unwrap();
+        let (view, cx) = cx.add_window_view(|_, cx| DoubleSelectionElementView {
+            selection: TextSelectionHandle::new("", cx),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            let selection = view.read(cx).selection.clone();
+            selection.update_runs(&[text_run(0, text.clone(), layout.clone())], cx);
+        });
+        let start = layout.position_for_index(1).unwrap();
+        let selected_to = layout.position_for_index(7).unwrap();
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_up(selected_to, MouseButton::Left, gpui::Modifiers::default());
+        let selected = cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            (snapshot.anchor(), snapshot.cursor())
+        });
+        // A press on the native title bar arrives above the client area and
+        // the move loop swallows its release.
+        let title_bar = point(start.x, px(-12.));
+        cx.simulate_mouse_down(title_bar, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(selected_to, None, gpui::Modifiers::default());
+        cx.update(|_, cx| {
+            let snapshot = view.read(cx).selection.snapshot(cx).unwrap();
+            assert!(!snapshot.is_selecting());
+            assert_eq!((snapshot.anchor(), snapshot.cursor()), selected);
+        });
     }
 
     #[gpui::test]

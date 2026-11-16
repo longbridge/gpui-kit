@@ -138,9 +138,12 @@ export default class App extends View {
     };
     let mount_builds = command::command_probe::take();
     assert_builds("mount", &mount_builds, 1, 1, 5);
+    // Count actual repaints, not clean frames that may reuse retained content.
+    context.update(|window, _| window.refresh());
     draw(&mut context);
     let first_draw_builds = command::command_probe::take();
     assert_builds("first draw", &first_draw_builds, 1, 1, 5);
+    context.update(|window, _| window.refresh());
     draw(&mut context);
     let second_draw_builds = command::command_probe::take();
     // An unchanged, unnotified view reuses its previous frame (gpui-fast 0.1.14).
@@ -156,7 +159,13 @@ export default class App extends View {
     let confirmed = context.update(|_, cx| view.read(cx).snapshot().unwrap().debug_tree());
     assert!(confirmed.contains("State: b|1:0|1"), "{confirmed}");
     command::command_probe::take();
-    context.update(|_, cx| view.update(cx, |view, cx| view.refresh(cx)));
+    // The refreshed snapshot's slot factories must survive two repaints.
+    context.update(|window, cx| {
+        view.update(cx, |view, cx| view.refresh(cx));
+        window.refresh();
+    });
+    draw(&mut context);
+    context.update(|window, _| window.refresh());
     draw(&mut context);
     let refresh_builds = command::command_probe::take();
     assert_builds("refresh", &refresh_builds, 2, 2, 4);

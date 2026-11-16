@@ -289,6 +289,7 @@ impl<M: InputModeKind> EditorScrollbar<M> {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<M: InputModeKind> IntoElement for EditorScrollbar<M> {
     type Element = Self;
 
@@ -884,11 +885,21 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         window.on_mouse_event({
             let state = self.state.clone();
 
-            move |event: &MouseMoveEvent, _, window, cx| {
+            move |event: &MouseMoveEvent, phase, window, cx| {
                 if event.pressed_button == Some(MouseButton::Left) {
                     state.update(cx, |state, cx| {
                         state.on_drag_move(event, window, cx);
                     });
+                } else if phase.capture() {
+                    state.update(cx, |state, cx| state.cancel_mouse_gesture(cx));
+                }
+            }
+        });
+        window.on_mouse_event({
+            let state = self.state.clone();
+            move |_: &gpui::MouseExitEvent, phase, _, cx| {
+                if phase.capture() {
+                    state.update(cx, |state, cx| state.cancel_mouse_gesture(cx));
                 }
             }
         });
@@ -3011,6 +3022,7 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<M: InputModeKind, R: EditorLineNumberRenderer> IntoElement for TextElement<M, R> {
     type Element = Self;
 

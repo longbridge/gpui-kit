@@ -169,6 +169,7 @@ impl RoundedFrameCover {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for RoundedFrameCover {
     type Element = Self;
 
@@ -404,6 +405,7 @@ impl<H: ScrollbarHandle + Clone> ScrollableMask<H> {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<H: ScrollbarHandle + Clone> IntoElement for ScrollableMask<H> {
     type Element = Self;
 
