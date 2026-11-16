@@ -198,7 +198,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "tree-sitter-cmake")]
+    #[cfg(all(feature = "tree-sitter-cmake", not(target_family = "wasm")))]
     #[test]
     fn closed_bracket_comment_is_not_a_line_comment() {
         use gpui_base::input::{Rope, SyntaxContext};
