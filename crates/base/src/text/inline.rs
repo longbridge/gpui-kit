@@ -2110,6 +2110,90 @@ mod line_bounds_tests {
 }
 
 #[cfg(test)]
+mod row_selection_tests {
+    use super::*;
+    use super::{
+        test_draw::in_prepaint,
+        test_fonts::{BODY, WideMonoTextSystem},
+    };
+    use gpui::{AvailableSpace, TestApp, size};
+
+    /// The byte range each laid-out row holds, a row's trailing space included.
+    fn rows(layout: &TextLayout) -> Vec<Range<usize>> {
+        let mut rows = Vec::new();
+        let mut line_start = 0;
+        for line in layout.line_layouts() {
+            let shaped = &line.unwrapped_layout;
+            let mut row_start = line_start;
+            for boundary in &line.wrap_boundaries {
+                let end = line_start + shaped.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index;
+                rows.push(row_start..end);
+                row_start = end;
+            }
+            rows.push(row_start..line_start + line.len());
+            line_start += line.len() + 1;
+        }
+        rows
+    }
+
+    #[test]
+    fn dragging_across_a_row_selects_its_first_character() {
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, |window, cx| {
+            let style = TextStyle {
+                font_family: BODY.into(),
+                font_size: px(16.).into(),
+                ..Default::default()
+            };
+            let origin = point(px(7.), px(11.));
+            for text in [
+                "Approve the draft first. Sending still requires the applicable approval.",
+                "Reply sent.\nSending still requires the applicable approval.",
+            ] {
+                for wrap_width in [100., 200., 1000.] {
+                    let runs = text_runs(text.len(), &style, &[]);
+                    let styled =
+                        StyledText::new(SharedString::from(text.to_string())).with_runs(runs);
+                    let layout = styled.layout().clone();
+                    let mut element = gpui::IntoElement::into_any_element(styled);
+                    element.layout_as_root(
+                        size(
+                            AvailableSpace::Definite(px(wrap_width)),
+                            AvailableSpace::MinContent,
+                        ),
+                        window,
+                        cx,
+                    );
+                    element.prepaint_at(origin, window, cx);
+                    let painted = PaintedSelectionLayout::new(&layout);
+                    let line_height = layout.line_height();
+                    for (row, range) in rows(&layout).into_iter().enumerate() {
+                        let y = origin.y + line_height * (row as f32 + 0.5);
+                        let before = point(origin.x - px(4.), y);
+                        let after = point(origin.x + px(wrap_width + 40.), y);
+                        let expected = text[range.clone()].trim_end_matches('\n');
+                        for (start, end) in [(before, after), (after, before)] {
+                            for selection in [
+                                project_selection(text, &layout, None, start, end),
+                                project_selection(text, &painted, None, start, end),
+                            ] {
+                                let selection = selection.expect("the row is selected");
+                                let selected = &text[selection.start..selection.end];
+                                assert_eq!(
+                                    selected.trim_end_matches('\n'),
+                                    expected,
+                                    "row {row} of {text:?} at {wrap_width}px"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(test)]
 mod range_highlight_tests {
     use super::*;
     use super::{
