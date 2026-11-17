@@ -22,7 +22,7 @@ use gpui_kit::*;
 use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffDecoration, DiffFile,
     DiffGutterMarker, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition,
-    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffState,
+    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffSpanHighlight, DiffState,
 };
 ```
 
@@ -482,8 +482,23 @@ focusable control, such as a ghost `Button` that announces
 the pointer. Pressing a marker does not start a text or line selection. The
 application owns the details panel and returns focus when it closes.
 
-Like annotations, decorations and markers are supplied on every render, so the
-current builder call is their only source.
+`span_highlights` emphasizes a character span inside one line, such as the
+matched text of a search hit:
+
+```rust
+Diff::new(&self.diff).span_highlights([DiffSpanHighlight::new(
+    DiffLinePosition::new(path, DiffSide::Modified, 10),
+    4..9,
+)])
+```
+
+The span is a byte range in the line's content, before tab expansion. Its fill
+paints over syntax, inline emphasis and decorations, and a text selection still
+shows above it. Without `with_background`, the fill is a translucent warning
+color; `with_foreground` sets the text color over a strong fill.
+
+Like annotations, decorations, markers and span highlights are supplied on
+every render, so the current builder call is their only source.
 
 ## Pointer and keyboard interaction
 
