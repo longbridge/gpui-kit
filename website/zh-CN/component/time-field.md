@@ -28,10 +28,10 @@ TimeField::new(&time)
 字段初始值为 `00:00`。用 `set_time` 设置值，这个方法不会触发事件：
 
 ```rust
-use chrono::NaiveTime;
+use jiff::civil;
 
 time.update(cx, |state, cx| {
-    state.set_time(NaiveTime::from_hms_opt(9, 30, 0).unwrap(), window, cx);
+    state.set_time(civil::time(9, 30, 0, 0), window, cx);
 });
 ```
 

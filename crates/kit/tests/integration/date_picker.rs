@@ -132,8 +132,8 @@ impl Render for TimedSchedule {
     }
 }
 
-fn at(value: &str) -> chrono::NaiveDateTime {
-    chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S").unwrap()
+fn at(value: &str) -> jiff::civil::DateTime {
+    jiff::civil::DateTime::strptime("%Y-%m-%d %H:%M:%S", value).unwrap()
 }
 
 #[gpui_kit::test]
