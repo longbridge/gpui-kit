@@ -30,11 +30,11 @@ DatePicker::new(&date_picker)
 ### 设置初始日期
 
 ```rust
-use chrono::Local;
+use jiff::ZonedDateTime;
 
 let date_picker = cx.new(|cx| {
     let mut picker = DatePickerState::new(window, cx);
-    picker.set_date(Local::now().naive_local().date(), window, cx);
+    picker.set_date(ZonedDateTime::now().date(), window, cx);
     picker
 });
 
@@ -44,7 +44,7 @@ DatePicker::new(&date_picker)
 ### 日期范围选择
 
 ```rust
-use chrono::{Local, Days};
+use jiff::{ToSpan as _, ZonedDateTime};
 
 let range_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
@@ -52,10 +52,10 @@ DatePicker::new(&range_picker)
     .number_of_months(2)
 
 let range_picker = cx.new(|cx| {
-    let now = Local::now().naive_local().date();
+    let now = ZonedDateTime::now().date();
     let mut picker = DatePickerState::new(window, cx);
     picker.set_date(
-        (now, now.checked_add_days(Days::new(7)).unwrap()),
+        (now, now + 7.days()),
         window,
         cx,
     );
@@ -71,12 +71,12 @@ DatePicker::new(&range_picker)
 设置 `time_precision` 后即可同时编辑具体时间。弹层会在日历下方显示时间字段，选择日期后弹层保持打开，方便接着调整时间。每次修改都会立即触发事件。再次点击已选中的日期（或直接双击某个日期）即可确认并关闭弹层，按 Enter、Escape 或点击弹层外部同样可以关闭。
 
 ```rust
-use chrono::NaiveTime;
+use jiff::civil;
 
 let date_time_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .time_precision(TimePrecision::Minute) // 或 TimePrecision::Second
-        .default_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+        .default_time(civil::time(9, 0, 0, 0))
 });
 
 DatePicker::new(&date_time_picker)
@@ -95,10 +95,10 @@ DatePickerState::new(window, cx)
 用 `date_time` 和 `set_date_time` 读写完整的值；`date` 和 `set_date` 仍然只处理日期部分，并保留当前时间。
 
 ```rust
-use chrono::Local;
+use jiff::ZonedDateTime;
 
 date_time_picker.update(cx, |state, cx| {
-    state.set_date_time(Local::now().naive_local(), window, cx);
+    state.set_date_time(ZonedDateTime::now().datetime(), window, cx);
 });
 
 if let DateTime::Single(Some(at)) = date_time_picker.read(cx).date_time() {
@@ -194,15 +194,15 @@ DatePicker::new(&date_picker)
 ### 禁用日期区间
 
 ```rust
-use chrono::{Local, Days};
+use jiff::{ToSpan as _, ZonedDateTime};
 
-let now = Local::now().naive_local().date();
+let now = ZonedDateTime::now().date();
 
 let date_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::range(
             Some(now),
-            now.checked_add_days(Days::new(7)),
+            now.checked_add(7.days()).ok(),
         ))
 });
 
@@ -216,7 +216,7 @@ let date_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::interval(
             Some(now),
-            now.checked_add_days(Days::new(5))
+            now.checked_add(5.days()).ok()
         ))
 });
 
@@ -238,7 +238,7 @@ DatePicker::new(&date_picker)
 let date_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::custom(|date| {
-            date.weekday() == chrono::Weekday::Mon
+            date.weekday() == jiff::civil::Weekday::Monday
         }))
 });
 ```
@@ -250,11 +250,9 @@ let date_picker = cx.new(|cx| {
 `range` 参数使用**半开区间** `(start, end)`，`end` **不包含**在内。若要包含当前年份，传入 `(1900, current_year + 1)`。
 
 ```rust
-use chrono::Datelike;
-
 // 生日选择器：允许选择 1900 年到当前年（含）
 let birthday_picker = cx.new(|cx| {
-    let current_year = chrono::Local::now().year();
+    let current_year = i32::from(jiff::ZonedDateTime::now().year());
     let mut picker = DatePickerState::new(window, cx)
         .date_format("%Y-%m-%d");
     picker.set_year_range((1900, current_year + 1), window, cx);
@@ -273,20 +271,22 @@ DatePicker::new(&birthday_picker)
 ### 单日期预设
 
 ```rust
-use chrono::{Utc, Duration};
+use jiff::{ToSpan as _, ZonedDateTime};
+
+let today = ZonedDateTime::now().date();
 
 let presets = vec![
     DateRangePreset::single(
         "Yesterday",
-        (Utc::now() - Duration::days(1)).naive_local().date(),
+        today - 1.day(),
     ),
     DateRangePreset::single(
         "Last Week",
-        (Utc::now() - Duration::weeks(1)).naive_local().date(),
+        today - 1.week(),
     ),
     DateRangePreset::single(
         "Last Month",
-        (Utc::now() - Duration::days(30)).naive_local().date(),
+        today - 30.days(),
     ),
 ];
 
@@ -300,18 +300,18 @@ DatePicker::new(&date_picker)
 let range_presets = vec![
     DateRangePreset::range(
         "Last 7 Days",
-        (Utc::now() - Duration::days(7)).naive_local().date(),
-        Utc::now().naive_local().date(),
+        today - 7.days(),
+        today,
     ),
     DateRangePreset::range(
         "Last 30 Days",
-        (Utc::now() - Duration::days(30)).naive_local().date(),
-        Utc::now().naive_local().date(),
+        today - 30.days(),
+        today,
     ),
     DateRangePreset::range(
         "Last 90 Days",
-        (Utc::now() - Duration::days(90)).naive_local().date(),
-        Utc::now().naive_local().date(),
+        today - 90.days(),
+        today,
     ),
 ];
 
@@ -362,12 +362,12 @@ DatePicker::new(&date_picker)
 ### 仅工作日可选
 
 ```rust
-use chrono::Weekday;
+use jiff::civil::Weekday;
 
 let business_days_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::custom(|date| {
-            matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
+            matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday)
         }))
 });
 
@@ -378,8 +378,6 @@ DatePicker::new(&business_days_picker)
 ### 限制最大范围
 
 ```rust
-use chrono::Days;
-
 let max_30_days_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
 cx.subscribe(&max_30_days_picker, |view, picker, event, _| {
@@ -388,7 +386,7 @@ cx.subscribe(&max_30_days_picker, |view, picker, event, _| {
             let Date::Range(Some(start), Some(end)) = value.date() else {
                 return;
             };
-            let duration = end.signed_duration_since(start).num_days();
+            let duration = (end - start).get_days();
             if duration > 30 {
                 picker.update(cx, |state, cx| {
                     state.set_date(Date::Range(Some(start), None), window, cx);
@@ -406,20 +404,19 @@ DatePicker::new(&max_30_days_picker)
 ### 季度预设
 
 ```rust
-use chrono::{NaiveDate, Datelike};
+use jiff::{ZonedDateTime, civil};
 
-fn quarter_start(year: i32, quarter: u32) -> NaiveDate {
+fn quarter_start(year: i16, quarter: i8) -> civil::Date {
     let month = (quarter - 1) * 3 + 1;
-    NaiveDate::from_ymd_opt(year, month, 1).unwrap()
+    civil::date(year, month, 1)
 }
 
-fn quarter_end(year: i32, quarter: u32) -> NaiveDate {
+fn quarter_end(year: i16, quarter: i8) -> civil::Date {
     let month = quarter * 3;
-    let start = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
-    NaiveDate::from_ymd_opt(year, month, start.days_in_month()).unwrap()
+    civil::date(year, month, 1).last_of_month()
 }
 
-let year = Local::now().year();
+let year = ZonedDateTime::now().year();
 let quarterly_presets = vec![
     DateRangePreset::range("Q1", quarter_start(year, 1), quarter_end(year, 1)),
     DateRangePreset::range("Q2", quarter_start(year, 2), quarter_end(year, 2)),
@@ -440,7 +437,7 @@ let event_date = cx.new(|cx| {
     let mut picker = DatePickerState::new(window, cx)
         .date_format("%B %d, %Y")
         .disabled_matcher(calendar::Matcher::custom(|date| {
-            *date < Local::now().naive_local().date()
+            *date < ZonedDateTime::now().date()
         }));
     picker
 });

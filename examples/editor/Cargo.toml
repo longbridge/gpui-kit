@@ -8,8 +8,8 @@ edition.workspace = true
 gpui-kit = { workspace = true, features = ["tree-sitter-languages"] }
 gpui-component-story = { path = "../../crates/story" }
 autocorrect = "2.14.2"
-chrono = "0.4"
 color-lsp = "0.2.0"
+jiff = "1.0"
 lsp-types.workspace = true
 serde_json.workspace = true
 smol.workspace = true

@@ -1035,7 +1035,7 @@ fn mark_as_gui_program(bytes: &mut [u8]) -> Result<()> {
 fn write_zip(tree: &Tree, file: fs::File) -> io::Result<()> {
     let too_large = || io::Error::other("the bundle is too large for a zip archive");
     let mut out = io::BufWriter::new(file);
-    let (time, date) = dos_time(chrono::Local::now().naive_local());
+    let (time, date) = dos_time(jiff::ZonedDateTime::now().datetime());
     let mut central = Vec::new();
     let mut offset = 0u32;
 
@@ -1121,14 +1121,23 @@ fn write_zip(tree: &Tree, file: fs::File) -> io::Result<()> {
 }
 
 /// A zip entry's MS-DOS time and date, which cannot say anything before 1980.
-fn dos_time(time: chrono::NaiveDateTime) -> (u16, u16) {
-    use chrono::{Datelike as _, Timelike as _};
+fn dos_time(time: jiff::civil::DateTime) -> (u16, u16) {
     if time.year() < 1980 {
         return (0, (1 << 5) | 1);
     }
+    let (hour, minute, second) = (
+        time.hour() as u32,
+        time.minute() as u32,
+        time.second() as u32,
+    );
+    let (year, month, day) = (
+        (time.year() - 1980) as u32,
+        time.month() as u32,
+        time.day() as u32,
+    );
     (
-        ((time.hour() << 11) | (time.minute() << 5) | (time.second() / 2)) as u16,
-        ((((time.year() - 1980) as u32) << 9) | (time.month() << 5) | time.day()) as u16,
+        ((hour << 11) | (minute << 5) | (second / 2)) as u16,
+        ((year << 9) | (month << 5) | day) as u16,
     )
 }
 
