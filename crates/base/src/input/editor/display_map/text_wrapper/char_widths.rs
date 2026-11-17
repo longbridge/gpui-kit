@@ -37,8 +37,15 @@ const RUN_CHARS: usize = 8;
 /// would round the positions near its end by more than `ADVANCE_TOLERANCE` allows.
 const BATCH_CHARS: usize = 16;
 
-/// Smallest difference, in pixels, between a summed and a shaped line width that fails the check.
+/// Largest difference, in pixels, between a summed and a shaped line width that passes the check.
 const LINE_TOLERANCE: f32 = 0.01;
+
+/// Share of a line's width that the check also allows, for long lines. The shaper adds glyph
+/// positions in `f32`, whose rounding grows with the width: at about 1000 px it passes
+/// `LINE_TOLERANCE`. This share keeps the allowance near a few `f32` steps at any width, so it
+/// absorbs that rounding and stays far below one column for lines of normal length. Only a
+/// line tens of thousands of columns long allows several pixels.
+const LINE_TOLERANCE_RATIO: f32 = 1e-5;
 
 /// Advances of single characters in one font, and the lines already checked against the shaper.
 #[derive(Default)]
@@ -251,6 +258,11 @@ impl CharWidths {
     /// Their widths come from the monospace table, which is already checked against the shaper,
     /// and from tab stop arithmetic. Only the arithmetic is new, so the first such line is
     /// compared with the shaper and its result stands for the rest.
+    ///
+    /// That holds only while this arithmetic and the shaped path's tab expansion end every tab
+    /// on the same stop, which both get from [`next_tab_stop`]. A change to either must keep
+    /// them on that one function, or later lines can measure a stop off without a check
+    /// catching it.
     fn passes_ascii_tabs_check(
         &mut self,
         line: &str,
@@ -293,7 +305,7 @@ impl CharWidths {
     ) -> bool {
         let summed = f32::from(self.view(tab_stop).width(0..line.len()));
         let actual = f32::from(shaped(line));
-        (summed - actual).abs() <= LINE_TOLERANCE.max(actual * 1e-5)
+        (summed - actual).abs() <= LINE_TOLERANCE.max(actual * LINE_TOLERANCE_RATIO)
     }
 
     fn view(&self, tab_stop: Pixels) -> LineWidths<'_> {

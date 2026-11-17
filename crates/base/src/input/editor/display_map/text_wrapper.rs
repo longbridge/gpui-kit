@@ -660,12 +660,16 @@ impl TextWrapper {
         }
         match self.stale_rows(width) {
             Some(stale_rows) => {
-                for rows in stale_rows {
-                    let range =
-                        text.line_start_offset(rows.start)..text.line_end_offset(rows.end - 1);
-                    let new_text = Rope::from(text.slice(range.clone()));
-                    self.update_wrapped(&text, &range, &new_text, Reuse::Measurements, cx);
-                }
+                let edits: Vec<(Range<usize>, Rope)> = stale_rows
+                    .into_iter()
+                    .map(|rows| {
+                        let range =
+                            text.line_start_offset(rows.start)..text.line_end_offset(rows.end - 1);
+                        let new_text = Rope::from(text.slice(range.clone()));
+                        (range, new_text)
+                    })
+                    .collect();
+                self.update_wrapped_ranges(&text, &edits, Reuse::Measurements, cx);
             }
             None => self.update_wrapped(&text, &(0..text.len()), &text, Reuse::Widths, cx),
         }
@@ -772,6 +776,23 @@ impl TextWrapper {
         reuse: Reuse,
         cx: &mut App,
     ) {
+        self.update_wrapped_ranges(
+            changed_text,
+            &[(range.clone(), new_text.clone())],
+            reuse,
+            cx,
+        );
+    }
+
+    /// [`Self::update_wrapped`] for several disjoint edits in order, sharing one setup.
+    fn update_wrapped_ranges(
+        &mut self,
+        changed_text: &Rope,
+        edits: &[(Range<usize>, Rope)],
+        reuse: Reuse,
+        cx: &mut App,
+    ) {
+        debug_assert!(reuse != Reuse::Widths || edits.len() == 1);
         let mut line_wrapper = cx
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
@@ -811,9 +832,16 @@ impl TextWrapper {
         };
         // Only wrapping measures text, so an unwrapped editor never pays for the detection.
         let monospace = if self.wrap_width.is_some() {
-            self.monospace
-                .get_or_insert_with(|| MonospaceWidths::detect(glyph_starts, shaped).map(Rc::new))
-                .clone()
+            if self.monospace.is_none() {
+                self.monospace = Some(MonospaceWidths::cached(
+                    &font,
+                    font_size,
+                    glyph_starts,
+                    shaped,
+                    cx,
+                ));
+            }
+            self.monospace.clone().flatten()
         } else {
             None
         };
@@ -821,88 +849,79 @@ impl TextWrapper {
         let mut char_widths = std::mem::take(&mut self.char_widths);
         #[cfg(test)]
         let fast_non_ascii = self.fast_non_ascii;
-        self.update_lines(
-            changed_text,
-            range,
-            new_text,
-            reuse == Reuse::Widths,
-            &mut |line_str, wrap_width, line_start| {
-                let mut fragments = Vec::new();
-                let mut offset = 0;
-                let first = metrics.partition_point(|(r, _)| r.end <= line_start);
-                for (range, width) in &metrics[first..] {
-                    if range.start >= line_start + line_str.len() {
-                        break;
-                    }
-                    if range.start < line_start || range.end > line_start + line_str.len() {
-                        continue;
-                    }
-                    let range = range.start - line_start..range.end - line_start;
-                    if !line_str.is_char_boundary(range.start)
-                        || !line_str.is_char_boundary(range.end)
-                    {
-                        continue;
-                    }
-                    if offset < range.start {
-                        fragments.push(LineFragment::text(&line_str[offset..range.start]));
-                    }
-                    fragments.push(LineFragment::element(*width, range.len()));
-                    offset = range.end;
+        let mut wrap_line = |line_str: &str, wrap_width: Pixels, line_start: usize| {
+            let mut fragments = Vec::new();
+            let mut offset = 0;
+            let first = metrics.partition_point(|(r, _)| r.end <= line_start);
+            for (range, width) in &metrics[first..] {
+                if range.start >= line_start + line_str.len() {
+                    break;
                 }
-                if fragments.is_empty() {
-                    if let Some(monospace) = &monospace
-                        && is_printable_ascii(line_str)
-                    {
-                        return monospace_wrap(
-                            line_str,
-                            wrap_width,
-                            wrapping_indent,
-                            &mut scratch,
-                            monospace,
-                            cached,
-                        );
-                    }
-                    #[cfg(test)]
-                    let fast = fast_non_ascii;
-                    #[cfg(not(test))]
-                    let fast = true;
-                    if fast
-                        && let Some(monospace) = &monospace
-                        && let Some(widths) = char_widths.line_widths(
-                            line_str,
-                            monospace,
-                            tab_stop,
-                            &mut |text: &str| shaped(text),
-                            &mut |text: &str| glyph_starts(text),
-                        )
-                    {
-                        return fast_wrap(
-                            line_str,
-                            wrap_width,
-                            wrapping_indent,
-                            &mut scratch,
-                            &widths,
-                        );
-                    }
-                    return measured_wrap(
+                if range.start < line_start || range.end > line_start + line_str.len() {
+                    continue;
+                }
+                let range = range.start - line_start..range.end - line_start;
+                if !line_str.is_char_boundary(range.start) || !line_str.is_char_boundary(range.end)
+                {
+                    continue;
+                }
+                if offset < range.start {
+                    fragments.push(LineFragment::text(&line_str[offset..range.start]));
+                }
+                fragments.push(LineFragment::element(*width, range.len()));
+                offset = range.end;
+            }
+            if fragments.is_empty() {
+                if let Some(monospace) = &monospace
+                    && is_printable_ascii(line_str)
+                {
+                    return monospace_wrap(
                         line_str,
                         wrap_width,
                         wrapping_indent,
                         &mut scratch,
+                        monospace,
                         cached,
                     );
                 }
-                if offset < line_str.len() {
-                    fragments.push(LineFragment::text(&line_str[offset..]));
+                #[cfg(test)]
+                let fast = fast_non_ascii;
+                #[cfg(not(test))]
+                let fast = true;
+                if fast
+                    && let Some(monospace) = &monospace
+                    && let Some(widths) = char_widths.line_widths(
+                        line_str,
+                        monospace,
+                        tab_stop,
+                        &mut |text: &str| shaped(text),
+                        &mut |text: &str| glyph_starts(text),
+                    )
+                {
+                    return fast_wrap(line_str, wrap_width, wrapping_indent, &mut scratch, &widths);
                 }
-                // Inline element widths retain the original wrapper; no safe interval is inferred.
-                MeasuredWrap::uncached(
-                    line_wrapper
-                        .wrap_line(&fragments, wrap_width, gpui::IndentAdjustment::SameIndent)
-                        .collect(),
-                )
-            },
-        );
+                return measured_wrap(line_str, wrap_width, wrapping_indent, &mut scratch, cached);
+            }
+            if offset < line_str.len() {
+                fragments.push(LineFragment::text(&line_str[offset..]));
+            }
+            // Inline element widths retain the original wrapper; no safe interval is inferred.
+            MeasuredWrap::uncached(
+                line_wrapper
+                    .wrap_line(&fragments, wrap_width, gpui::IndentAdjustment::SameIndent)
+                    .collect(),
+            )
+        };
+        for (range, new_text) in edits {
+            self.update_lines(
+                changed_text,
+                range,
+                new_text,
+                reuse == Reuse::Widths,
+                &mut wrap_line,
+            );
+        }
+        drop(wrap_line);
         scratch.release_excess();
         self.scratch = scratch;
         char_widths.release_excess();

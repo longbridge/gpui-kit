@@ -6,7 +6,9 @@
 //! shaped run. A lookup must reproduce the shaped widths bit for bit, or a break could move, so a
 //! font is only used here after its shaped widths have been checked against the table.
 
-use gpui::{Pixels, px};
+use std::{collections::HashMap, rc::Rc};
+
+use gpui::{App, Font, Global, Pixels, px};
 
 #[cfg(test)]
 mod tests;
@@ -78,12 +80,38 @@ impl MonospaceWidths {
             .then_some(this)
     }
 
+    /// [`Self::detect`] for `font` at `font_size`, run once per application.
+    ///
+    /// Every soft wrapped editor measures with this, and a monospace font takes a few hundred
+    /// shaping calls to check, so editors in the same font share one result.
+    pub(super) fn cached(
+        font: &Font,
+        font_size: Pixels,
+        glyph_starts: impl FnMut(&str) -> Vec<Pixels>,
+        measure: impl FnMut(&str) -> Pixels,
+        cx: &mut App,
+    ) -> Option<Rc<Self>> {
+        let key = (font.clone(), f32::from(font_size).to_bits());
+        let cache = cx.default_global::<MonospaceCache>();
+        cache
+            .0
+            .entry(key)
+            .or_insert_with(|| Self::detect(glyph_starts, measure).map(Rc::new))
+            .clone()
+    }
+
     /// The width of `chars` printable ASCII characters, or `None` past the table, where the
     /// caller must shape instead.
     pub(super) fn width(&self, chars: usize) -> Option<Pixels> {
         self.widths.get(chars).copied()
     }
 }
+
+/// Results of [`MonospaceWidths::detect`] by font and font size bits.
+#[derive(Default)]
+struct MonospaceCache(HashMap<(Font, u32), Option<Rc<MonospaceWidths>>>);
+
+impl Global for MonospaceCache {}
 
 /// Printable ASCII is one grapheme per byte and is the only text measured by lookup.
 pub(super) fn is_printable_ascii(text: &str) -> bool {

@@ -4583,8 +4583,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx.notify();
     }
 
-    /// Update fold candidates from tree-sitter syntax tree (full extraction).
-    /// Used only on initial load or language changes.
     /// Replacing the whole text can change how many digits the line-number gutter shows, and so
     /// the wrap width the next layout picks. Adopting that width before the new text is wrapped
     /// saves wrapping all of it again at that layout.
@@ -4605,6 +4603,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             .prepare_wrap_width(wrap_width - (new_width - old_width));
     }
 
+    /// Update fold candidates from tree-sitter syntax tree (full extraction).
+    /// Used only on initial load or language changes.
     fn update_fold_candidates(&mut self) {
         if !self.mode.is_folding() {
             return;
