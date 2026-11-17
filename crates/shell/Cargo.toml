@@ -73,8 +73,8 @@ rquickjs-jit = { package = "quickjs-jit-runtime", version = "=0.14.1", features 
 # Standard modules are vendored and use the same QuickJS VM as the bindings.
 quickjs-jit-stdlib = { version = "=0.14.1", default-features = false, features = ["buffer", "crypto", "path", "url", "zlib"], optional = true }
 # The date type `gpui_base::Date` is built from, for the calendar binding. Same
-# version as `gpui-base`'s, because the two exchange `NaiveDate` values.
-chrono = "0.4.38"
+# version as `gpui-base`'s, because the two exchange `civil::Date` values.
+jiff = "1.0"
 cap-std = "4.0.3"
 async-channel = "2.5"
 fs2 = "0.4"

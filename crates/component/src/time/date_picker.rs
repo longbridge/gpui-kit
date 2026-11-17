@@ -1,12 +1,12 @@
 use std::rc::Rc;
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use gpui::{
     App, AppContext, Bounds, ClickEvent, Context, ElementId, Empty, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
     ParentElement as _, Pixels, Render, RenderOnce, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Subscription, Window, deferred, div, prelude::FluentBuilder as _, px,
 };
+use jiff::civil::{self, Weekday};
 use rust_i18n::t;
 
 use crate::ThemeStyled as _;
@@ -50,18 +50,18 @@ pub enum DatePickerEvent {
 /// [`DatePickerState::default_time`], `00:00` unless configured.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateTime {
-    Single(Option<NaiveDateTime>),
-    Range(Option<NaiveDateTime>, Option<NaiveDateTime>),
+    Single(Option<civil::DateTime>),
+    Range(Option<civil::DateTime>, Option<civil::DateTime>),
 }
 
-impl From<NaiveDateTime> for DateTime {
-    fn from(value: NaiveDateTime) -> Self {
+impl From<civil::DateTime> for DateTime {
+    fn from(value: civil::DateTime) -> Self {
         Self::Single(Some(value))
     }
 }
 
-impl From<(NaiveDateTime, NaiveDateTime)> for DateTime {
-    fn from((start, end): (NaiveDateTime, NaiveDateTime)) -> Self {
+impl From<(civil::DateTime, civil::DateTime)> for DateTime {
+    fn from((start, end): (civil::DateTime, civil::DateTime)) -> Self {
         Self::Range(Some(start), Some(end))
     }
 }
@@ -75,13 +75,13 @@ impl DateTime {
         self.date().is_complete()
     }
 
-    pub fn start(&self) -> Option<NaiveDateTime> {
+    pub fn start(&self) -> Option<civil::DateTime> {
         match self {
             Self::Single(v) | Self::Range(v, _) => *v,
         }
     }
 
-    pub fn end(&self) -> Option<NaiveDateTime> {
+    pub fn end(&self) -> Option<civil::DateTime> {
         match self {
             Self::Range(_, v) => *v,
             Self::Single(_) => None,
@@ -99,9 +99,9 @@ impl DateTime {
     /// Format a complete value, joining a range with ` - `.
     pub fn format(&self, format: &str) -> Option<SharedString> {
         match self {
-            Self::Single(Some(v)) => Some(v.format(format).to_string().into()),
+            Self::Single(Some(v)) => Some(v.strftime(format).to_string().into()),
             Self::Range(Some(a), Some(b)) => {
-                Some(format!("{} - {}", a.format(format), b.format(format)).into())
+                Some(format!("{} - {}", a.strftime(format), b.strftime(format)).into())
             }
             _ => None,
         }
@@ -111,8 +111,8 @@ impl DateTime {
 /// Preset value for DateRangePreset.
 #[derive(Clone)]
 pub enum DateRangePresetValue {
-    Single(NaiveDate),
-    Range(NaiveDate, NaiveDate),
+    Single(civil::Date),
+    Range(civil::Date, civil::Date),
     DateTime(DateTime),
 }
 
@@ -125,14 +125,14 @@ pub struct DateRangePreset {
 
 impl DateRangePreset {
     /// Creates a new DateRangePreset with a date.
-    pub fn single(label: impl Into<SharedString>, date: NaiveDate) -> Self {
+    pub fn single(label: impl Into<SharedString>, date: civil::Date) -> Self {
         DateRangePreset {
             label: label.into(),
             value: DateRangePresetValue::Single(date),
         }
     }
     /// Creates a new DateRangePreset with a range of dates.
-    pub fn range(label: impl Into<SharedString>, start: NaiveDate, end: NaiveDate) -> Self {
+    pub fn range(label: impl Into<SharedString>, start: civil::Date, end: civil::Date) -> Self {
         DateRangePreset {
             label: label.into(),
             value: DateRangePresetValue::Range(start, end),
@@ -161,11 +161,11 @@ pub struct DatePickerState {
     /// `None` edits dates only.
     time_precision: Option<TimePrecision>,
     hour_cycle: HourCycle,
-    default_time: NaiveTime,
-    start_time: NaiveTime,
+    default_time: civil::Time,
+    start_time: civil::Time,
     /// The time of a range's end. Only [`DatePickerState::set_date_time`]
     /// sets it, since a range picker edits dates only.
-    end_time: NaiveTime,
+    end_time: civil::Time,
     time_field: Entity<TimeFieldState>,
     time_field_pushed: bool,
     _subscriptions: Vec<Subscription>,
@@ -238,13 +238,13 @@ impl DatePickerState {
             disabled_matcher: None,
             time_precision: None,
             hour_cycle: HourCycle::default(),
-            default_time: NaiveTime::MIN,
-            start_time: NaiveTime::MIN,
-            end_time: NaiveTime::MIN,
+            default_time: civil::Time::midnight(),
+            start_time: civil::Time::midnight(),
+            end_time: civil::Time::midnight(),
             time_field,
             time_field_pushed: false,
             _subscriptions,
-            first_day_of_week: Weekday::Sun,
+            first_day_of_week: Weekday::Sunday,
             bounds: Bounds::default(),
         }
     }
@@ -283,7 +283,7 @@ impl DatePickerState {
     }
 
     /// Set the time given to a date before the user edits it, default: `00:00`.
-    pub fn default_time(mut self, time: NaiveTime) -> Self {
+    pub fn default_time(mut self, time: civil::Time) -> Self {
         let time = self.truncate_time(time);
         self.default_time = time;
         self.start_time = time;
@@ -312,10 +312,10 @@ impl DatePickerState {
     /// Get the value, combining the date with its time of day.
     pub fn date_time(&self) -> DateTime {
         match self.date {
-            Date::Single(date) => DateTime::Single(date.map(|d| d.and_time(self.start_time))),
+            Date::Single(date) => DateTime::Single(date.map(|d| d.to_datetime(self.start_time))),
             Date::Range(start, end) => DateTime::Range(
-                start.map(|d| d.and_time(self.start_time)),
-                end.map(|d| d.and_time(self.end_time)),
+                start.map(|d| d.to_datetime(self.start_time)),
+                end.map(|d| d.to_datetime(self.end_time)),
             ),
         }
     }
@@ -360,15 +360,15 @@ impl DatePickerState {
         self.time_precision.filter(|_| self.date.is_single())
     }
 
-    fn truncate_time(&self, time: NaiveTime) -> NaiveTime {
+    fn truncate_time(&self, time: civil::Time) -> civil::Time {
         self.time_precision
             .map_or(time, |precision| precision.truncate(time))
     }
 
     fn set_times(
         &mut self,
-        start: NaiveTime,
-        end: NaiveTime,
+        start: civil::Time,
+        end: civil::Time,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

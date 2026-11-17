@@ -575,7 +575,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
     // button per day — what it would have done inside the renderer anyway,
     // minus forty-two boundary crossings.
     //
-    // Dates cross as `"YYYY-MM-DD"`: `NaiveDate`'s own `Display`, sortable as
+    // Dates cross as `"YYYY-MM-DD"`: `civil::Date`'s own `Display`, sortable as
     // text, and readable by `new Date(s)` — so weekday names and localized
     // month labels are the script's, without this boundary inventing a date
     // type.
@@ -1669,11 +1669,11 @@ pub(super) fn date_to_parts(date: gpui_base::Date) -> Vec<Option<String>> {
 
 /// The same slots, read back. Two of them means a range was meant.
 fn date_from_parts(ctx: &Ctx<'_>, parts: &[Option<String>]) -> JsResult<gpui_base::Date> {
-    let day = |slot: Option<&String>| -> JsResult<Option<chrono::NaiveDate>> {
+    let day = |slot: Option<&String>| -> JsResult<Option<jiff::civil::Date>> {
         let Some(text) = slot else {
             return Ok(None);
         };
-        chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        jiff::civil::Date::strptime("%Y-%m-%d", text)
             .map(Some)
             .map_err(|error| {
                 js_error::type_error(

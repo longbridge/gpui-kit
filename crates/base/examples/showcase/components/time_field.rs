@@ -37,7 +37,7 @@ impl BaseShowcase {
             .child(
                 div()
                     .text_color(super::example_rgb(0x737373))
-                    .child(format!("Selected {}", value.format("%H:%M:%S"))),
+                    .child(format!("Selected {}", value.strftime("%H:%M:%S"))),
             )
     }
 }
