@@ -12,7 +12,7 @@ mod selection;
 mod state;
 
 pub use conflict::{DiffConflict, DiffConflictResolution};
-pub use decoration::{DiffDecoration, DiffGutterMarker};
+pub use decoration::{DiffDecoration, DiffGutterMarker, DiffSpanHighlight};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::{DiffParseError, DiffParseOptions};
 pub use presentation::DiffInlineUnit;
@@ -40,7 +40,7 @@ use crate::{
 };
 use actions::*;
 use conflict::ConflictPart;
-use decoration::{Decorations, GutterMarkers};
+use decoration::{Decorations, GutterMarkers, SpanHighlights};
 use presentation::FilePresentation;
 use selection::{CodeText, SelectionLayer};
 use state::{DisplayRow, FoldExpansion, LayoutKey, SelectedLines};
@@ -236,6 +236,7 @@ pub struct Diff {
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
     decorations: Rc<Decorations>,
+    span_highlights: Rc<SpanHighlights>,
     gutter_markers: Rc<GutterMarkers>,
     gutter_marker_content: Option<MarkerRenderer>,
     on_add_annotation: Option<RangeHandler>,
@@ -269,6 +270,7 @@ impl Diff {
             annotations: Rc::default(),
             annotation_content: None,
             decorations: Rc::default(),
+            span_highlights: Rc::default(),
             gutter_markers: Rc::default(),
             gutter_marker_content: None,
             on_add_annotation: None,
@@ -366,6 +368,15 @@ impl Diff {
     /// references, without changing the selection.
     pub fn decorations(mut self, decorations: impl IntoIterator<Item = DiffDecoration>) -> Self {
         self.decorations = Rc::new(Decorations::new(decorations));
+        self
+    }
+    /// Emphasizes character spans inside lines, such as search matches, over
+    /// decorations and inline emphasis.
+    pub fn span_highlights(
+        mut self,
+        highlights: impl IntoIterator<Item = DiffSpanHighlight>,
+    ) -> Self {
+        self.span_highlights = Rc::new(SpanHighlights::new(highlights));
         self
     }
     /// Supplies markers for the marker lane, shown once both markers and
@@ -610,6 +621,7 @@ fn render_diff(
         annotations: props.annotations.clone(),
         annotation_content: props.annotation_content,
         decorations: props.decorations,
+        span_highlights: props.span_highlights,
         gutter_markers: props.gutter_markers,
         gutter_marker_content: props.gutter_marker_content.filter(|_| marker_lane),
         lane_width,
@@ -861,6 +873,7 @@ struct CodePresentation {
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
     decorations: Rc<Decorations>,
+    span_highlights: Rc<SpanHighlights>,
     gutter_markers: Rc<GutterMarkers>,
     /// Set only while the marker lane is shown.
     gutter_marker_content: Option<MarkerRenderer>,
@@ -1634,6 +1647,28 @@ fn line_highlights(
                 ..Default::default()
             },
         ));
+    }
+    // Supplied last so a span's fill and text color win over syntax, inline
+    // emphasis and the selected-line fill; a live text selection is layered
+    // later still, in CodeText.
+    if let Some(spans) = code.span_highlights.at(&code.position(file, side, ix)) {
+        for span in spans {
+            let range = line.display_range(span.span());
+            if range.is_empty() {
+                continue;
+            }
+            highlights.push((
+                range,
+                HighlightStyle {
+                    background_color: Some(
+                        span.background()
+                            .unwrap_or_else(|| cx.theme().warning.opacity(0.5)),
+                    ),
+                    color: span.foreground(),
+                    ..Default::default()
+                },
+            ));
+        }
     }
     highlights
 }
