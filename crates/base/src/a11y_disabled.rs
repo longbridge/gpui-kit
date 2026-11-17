@@ -60,6 +60,7 @@ impl<E: Element<PrepaintState = Option<gpui::Hitbox>> + InteractiveElement> A11y
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl<E: Element> IntoElement for A11yDisabled<E> {
     type Element = Self;
 

@@ -102,7 +102,10 @@ gpui-kit = "{{gpui_kit_version}}"
 Replace `src/main.rs` with this complete "Hello, World!" application:
 
 ```rust
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{
+    button::{Button, ButtonVariants},
+    label::Label,
+};
 use gpui_kit::*;
 
 struct HelloWorld;
@@ -116,7 +119,7 @@ impl Render for HelloWorld {
             .items_center()
             .justify_center()
             .gap_2()
-            .child("Hello, World!")
+            .child(Label::new("Hello, World!"))
             .child(
                 Button::new("hello")
                     .primary()

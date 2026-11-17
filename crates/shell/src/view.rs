@@ -476,6 +476,7 @@ struct NestingFrame {
     element: AnyElement,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for NestingFrame {
     type Element = Self;
 

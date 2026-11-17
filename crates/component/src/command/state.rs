@@ -40,6 +40,7 @@ pub(crate) struct CommandModel {
     pub(crate) entries: Vec<CommandEntry>,
     pub(crate) searchable: bool,
     pub(crate) filterable: bool,
+    pub(crate) highlight_matches: bool,
     pub(crate) on_query: Option<Rc<OnQuery>>,
     pub(crate) on_select: Option<Rc<OnIndex>>,
     pub(crate) on_confirm: Option<Rc<OnIndex>>,
@@ -52,6 +53,7 @@ impl Default for CommandModel {
             entries: Vec::new(),
             searchable: true,
             filterable: true,
+            highlight_matches: false,
             on_query: None,
             on_select: None,
             on_confirm: None,
@@ -335,6 +337,16 @@ impl CommandState {
             true
         } else {
             item.matches(query)
+        }
+    }
+
+    /// The query the rows highlight in their labels: the one the palette
+    /// filtered by when `highlight_matches` is on, or none.
+    fn highlighted_query(&self) -> &str {
+        if self.model.highlight_matches && self.model.searchable && self.model.filterable {
+            self.applied_query.trim()
+        } else {
+            ""
         }
     }
 
@@ -841,7 +853,13 @@ impl CommandState {
                 .when_some(item.icon.clone(), |this, icon| {
                     this.child(icon.size_4().text_color(icon_color))
                 })
-                .when_some(item.label_text().cloned(), |this, label| this.child(label))
+                .when_some(item.label_text().cloned(), |this, label| {
+                    this.child(crate::label::highlight_matches(
+                        label,
+                        self.highlighted_query(),
+                        cx,
+                    ))
+                })
                 .into_any_element(),
         };
 
@@ -1590,6 +1608,56 @@ mod tests {
                     0,
                 );
                 assert!(matches!(state.rows.first(), Some(CommandRow::Heading(_))));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn rows_highlight_the_query_the_palette_filtered_by(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+
+        cx.update(|window, cx| {
+            let plain = cx.new(|cx| command_state(window, cx, suggestion_entries()));
+            plain.update(cx, |state, cx| {
+                state.set_query("cal", window, cx);
+                assert_eq!(state.highlighted_query(), "");
+            });
+
+            let state = cx.new(|cx| {
+                let mut state = CommandState::new(window, cx);
+                state.install_model(
+                    CommandModel {
+                        entries: suggestion_entries(),
+                        highlight_matches: true,
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                state
+            });
+            state.update(cx, |state, cx| {
+                assert_eq!(state.highlighted_query(), "");
+                state.set_query(" cal ", window, cx);
+                assert_eq!(state.highlighted_query(), "cal");
+            });
+
+            let host_filtered = cx.new(|cx| {
+                let mut state = CommandState::new(window, cx);
+                state.install_model(
+                    CommandModel {
+                        entries: suggestion_entries(),
+                        filterable: false,
+                        highlight_matches: true,
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                state
+            });
+            host_filtered.update(cx, |state, cx| {
+                state.set_query("cal", window, cx);
+                assert_eq!(state.highlighted_query(), "");
             });
         });
     }

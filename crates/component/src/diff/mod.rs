@@ -12,7 +12,7 @@ mod selection;
 mod state;
 
 pub use conflict::{DiffConflict, DiffConflictResolution};
-pub use decoration::{DiffDecoration, DiffGutterMarker};
+pub use decoration::{DiffDecoration, DiffGutterMarker, DiffSpanHighlight};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::{DiffParseError, DiffParseOptions};
 pub use presentation::DiffInlineUnit;
@@ -40,7 +40,7 @@ use crate::{
 };
 use actions::*;
 use conflict::ConflictPart;
-use decoration::{Decorations, GutterMarkers};
+use decoration::{Decorations, GutterMarkers, SpanHighlights};
 use presentation::FilePresentation;
 use selection::{CodeText, SelectionLayer};
 use state::{DisplayRow, FoldExpansion, LayoutKey, SelectedLines};
@@ -236,6 +236,7 @@ pub struct Diff {
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
     decorations: Rc<Decorations>,
+    span_highlights: Rc<SpanHighlights>,
     gutter_markers: Rc<GutterMarkers>,
     gutter_marker_content: Option<MarkerRenderer>,
     on_add_annotation: Option<RangeHandler>,
@@ -269,6 +270,7 @@ impl Diff {
             annotations: Rc::default(),
             annotation_content: None,
             decorations: Rc::default(),
+            span_highlights: Rc::default(),
             gutter_markers: Rc::default(),
             gutter_marker_content: None,
             on_add_annotation: None,
@@ -318,8 +320,9 @@ impl Diff {
         self
     }
     /// Gives the original column this share of the width in split mode,
-    /// clamped to 0.1..=0.9. Default is 0.5. Without soft wrap, neither column
-    /// gets narrower than its longest line.
+    /// clamped to 0.1..=0.9. Default is 0.5. Without soft wrap, each column
+    /// keeps its share and clips its long lines, and the code of both columns
+    /// scrolls horizontally together.
     pub fn split_ratio(mut self, ratio: f32) -> Self {
         self.split_ratio = if ratio.is_finite() {
             ratio.clamp(0.1, 0.9)
@@ -365,6 +368,15 @@ impl Diff {
     /// references, without changing the selection.
     pub fn decorations(mut self, decorations: impl IntoIterator<Item = DiffDecoration>) -> Self {
         self.decorations = Rc::new(Decorations::new(decorations));
+        self
+    }
+    /// Emphasizes character spans inside lines, such as search matches, over
+    /// decorations and inline emphasis.
+    pub fn span_highlights(
+        mut self,
+        highlights: impl IntoIterator<Item = DiffSpanHighlight>,
+    ) -> Self {
+        self.span_highlights = Rc::new(SpanHighlights::new(highlights));
         self
     }
     /// Supplies markers for the marker lane, shown once both markers and
@@ -570,16 +582,19 @@ fn render_diff(
     }
     state.sync_annotations(&props.annotations.items);
     let viewport_width = state.viewport().width;
-    let (content_width, column_width, modified_width) = if mode == DiffMode::Split {
-        // Each column keeps room for its longest line; the ratio divides
-        // whatever the viewport adds beyond that.
-        let half = state.content_width() / 2.;
-        let original = (viewport_width * props.split_ratio).max(half);
-        let modified = (viewport_width * (1. - props.split_ratio)).max(half);
-        (original + modified, original, modified)
+    let (content_width, column_width, modified_width, split_offset) = if mode == DiffMode::Split {
+        let original = viewport_width * props.split_ratio;
+        let modified = viewport_width * (1. - props.split_ratio);
+        let overflow = (state.content_width() / 2. - original.min(modified)).max(px(0.));
+        let offset = (!soft_wrap).then(|| {
+            (-state.horizontal_scroll().offset().x)
+                .max(px(0.))
+                .min(overflow)
+        });
+        (original + modified + overflow, original, modified, offset)
     } else {
         let width = state.content_width().max(viewport_width);
-        (width, width, width)
+        (width, width, width, None)
     };
     let code = Rc::new(CodePresentation {
         files: state.files().to_vec(),
@@ -588,6 +603,7 @@ fn render_diff(
         content_width,
         column_width,
         modified_width,
+        split_offset,
         font_size,
         row_height,
         gutter_width,
@@ -605,6 +621,7 @@ fn render_diff(
         annotations: props.annotations.clone(),
         annotation_content: props.annotation_content,
         decorations: props.decorations,
+        span_highlights: props.span_highlights,
         gutter_markers: props.gutter_markers,
         gutter_marker_content: props.gutter_marker_content.filter(|_| marker_lane),
         lane_width,
@@ -838,6 +855,7 @@ struct CodePresentation {
     column_width: Pixels,
     /// The modified column in split mode.
     modified_width: Pixels,
+    split_offset: Option<Pixels>,
     font_size: Pixels,
     row_height: Pixels,
     gutter_width: Pixels,
@@ -855,6 +873,7 @@ struct CodePresentation {
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
     decorations: Rc<Decorations>,
+    span_highlights: Rc<SpanHighlights>,
     gutter_markers: Rc<GutterMarkers>,
     /// Set only while the marker lane is shown.
     gutter_marker_content: Option<MarkerRenderer>,
@@ -989,6 +1008,9 @@ fn render_row(
                 h_flex()
                     .items_stretch()
                     .w_full()
+                    .when_some(code.split_offset, |this, offset| {
+                        this.relative().left(offset)
+                    })
                     .child(render_cell(
                         *file,
                         DiffSide::Original,
@@ -1284,9 +1306,23 @@ fn render_file_header(
     };
     let state = code.state.clone();
     let name = document.path().clone();
+    // The row lives inside the horizontally scrolled strip, but the header
+    // and the file's annotations must never leave the viewport: they take
+    // the viewport's width and cancel the strip's offset. Before the first
+    // paint the viewport is unknown; the row's own width stands in.
+    let scrolled = code.state.read(cx);
+    let pin = -scrolled.horizontal_scroll().offset().x;
+    let viewport = scrolled.viewport().width;
     v_flex()
         .id("file-header")
-        .w_full()
+        .test_support()
+        .map(|this| {
+            if viewport > px(0.) {
+                this.w(viewport).ml(pin)
+            } else {
+                this.w_full()
+            }
+        })
         .when(file > 0, |this| this.border_t_1())
         .border_b_1()
         .border_color(border)
@@ -1338,7 +1374,9 @@ fn file_annotations(
         .get(path)
         .cloned()
         .unwrap_or_default();
-    annotation_elements(&ixs, code, window, cx)
+    // No placement: file cards already sit inside the pinned header bar,
+    // which takes the viewport's width and cancels the offset itself.
+    annotation_elements(&ixs, code, None, window, cx)
 }
 
 /// Summarizes a file without source rows: binary, metadata-only or empty.
@@ -1610,6 +1648,28 @@ fn line_highlights(
             },
         ));
     }
+    // Supplied last so a span's fill and text color win over syntax, inline
+    // emphasis and the selected-line fill; a live text selection is layered
+    // later still, in CodeText.
+    if let Some(spans) = code.span_highlights.at(&code.position(file, side, ix)) {
+        for span in spans {
+            let range = line.display_range(span.span());
+            if range.is_empty() {
+                continue;
+            }
+            highlights.push((
+                range,
+                HighlightStyle {
+                    background_color: Some(
+                        span.background()
+                            .unwrap_or_else(|| cx.theme().warning.opacity(0.5)),
+                    ),
+                    color: span.foreground(),
+                    ..Default::default()
+                },
+            ));
+        }
+    }
     highlights
 }
 
@@ -1727,6 +1787,9 @@ fn code_line(
     } else {
         source_line.chunk_ranges().collect()
     };
+    let split_offset = code
+        .split_offset
+        .filter(|_| code.mode == DiffMode::Split && !document.is_single_column());
     // A block container gives wrapped text a definite width to break at.
     let text = div()
         .map(|this| {
@@ -1817,6 +1880,49 @@ fn code_line(
                 this.child(render(marker, window, cx))
             })
     });
+    let source = div()
+        .id("source")
+        .test_support()
+        .map(|this| {
+            if code.soft_wrap {
+                this.flex_1().min_w_0()
+            } else {
+                this.flex_shrink_0()
+            }
+        })
+        .when_some(split_offset, |this, offset| this.relative().left(-offset))
+        .role(gpui::accesskit::Role::Label)
+        .aria_label(source_line.text().clone())
+        .aria_description(
+            t!(
+                if changed {
+                    if side == DiffSide::Original {
+                        "Diff.RemovedLine"
+                    } else {
+                        "Diff.AddedLine"
+                    }
+                } else {
+                    "Diff.SourceLine"
+                },
+                side = side_label(text_side),
+                line = position.line()
+            )
+            .to_string(),
+        )
+        .when_some(code.on_line_click.clone(), |this, handler| {
+            let position = position.clone();
+            this.on_click(move |event, window, cx| {
+                // A drag selects text; only a stationary press is a click.
+                if let ClickEvent::Mouse(mouse) = event {
+                    let moved = mouse.up.position - mouse.down.position;
+                    if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
+                        return;
+                    }
+                }
+                handler(&position, event, window, cx)
+            })
+        })
+        .child(text);
     h_flex()
         .id("line-row")
         .group("diff-line")
@@ -1862,50 +1968,20 @@ fn code_line(
         })
         .children(marker_lane)
         .child(indicator)
-        .child(
-            div()
-                .id("source")
-                .test_support()
-                .map(|this| {
-                    if code.soft_wrap {
-                        this.flex_1().min_w_0()
-                    } else {
-                        this.flex_shrink_0()
-                    }
-                })
-                .role(gpui::accesskit::Role::Label)
-                .aria_label(source_line.text().clone())
-                .aria_description(
-                    t!(
-                        if changed {
-                            if side == DiffSide::Original {
-                                "Diff.RemovedLine"
-                            } else {
-                                "Diff.AddedLine"
-                            }
-                        } else {
-                            "Diff.SourceLine"
-                        },
-                        side = side_label(text_side),
-                        line = position.line()
-                    )
-                    .to_string(),
+        .map(|this| {
+            if split_offset.is_some() {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(source),
                 )
-                .when_some(code.on_line_click.clone(), |this, handler| {
-                    let position = position.clone();
-                    this.on_click(move |event, window, cx| {
-                        // A drag selects text; only a stationary press is a click.
-                        if let ClickEvent::Mouse(mouse) = event {
-                            let moved = mouse.up.position - mouse.down.position;
-                            if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
-                                return;
-                            }
-                        }
-                        handler(&position, event, window, cx)
-                    })
-                })
-                .child(text),
-        )
+            } else {
+                this.child(source)
+            }
+        })
         .children(add_button)
         .into_any_element()
 }
@@ -1961,12 +2037,39 @@ fn line_annotations(
         .get(&position)
         .cloned()
         .unwrap_or_default();
-    annotation_elements(&ixs, code, window, cx)
+    annotation_elements(&ixs, code, CardPlacement::resolve(code, cx), window, cx)
+}
+
+/// Keeps a line's annotation cards in the viewport, as [`HeaderPlacement`]
+/// does for the header bar: in unified mode the row strip is as wide as the
+/// longest line, and a full-width card would stretch with it and scroll
+/// sideways. `None` while nothing scrolls sideways, or before the viewport
+/// is measured; the card then fills its container.
+#[derive(Clone, Copy)]
+struct CardPlacement {
+    /// Cancels the horizontal strip's offset so the card stays in the viewport.
+    pin: Pixels,
+    viewport: Pixels,
+}
+
+impl CardPlacement {
+    fn resolve(code: &CodePresentation, cx: &App) -> Option<Self> {
+        if code.mode != DiffMode::Unified || code.soft_wrap {
+            return None;
+        }
+        let state = code.state.read(cx);
+        let viewport = state.viewport().width;
+        (viewport > px(0.)).then(|| Self {
+            pin: -state.horizontal_scroll().offset().x,
+            viewport,
+        })
+    }
 }
 
 fn annotation_elements(
     ixs: &[usize],
     code: &CodePresentation,
+    placement: Option<CardPlacement>,
     window: &mut Window,
     cx: &mut App,
 ) -> Vec<AnyElement> {
@@ -1978,7 +2081,10 @@ fn annotation_elements(
             let annotation = &code.annotations.items[*ix];
             div()
                 .id(annotation.id.clone())
-                .w_full()
+                .map(|this| match placement {
+                    Some(placement) => this.w(placement.viewport).ml(placement.pin),
+                    None => this.w_full(),
+                })
                 .px_3()
                 .py_3()
                 .border_t_1()

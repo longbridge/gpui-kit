@@ -8,7 +8,7 @@ use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Side, Sizable, StyledExt, ThemeStyled as _,
     badge::Badge,
     breadcrumb::{Breadcrumb, BreadcrumbItem},
-    button::Button,
+    button::{Button, ButtonVariants as _},
     h_flex,
     menu::DropdownMenu,
     separator::Separator,
@@ -602,36 +602,48 @@ impl Render for SidebarStory {
                         )),
                     )
                     .child(
-                        SidebarGroup::new("Projects").child(SidebarMenu::new().children(
-                            groups[1].iter().enumerate().map(|(ix, item)| {
-                                let is_active =
-                                    self.last_active_item == *item && self.active_subitem == None;
-                                SidebarMenuItem::new(item.label())
-                                    .icon(item.icon())
-                                    .active(is_active)
-                                    .disable(item.is_disabled())
-                                    .click_to_open(self.click_to_open_submenu)
-                                    .when(ix == 0 && self.show_dynamic_children, |this| {
-                                        this.default_open(true).children(vec![
-                                            SidebarMenuItem::new("Child A")
-                                                .on_click(cx.listener(|_, _, _, _| {})),
-                                            SidebarMenuItem::new("Child B")
-                                                .on_click(cx.listener(|_, _, _, _| {})),
-                                        ])
-                                    })
-                                    .when(ix == 0, |this| {
-                                        this.suffix(|_, _| {
-                                            Badge::new().dot().count(1).child(
-                                                div().p_0p5().child(Icon::new(IconName::Bell)),
-                                            )
-                                        })
-                                    })
-                                    .when(ix == 1, |this| {
-                                        this.suffix(|_, _| Icon::new(IconName::Settings2))
-                                    })
-                                    .on_click(cx.listener(item.handler()))
-                            }),
-                        )),
+                        SidebarGroup::new("Projects")
+                            .suffix(|_, _| {
+                                Button::new("new-project")
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(IconName::Plus)
+                                    .tooltip("New Project")
+                            })
+                            .child(
+                                SidebarMenu::new().children(groups[1].iter().enumerate().map(
+                                    |(ix, item)| {
+                                        let is_active = self.last_active_item == *item
+                                            && self.active_subitem == None;
+                                        SidebarMenuItem::new(item.label())
+                                            .icon(item.icon())
+                                            .active(is_active)
+                                            .disable(item.is_disabled())
+                                            .click_to_open(self.click_to_open_submenu)
+                                            .when(ix == 0 && self.show_dynamic_children, |this| {
+                                                this.default_open(true).children(vec![
+                                                    SidebarMenuItem::new("Child A")
+                                                        .on_click(cx.listener(|_, _, _, _| {})),
+                                                    SidebarMenuItem::new("Child B")
+                                                        .on_click(cx.listener(|_, _, _, _| {})),
+                                                ])
+                                            })
+                                            .when(ix == 0, |this| {
+                                                this.suffix(|_, _| {
+                                                    Badge::new().dot().count(1).child(
+                                                        div()
+                                                            .p_0p5()
+                                                            .child(Icon::new(IconName::Bell)),
+                                                    )
+                                                })
+                                            })
+                                            .when(ix == 1, |this| {
+                                                this.suffix(|_, _| Icon::new(IconName::Settings2))
+                                            })
+                                            .on_click(cx.listener(item.handler()))
+                                    },
+                                )),
+                            ),
                     )
                     .footer(
                         SidebarFooter::new()

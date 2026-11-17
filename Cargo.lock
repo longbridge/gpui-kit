@@ -336,7 +336,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app_assets"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -2406,7 +2406,7 @@ checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
 
 [[package]]
 name = "dialog_overlay"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -2840,7 +2840,7 @@ dependencies = [
 
 [[package]]
 name = "example-brush"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-component-story",
  "gpui-kit",
@@ -2848,7 +2848,7 @@ dependencies = [
 
 [[package]]
 name = "example-dock"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-component-story",
@@ -2860,7 +2860,7 @@ dependencies = [
 
 [[package]]
 name = "example-editor"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "autocorrect",
  "chrono",
@@ -2875,7 +2875,7 @@ dependencies = [
 
 [[package]]
 name = "example-html"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-component-story",
  "gpui-kit",
@@ -2883,7 +2883,7 @@ dependencies = [
 
 [[package]]
 name = "example-large-text"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-component-story",
  "gpui-kit",
@@ -2898,7 +2898,7 @@ dependencies = [
 
 [[package]]
 name = "example-markdown"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-component-story",
  "gpui-kit",
@@ -2908,7 +2908,7 @@ dependencies = [
 
 [[package]]
 name = "example-stream-markdown"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-component-story",
  "gpui-kit",
@@ -2918,14 +2918,14 @@ dependencies = [
 
 [[package]]
 name = "example-syntect"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-kit",
 ]
 
 [[package]]
 name = "example-tig"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-kit",
 ]
@@ -3133,7 +3133,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "focus_trap"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -3230,7 +3230,7 @@ dependencies = [
 
 [[package]]
 name = "fps_monitor"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-fps",
  "gpui-kit",
@@ -3787,7 +3787,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-base"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3835,7 +3835,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-base-examples"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "gpui-base",
@@ -3849,7 +3849,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-base-examples-wasm"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
@@ -3868,7 +3868,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-component"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -3957,7 +3957,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-component-macros"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "proc-macro-crate 3.5.0",
  "proc-macro2",
@@ -3967,7 +3967,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-component-story"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3998,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-component-story-web"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -4012,9 +4012,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8c3a7e25e5a4789656da980b0316857acbdb72347b5d890d7d0c549bb9fee72"
+checksum = "7f156153ed82b67b45c6b5ed5d833da14b27eb68ae7828741f64b52691e254d0"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -4085,9 +4085,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-apple"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d1934376409ef93257473cfd1cba16bbc825a3a3afc437410de73208cfd8364"
+checksum = "52c8337a6ca2fcbaf574e3e78495b29ff92a06932523c1e7e005f0fb37c6ce48"
 dependencies = [
  "anyhow",
  "async-task",
@@ -4125,9 +4125,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-linux"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0409042721bd50ed8c538e13cb13f6d92f5adeade2e2a284a41d32c704c2eef1"
+checksum = "442fb7af8c998c77749ed68d64fccc019ebc9938f42d55e6ebc86ac7f9ef6bec"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -4170,9 +4170,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macos"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "192b5731d190f840ad7868d1bb8c1c1fe70007a747cc8d2f60700699ca4318e0"
+checksum = "bcc07eff9d26477dad2c75809c083bda8ab0fa61a8fee60b46cc28c48b5a7a1d"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4204,6 +4204,7 @@ dependencies = [
  "parking_lot",
  "raw-window-handle",
  "semver",
+ "serde_json",
  "smallvec",
  "strum",
  "uuid",
@@ -4211,9 +4212,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macros"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "269fc24ab55f85d5fb90ce812b3e6adcf5ad0bdccc79a08aa9ddd88a3a477494"
+checksum = "a926cfbda4204e849bb17a09872298d92838157088a7a3c32d9b31324ccaac8a"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4223,9 +4224,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-platform"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df86a665111fb86fe149c6d72660777d17bcf2af9133079459faf7bda0b3f756"
+checksum = "f635166b148a1d4097d75d41620b5bc477be2e17ca122b56b1ff8a82330f993a"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -4240,9 +4241,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-web"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f01164798296dafad1d7608e2385f28145d36ae180cfef4d5d5ac737d323815a"
+checksum = "a0a5719c2ca90add59e8639886fadbcdebad658e750e8e99ec87b22eaf0ad24c"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -4270,9 +4271,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-wgpu"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cfa13d90b546bec059b6e1c08969b45236d64beb89a96cc6bc54d0df19466ce"
+checksum = "846b898f14d55f6e107521fde8ec045a971af6225d6a51410c5514bc2f8bf334"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4298,9 +4299,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-windows"
-version = "0.1.14"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89bfdc3a922a29f83611fc7f01642533d35260a7f86aa9befb14f2b6dcca093"
+checksum = "eefc0adacde37f6d5291225177d5ba90e5cf51274b0d9a4ef4201e0a801e8aa9"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -4328,7 +4329,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-fps"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "core-graphics 0.24.0",
  "gpui-fast",
@@ -4345,7 +4346,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-kit"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "gpui-base",
@@ -4363,7 +4364,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-kit-assets"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-fast",
@@ -4379,7 +4380,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-kit-recipes"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-kit",
 ]
@@ -4935,7 +4936,7 @@ checksum = "85701631a9bbecf47e6d19f145e85e57767e7c50f7192d5b1bf65b5ef43cb373"
 
 [[package]]
 name = "gpui-shell"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -4977,7 +4978,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-webview"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gdkx11",
@@ -5197,7 +5198,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello_world"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -5704,7 +5705,7 @@ dependencies = [
 
 [[package]]
 name = "input"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -6345,7 +6346,7 @@ dependencies = [
 
 [[package]]
 name = "markdown_table"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-kit",
 ]
@@ -9830,7 +9831,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sidebar"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -10038,7 +10039,7 @@ dependencies = [
 
 [[package]]
 name = "speech"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "cpal",
@@ -10372,7 +10373,7 @@ dependencies = [
 
 [[package]]
 name = "system_monitor"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "battery",
@@ -10386,7 +10387,7 @@ dependencies = [
 
 [[package]]
 name = "table_in_scrollable"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "gpui-kit",
 ]
@@ -10493,7 +10494,7 @@ dependencies = [
 
 [[package]]
 name = "text_max_lines"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -10502,7 +10503,7 @@ dependencies = [
 
 [[package]]
 name = "text_selection"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -10850,7 +10851,7 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 
 [[package]]
 name = "tooltip_top_edge"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -10858,7 +10859,7 @@ dependencies = [
 
 [[package]]
 name = "touch_selection"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -12051,7 +12052,7 @@ dependencies = [
 
 [[package]]
 name = "webview"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -12326,7 +12327,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "window_title"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "gpui-kit",

@@ -22,7 +22,7 @@ use gpui_kit::*;
 use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffDecoration, DiffFile,
     DiffGutterMarker, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition,
-    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffState,
+    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffSpanHighlight, DiffState,
 };
 ```
 
@@ -306,8 +306,9 @@ Diff::new(&self.diff)
   of scrolling horizontally.
 - `split_ratio` gives the original column that share of the width in Split
   mode (0.5 by default, clamped to 0.1–0.9), for example from a divider the
-  application lets users drag. Without soft wrap, neither column gets narrower
-  than its longest line.
+  application lets users drag. Without soft wrap, each column keeps its share
+  and clips its long lines, and the code of both columns scrolls horizontally
+  together while the line numbers stay in place.
 
 Syntax language is detected from each file's path; `DiffFile::with_language`
 overrides it with a highlighter language name such as `rust`. Enable the
@@ -481,8 +482,23 @@ focusable control, such as a ghost `Button` that announces
 the pointer. Pressing a marker does not start a text or line selection. The
 application owns the details panel and returns focus when it closes.
 
-Like annotations, decorations and markers are supplied on every render, so the
-current builder call is their only source.
+`span_highlights` emphasizes a character span inside one line, such as the
+matched text of a search hit:
+
+```rust
+Diff::new(&self.diff).span_highlights([DiffSpanHighlight::new(
+    DiffLinePosition::new(path, DiffSide::Modified, 10),
+    4..9,
+)])
+```
+
+The span is a byte range in the line's content, before tab expansion. Its fill
+paints over syntax, inline emphasis and decorations, and a text selection still
+shows above it. Without `with_background`, the fill is a translucent warning
+color; `with_foreground` sets the text color over a strong fill.
+
+Like annotations, decorations, markers and span highlights are supplied on
+every render, so the current builder call is their only source.
 
 ## Pointer and keyboard interaction
 

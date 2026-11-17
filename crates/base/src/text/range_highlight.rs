@@ -920,7 +920,7 @@ mod tests {
             let separator = format!("|{}\n", "---|".repeat(columns));
             let source = format!("{row}{separator}{}", row.repeat(rows));
             let old = parse(&source);
-            let mut changed = source.clone();
+            let mut changed = source;
             // Even unchanged cells earlier in the edited row must lose their
             // highlights, as must the unchanged rows that follow it.
             let edit = row.len() + separator.len() + row.rfind('x').unwrap();

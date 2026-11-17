@@ -10,9 +10,8 @@ use std::{
 
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, HighlightStyle, Hitbox,
-    HitboxBehavior, InspectorElementId, IntoElement, LayoutId, ListState, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, StyledText,
-    TextLayout, Window, px,
+    HitboxBehavior, InspectorElementId, LayoutId, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, StyledText, TextLayout, Window, px,
 };
 use gpui_base::{
     ScrollbarHandle, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
@@ -30,6 +29,7 @@ pub(crate) struct CodeRun {
     display_range: Range<usize>,
     layout: TextLayout,
     bounds: Bounds<Pixels>,
+    visible: Bounds<Pixels>,
     document: DiffFile,
 }
 
@@ -101,8 +101,8 @@ impl SelectionGeometry {
             self.runs
                 .iter()
                 .min_by(|a, b| {
-                    distance_to_bounds(point, a.bounds)
-                        .total_cmp(&distance_to_bounds(point, b.bounds))
+                    distance_to_bounds(point, a.visible)
+                        .total_cmp(&distance_to_bounds(point, b.visible))
                 })
                 .map(|run| run.side)
         })?;
@@ -110,11 +110,11 @@ impl SelectionGeometry {
             .iter()
             .filter(|run| run.side == side)
             .min_by(|a, b| {
-                line_distance(point, a.bounds)
-                    .cmp(&line_distance(point, b.bounds))
+                line_distance(point, a.visible)
+                    .cmp(&line_distance(point, b.visible))
                     .then_with(|| {
-                        distance_to_bounds(point, a.bounds)
-                            .total_cmp(&distance_to_bounds(point, b.bounds))
+                        distance_to_bounds(point, a.visible)
+                            .total_cmp(&distance_to_bounds(point, b.visible))
                     })
             })
     }
@@ -245,7 +245,8 @@ impl CodeText {
     }
 }
 
-impl IntoElement for CodeText {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for CodeText {
     type Element = Self;
     fn into_element(self) -> Self {
         self
@@ -318,6 +319,7 @@ impl Element for CodeText {
             display_range: self.range.clone(),
             layout: text.layout().clone(),
             bounds,
+            visible: bounds.intersect(&window.content_mask().bounds),
             document: self.document.clone(),
         });
     }
@@ -437,7 +439,8 @@ impl SelectionLayer {
     }
 }
 
-impl IntoElement for SelectionLayer {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for SelectionLayer {
     type Element = Self;
     fn into_element(self) -> Self {
         self
@@ -489,7 +492,7 @@ impl Element for SelectionLayer {
             .borrow()
             .runs
             .iter()
-            .map(|run| run.bounds)
+            .map(|run| run.visible)
             .collect();
         self.selection.register(
             TextSelectionRegistration::new(hitbox.clone(), bounds)
@@ -518,7 +521,7 @@ impl Element for SelectionLayer {
             .iter()
             .map(|run| {
                 let text = run.document.lines(run.side)[run.line_ix].chunk_text(&run.display_range);
-                TextSelectionRun::new(text, run.layout.clone(), run.bounds).with_document_order(
+                TextSelectionRun::new(text, run.layout.clone(), run.visible).with_document_order(
                     encode_key(
                         run.file,
                         run.side,

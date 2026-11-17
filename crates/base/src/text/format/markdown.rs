@@ -304,6 +304,16 @@ fn normalize_inline_boundaries(paragraph: &mut Paragraph) -> String {
             continue;
         }
         let leading = node.text.len() - node.text.trim_start_matches([' ', '\t']).len();
+        // Inline code keeps its white space, so the fold stops where a code
+        // mark begins: `` x `  y` `` keeps the span's leading spaces even
+        // though the run before it ends with one (#3710 review).
+        let code_start = node
+            .marks
+            .iter()
+            .filter(|(range, mark)| mark.code && range.end > 0)
+            .map(|(range, _)| range.start)
+            .min();
+        let leading = leading.min(code_start.unwrap_or(leading));
         if leading > 0 && (at_line_start || previous_white_space) {
             trim_leading_white_space(node, leading);
         }
@@ -1442,6 +1452,26 @@ mod tests {
 
     use crate::text::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 
+    #[test]
+    fn malformed_setext_headings_return_an_error_instead_of_panicking() {
+        let source = "a\n===\n---\nb\n===";
+        assert!(parse_mdast(source, &ParseOptions::gfm()).is_err());
+        assert!(parse(source, &mut NodeContext::default()).is_err());
+        assert!(parse("**Valid** Markdown", &mut NodeContext::default()).is_ok());
+    }
+
+    #[test]
+    fn prose_reparse_keeps_its_fallback_after_a_parser_panic() {
+        let source = "*a*\n===\n---\nb\n===";
+        let options = ParseOptions::gfm();
+        assert!(parse_mdast(source, &options).is_err());
+        let node = Node::InlineMath(mdast::InlineMath {
+            value: source.to_owned(),
+            position: Some(markdown::unist::Position::new(1, 1, 0, 5, 4, source.len())),
+        });
+        assert!(reparse_as_prose(&node, source, &options).is_none());
+    }
+
     fn first_paragraph(block: &BlockNode) -> Option<&Paragraph> {
         match block {
             BlockNode::Paragraph(paragraph)
@@ -2146,6 +2176,30 @@ mod tests {
         );
     }
 
+    /// A code span keeps its white space, so a fold that starts when the run
+    /// before the span ends with a space must not reach into the span
+    /// (follow-up to #3710, from the review of #3949).
+    #[test]
+    fn white_space_folds_do_not_reach_into_a_code_span() {
+        for (source, expected) in [
+            ("x `  y`", "x   y"),
+            ("`  y` x", "  y x"),
+            ("x *`  y`*", "x   y"),
+        ] {
+            let mut cx = NodeContext::default();
+            let document = parse(source, &mut cx).unwrap();
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected paragraph");
+            };
+            let text: String = paragraph
+                .children
+                .iter()
+                .map(|node| node.text.as_ref())
+                .collect();
+            assert_eq!(text, expected, "source {source:?}");
+        }
+    }
+
     #[test]
     fn selected_source_range_survives_a_folded_space_run() {
         let source = "two  spaces";
@@ -2814,6 +2868,45 @@ mod tests {
         };
         let document = parse("area $x^2$ costs $5 and $10", &mut cx).unwrap();
         assert_eq!(document.text(), "area [x^2] costs [5 and ]10\n");
+    }
+
+    #[test]
+    fn raw_html_off_keeps_html_as_text() {
+        let source = "a <b>bold</b> <img src=\"https://example.com/x.png\"> <https://example.com>\n\n<div>block</div>";
+
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(bold_runs(paragraph), ["bold"]);
+
+        let mut cx = NodeContext {
+            markdown_extensions: Arc::new(MarkdownExtensions::default().raw_html(false)),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let text = paragraph.text();
+        assert!(
+            text.starts_with(r#"a <b>bold</b> <img src="https://example.com/x.png"> "#),
+            "{text}"
+        );
+        assert!(bold_runs(paragraph).is_empty());
+        assert!(paragraph.children.iter().all(|child| child.image.is_none()));
+        assert!(
+            paragraph
+                .children
+                .iter()
+                .any(|child| child.marks.iter().any(|(_, mark)| mark.link.is_some())),
+            "an autolink is not HTML and stays a link"
+        );
+        let BlockNode::Paragraph(block) = &document.blocks[1] else {
+            panic!("expected the HTML block as a paragraph");
+        };
+        assert_eq!(block.text(), "<div>block</div>");
     }
 
     #[test]

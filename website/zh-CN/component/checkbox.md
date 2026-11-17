@@ -78,6 +78,26 @@ Checkbox::new("cb").label("Medium")
 Checkbox::new("cb").text_lg().label("Large")
 ```
 
+### 部分选中状态
+
+当一个 Checkbox 代表一组选项、而组内只有部分选项被勾选时，使用 `indeterminate(true)`。此时它显示横线而不是对勾，并向屏幕阅读器报告“部分选中”，与 `checked` 的值无关。激活它会请求 `true`，因此常规的处理函数会勾选全部选项：
+
+```rust
+let all = files.iter().all(|file| file.checked);
+let some = files.iter().any(|file| file.checked);
+
+Checkbox::new("all-files")
+    .label("All files")
+    .checked(all)
+    .indeterminate(some && !all)
+    .on_change(cx.listener(|view, checked, _, cx| {
+        for file in &mut view.files {
+            file.checked = *checked;
+        }
+        cx.notify();
+    }))
+```
+
 ### 禁用状态
 
 ```rust

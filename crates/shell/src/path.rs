@@ -1,8 +1,8 @@
 //! Native GPUI path materialization.
 
 use gpui::{
-    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    Pixels, Point, Refineable as _, Style, StyleRefinement, Window, point, px,
+    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels, Point,
+    Refineable as _, Style, StyleRefinement, Window, point, px,
 };
 
 use crate::{
@@ -132,7 +132,8 @@ impl NativePath {
     }
 }
 
-impl IntoElement for NativePath {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for NativePath {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {

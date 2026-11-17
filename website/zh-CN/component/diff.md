@@ -19,7 +19,7 @@ use gpui_kit::*;
 use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffDecoration, DiffFile,
     DiffGutterMarker, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition,
-    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffState,
+    DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffSpanHighlight, DiffState,
 };
 ```
 
@@ -262,7 +262,8 @@ Diff::new(&self.diff)
 - `hover_highlight` 强调指针下的行、行号或两者。
 - `soft_wrap(true)` 在列宽处自动换行，行高随内容增加，不再横向滚动。
 - `split_ratio` 设置 Split 模式中原始列所占的宽度比例（默认 0.5，限制在 0.1–0.9），
-  例如由应用提供的可拖动分隔线控制。未启用自动换行时，每一列都不会窄于其最长的行。
+  例如由应用提供的可拖动分隔线控制。未启用自动换行时，每一列保持该比例并裁剪过长的行，
+  两列的代码一起横向滚动，行号保持不动。
 
 组件根据每个文件的路径识别语法语言；`DiffFile::with_language` 可以用 `rust` 等高亮语言名覆盖识别结果。
 启用相应的 Cargo grammar feature，例如 `tree-sitter-rust`；`tree-sitter-languages`
@@ -405,7 +406,20 @@ Diff::new(&self.diff)
 marker 既能用鼠标操作，也能用 Enter 和 Space 激活。按下 marker 不会开始文本或行选择。
 详情面板由应用管理，关闭时由应用恢复焦点。
 
-与批注一样，装饰和 marker 在每次渲染时传入，当前的 builder 调用就是它们唯一的数据来源。
+`span_highlights` 强调一行内的一段字符，例如搜索命中的文字：
+
+```rust
+Diff::new(&self.diff).span_highlights([DiffSpanHighlight::new(
+    DiffLinePosition::new(path, DiffSide::Modified, 10),
+    4..9,
+)])
+```
+
+范围是该行内容中的字节区间，按 Tab 展开之前计算。它的背景绘制在语法高亮、行内强调和装饰之上，
+文本选区仍显示在它上面。不调用 `with_background` 时，使用半透明的 warning 颜色；
+`with_foreground` 设置背景较深时的文字颜色。
+
+与批注一样，装饰、marker 和字符高亮在每次渲染时传入，当前的 builder 调用就是它们唯一的数据来源。
 
 ## 鼠标与键盘交互
 
