@@ -1798,17 +1798,23 @@ fn project_selection(
         return Some((0..text.len()).into());
     }
 
+    let row_left = text_layout.position_for_index(0).map(|origin| origin.x);
     let mut selection: Option<Selection> = None;
     for (offset, c) in text.char_indices() {
-        let Some(pos) = text_layout.position_for_index(offset) else {
+        let Some(mut pos) = text_layout.position_for_index(offset) else {
             continue;
         };
         let next_offset = offset + c.len_utf8();
         let mut char_width = line_height.half();
-        if let Some(next_pos) = text_layout.position_for_index(next_offset)
-            && next_pos.y == pos.y
-        {
-            char_width = next_pos.x - pos.x;
+        match (text_layout.position_for_index(next_offset), row_left) {
+            (Some(next_pos), _) if next_pos.y == pos.y => char_width = next_pos.x - pos.x,
+            // GPUI places a wrap boundary at the end of the row above, but its
+            // glyph starts the next row.
+            (Some(next_pos), Some(row_left)) if c != '\n' && next_pos.y > pos.y => {
+                pos = point(row_left, next_pos.y);
+                char_width = next_pos.x - row_left;
+            }
+            _ => {}
         }
         let selection_pos = selection_bounds.map_or(pos, |bounds| point(pos.x, bounds.top()));
         let selection_height = selection_bounds.map_or(line_height, |bounds| bounds.size.height);
