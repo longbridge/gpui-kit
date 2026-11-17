@@ -3,7 +3,7 @@ use gpui::{
     ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
-use super::{Diff, DiffState, document::fixture};
+use super::{Diff, DiffLinePosition, DiffSide, DiffState, document::fixture};
 
 /// Every line changed, so the unified patch is two rows per line.
 const LINES: usize = 300;
@@ -245,4 +245,30 @@ fn file_headers_stay_in_the_viewport_under_horizontal_scrolling(cx: &mut TestApp
         );
         assert_eq!(header(cx), before, "{mode:?}: the header stays in place");
     }
+}
+
+#[gpui::test]
+fn replacing_files_in_place_keeps_the_line_at_the_top(cx: &mut TestAppContext) {
+    let (state, cx) = long_patch(cx);
+    let target = DiffLinePosition::new("long.txt", DiffSide::Modified, 200);
+    state.update(cx, |state, cx| state.scroll_to_line(target, cx));
+    draw(cx);
+    let top = cx.update(|_, cx| state.read(cx).list().logical_scroll_top().item_ix);
+    assert!(top > 0, "scrolled down to the line");
+
+    let original = (0..LINES)
+        .map(|ix| format!("old {ix}\n"))
+        .collect::<String>();
+    let modified = (0..LINES)
+        .map(|ix| format!("new {ix}\n"))
+        .collect::<String>();
+    state.update(cx, |state, cx| {
+        state.replace_files_in_place([fixture::modified("long.txt", &original, &modified)], cx)
+    });
+    draw(cx);
+    assert_eq!(
+        cx.update(|_, cx| state.read(cx).list().logical_scroll_top().item_ix),
+        top,
+        "the same line is at the top"
+    );
 }

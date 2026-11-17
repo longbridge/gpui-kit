@@ -639,6 +639,22 @@ impl DiffState {
         cx.notify();
     }
 
+    /// Replaces the files like [`Self::set_files`], then scrolls back to the
+    /// source line that was at the top of the viewport. For the same changes
+    /// presented differently (more context, whitespace ignored), so the reader
+    /// keeps their place.
+    pub fn replace_files_in_place(
+        &mut self,
+        files: impl IntoIterator<Item = DiffFile>,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor = self.row_position(self.list.logical_scroll_top().item_ix);
+        self.set_files(files, cx);
+        if let Some(anchor) = anchor {
+            self.reveal_line(&anchor);
+        }
+    }
+
     /// Changes the display mode while preserving source-line selection and a
     /// nearby source row.
     pub fn set_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
