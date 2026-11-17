@@ -1067,10 +1067,43 @@ fn render_hunk_separator(
         .text_xs()
         .text_color(cx.theme().muted_foreground);
     match code.hunk_separator {
-        DiffHunkSeparator::Metadata => row
-            .h_6()
-            .child(hunks[hunk].label().clone())
-            .into_any_element(),
+        // The line ranges stay quiet in the code font, and the enclosing scope
+        // Git names after them is in the text color, so a hunk's start reads
+        // as a place in the file. A tint and an accent edge set it off from
+        // the code around it.
+        DiffHunkSeparator::Metadata => {
+            let label = hunks[hunk].label().clone();
+            let (ranges, scope) = match label.rfind("@@") {
+                Some(end) if end > 0 => (
+                    label[..end + 2].to_string(),
+                    label[end + 2..].trim().to_string(),
+                ),
+                _ => (label.to_string(), String::new()),
+            };
+            row.h_7()
+                .gap_3()
+                .border_l_2()
+                .border_color(cx.theme().accent_foreground.opacity(0.5))
+                .bg(cx.theme().accent.opacity(0.5))
+                .child(
+                    div()
+                        .flex_none()
+                        .font_family(cx.theme().mono_font_family.clone())
+                        .child(ranges),
+                )
+                .when(!scope.is_empty(), |row| {
+                    row.child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(cx.theme().mono_font_family.clone())
+                            .font_medium()
+                            .text_color(cx.theme().foreground)
+                            .child(scope),
+                    )
+                })
+                .into_any_element()
+        }
         DiffHunkSeparator::LineInfo => {
             let hidden = hunks[hunk].hidden_lines_before(hunk.checked_sub(1).map(|ix| &hunks[ix]));
             if hidden == 0 {
