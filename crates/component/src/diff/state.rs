@@ -7,9 +7,9 @@ use std::{
 };
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, EventEmitter, FocusHandle, Focusable, HighlightStyle,
-    ListAlignment, ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size, Subscription,
-    Task, Window, WindowId, point, px,
+    App, AppContext as _, Bounds, Context, ElementId, EventEmitter, FocusHandle, Focusable,
+    HighlightStyle, ListAlignment, ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size,
+    Subscription, Task, Window, WindowId, point, px,
 };
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
@@ -340,6 +340,13 @@ impl DiffState {
             cx,
         );
         let files = files.into_iter().collect::<Vec<_>>();
+        // Observers are told when the diff scrolls, so content an application
+        // places beside its lines can follow them.
+        let list = ListState::new(0, ListAlignment::Top, px(0.));
+        let scrolled = cx.entity().downgrade();
+        list.set_scroll_handler(move |_, _, cx| {
+            let _ = scrolled.update(cx, |_, cx| cx.notify());
+        });
         let mut state = Self {
             expanded: vec![Vec::new(); files.len()],
             presentations: vec![None; files.len()],
@@ -355,7 +362,7 @@ impl DiffState {
             header_rows: Vec::new(),
             rows: Rc::default(),
             change_rows: Vec::new(),
-            list: ListState::new(0, ListAlignment::Top, px(0.)),
+            list,
             horizontal_scroll: ScrollHandle::new(),
             focus,
             selection,
@@ -862,6 +869,25 @@ impl DiffState {
             .and_then(|file| file.source(side).get(range))
             .unwrap_or("")
             .to_owned()
+    }
+
+    /// Where a source line is laid out now, in window coordinates, for
+    /// placing application content beside it. `None` when it isn't laid out:
+    /// outside the rendered range, folded, or in a collapsed file.
+    pub fn line_bounds(&self, position: &DiffLinePosition) -> Option<Bounds<Pixels>> {
+        self.list.bounds_for_item(self.source_row(position)?)
+    }
+
+    /// The part of the diff on screen, in window coordinates, to keep placed
+    /// content inside it.
+    pub fn viewport_bounds(&self) -> Bounds<Pixels> {
+        self.list.viewport_bounds()
+    }
+
+    /// The path of the file at the top of the viewport: the one being read.
+    pub fn top_file(&self) -> Option<SharedString> {
+        let row = self.rows.get(self.list.logical_scroll_top().item_ix)?;
+        Some(self.files.get(row.file())?.path().clone())
     }
 
     /// Reveals and scrolls to a source line, expanding its file and hidden

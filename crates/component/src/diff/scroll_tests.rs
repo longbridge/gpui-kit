@@ -3,7 +3,7 @@ use gpui::{
     ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
-use super::{Diff, DiffState, document::fixture};
+use super::{Diff, DiffLinePosition, DiffSide, DiffState, document::fixture};
 
 /// Every line changed, so the unified patch is two rows per line.
 const LINES: usize = 300;
@@ -245,4 +245,29 @@ fn file_headers_stay_in_the_viewport_under_horizontal_scrolling(cx: &mut TestApp
         );
         assert_eq!(header(cx), before, "{mode:?}: the header stays in place");
     }
+}
+
+#[gpui::test]
+fn a_line_scrolled_to_has_bounds_inside_the_viewport_and_names_the_top_file(
+    cx: &mut TestAppContext,
+) {
+    let (state, cx) = long_patch(cx);
+    let target = DiffLinePosition::new("long.txt", DiffSide::Modified, 200);
+    assert!(
+        cx.update(|_, cx| state.read(cx).line_bounds(&target))
+            .is_none(),
+        "not laid out before it's scrolled to"
+    );
+    state.update(cx, |state, cx| state.scroll_to_line(target.clone(), cx));
+    draw(cx);
+    let (line, viewport) = cx.update(|_, cx| {
+        let state = state.read(cx);
+        (state.line_bounds(&target), state.viewport_bounds())
+    });
+    let line = line.expect("laid out once scrolled to");
+    assert!(viewport.contains(&line.origin));
+    assert_eq!(
+        cx.update(|_, cx| state.read(cx).top_file()).as_deref(),
+        Some("long.txt")
+    );
 }
