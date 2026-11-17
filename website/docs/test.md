@@ -146,7 +146,7 @@ observation adds no layout container:
 | Menu | Item label and selection, menu focus scope and submenu bounds |
 | Notification | Alert role and bounds; close button uses normal Button observation |
 | Progress / ProgressCircle | Progress indicator role and label; numeric accessibility values are not exposed by `ElementSnapshot::value()` |
-| TitleBar | `title-bar` and `window-controls` bounds; caption buttons (`minimize`, `maximize` or `restore`, `close`) only where the title bar draws them |
+| TitleBar | `title-bar`, trailing `window-controls`, and optional leading `window-controls-start` bounds; caption buttons (`minimize`, `maximize` or `restore`, `close`) only where the title bar draws them |
 | Dock | Area/group/content bounds and focus scopes; tabs retain native selection |
 
 Use constructor IDs where available. Input and Select accept `.id("name")`;
