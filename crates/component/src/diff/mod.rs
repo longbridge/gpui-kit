@@ -1361,7 +1361,9 @@ fn file_annotations(
         .get(path)
         .cloned()
         .unwrap_or_default();
-    annotation_elements(&ixs, code, window, cx)
+    // No placement: file cards already sit inside the pinned header bar,
+    // which takes the viewport's width and cancels the offset itself.
+    annotation_elements(&ixs, code, None, window, cx)
 }
 
 /// Summarizes a file without source rows: binary, metadata-only or empty.
@@ -2000,12 +2002,39 @@ fn line_annotations(
         .get(&position)
         .cloned()
         .unwrap_or_default();
-    annotation_elements(&ixs, code, window, cx)
+    annotation_elements(&ixs, code, CardPlacement::resolve(code, cx), window, cx)
+}
+
+/// Keeps a line's annotation cards in the viewport, as [`HeaderPlacement`]
+/// does for the header bar: in unified mode the row strip is as wide as the
+/// longest line, and a full-width card would stretch with it and scroll
+/// sideways. `None` while nothing scrolls sideways, or before the viewport
+/// is measured; the card then fills its container.
+#[derive(Clone, Copy)]
+struct CardPlacement {
+    /// Cancels the horizontal strip's offset so the card stays in the viewport.
+    pin: Pixels,
+    viewport: Pixels,
+}
+
+impl CardPlacement {
+    fn resolve(code: &CodePresentation, cx: &App) -> Option<Self> {
+        if code.mode != DiffMode::Unified || code.soft_wrap {
+            return None;
+        }
+        let state = code.state.read(cx);
+        let viewport = state.viewport().width;
+        (viewport > px(0.)).then(|| Self {
+            pin: -state.horizontal_scroll().offset().x,
+            viewport,
+        })
+    }
 }
 
 fn annotation_elements(
     ixs: &[usize],
     code: &CodePresentation,
+    placement: Option<CardPlacement>,
     window: &mut Window,
     cx: &mut App,
 ) -> Vec<AnyElement> {
@@ -2017,7 +2046,10 @@ fn annotation_elements(
             let annotation = &code.annotations.items[*ix];
             div()
                 .id(annotation.id.clone())
-                .w_full()
+                .map(|this| match placement {
+                    Some(placement) => this.w(placement.viewport).ml(placement.pin),
+                    None => this.w_full(),
+                })
                 .px_3()
                 .py_3()
                 .border_t_1()
