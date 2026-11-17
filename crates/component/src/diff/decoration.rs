@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use gpui::{ElementId, Hsla, SharedString};
 
@@ -49,6 +50,57 @@ impl DiffDecoration {
         } else {
             line <= range.end()
         }
+    }
+}
+
+/// A painted emphasis on a character span of one source line, such as the
+/// matched text of a search hit.
+///
+/// `span` is a byte range in the line's content, before tab expansion. The
+/// fill paints over syntax, inline-change emphasis and decorations, so the
+/// span stays visible on marked lines; an active text selection still shows
+/// above it.
+#[derive(Clone)]
+pub struct DiffSpanHighlight {
+    position: DiffLinePosition,
+    span: Range<usize>,
+    background: Option<Hsla>,
+    foreground: Option<Hsla>,
+}
+
+impl DiffSpanHighlight {
+    /// Highlights `span` of the line at `position`.
+    pub fn new(position: DiffLinePosition, span: Range<usize>) -> Self {
+        Self {
+            position,
+            span,
+            background: None,
+            foreground: None,
+        }
+    }
+    /// Sets the fill, which defaults to a translucent warning color.
+    pub fn with_background(mut self, background: impl Into<Hsla>) -> Self {
+        self.background = Some(background.into());
+        self
+    }
+    /// Sets the text color over the fill, keeping it readable on a strong one.
+    pub fn with_foreground(mut self, foreground: impl Into<Hsla>) -> Self {
+        self.foreground = Some(foreground.into());
+        self
+    }
+    pub fn position(&self) -> &DiffLinePosition {
+        &self.position
+    }
+    pub fn span(&self) -> Range<usize> {
+        self.span.clone()
+    }
+    /// The fill set with [`Self::with_background`].
+    pub fn background(&self) -> Option<Hsla> {
+        self.background
+    }
+    /// The text color set with [`Self::with_foreground`].
+    pub fn foreground(&self) -> Option<Hsla> {
+        self.foreground
     }
 }
 
@@ -115,6 +167,30 @@ impl Decorations {
             .iter()
             .rev()
             .find(|decoration| decoration.contains(position.side(), position.line()))
+    }
+}
+
+/// Span highlights by line, in supplied order.
+#[derive(Default)]
+pub(super) struct SpanHighlights {
+    lines: HashMap<DiffLinePosition, Vec<DiffSpanHighlight>>,
+}
+
+impl SpanHighlights {
+    pub(super) fn new(highlights: impl IntoIterator<Item = DiffSpanHighlight>) -> Self {
+        let mut index = Self::default();
+        for highlight in highlights {
+            index
+                .lines
+                .entry(highlight.position.clone())
+                .or_default()
+                .push(highlight);
+        }
+        index
+    }
+
+    pub(super) fn at(&self, position: &DiffLinePosition) -> Option<&[DiffSpanHighlight]> {
+        self.lines.get(position).map(Vec::as_slice)
     }
 }
 

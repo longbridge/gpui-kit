@@ -143,7 +143,8 @@ export default class App extends View {
     draw(&mut context);
     let first_draw_builds = command::command_probe::take();
     assert_builds("first draw", &first_draw_builds, 1, 1, 5);
-    context.update(|window, _| window.refresh());
+    // No forced refresh here: `window.refresh()` disables view caching, and this
+    // step checks that a clean frame reuses the unnotified view.
     draw(&mut context);
     let second_draw_builds = command::command_probe::take();
     // An unchanged, unnotified view reuses its previous frame (gpui-fast 0.1.14).
