@@ -62,6 +62,8 @@ mod painted_text;
 mod query_helpers;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod root;
+#[cfg(all(feature = "test-support", feature = "component"))]
+mod root_focus;
 #[cfg(all(feature = "assets", feature = "test-support", feature = "component"))]
 mod search;
 #[cfg(all(feature = "test-support", feature = "component"))]
