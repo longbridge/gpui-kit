@@ -7,8 +7,10 @@ use gpui::{
 };
 
 use super::{
-    Diff, DiffDecoration, DiffGutterMarker, DiffLinePosition, DiffLineRange, DiffSide, DiffState,
-    decoration::Decorations, document::fixture,
+    Diff, DiffDecoration, DiffGutterMarker, DiffLinePosition, DiffLineRange, DiffSide,
+    DiffSpanHighlight, DiffState,
+    decoration::{Decorations, SpanHighlights},
+    document::fixture,
 };
 
 fn position(side: DiffSide, line: usize) -> DiffLinePosition {
@@ -55,6 +57,31 @@ fn decorations_cover_their_range_and_the_last_supplied_wins() {
             .at(&DiffLinePosition::new("other.txt", DiffSide::Modified, 2))
             .is_none()
     );
+}
+
+#[test]
+fn span_highlights_group_by_line_in_supplied_order() {
+    let highlights = SpanHighlights::new([
+        DiffSpanHighlight::new(position(DiffSide::Modified, 2), 4..8).with_background(gpui::red()),
+        DiffSpanHighlight::new(position(DiffSide::Modified, 2), 12..15),
+        DiffSpanHighlight::new(position(DiffSide::Original, 2), 0..3),
+    ]);
+    let line = highlights
+        .at(&position(DiffSide::Modified, 2))
+        .expect("two spans on the line");
+    assert_eq!(line.len(), 2);
+    assert_eq!(line[0].span(), 4..8);
+    assert_eq!(line[0].background(), Some(gpui::red()));
+    assert_eq!(line[1].span(), 12..15);
+    // The default fill is resolved at paint time from the theme.
+    assert_eq!(line[1].background(), None);
+    assert_eq!(
+        highlights
+            .at(&position(DiffSide::Original, 2))
+            .map(<[_]>::len),
+        Some(1)
+    );
+    assert!(highlights.at(&position(DiffSide::Original, 3)).is_none());
 }
 
 struct Host {
