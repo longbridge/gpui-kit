@@ -249,14 +249,14 @@ mod tests {
     fn test_input_editor_style_builder() {
         let renderer: GutterMarkerRenderer = Rc::new(|_| gpui::Empty.into_any_element());
         let style = InputEditorStyle::default()
-            .with_gutter_marker_renderer(Some(renderer.clone()))
+            .with_gutter_marker_renderer(Some(renderer))
             .with_gutter_marker_size(rems(0.75))
             .with_gutter_marker_gap(rems(0.25));
         // Palette resolution and cloning must preserve the presentation seam.
-        let resolved = style.clone().resolved(&dark());
+        let resolved = style.resolved(&dark());
         assert!(Rc::ptr_eq(
             resolved.gutter_marker_renderer().unwrap(),
-            &renderer
+            style.gutter_marker_renderer().unwrap()
         ));
         assert_eq!(resolved.gutter_marker_size().to_pixels(px(32.)), px(24.));
         assert_eq!(resolved.gutter_marker_gap().to_pixels(px(32.)), px(8.));
