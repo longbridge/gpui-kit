@@ -37,21 +37,33 @@ fn apply_syntax_styling(theme: &mut Theme) {
     let mono_font = theme.mono_font_family.clone();
     let highlight = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
     // Refine typography in place so each palette keeps its syntax colors.
-    let literal_style = highlight.syntax.text_literal.get_or_insert_with(ThemeStyle::default);
+    let literal_style = highlight
+        .syntax
+        .text_literal
+        .get_or_insert_with(ThemeStyle::default);
     literal_style.font_family = Some(mono_font.clone());
     literal_style.font_style = Some(FontStyle::Normal);
     // Refine only the heading weight so each palette keeps its other title attributes.
-    highlight.syntax.title.get_or_insert_with(ThemeStyle::default).font_weight =
-        Some(FontWeightContent::Bold);
+    highlight
+        .syntax
+        .title
+        .get_or_insert_with(ThemeStyle::default)
+        .font_weight = Some(FontWeightContent::Bold);
 
     // Mode switches reload the stored palettes, so keep the example's style there too.
     for config in [&mut theme.light_theme, &mut theme.dark_theme] {
         if let Some(highlight) = std::rc::Rc::make_mut(config).highlight.as_mut() {
-            let literal_style = highlight.syntax.text_literal.get_or_insert_with(ThemeStyle::default);
+            let literal_style = highlight
+                .syntax
+                .text_literal
+                .get_or_insert_with(ThemeStyle::default);
             literal_style.font_family = Some(mono_font.clone());
             literal_style.font_style = Some(FontStyle::Normal);
-            highlight.syntax.title.get_or_insert_with(ThemeStyle::default).font_weight =
-                Some(FontWeightContent::Bold);
+            highlight
+                .syntax
+                .title
+                .get_or_insert_with(ThemeStyle::default)
+                .font_weight = Some(FontWeightContent::Bold);
         }
     }
 }

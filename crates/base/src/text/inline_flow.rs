@@ -376,6 +376,7 @@ impl InlineFlow {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for InlineFlow {
     type Element = Self;
 
@@ -1332,7 +1333,9 @@ fn code_background(
         })
         .fold(Pixels::ZERO, Pixels::max);
     let vertical_padding = font_size * 0.125 + shaped_line.descent / 2.;
-    let color = highlights.iter().find_map(|(_, h)| h.style.background_color);
+    let color = highlights
+        .iter()
+        .find_map(|(_, h)| h.style.background_color);
     let mut style = highlights
         .iter()
         .find_map(|(_, h)| h.code_style.clone())

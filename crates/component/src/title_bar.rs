@@ -374,8 +374,14 @@ impl RenderOnce for TitleBar {
                     // A control that took the press, such as a Button or a
                     // focusable Select, prevents the default; its click must
                     // not turn into a window move on the smallest motion.
-                    window.listener_for(&state, |state, _, window, _| {
+                    window.listener_for(&state, |state, _, window, cx| {
                         state.should_move = !window.default_prevented();
+                        // The bar moves the window; it never starts a text
+                        // selection. On Windows the press arrives through the
+                        // caption hit test and the move loop swallows the
+                        // release, so a started selection would follow the
+                        // pointer afterwards.
+                        crate::GlobalState::suppress_text_selection(cx);
                     }),
                 )
                 .on_mouse_up(
@@ -384,12 +390,21 @@ impl RenderOnce for TitleBar {
                         state.should_move = false;
                     }),
                 )
-                .on_mouse_move(window.listener_for(&state, |state, _, window, _| {
-                    if state.should_move {
-                        state.should_move = false;
-                        window.start_window_move();
-                    }
-                }))
+                .on_mouse_move(window.listener_for(
+                    &state,
+                    |state, event: &gpui::MouseMoveEvent, window, cx| {
+                        if event.pressed_button != Some(MouseButton::Left) {
+                            state.should_move = false;
+                            return;
+                        }
+                        if state.should_move {
+                            state.should_move = false;
+                            gpui_base::TextSelection::end(window, cx);
+                            cx.stop_active_drag(window);
+                            window.start_window_move();
+                        }
+                    },
+                ))
                 .child(
                     h_flex()
                         .id("bar")
@@ -489,6 +504,15 @@ mod tests {
             .center();
         click_with_drift(&mut cx, at);
         assert_eq!(clicks.get(), 1);
+    }
+
+    #[gpui::test]
+    fn a_press_on_the_bar_does_not_start_a_text_selection(cx: &mut TestAppContext) {
+        let (mut cx, _) = open(cx);
+        let button = cx.debug_bounds(BUTTON).expect("the button is drawn");
+        let bar = point(button.left() - px(100.), button.center().y);
+        cx.simulate_mouse_down(bar, MouseButton::Left, Modifiers::default());
+        cx.update(|_, cx| assert!(crate::GlobalState::is_text_selection_suppressed(cx)));
     }
 
     /// The test platform's `start_window_move` is `unimplemented!()`, so a

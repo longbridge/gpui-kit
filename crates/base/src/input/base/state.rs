@@ -30,7 +30,7 @@ use super::{
     cursor::{CursorSelection, Selections},
     element::{
         EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, OverviewRulerRows, TextElement,
-        clamp_horizontal_scroll_offset,
+        clamp_horizontal_scroll_offset, line_number_digits_width, line_number_len,
     },
     kind::InputModeKind,
     mask_pattern::normalize_number_input,
@@ -957,6 +957,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             cx.observe(&blink_cursor, |_, _, cx| cx.notify()),
             // Blink the cursor when the window is active, pause when it's not.
             cx.observe_window_activation(window, |input, window, cx| {
+                if !window.is_window_active() {
+                    input.cancel_mouse_gesture(cx);
+                }
                 if window.is_window_active() {
                     let focus_handle = input.focus_handle.clone();
                     if focus_handle.is_focused(window) {
@@ -966,6 +969,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     }
                 }
             }),
+            cx.observe_window_bounds(window, |input, _, cx| input.cancel_mouse_gesture(cx)),
             cx.on_focus(&focus_handle, window, Self::on_focus),
             cx.on_blur(&focus_handle, window, Self::on_blur),
         ];
@@ -1390,7 +1394,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let text: SharedString = text.into();
         self.with_edits_allowed(|this| {
             this.undo_manager.set_pending_intent(EditIntent::Atomic);
-            let range = 0..this.text.chars().map(|c| c.len_utf16()).sum();
+            let range = 0..this.text.len_utf16();
             this.replace_text_in_range_silent(Some(range), &text, window, cx);
             this.reset_highlighter(cx);
         });
@@ -4079,6 +4083,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     fn on_blur(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_mouse_gesture(cx);
         self.revealed_viewport = None;
         if M::is_context_menu_open(self, cx) {
             return;
@@ -4144,12 +4149,26 @@ impl<M: InputModeKind> InputBaseState<M> {
         });
     }
 
+    pub(super) fn cancel_mouse_gesture(&mut self, cx: &mut Context<Self>) {
+        let was_dragging = self.selecting || self.column_select_start.is_some();
+        self.selecting = false;
+        self.column_select_start = None;
+        self.auto_scroll.stop();
+        if was_dragging {
+            cx.notify();
+        }
+    }
+
     pub(super) fn on_drag_move(
         &mut self,
         event: &MouseMoveEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.cancel_mouse_gesture(cx);
+            return;
+        }
         if self.text.len() == 0 {
             return;
         }
@@ -4462,6 +4481,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             // Incremental, single-range updates must run per edit.
             self.display_map
                 .adjust_folds_for_edit(&old_text, range, new_text);
+            if *range == (0..old_text.len()) {
+                self.adopt_gutter_wrap_width(&old_text, window);
+            }
             self.display_map
                 .on_text_changed(&self.text, range, &Rope::from(*new_text), cx);
 
@@ -4578,6 +4600,26 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.emit_change(cx);
         }
         cx.notify();
+    }
+
+    /// Replacing the whole text can change how many digits the line-number gutter shows, and so
+    /// the wrap width the next layout picks. Adopting that width before the new text is wrapped
+    /// saves wrapping all of it again at that layout.
+    fn adopt_gutter_wrap_width(&mut self, old_text: &Rope, window: &mut Window) {
+        let Some(wrap_width) = self.display_map.wrap_width() else {
+            return;
+        };
+        let old_digits = line_number_len(old_text.lines_len());
+        let new_digits = line_number_len(self.text.lines_len());
+        if !self.mode.line_number() || old_digits == new_digits {
+            return;
+        }
+        let (font, font_size) = self.display_map.font();
+        let font = font.clone();
+        let old_width = line_number_digits_width(old_digits, font.clone(), font_size, window);
+        let new_width = line_number_digits_width(new_digits, font, font_size, window);
+        self.display_map
+            .prepare_wrap_width(wrap_width - (new_width - old_width));
     }
 
     /// Update fold candidates from tree-sitter syntax tree (full extraction).
@@ -7048,6 +7090,55 @@ mod tests {
             })
             .unwrap();
         assert_eq!(notifications.get(), 1, "an unchanged input must stay quiet");
+    }
+
+    /// Replacing the text with one whose line numbers need another digit narrows the wrap width
+    /// by that digit up front, so the next layout does not wrap the new text a second time.
+    #[gpui::test]
+    fn replacing_the_text_wraps_at_the_width_its_line_numbers_leave(cx: &mut TestAppContext) {
+        struct Panel(Entity<crate::input::EditorState>);
+        impl Render for Panel {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().child(self.0.clone())
+            }
+        }
+        cx.update(crate::init);
+        let mut input = None;
+        let window = cx.open_window(size(px(400.), px(300.)), |window, cx| {
+            let state = cx.new(|cx| {
+                crate::input::EditorState::new(window, cx)
+                    .line_number(true)
+                    .soft_wrap(true)
+            });
+            input = Some(state.clone());
+            Panel(state)
+        });
+        cx.run_until_parked();
+        let input = input.unwrap();
+        let wrap_width = |cx: &mut TestAppContext| {
+            input.read_with(cx, |state, _| state.display_map.wrap_width())
+        };
+        let three_digits = wrap_width(cx).expect("a soft wrapped editor has a wrap width");
+
+        let predicted = window
+            .update(cx, |_, window, cx| {
+                input.update(cx, |state, cx| {
+                    state.set_value("line\n".repeat(1_000), window, cx);
+                    state.display_map.wrap_width()
+                })
+            })
+            .unwrap()
+            .unwrap();
+        assert!(
+            predicted < three_digits,
+            "a fourth digit must narrow the text"
+        );
+        cx.run_until_parked();
+        assert_eq!(
+            wrap_width(cx),
+            Some(predicted),
+            "the layout must keep the width the text was wrapped at"
+        );
     }
 
     /// Hover must reach the whole visible editor after scrolling, not only
@@ -10601,6 +10692,34 @@ mod tests {
         view.input.read_with(&cx, |state, _| {
             let ranges: Vec<_> = state.selections.iter().map(|s| (s.start, s.end)).collect();
             assert_eq!(ranges, vec![(1, 5), (8, 9)]);
+        });
+    }
+
+    #[gpui::test]
+    fn test_lost_mouse_release_ends_selection_on_plain_motion(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|alpha bravo charlie delta");
+        let (start, end, beyond) = view.input.read_with(&cx, |state, _| {
+            (
+                state.range_to_bounds(&(0..1)).unwrap().center(),
+                state.range_to_bounds(&(6..7)).unwrap().center(),
+                state.range_to_bounds(&(18..19)).unwrap().center(),
+            )
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
+        let selected = view.input.read_with(&cx, |state, _| {
+            assert!(state.selecting);
+            let text = state.selected_value();
+            assert!(!text.is_empty());
+            text
+        });
+        cx.simulate_mouse_move(beyond, None, gpui::Modifiers::default());
+        view.input.read_with(&cx, |state, _| {
+            assert!(!state.selecting);
+            assert_eq!(state.selected_value(), selected);
         });
     }
 

@@ -419,6 +419,7 @@ struct ResizePanelGroupElement {
     axis: Axis,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for ResizePanelGroupElement {
     type Element = Self;
 

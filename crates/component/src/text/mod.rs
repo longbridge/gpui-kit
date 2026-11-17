@@ -238,9 +238,9 @@ mod tests {
         let styles = highlighter(&CodeBlock::from_code(code, Some("toml")));
         let string = code.find("\"demo\"").unwrap();
         assert!(
-            styles
-                .iter()
-                .any(|(range, highlight)| range.contains(&string) && highlight.style.color.is_some()),
+            styles.iter().any(
+                |(range, highlight)| range.contains(&string) && highlight.style.color.is_some()
+            ),
             "the string must be colored: {styles:?}"
         );
         assert_eq!(
@@ -315,8 +315,12 @@ mod tests {
 
             let light = HighlightTheme::default_light();
             let dark = HighlightTheme::default_dark();
-            let light_number = light.style("number").and_then(|highlight| highlight.style.color);
-            let dark_number = dark.style("number").and_then(|highlight| highlight.style.color);
+            let light_number = light
+                .style("number")
+                .and_then(|highlight| highlight.style.color);
+            let dark_number = dark
+                .style("number")
+                .and_then(|highlight| highlight.style.color);
             assert_ne!(
                 light_number, dark_number,
                 "the default themes must use different number colors"

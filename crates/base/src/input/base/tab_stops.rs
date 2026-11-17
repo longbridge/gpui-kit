@@ -66,11 +66,30 @@ fn tab_shifts<'a>(
     text.match_indices('\t').scan(0_f64, move |shift, (ix, _)| {
         let start = f64::from(f32::from(x_for_index(ix))) + *shift;
         let end = f64::from(f32::from(x_for_index(ix + 1)));
-        let next_stop = stop * ((start / stop).floor() + 1.);
+        let next_stop = next_tab_stop(start, stop);
         *shift = next_stop - end;
         Some((ix, px(*shift as f32)))
     })
 }
+
+/// The tab stop that a tab starting at `x` ends on, for stops every `stop` pixels.
+///
+/// Text that fills its columns ends exactly on a stop, and the tab after it takes a whole
+/// stop. Glyph positions are `f32` and can fall a hair short of that stop, which would give
+/// the tab no width. So a start within `TAB_STOP_SNAP` of the next stop counts as on it. The
+/// wrapper measures with the same rule, so both agree on where a tab ends.
+pub(crate) fn next_tab_stop(x: f64, stop: f64) -> f64 {
+    let snap = (x * TAB_STOP_SNAP_RATIO).clamp(TAB_STOP_SNAP_MIN, TAB_STOP_SNAP_MAX);
+    stop * (((x + snap) / stop).floor() + 1.)
+}
+
+/// Share of a tab's start position that it may fall short of a stop and still count as on it.
+/// Positions summed in `f32` drift by about half of this.
+const TAB_STOP_SNAP_RATIO: f64 = 1e-4;
+/// Smallest and largest snap distance, in pixels. The largest stays well under the width of a
+/// character, so text that ends one column before a stop is never snapped onto it.
+const TAB_STOP_SNAP_MIN: f64 = 0.01;
+const TAB_STOP_SNAP_MAX: f64 = 0.5;
 
 /// `layout` with its tabs widened, or `None` when it has none to widen.
 fn expanded_layout(layout: &LineLayout, text: &str, stop: Pixels) -> Option<LineLayout> {
@@ -185,6 +204,32 @@ mod tests {
         let text = "abcd\te";
         let expanded = expanded_layout(&layout(text, 10., 0.), text, px(40.)).unwrap();
         assert_eq!(xs(&expanded)[5], 80.);
+    }
+
+    #[test]
+    fn a_tab_a_hair_short_of_a_stop_takes_a_whole_stop() {
+        // Six advances of 6.6 summed in `f32` end just off 39.6, the third stop of 13.2.
+        for (advance, stop) in [(6.6, 13.2), (7.2, 14.4), (7.8, 15.6), (8.4, 16.8)] {
+            for columns in [2, 6, 12, 22, 44, 88, 200] {
+                let text = format!("{}\tx", "a".repeat(columns));
+                let shaped = layout(&text, advance, 0.);
+                let expanded = expanded_layout(&shaped, &text, px(stop)).unwrap();
+                let after_tab = f32::from(xs(&expanded)[columns + 1]);
+                let expected = advance * columns as f32 + stop;
+                assert!(
+                    (after_tab - expected).abs() < 0.05,
+                    "advance {advance}, {columns} columns: {after_tab} is not {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_tab_one_column_before_a_stop_fills_only_that_column() {
+        let text = format!("{}\tx", "a".repeat(199));
+        let expanded = expanded_layout(&layout(&text, 6.6, 0.), &text, px(13.2)).unwrap();
+        let after_tab = f32::from(xs(&expanded)[200]);
+        assert!((after_tab - 6.6 * 200.).abs() < 0.05, "{after_tab}");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use gpui::{
-    Action, AsKeystroke, FocusHandle, Half, InteractiveElement as _, IntoElement, KeyBinding,
-    KeyContext, Keystroke, ParentElement as _, RenderOnce, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _, relative,
+    Action, FocusHandle, Half, InteractiveElement as _, IntoElement, KeyBinding, KeyContext,
+    KeybindingKeystroke, Keystroke, ParentElement as _, RenderOnce, StyleRefinement, Styled,
+    Window, div, prelude::FluentBuilder as _, relative,
 };
 
 use gpui_base::TestTextExt as _;
@@ -96,8 +96,20 @@ impl Kbd {
     }
 
     fn from_binding(binding: &KeyBinding) -> Option<Self> {
-        let key = binding.keystrokes().first()?;
-        Some(Self::new(key.as_keystroke().clone()))
+        binding
+            .keystrokes()
+            .first()
+            .map(Self::from_keybinding_keystroke)
+    }
+
+    /// Show a keystroke as it was bound. On Windows its inner keystroke is
+    /// what the keyboard reports instead: `alt-+` for `alt-shift-=`.
+    fn from_keybinding_keystroke(key: &KeybindingKeystroke) -> Self {
+        Self::new(Keystroke {
+            modifiers: *key.modifiers(),
+            key: key.key().into(),
+            key_char: None,
+        })
     }
 
     /// Return the Platform specific keybinding string by KeyStroke
@@ -338,5 +350,27 @@ mod tests {
                 "Alt+Tab"
             );
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_from_keybinding_keystroke() {
+        use super::Kbd;
+        use gpui::{KeybindingKeystroke, Keystroke, Modifiers};
+
+        // What the Windows keyboard mapper makes of `alt-shift-=`.
+        let key = KeybindingKeystroke::new(
+            Keystroke::parse("alt-+").unwrap(),
+            Modifiers {
+                alt: true,
+                shift: true,
+                ..Default::default()
+            },
+            "=".into(),
+        );
+        assert_eq!(
+            Kbd::format(Kbd::from_keybinding_keystroke(&key).keystroke()),
+            "Alt+Shift+="
+        );
     }
 }

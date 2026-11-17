@@ -148,6 +148,11 @@ impl WrapMap {
         self.wrapper.apply_font_runs(runs, cx);
     }
 
+    /// See [`super::DisplayMap::prepare_wrap_width`].
+    pub(super) fn prepare_wrap_width(&mut self, wrap_width: Pixels) {
+        self.wrapper.prepare_wrap_width(wrap_width);
+    }
+
     /// Set font parameters
     pub(super) fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrapper.set_font(font, font_size, cx);

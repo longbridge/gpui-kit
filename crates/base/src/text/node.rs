@@ -206,6 +206,7 @@ fn custom_block_selection(
 /// cell, so a drag that starts in the cell selects only in that cell.
 struct TableCellElement(AnyElement);
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for TableCellElement {
     type Element = Self;
 
@@ -282,6 +283,7 @@ struct CustomBlockElement {
     reveal: Option<RevealAt>,
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for CustomBlockElement {
     type Element = Self;
 
@@ -3279,8 +3281,7 @@ impl Paragraph {
                 let mut object_style = HighlightStyle::default();
                 let mut object_link = None;
                 for (_, mark) in &inline_node.marks {
-                    object_style = object_style
-                        .highlight(mark_highlight(mark, node_cx, cx).style);
+                    object_style = object_style.highlight(mark_highlight(mark, node_cx, cx).style);
                     if let Some(link) = mark.link.as_ref().and_then(|link| node_cx.link(link, cx)) {
                         object_link = Some(link);
                         object_style.color = Some(node_cx.style.link());
@@ -4830,7 +4831,8 @@ mod tests {
                 assert_eq!(spans[4].1.style.font_weight, None);
             }
             assert!(highlights[3..].iter().all(|(_, highlight)| {
-                highlight.style.color == Some(context.style.link()) && highlight.style.underline.is_some()
+                highlight.style.color == Some(context.style.link())
+                    && highlight.style.underline.is_some()
             }));
             let items = paragraph.inline_flow_items(None, &[], &[], &context, cx);
             let [
@@ -5019,7 +5021,11 @@ mod tests {
             };
             assert_eq!(text.as_ref(), "a中😀link");
             assert_eq!(links, &vec![(1..12, link.clone())]);
-            assert!(highlights.iter().all(|(_, h)| h.style.color == Some(gpui::red())));
+            assert!(
+                highlights
+                    .iter()
+                    .all(|(_, h)| h.style.color == Some(gpui::red()))
+            );
             assert!(
                 highlights
                     .iter()
@@ -5267,7 +5273,8 @@ mod tests {
                 gpui::white()
             );
             let transparent: Hsla = gpui::rgba(0x00000000).into();
-            let style = mark_highlight(&TextMark::default().highlight(transparent), &node_cx, cx).style;
+            let style =
+                mark_highlight(&TextMark::default().highlight(transparent), &node_cx, cx).style;
             assert_eq!(style.color, None);
 
             // Text that is not marked keeps the inherited color.
@@ -5336,9 +5343,9 @@ mod tests {
                 },
             );
             let underlined = |highlights: &[(Range<usize>, InlineHighlight)], at: usize| {
-                highlights
-                    .iter()
-                    .any(|(range, highlight)| range.contains(&at) && highlight.style.underline.is_some())
+                highlights.iter().any(|(range, highlight)| {
+                    range.contains(&at) && highlight.style.underline.is_some()
+                })
             };
 
             let (_, highlights, links) = paragraph.plain_render(&node_cx, cx);
@@ -5978,8 +5985,14 @@ mod tests {
         let light_styles = block.highlighted_styles(&light);
         let dark_styles = block.highlighted_styles(&dark);
 
-        assert_eq!(light_styles[0].1.style.color, Some(gpui::rgb(0x0000ff).into()));
-        assert_eq!(dark_styles[0].1.style.color, Some(gpui::rgb(0xffff00).into()));
+        assert_eq!(
+            light_styles[0].1.style.color,
+            Some(gpui::rgb(0x0000ff).into())
+        );
+        assert_eq!(
+            dark_styles[0].1.style.color,
+            Some(gpui::rgb(0xffff00).into())
+        );
         assert_eq!(block.code(), "42", "the document must survive the swap");
     }
 

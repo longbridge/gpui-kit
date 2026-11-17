@@ -68,6 +68,8 @@ mod search;
 mod semantic_controls;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod slider_steps;
+#[cfg(all(feature = "test-support", feature = "component"))]
+mod tab_focus;
 mod test_macro;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod text_selection;

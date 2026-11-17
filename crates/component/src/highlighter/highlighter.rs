@@ -9,7 +9,7 @@ use gpui::SharedString;
 use gpui_base::input::RopeExt as _;
 use gpui_base::text::InlineHighlight;
 use ropey::{ChunkCursor, Rope};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -1233,6 +1233,34 @@ impl SyntaxHighlighter {
     }
 }
 
+impl Drop for SyntaxHighlighter {
+    /// Freeing the syntax trees of a large document takes tens of milliseconds, so they are
+    /// freed off the thread that replaces the document.
+    fn drop(&mut self) {
+        let trees = (self.tree.take(), std::mem::take(&mut self.injection_layers));
+        if trees.0.is_some() || !trees.1.is_empty() {
+            drop_in_background(trees);
+        }
+    }
+}
+
+/// Drop `value` on a shared background thread, or right here if that thread cannot be started.
+fn drop_in_background(value: impl Send + 'static) {
+    static DROPPER: OnceLock<Option<mpsc::Sender<Box<dyn Send>>>> = OnceLock::new();
+    let dropper = DROPPER.get_or_init(|| {
+        let (sender, receiver) = mpsc::channel::<Box<dyn Send>>();
+        std::thread::Builder::new()
+            .name("syntax-tree-drop".into())
+            .spawn(move || receiver.into_iter().for_each(drop))
+            .ok()?;
+        Some(sender)
+    });
+    if let Some(dropper) = dropper {
+        // A failed send hands the value back, and it is dropped here.
+        let _ = dropper.send(Box::new(value));
+    }
+}
+
 /// To merge intersection ranges, let the subsequent range cover
 /// the previous overlapping range and split the previous range.
 ///
@@ -1658,7 +1686,9 @@ console.log(answer);
         let theme = HighlightTheme::default_dark();
         let styles = highlighter.styles(&(0..markdown.len()), theme.as_ref());
         let keyword_start = markdown.find("fn first").unwrap();
-        let keyword_color = theme.style("keyword").and_then(|highlight| highlight.style.color);
+        let keyword_color = theme
+            .style("keyword")
+            .and_then(|highlight| highlight.style.color);
         assert!(styles.iter().any(|(range, highlight)| {
             range.start <= keyword_start
                 && range.end >= keyword_start + 2
@@ -2013,5 +2043,19 @@ $x = 1;
             vec![(2..2, red), (4..6, green)],
             vec![(0..4, clean), (4..6, green), (6..10, clean)],
         );
+    }
+    #[test]
+    fn values_dropped_in_the_background_are_freed_on_another_thread() {
+        struct ReportsDropThread(std::sync::mpsc::Sender<std::thread::ThreadId>);
+        impl Drop for ReportsDropThread {
+            fn drop(&mut self) {
+                let _ = self.0.send(std::thread::current().id());
+            }
+        }
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        super::drop_in_background(ReportsDropThread(sender));
+        let dropped_on = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_ne!(dropped_on, std::thread::current().id());
     }
 }

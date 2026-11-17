@@ -159,9 +159,7 @@ impl FilePresentation {
             .iter()
             .filter_map(|(range, paint)| {
                 let style = match paint {
-                    SyntaxPaint::Name(name) => {
-                        theme.style(&self.names[*name as usize])?.style
-                    }
+                    SyntaxPaint::Name(name) => theme.style(&self.names[*name as usize])?.style,
                     SyntaxPaint::Style(style) => *style,
                 };
                 Some((
