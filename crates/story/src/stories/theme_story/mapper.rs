@@ -97,6 +97,9 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         "list_even" => ("List", "Even Background", "list.even.background"),
         "list_head" => ("List", "Head Background", "list.head.background"),
         "list_hover" => ("List", "Hover Background", "list.hover.background"),
+        "list_highlight_foreground" => {
+            ("List", "Highlight Foreground", "list.highlight.foreground")
+        }
 
         // Table
         "table" => ("Table", "Background", "table.background"),

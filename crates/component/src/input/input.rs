@@ -1284,12 +1284,8 @@ mod tests {
         let mut cx = gpui::VisualTestContext::from_window(window.into(), cx);
 
         // Focusing each kind of input registers it, and blurring clears it.
-        let cases: Vec<AnyInputState> = vec![
-            input.clone().into(),
-            textarea.clone().into(),
-            editor.clone().into(),
-            otp.clone().into(),
-        ];
+        let cases: Vec<AnyInputState> =
+            vec![input.into(), textarea.into(), editor.into(), otp.into()];
         for expected in cases {
             cx.update(|window, cx| {
                 let _ = window.draw(cx);

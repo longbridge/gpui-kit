@@ -6,8 +6,8 @@ use gpui::{
     DragMoveEvent, Empty, Entity, EntityId, EventEmitter, FocusHandle, HitboxBehavior,
     InteractiveElement, IntoElement, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent,
     Orientation, ParentElement, Pixels, Point, Render, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement, StyleRefinement, Styled, TouchDragEvent, TouchPhase, Window, div,
-    prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement, StyleRefinement, Styled, TouchDragEvent, TouchPhase, Window,
+    accesskit::ActionData, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -424,10 +424,42 @@ impl SliderState {
             return;
         }
         let value = step_thumb(self.value, start, delta, self.min, self.max, self.step);
+        self.commit_thumb_value(value, window, cx);
+    }
+
+    fn handle_accessibility_set_value(
+        &mut self,
+        data: Option<&ActionData>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ActionData::NumericValue(target)) = data else {
+            return;
+        };
+        if !target.is_finite() || !steppable(self.value, self.min, self.max) {
+            return;
+        }
+        let value = thumb_value_at(
+            self.value,
+            false,
+            *target as f32,
+            self.min,
+            self.max,
+            self.step,
+        );
+        self.commit_thumb_value(value, window, cx);
+    }
+
+    fn commit_thumb_value(
+        &mut self,
+        value: SliderValue,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if value != self.value {
             self.set_value(value, window, cx);
             cx.emit(SliderEvent::Change(value));
-            // A step is a whole gesture: no pointer release follows it.
+            // A keyboard or accessibility adjustment is a complete gesture.
             cx.emit(SliderEvent::Release(value));
         }
     }
@@ -530,17 +562,24 @@ fn step_thumb(
     if !steppable(value, min, max) {
         return value;
     }
-    let mut value = value;
-    let moves_start = start && value.is_range();
-    let current = if moves_start {
+    let current = if start && value.is_range() {
         value.start()
     } else {
         value.end()
     };
-    let next = snap_to_step(current + delta, min, max, step)
-        .min(max)
-        .max(min);
-    if moves_start {
+    thumb_value_at(value, start, current + delta, min, max, step)
+}
+
+fn thumb_value_at(
+    mut value: SliderValue,
+    start: bool,
+    target: f32,
+    min: f32,
+    max: f32,
+    step: f32,
+) -> SliderValue {
+    let next = snap_to_step(target, min, max, step).min(max).max(min);
+    if start && value.is_range() {
         value.set_start(next);
     } else {
         value.set_end(next);
@@ -681,6 +720,14 @@ impl RenderOnce for Slider {
                     move |_, window, cx| {
                         state.update(cx, |state, cx| {
                             state.step_thumb(false, -state.accessibility_step(), window, cx);
+                        });
+                    }
+                })
+                .on_a11y_action(AccessibleAction::SetValue, {
+                    let state = slider_state.clone();
+                    move |data, window, cx| {
+                        state.update(cx, |state, cx| {
+                            state.handle_accessibility_set_value(data, window, cx);
                         });
                     }
                 })
@@ -1453,6 +1500,44 @@ mod tests {
         assert_eq!(events.borrow().len(), 2);
         step(-1., cx);
         assert_eq!(events.borrow()[2..], [("change", 99.), ("release", 99.)]);
+    }
+
+    #[gpui::test]
+    fn accessibility_set_value_moves_the_reported_thumb(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = sized(SliderState::new().step(5.).default_value((20., 60.)), cx);
+        let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        cx.update(|_, cx| {
+            let events = events.clone();
+            cx.subscribe(&state, move |_, event: &SliderEvent, _| {
+                events.borrow_mut().push(match event {
+                    SliderEvent::Change(value) => ("change", *value),
+                    SliderEvent::Release(value) => ("release", *value),
+                });
+            })
+            .detach();
+        });
+        let set = |target, cx: &mut gpui::VisualTestContext| {
+            state.update_in(cx, |state, window, cx| {
+                state.handle_accessibility_set_value(
+                    Some(&ActionData::NumericValue(target)),
+                    window,
+                    cx,
+                );
+            });
+        };
+        set(72., cx);
+        set(72., cx);
+        set(f64::NAN, cx);
+        set(10., cx);
+        assert_eq!(
+            &*events.borrow(),
+            &[
+                ("change", SliderValue::Range(20., 70.)),
+                ("release", SliderValue::Range(20., 70.)),
+                ("change", SliderValue::Range(20., 20.)),
+                ("release", SliderValue::Range(20., 20.)),
+            ]
+        );
     }
 
     #[gpui::test]

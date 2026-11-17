@@ -4,6 +4,7 @@ use crate::{
         Cancel, SelectDown, SelectFirst, SelectLast, SelectNextColumn, SelectPageDown,
         SelectPageUp, SelectPrevColumn, SelectUp,
     },
+    scroll::ScrollbarMode,
     table::{TableDelegate, TableState},
 };
 use gpui::{
@@ -31,6 +32,7 @@ pub(super) fn init(cx: &mut App) {
 pub(super) struct TableOptions {
     pub(super) scroll_bounce: Option<bool>,
     pub(super) scrollbar_visible: Edges<bool>,
+    pub(super) scrollbar_mode: Option<ScrollbarMode>,
     /// Set stripe style of the table.
     pub(super) stripe: bool,
     /// Set to use border style of the table.
@@ -48,6 +50,7 @@ impl Default for TableOptions {
         Self {
             scroll_bounce: None,
             scrollbar_visible: Edges::all(true),
+            scrollbar_mode: None,
             stripe: false,
             bordered: true,
             fixed_cols_border: true,
@@ -171,6 +174,16 @@ where
             bottom: horizontal,
             ..Default::default()
         };
+        self
+    }
+
+    /// Set the show mode of both the vertical and horizontal scrollbars.
+    ///
+    /// Defaults to the theme's [`ScrollbarMode`]. A data grid can use
+    /// [`ScrollbarMode::Always`] so that the columns out of view are visible
+    /// without scrolling.
+    pub fn scrollbar_mode(mut self, mode: ScrollbarMode) -> Self {
+        self.options.scrollbar_mode = Some(mode);
         self
     }
 }
@@ -348,6 +361,7 @@ mod tests {
             .header_row_height(px(32.))
             .fixed_cols_border(false)
             .scrollbar_visible(false, true)
+            .scrollbar_mode(ScrollbarMode::Always)
             .with_size(Size::Small)
             .focus_ring(false);
         assert!(table.options.stripe);
@@ -357,6 +371,7 @@ mod tests {
         assert!(!table.options.fixed_cols_border);
         assert!(!table.options.scrollbar_visible.right);
         assert!(table.options.scrollbar_visible.bottom);
+        assert_eq!(table.options.scrollbar_mode, Some(ScrollbarMode::Always));
         assert_eq!(table.options.size, Size::Small);
         assert!(!table.is_focus_ring_enabled());
         assert!(table.focus_ring(true).is_focus_ring_enabled());

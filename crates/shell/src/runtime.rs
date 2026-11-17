@@ -1022,6 +1022,7 @@ impl FailureDetailText {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for FailureDetailText {
     type Element = Self;
 

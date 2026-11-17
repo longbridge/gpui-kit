@@ -1,8 +1,8 @@
 use std::{rc::Rc, time::Duration};
 
 use crate::{
-    ActiveTheme, AxisExt, Sizable, Size, StyledExt, checkbox::checkbox_check_icon, h_flex,
-    text::Text, tooltip::ComponentTooltip, v_flex,
+    ActiveTheme, AxisExt, IconName, Sizable, Size, StyledExt, checkbox::checkbox_check_icon,
+    h_flex, text::Text, tooltip::ComponentTooltip, v_flex,
 };
 use crate::{StyleSized as _, ThemeStyled as _};
 use gpui::{
@@ -247,7 +247,12 @@ impl RenderOnce for Radio {
                         true => this.bg(cx.theme().tokens.primary),
                     })
                     .child(checkbox_check_icon(
-                        self.id, self.size, checked, disabled, window, cx,
+                        self.id,
+                        self.size,
+                        checked.then_some(IconName::Check),
+                        disabled,
+                        window,
+                        cx,
                     )),
             )
             .when(!self.children.is_empty() || self.label.is_some(), |this| {

@@ -18,6 +18,7 @@ use crate::{
     list::List,
     searchable_list::{
         SearchableListChange, SearchableListDelegate, SearchableListItem, SearchableListState,
+        state::menu_popup,
     },
     sizing::DROPDOWN_LIST_PADDING,
     v_flex,
@@ -87,6 +88,7 @@ struct SelectOptions {
     accessibility_label: Option<SharedString>,
     title_prefix: Option<SharedString>,
     search_placeholder: Option<SharedString>,
+    highlight_matches: bool,
     menu_width: Length,
     menu_max_h: Length,
     scroll_bounce: Option<bool>,
@@ -112,6 +114,7 @@ impl Default for SelectOptions {
             appearance: true,
             focus_ring_enabled: true,
             search_placeholder: None,
+            highlight_matches: false,
         }
     }
 }
@@ -462,6 +465,14 @@ where
 
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
         let dismissed = self.state.open && !open;
+        if self.state.open && !open {
+            self.state.menu_side.reset();
+            // Deferred: `set_open` may run inside a list update.
+            let list = self.state.list.downgrade();
+            cx.defer(move |cx| {
+                _ = list.update(cx, |list, _| list.reset_held_items_height());
+            });
+        }
         self.state.open = open;
         self.state.deferred_context = open.then(|| GlobalState::register_deferred_popover(cx));
 
@@ -543,6 +554,7 @@ where
         let is_focused = self.state.focus_handle.is_focused(window);
         let show_clean = self.state.cleanable && self.selected_index(cx).is_some();
         let bounds = self.state.bounds;
+        let menu_side = self.state.menu_side.clone();
         let allow_open = !(self.state.open || self.state.disabled);
         let outline_visible = self.state.open || (is_focused && !self.state.disabled);
 
@@ -551,6 +563,7 @@ where
         self.state.list.update(cx, |list, cx| {
             list.set_searchable(searchable, cx);
             list.delegate_mut().size = self.state.size;
+            list.delegate_mut().highlight_matches = self.state.highlight_matches;
         });
 
         div().size_full().relative().child(
@@ -637,7 +650,8 @@ where
                 )
                 .when(self.state.open, |this| {
                     this.child(
-                        deferred(crate::popover::dropdown_popup(
+                        deferred(menu_popup(
+                            &menu_side,
                             ("select-popup", cx.entity_id()),
                             bounds,
                             v_flex()
@@ -657,6 +671,7 @@ where
                                         )
                                         .with_size(self.state.size)
                                         .max_h(self.state.menu_max_h)
+                                        .hold_items_height(menu_side.is_above())
                                         .when_some(self.state.scroll_bounce, |list, on| {
                                             list.scroll_bounce(on)
                                         })
@@ -738,6 +753,16 @@ where
     /// Show a clear button when a value is selected.
     pub fn cleanable(mut self, cleanable: bool) -> Self {
         self.options.cleanable = cleanable;
+        self
+    }
+
+    /// Highlight the part of each row that matches the search query, default is `false`.
+    ///
+    /// Rows render with [`SearchableListItem::render_highlighted`]; the default
+    /// highlights the matched text of `title()` in the theme's
+    /// `list_highlight_foreground` color.
+    pub fn highlight_matches(mut self, highlight: bool) -> Self {
+        self.options.highlight_matches = highlight;
         self
     }
 
@@ -860,6 +885,7 @@ where
             this.state.cleanable = opts.cleanable;
             this.state.placeholder = opts.placeholder;
             this.state.search_placeholder = opts.search_placeholder;
+            this.state.highlight_matches = opts.highlight_matches;
             this.state.menu_width = opts.menu_width;
             this.state.menu_max_h = opts.menu_max_h;
             this.state.scroll_bounce = opts.scroll_bounce;
@@ -912,6 +938,58 @@ mod tests {
         searchable_list::{SearchableListDelegate as _, SearchableVec},
         select::{Select, SelectGroup, SelectState},
     };
+
+    struct MenuSideProbe {
+        state: gpui::Entity<SelectState<SearchableVec<String>>>,
+        at_bottom: bool,
+    }
+
+    impl gpui::Render for MenuSideProbe {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::{ParentElement as _, Styled as _, prelude::FluentBuilder as _};
+
+            gpui::div()
+                .when(self.at_bottom, |this| this.pt(gpui::px(1000.)))
+                .child(Select::new(&self.state).w(gpui::px(200.)))
+        }
+    }
+
+    #[gpui::test]
+    fn the_menu_side_is_recorded_on_open_and_reset_on_close(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for at_bottom in [false, true] {
+            let (view, cx) = cx.add_window_view(|window, cx| {
+                let items = (0..30).map(|ix| format!("Item {ix}")).collect::<Vec<_>>();
+                MenuSideProbe {
+                    state: cx.new(|cx| {
+                        SelectState::new(SearchableVec::new(items), None, window, cx)
+                            .searchable(true)
+                    }),
+                    at_bottom,
+                }
+            });
+            let state = view.read_with(cx, |view, _| view.state.clone());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            state.update(cx, |state, cx| state.set_open(true, cx));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                state.read_with(cx, |state, _| state.state.menu_side.is_above()),
+                at_bottom,
+                "the menu opens above a trigger at the bottom of the window",
+            );
+
+            state.update(cx, |state, cx| state.set_open(false, cx));
+            assert!(
+                !state.read_with(cx, |state, _| state.state.menu_side.is_above()),
+                "closing forgets the side",
+            );
+        }
+    }
 
     #[gpui::test]
     fn an_explicit_accessibility_label_does_not_replace_the_placeholder(cx: &mut TestAppContext) {

@@ -1,6 +1,6 @@
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window, px, relative, size,
+    InspectorElementId, LayoutId, Pixels, Style, Window, px, relative, size,
 };
 
 /// A measured, clipped vertical reveal driven by normalized progress.
@@ -25,7 +25,8 @@ impl MotionReveal {
     }
 }
 
-impl IntoElement for MotionReveal {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for MotionReveal {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {

@@ -60,6 +60,30 @@ Use `soft_wrap(false)` when visual wrapping is undesirable. Set
 `submit_on_enter(true)` only when Enter should submit instead of inserting a
 line break. `TextareaState` emits the same `InputEvent` variants as `InputState`.
 
+## Text decorations
+
+Style ranges of the text, such as inline Markdown marks in a message composer,
+with `set_decorations`. Ranges are UTF-8 byte offsets into `value()`:
+
+```rust
+use gpui::{FontWeight, HighlightStyle};
+use gpui_kit::base::input::TextDecoration;
+
+let bold = HighlightStyle {
+    font_weight: Some(FontWeight::BOLD),
+    ..Default::default()
+};
+notes.update(cx, |state, cx| {
+    state.set_decorations(vec![TextDecoration::new(0..5, bold)], cx);
+});
+```
+
+Each call replaces the previous decorations. Like the Editor's decoration
+collections, ranges follow later edits, and a decoration whose text is deleted
+is dropped, so `set_value("")` clears them. Soft wrap measures lines with the
+base font, so a decoration that widens text, such as bold, can make a wrapped
+row overflow slightly.
+
 ## Presentation
 
 The control is unstyled. Your design system supplies the frame, height, colors,

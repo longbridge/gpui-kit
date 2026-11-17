@@ -193,7 +193,7 @@ pub(super) struct InlineObject {
     object: MeasuredInlineObject,
     selected: Arc<Mutex<bool>>,
     selection_bounds: Bounds<Pixels>,
-    line_bounds: Bounds<Pixels>,
+    line_bounds: super::state::ParagraphRows,
     content: AnyElement,
     content_measured: bool,
     link: Option<super::node::LinkMark>,
@@ -218,7 +218,7 @@ impl InlineObject {
         object: MeasuredInlineObject,
         selected: Arc<Mutex<bool>>,
         selection_bounds: Bounds<Pixels>,
-        line_bounds: Bounds<Pixels>,
+        line_bounds: super::state::ParagraphRows,
     ) -> Self {
         let (content, content_measured) = object.element();
         Self {
@@ -237,6 +237,7 @@ impl InlineObject {
     }
 }
 
+#[cfg(not(feature = "gpui-fast"))]
 impl IntoElement for InlineObject {
     type Element = Self;
     fn into_element(self) -> Self {
@@ -406,7 +407,11 @@ impl Element for InlineObject {
                     ),
                     cx,
                 );
-            if self.link.is_none() {
+            if self.link.is_none()
+                && view
+                    .as_ref()
+                    .is_some_and(|view| view.read(cx).shows_text_cursor())
+            {
                 window.set_cursor_style(CursorStyle::IBeam, hitbox);
             }
             let visible = bounds.intersect(&window.content_mask().bounds);
@@ -530,7 +535,7 @@ mod tests {
                 measured,
                 Arc::default(),
                 Bounds::default(),
-                Bounds::default(),
+                crate::text::state::ParagraphRows::single(Bounds::default()),
             );
             let mut accessible = gpui::accesskit::Node::new(Role::Unknown);
             object.write_a11y_info(&mut accessible);

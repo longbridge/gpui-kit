@@ -1,5 +1,6 @@
 mod selection_paint;
 
+use super::state::ParagraphRows;
 #[cfg(target_family = "wasm")]
 use async_channel::bounded;
 use gpui::Corners;
@@ -20,7 +21,7 @@ use std::{
 use gpui::{
     AnyTooltip, App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId,
     ForegroundExecutor, Global, GlobalElementId, Half, HighlightStyle, Hitbox, HitboxBehavior,
-    Hsla, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent,
+    Hsla, InspectorElementId, LayoutId, MouseButton, MouseClickEvent, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, StyledText, Task,
     TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, size,
 };
@@ -371,6 +372,9 @@ pub(super) struct Inline {
     text_style: Option<TextStyle>,
     paint_origin: Option<Point<Pixels>>,
     selection_bounds: Option<Bounds<Pixels>>,
+    /// What a triple click selects, when the text is one row of a wrapped
+    /// inline flow: the whole paragraph, as its first and last rows.
+    paragraph_rows: Option<ParagraphRows>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     /// Range highlight backgrounds, painted behind the text.
     range_backgrounds: Vec<(Range<usize>, Hsla)>,
@@ -444,12 +448,9 @@ thread_local! {
     static RETAINED_LAYOUTS: RefCell<HashMap<usize, RetainedLayout>> = RefCell::new(HashMap::new());
     /// [`DROPPED_STATES`] when this thread's table was last swept.
     static SWEPT_AT_DROPS: Cell<usize> = const { Cell::new(0) };
+    #[cfg(test)]
+    static RETAINED_LAYOUT_SWEEPS: Cell<usize> = const { Cell::new(0) };
 }
-
-/// Dead entries (states that were dropped without a final paint, e.g. a
-/// replaced document) are swept once the table grows past this many, or by
-/// the UI cleanup task after an [`InlineState`] was dropped.
-const RETAINED_SWEEP_AT: usize = 4096;
 
 /// How many [`InlineState`]s have been dropped. States drop on whichever
 /// thread lets go of them last (the background parse included), so this is a
@@ -530,7 +531,10 @@ fn sweep_retained_layouts() {
         // Read before sweeping: a state dropped during the sweep wakes another
         // cleanup and must not be acknowledged by this pass.
         let dropped = DROPPED_STATES.load(Ordering::Acquire);
-        if dropped != SWEPT_AT_DROPS.get() || layouts.len() >= RETAINED_SWEEP_AT {
+        // Live layouts cannot be reclaimed, regardless of the table's size.
+        if dropped != SWEPT_AT_DROPS.get() {
+            #[cfg(test)]
+            RETAINED_LAYOUT_SWEEPS.with(|sweeps| sweeps.set(sweeps.get() + 1));
             layouts.retain(|_, retained| retained.state.strong_count() > 0);
             SWEPT_AT_DROPS.set(dropped);
         }
@@ -761,6 +765,7 @@ impl Inline {
             text_style: None,
             paint_origin: None,
             selection_bounds: None,
+            paragraph_rows: None,
             selection_source: None,
             range_backgrounds: Vec::new(),
             reveal: None,
@@ -794,6 +799,11 @@ impl Inline {
 
     pub(super) fn selection_bounds(mut self, bounds: Bounds<Pixels>) -> Self {
         self.selection_bounds = Some(bounds);
+        self
+    }
+
+    pub(super) fn paragraph_rows(mut self, rows: ParagraphRows) -> Self {
+        self.paragraph_rows = Some(rows);
         self
     }
 
@@ -905,7 +915,7 @@ impl Inline {
         else {
             return;
         };
-        let target = (state_key(&self.state), link.url.clone());
+        let target = ((state_key(&self.state), hitbox.bounds), link.url.clone());
         if view.read(cx).link_tooltip_target.as_ref() != Some(&target) {
             return;
         }
@@ -1145,7 +1155,8 @@ impl Inline {
     }
 }
 
-impl IntoElement for Inline {
+#[cfg(not(feature = "gpui-fast"))]
+impl gpui::IntoElement for Inline {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -1284,7 +1295,10 @@ impl Element for Inline {
             });
         }
 
-        if is_selection || is_selectable {
+        let shows_text_cursor = GlobalState::global(cx)
+            .text_view_state()
+            .is_some_and(|view| view.read(cx).shows_text_cursor());
+        if (is_selection || is_selectable) && shows_text_cursor {
             window.set_cursor_style(CursorStyle::IBeam, &hitbox);
         }
 
@@ -1305,7 +1319,7 @@ impl Element for Inline {
         if self.link_tooltip
             && let Some(view) = GlobalState::global(cx).text_view_state()
         {
-            let key = state_key(&self.state);
+            let key = (state_key(&self.state), hitbox.bounds);
             let target = hovered_link.as_ref().and_then(|range| {
                 self.links
                     .iter()
@@ -1399,6 +1413,9 @@ impl Element for Inline {
                 let text = self.text.clone();
                 let text_view_state = GlobalState::global(cx).text_view_state();
                 let line_bounds = self.selection_bounds;
+                let paragraph_rows = self
+                    .paragraph_rows
+                    .or_else(|| line_bounds.map(ParagraphRows::single));
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.bubble()
                         || !hitbox.is_hovered(window)
@@ -1408,13 +1425,11 @@ impl Element for Inline {
                     }
 
                     if event.click_count == 3
-                        && let Some(line_bounds) = line_bounds
+                        && let Some(rows) = paragraph_rows
                     {
                         GlobalState::suppress_text_selection(cx);
                         if let Some(view) = &text_view_state {
-                            view.update(cx, |state, cx| {
-                                state.set_multi_click_line(line_bounds, cx)
-                            });
+                            view.update(cx, |state, cx| state.set_multi_click_line(rows, cx));
                         }
                         cx.notify(current_view);
                         return;
@@ -2034,7 +2049,7 @@ mod line_bounds_tests {
                     let styled =
                         StyledText::new(SharedString::from(text.to_string())).with_runs(runs);
                     let layout = styled.layout().clone();
-                    let mut element = styled.into_any_element();
+                    let mut element = gpui::IntoElement::into_any_element(styled);
                     element.layout_as_root(
                         size(
                             AvailableSpace::Definite(px(wrap_width)),
@@ -2125,7 +2140,7 @@ mod range_highlight_tests {
                 &[],
             ));
             let layout = styled.layout().clone();
-            let mut element = styled.into_any_element();
+            let mut element = gpui::IntoElement::into_any_element(styled);
             element.layout_as_root(
                 size(
                     AvailableSpace::Definite(px(wrap_width)),
@@ -2178,7 +2193,7 @@ mod range_highlight_tests {
                     let styled =
                         StyledText::new(SharedString::from(text.to_string())).with_runs(runs);
                     let layout = styled.layout().clone();
-                    let mut element = styled.into_any_element();
+                    let mut element = gpui::IntoElement::into_any_element(styled);
                     element.layout_as_root(
                         size(
                             AvailableSpace::Definite(px(wrap_width)),
@@ -2951,6 +2966,41 @@ mod retained_layout_tests {
             cleanup,
         );
         state
+    }
+
+    #[test]
+    fn live_layouts_above_the_old_threshold_do_not_trigger_sweeps() {
+        super::sweep_retained_layouts();
+        let dropped_before = super::SWEPT_AT_DROPS.get();
+        let sweeps_before = super::RETAINED_LAYOUT_SWEEPS.get();
+        let states = (0..8192)
+            .map(|_| hand_over("live paragraph", None))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len()),
+            8192
+        );
+
+        // Hand the same layouts to the next frame without dropping any state.
+        for state in &states {
+            let retained = super::take_retained_layout(state).unwrap();
+            super::retain_layout(state, retained, None);
+        }
+        // Other tests may drop states concurrently. Every sweep must consume
+        // at least one new drop, regardless of how many live layouts we keep.
+        let sweeps = super::RETAINED_LAYOUT_SWEEPS.get() - sweeps_before;
+        let dropped = super::DROPPED_STATES
+            .load(std::sync::atomic::Ordering::Acquire)
+            .wrapping_sub(dropped_before);
+        assert!(sweeps <= dropped, "{sweeps} sweeps for {dropped} drops");
+        assert_eq!(
+            RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len()),
+            8192
+        );
+
+        drop(states);
+        super::sweep_retained_layouts();
+        assert!(RETAINED_LAYOUTS.with(|layouts| layouts.borrow().is_empty()));
     }
 
     /// Tables are per thread and the drop count is global: a hand-over on

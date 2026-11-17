@@ -5,9 +5,9 @@ description: 用于复制文本或其它内容到剪贴板的按钮组件。
 
 # Clipboard
 
-Clipboard 组件提供了一个简单的复制按钮，可将文本或其它数据复制到用户剪贴板。它默认显示复制图标，在复制成功后会切换为勾选图标。组件既支持静态值，也支持通过回调动态生成复制内容。
+Clipboard 组件提供了一个简单的复制按钮，可将文本或其它数据复制到用户剪贴板。它默认显示复制图标，在复制成功后会切换为勾选图标，也可以添加可见标签来说明操作。组件既支持静态值，也支持通过回调动态生成复制内容。
 
-这个图标按钮默认使用本地化的“复制”作为无障碍名称。如果需要更明确地说明复制对象，可用 `accessibility_label` 指定名称，例如“复制 API 密钥”。tooltip 只是辅助提示，不会设置无障碍名称。
+没有可见标签时，按钮默认使用本地化的“复制”作为无障碍名称；添加可见标签后，标签文本会作为无障碍名称。如需覆盖，可用 `accessibility_label` 指定名称。tooltip 只是辅助提示，不会设置无障碍名称。
 
 ## 导入
 
@@ -25,6 +25,14 @@ Clipboard::new("my-clipboard")
     .on_copied(|value, window, cx| {
         window.push_notification(format!("Copied: {}", value), cx)
     })
+```
+
+### 添加标签
+
+```rust
+Clipboard::new("copy-url")
+    .label("复制 URL")
+    .value("https://example.com")
 ```
 
 ### 动态值

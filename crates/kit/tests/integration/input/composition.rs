@@ -130,6 +130,47 @@ fn unmark_retains_preedit_and_separates_its_history_from_later_typing(cx: &mut T
 }
 
 #[gpui_kit::test]
+fn unmark_reports_the_kept_preedit_as_one_change(cx: &mut TestAppContext) {
+    let (handle, fields, ids) = mount(cx);
+    for (ix, id) in ids.into_iter().enumerate() {
+        // Subscribers run once each update ends, so every step is its own update.
+        let step = |cx: &mut TestAppContext,
+                    f: &dyn Fn(&mut dyn InputHandler, &mut Window, &mut App)| {
+            cx.update_window(handle.into(), |_, window, cx| {
+                let mut handler = fields.read(cx).handler(ix, window);
+                f(&mut *handler, window, cx);
+            })
+            .unwrap();
+            fields.read_with(cx, |fields, _| fields.changes(ix))
+        };
+        cx.update_window(handle.into(), |_, window, cx| window.click(id.clone(), cx))
+            .unwrap();
+        // Android keyboards compose a whole word, then end with unmark alone.
+        let composed = step(cx, &|handler, window, cx| {
+            handler.replace_and_mark_text_in_range(None, "s", None, window, cx);
+            handler.replace_and_mark_text_in_range(None, "slider", None, window, cx);
+        });
+        assert_eq!(composed, 0);
+        assert_eq!(
+            step(cx, &|handler, window, cx| handler.unmark_text(window, cx)),
+            1
+        );
+        // Unmarking again, or after a cancelled preedit, changes nothing.
+        let after = step(cx, &|handler, window, cx| {
+            handler.unmark_text(window, cx);
+            handler.replace_and_mark_text_in_range(None, "x", None, window, cx);
+            handler.replace_and_mark_text_in_range(None, "", None, window, cx);
+            handler.unmark_text(window, cx);
+        });
+        assert_eq!(after, 1);
+        cx.update_window(handle.into(), |_, window, _| {
+            assert_eq!(window.find(id).value(), Some("slider"));
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
 fn input_handler_reports_backward_unicode_selection_direction(cx: &mut TestAppContext) {
     let (handle, fields, ids) = mount(cx);
     for (ix, id) in ids.into_iter().enumerate() {

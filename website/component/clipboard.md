@@ -5,9 +5,9 @@ description: A button component that helps you copy text or other content to you
 
 # Clipboard
 
-The Clipboard component provides an easy way to copy text or other data to the user's clipboard. It renders as a button with a copy icon that changes to a checkmark when content is successfully copied. The component supports both static values and dynamic content through callback functions.
+The Clipboard component provides an easy way to copy text or other data to the user's clipboard. It renders as a button with a copy icon that changes to a checkmark when content is successfully copied. An optional visible label can describe the action. The component supports both static values and dynamic content through callback functions.
 
-The icon button has a localized "Copy" accessible name by default. Use `accessibility_label` when the context needs a more specific name, such as "Copy API key". A tooltip is a separate hint and does not set the accessible name.
+Without a visible label, the button has a localized "Copy" accessible name by default. A visible label is used as the accessible name; use `accessibility_label` to override it when needed. A tooltip is a separate hint and does not set the accessible name.
 
 ## Import
 
@@ -25,6 +25,14 @@ Clipboard::new("my-clipboard")
     .on_copied(|value, window, cx| {
         window.push_notification(format!("Copied: {}", value), cx)
     })
+```
+
+### With a Label
+
+```rust
+Clipboard::new("copy-url")
+    .label("Copy URL")
+    .value("https://example.com")
 ```
 
 ### Using Dynamic Values

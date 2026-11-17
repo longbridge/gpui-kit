@@ -18,6 +18,7 @@ pub struct Clipboard {
     value: SharedString,
     value_fn: Option<Rc<dyn Fn(&mut Window, &mut App) -> SharedString>>,
     on_copied: Option<Rc<dyn Fn(SharedString, &mut Window, &mut App)>>,
+    label: Option<SharedString>,
     tooltip_text: Option<SharedString>,
     tooltip_show_delay: Option<Duration>,
     accessibility_label: Option<SharedString>,
@@ -39,11 +40,18 @@ impl Clipboard {
             value: SharedString::default(),
             value_fn: None,
             on_copied: None,
+            label: None,
             tooltip_text: None,
             tooltip_show_delay: None,
             accessibility_label: None,
             size: Size::XSmall,
         }
+    }
+
+    /// Set visible text for the clipboard button.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// Set tooltip text for the clipboard button.
@@ -104,6 +112,9 @@ impl RenderOnce for Clipboard {
         let clipboard_id = self.id.clone();
         let copied = state.read(cx).copied;
         let value_fn = self.value_fn.clone();
+        let accessibility_label = self
+            .accessibility_label
+            .or_else(|| self.label.is_none().then(|| t!("Copy").into()));
 
         Button::new(clipboard_id)
             .icon(if copied {
@@ -111,16 +122,16 @@ impl RenderOnce for Clipboard {
             } else {
                 IconName::Copy
             })
+            .when_some(self.label, |this, label| this.label(label))
             .ghost()
             .with_size(self.size)
             .when_some(self.tooltip_text, |this, text| this.tooltip(text))
             .when_some(self.tooltip_show_delay, |this, delay| {
                 this.tooltip_show_delay(delay)
             })
-            .accessibility_label(
-                self.accessibility_label
-                    .unwrap_or_else(|| t!("Copy").into()),
-            )
+            .when_some(accessibility_label, |this, label| {
+                this.accessibility_label(label)
+            })
             .when(!copied, |this| {
                 this.on_click({
                     let state = state.clone();
@@ -153,6 +164,26 @@ impl RenderOnce for Clipboard {
                     }
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clipboard_builder() {
+        let clipboard = Clipboard::new("copy").label("Copy value");
+
+        assert_eq!(clipboard.label.as_deref(), Some("Copy value"));
+        assert_eq!(clipboard.accessibility_label, None);
+
+        let clipboard = clipboard.accessibility_label("Copy current value");
+        assert_eq!(
+            clipboard.accessibility_label.as_deref(),
+            Some("Copy current value")
+        );
+        assert_eq!(clipboard.label.as_deref(), Some("Copy value"));
     }
 }
 

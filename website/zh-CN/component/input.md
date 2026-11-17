@@ -429,6 +429,24 @@ let draft = InputContent::new("Ask @alice")
 
 `set_value` 清空撤销历史，不触发 `InputEvent::Change`。传入纯文本会移除全部 token，即使文字未变；传入 content 则恢复其中的 token（无法显示 token 的模式除外）。需要可撤销的纯文本替换时使用 `replace_all`。token 编辑会触发 `InputEvent::Change`，包括为已有文本添加引用。程序化 setter 可以修改只读或禁用的输入，因此不应对用户开放的应用命令需要自行检查这些状态。
 
+### 由文本派生 token
+
+要把用户输入的部分文本显示为 token（例如光标不在附近时的 `**bold**`），将当前文本连同它的 token 传给 `set_tokens`。它保留文本、选区和撤销历史，不触发 `InputEvent::Change`：
+
+```rust
+use gpui_kit::component::input::{InlineToken, InputContent};
+
+input.update(cx, |state, cx| {
+    let content = InputContent::new(state.value())
+        .with_token(2..7, InlineToken::new("bold", "**b**"))
+        .expect("the text holds `**b**` at 2..7");
+    // 光标位于 2..7 内时会被拒绝：文本保持原样。
+    state.set_tokens(content, cx).ok();
+});
+```
+
+content 中的文本不同时，`set_tokens` 返回 `TextMismatch`；token 会切开某个选区或光标时返回 `SplitsSelection`；失败时 token 保持原样。撤销/重做会按每次编辑记录的 token 重放文本，并丢弃被撤销的编辑切开的 token，因此每次变更后都应再次调用 `set_tokens`，使派生的 token 保持最新。
+
 ### 校验与适用范围
 
 token 适用于 Input 和 Textarea，不支持 Editor、NumberInput、格式化 mask 或密码输入。ID 不能全为空白；真实文本和标签必须非空、单行且不含控制字符。范围不能重叠或切开 Unicode grapheme（例如 emoji 或带组合重音的字符）；恢复草稿时，每个 token 的真实文本必须与对应范围匹配。

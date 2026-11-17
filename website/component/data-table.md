@@ -518,6 +518,7 @@ DataTable::new(&state)
     .bordered(true)                 // Border around table
     .fixed_cols_border(true)        // Border on the inner edge of the fixed columns
     .scrollbar_visible(true, true)  // Vertical, horizontal scrollbars
+    .scrollbar_mode(ScrollbarMode::Always)
 ```
 
 ## Examples
