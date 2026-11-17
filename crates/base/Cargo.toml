@@ -56,6 +56,7 @@ smallvec.workspace = true
 sum-tree.workspace = true
 tracing.workspace = true
 sys-locale = "0.3"
+unicode-bidi = "0.3.18"
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.12.0"
 web-time = "1"
