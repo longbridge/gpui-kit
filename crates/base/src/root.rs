@@ -2,7 +2,7 @@
 use crate::input::Copy;
 use crate::{StyledExt, TextSelectionLayer};
 use gpui::{
-    AnyElement, AnyView, App, AppContext, ClipboardItem, Context, Div, Entity, FocusHandle, Global,
+    Action, AnyElement, AnyView, App, AppContext, ClipboardItem, Context, Div, Entity, Global,
     InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, Stateful, StyleRefinement,
     Styled, Subscription, Window, actions, div,
 };
@@ -121,17 +121,11 @@ pub struct Root {
     view: AnyView,
     style: StyleRefinement,
     plugins: Vec<Plugin>,
-    /// Held while nothing else in the window has focus. GPUI dispatches a
-    /// keystroke from the focused element, or from the window's root element
-    /// when nothing is focused, which is above the root's key context. So
-    /// without this, Tab, Shift-Tab and copy would match no binding until the
-    /// user had clicked a control.
-    ///
-    /// It is tracked on an empty element inside the surface, not on the
-    /// surface: a focusable element takes focus when pressed, and the surface
-    /// would take it from a focused control at every press on the background.
-    focus_handle: FocusHandle,
-    _focus_lost: Subscription,
+    /// Runs Tab and Shift-Tab while nothing in the window is focused. GPUI
+    /// dispatches a keystroke from the focused element, or from the window's
+    /// root element when nothing is focused, which is above the root's key
+    /// context, so the bindings below match nothing there.
+    _unfocused_tab: Subscription,
 }
 
 impl Root {
@@ -190,20 +184,29 @@ impl Root {
             .try_global::<PluginRegistry>()
             .map(|e| e.0.clone())
             .unwrap_or_default();
-        let focus_handle = cx.focus_handle();
-        // Deferred, so focus the content gives itself when the window opens,
-        // deferred or not, comes first.
-        window.defer(cx, {
-            let focus_handle = focus_handle.clone();
-            move |window, cx| {
-                if window.focused(cx).is_none() {
-                    focus_handle.focus(window, cx);
-                }
+        let window_handle = window.window_handle();
+        let unfocused_tab = cx.observe_keystrokes(move |_, event, window, cx| {
+            // Only a key no binding took, in this window, with nothing focused.
+            if event.action.is_some()
+                || window.window_handle() != window_handle
+                || window.focused(cx).is_some()
+            {
+                return;
             }
-        });
-        // And again when the focused element is blurred or leaves the tree.
-        let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
-            this.focus_handle.focus(window, cx);
+            let bound_to = |action: &dyn Action, cx: &App| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_action(action)
+                    .any(|binding| {
+                        binding.match_keystrokes(std::slice::from_ref(&event.keystroke))
+                            == Some(false)
+                    })
+            };
+            if bound_to(&Tab, cx) {
+                advance_focus(window, cx, Window::focus_next);
+            } else if bound_to(&TabPrev, cx) {
+                advance_focus(window, cx, Window::focus_prev);
+            }
         });
         Self {
             view: view.into(),
@@ -212,8 +215,7 @@ impl Root {
                 .into_iter()
                 .map(|(_, build)| build(window, cx))
                 .collect(),
-            focus_handle,
-            _focus_lost: focus_lost,
+            _unfocused_tab: unfocused_tab,
         }
     }
 
@@ -286,7 +288,6 @@ impl Render for Root {
             .on_action(cx.listener(Self::on_action_copy))
             .relative()
             .size_full()
-            .child(div().absolute().size_0().track_focus(&self.focus_handle))
             .child(TextSelectionLayer)
             .child(self.view.clone())
             .child(

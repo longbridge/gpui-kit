@@ -1,30 +1,25 @@
-//! A window with nothing focused still answers the keyboard: Tab and
-//! Shift-Tab reach its controls before anything has been clicked, and again
-//! after the focused control goes away.
+//! A window with nothing focused still answers Tab and Shift-Tab: they reach
+//! its controls before anything has been clicked, and again after the focused
+//! control goes away. Nothing is focused until then.
 
 use crate::common;
 use gpui_kit::component::button::Button;
-use gpui_kit::test::{TestEventExt as _, TestQueryExt as _, TestWindowExt as _};
+use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
 use gpui_kit::{
-    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, Render, TestAppContext, Window, WindowHandle, base::Root, div,
-    point, prelude::FluentBuilder as _, px,
+    AppContext as _, Context, Entity, IntoElement, KeyBinding, ParentElement as _, Render,
+    TestAppContext, Window, WindowHandle, actions, base::Root, div, prelude::FluentBuilder as _,
 };
+use std::{cell::Cell, rc::Rc};
+
+actions!(root_focus_test, [AppTab]);
 
 struct Controls {
     show_middle: bool,
-    /// Focused when the window opens if nothing else is, as the story
-    /// gallery focuses its root.
-    own_focus: Option<FocusHandle>,
 }
 
 impl Render for Controls {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-            .id("controls")
-            .when_some(self.own_focus.as_ref(), |this, focus| {
-                this.track_focus(focus)
-            })
             .child(Button::new("first").label("First"))
             .when(self.show_middle, |this| {
                 this.child(Button::new("middle").label("Middle"))
@@ -33,29 +28,21 @@ impl Render for Controls {
     }
 }
 
-fn open(cx: &mut TestAppContext, focus_itself: bool) -> (WindowHandle<Root>, Entity<Controls>) {
+fn open(cx: &mut TestAppContext) -> (WindowHandle<Root>, Entity<Controls>) {
     cx.update(gpui_kit::init);
-    common::open_window(cx, None, move |window, cx| {
-        let controls = cx.new(|cx| Controls {
-            show_middle: true,
-            own_focus: focus_itself.then(|| cx.focus_handle()),
-        });
-        if let Some(focus) = controls.read(cx).own_focus.clone() {
-            window.defer(cx, move |window, cx| {
-                if window.focused(cx).is_none() {
-                    focus.focus(window, cx);
-                }
-            });
-        }
-        controls
+    let opened = common::open_window(cx, None, |_, cx| cx.new(|_| Controls { show_middle: true }));
+    cx.update_window(opened.0.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.focused(cx).is_none());
     })
+    .unwrap();
+    opened
 }
 
 #[gpui_kit::test]
 fn tab_in_a_window_with_nothing_focused_reaches_the_first_control(cx: &mut TestAppContext) {
-    let (handle, _) = open(cx, false);
+    let (handle, _) = open(cx);
     cx.update_window(handle.into(), |_, window, cx| {
-        window.render_frame(cx);
         window.press("tab", cx);
         window.render_frame(cx);
         assert_eq!(window.find_by_label("First").focused(), Some(true));
@@ -65,9 +52,8 @@ fn tab_in_a_window_with_nothing_focused_reaches_the_first_control(cx: &mut TestA
 
 #[gpui_kit::test]
 fn shift_tab_in_a_window_with_nothing_focused_reaches_the_last_control(cx: &mut TestAppContext) {
-    let (handle, _) = open(cx, false);
+    let (handle, _) = open(cx);
     cx.update_window(handle.into(), |_, window, cx| {
-        window.render_frame(cx);
         window.press("shift-tab", cx);
         window.render_frame(cx);
         assert_eq!(window.find_by_label("Last").focused(), Some(true));
@@ -77,9 +63,8 @@ fn shift_tab_in_a_window_with_nothing_focused_reaches_the_last_control(cx: &mut 
 
 #[gpui_kit::test]
 fn tab_reaches_the_controls_again_after_the_focused_one_goes_away(cx: &mut TestAppContext) {
-    let (handle, controls) = open(cx, false);
+    let (handle, controls) = open(cx);
     cx.update_window(handle.into(), |_, window, cx| {
-        window.render_frame(cx);
         window.focus_next(cx);
         window.focus_next(cx);
         window.render_frame(cx);
@@ -93,6 +78,7 @@ fn tab_reaches_the_controls_again_after_the_focused_one_goes_away(cx: &mut TestA
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         window.render_frame(cx);
+        assert!(window.focused(cx).is_none());
         window.press("tab", cx);
         window.render_frame(cx);
         assert_eq!(window.find_by_label("First").focused(), Some(true));
@@ -101,29 +87,22 @@ fn tab_reaches_the_controls_again_after_the_focused_one_goes_away(cx: &mut TestA
 }
 
 #[gpui_kit::test]
-fn content_that_focuses_itself_when_the_window_opens_keeps_that_focus(cx: &mut TestAppContext) {
-    let (handle, controls) = open(cx, true);
-    let focus = controls.read_with(cx, |controls, _| controls.own_focus.clone().unwrap());
-    cx.update_window(handle.into(), |_, window, cx| {
-        window.render_frame(cx);
-        assert!(focus.is_focused(window));
-    })
-    .unwrap();
-}
-
-#[gpui_kit::test]
-fn pressing_the_background_leaves_the_focused_control_focused(cx: &mut TestAppContext) {
-    let (handle, _) = open(cx, false);
+fn an_app_binding_for_tab_outside_any_context_still_takes_tab(cx: &mut TestAppContext) {
+    let (handle, _) = open(cx);
+    let ran = Rc::new(Cell::new(false));
+    cx.update({
+        let ran = ran.clone();
+        move |cx| {
+            cx.bind_keys([KeyBinding::new("tab", AppTab, None)]);
+            cx.on_action(move |_: &AppTab, _| ran.set(true));
+        }
+    });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         window.press("tab", cx);
         window.render_frame(cx);
-        assert_eq!(window.find_by_label("First").focused(), Some(true));
-        let background = point(px(600.), px(600.));
-        window.pointer_down(background, MouseButton::Left, cx);
-        window.pointer_up(background, MouseButton::Left, cx);
-        window.render_frame(cx);
-        assert_eq!(window.find_by_label("First").focused(), Some(true));
+        assert!(window.focused(cx).is_none());
     })
     .unwrap();
+    assert!(ran.get());
 }
