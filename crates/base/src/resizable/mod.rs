@@ -59,6 +59,11 @@ impl ResizableState {
         &self.sizes
     }
 
+    /// Whether a resize handle is being dragged.
+    pub fn is_resizing(&self) -> bool {
+        self.resizing_panel_ix.is_some()
+    }
+
     /// Programmatically resize the panel at `ix` to `size`, redistributing
     /// space among siblings using the same logic as a drag.
     ///
@@ -850,6 +855,7 @@ mod tests {
     fn dragging_the_handle_resizes_and_emits_once(cx: &mut TestAppContext) {
         let (cx, state, resizes) = harness(cx);
         let boundary = cx.debug_bounds("second-panel").unwrap().left();
+        assert!(!state.read_with(cx, |state, _| state.is_resizing()));
 
         cx.simulate_mouse_down(
             point(boundary - px(2.), px(50.)),
@@ -866,6 +872,7 @@ mod tests {
             Some(MouseButton::Left),
             Modifiers::default(),
         );
+        assert!(state.read_with(cx, |state, _| state.is_resizing()));
         cx.simulate_mouse_up(
             point(px(220.), px(50.)),
             MouseButton::Left,
@@ -874,6 +881,7 @@ mod tests {
 
         state.read_with(cx, |state, _| {
             assert_eq!(state.sizes(), &vec![px(220.), px(180.)]);
+            assert!(!state.is_resizing());
         });
         assert_eq!(resizes.get(), 1);
     }
