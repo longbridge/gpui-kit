@@ -10171,6 +10171,9 @@ mod tests {
         cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(1, cx)));
         assert_eq!(folded(&mut cx), vec![0]);
 
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(3, cx)));
+        assert_eq!(folded(&mut cx), vec![2]);
+
         cx.update(|_, cx| input.update(cx, |state, cx| state.unfold_all(cx)));
         assert!(folded(&mut cx).is_empty());
         cx.update(|_, cx| {
@@ -13664,6 +13667,9 @@ impl InputBaseState<crate::input::EditorMode> {
 
     /// Unfold every folded range. Fold candidates are kept.
     pub fn unfold_all(&mut self, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
         self.display_map.clear_folds();
         cx.notify();
     }
@@ -13675,22 +13681,20 @@ impl InputBaseState<crate::input::EditorMode> {
         if !self.mode.is_folding() {
             return;
         }
-        let candidates = self.display_map.fold_candidates();
-        let lines: Vec<usize> = candidates
-            .iter()
-            .filter(|c| {
-                let depth = 1 + candidates
-                    .iter()
-                    .filter(|o| {
-                        o.start_line <= c.start_line
-                            && o.end_line >= c.end_line
-                            && (o.start_line, o.end_line) != (c.start_line, c.end_line)
-                    })
-                    .count();
-                depth == level
-            })
-            .map(|c| c.start_line)
-            .collect();
+        // One pass: the candidates are sorted by start line with unique starts,
+        // so the stack holds the end lines of the candidates that contain the
+        // current one, and its length is the depth.
+        let mut open: Vec<usize> = Vec::new();
+        let mut lines = Vec::new();
+        for c in self.display_map.fold_candidates() {
+            while open.last().is_some_and(|&end| end < c.end_line) {
+                open.pop();
+            }
+            if open.len() + 1 == level {
+                lines.push(c.start_line);
+            }
+            open.push(c.end_line);
+        }
         self.display_map.set_folded_lines(lines);
         cx.notify();
     }

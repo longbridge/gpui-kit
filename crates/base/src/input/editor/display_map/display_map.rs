@@ -172,14 +172,14 @@ impl DisplayMap {
 
     /// Get all fold candidates (the ranges that can be folded)
     #[inline]
-    pub fn fold_candidates(&self) -> &[FoldRange] {
+    pub(crate) fn fold_candidates(&self) -> &[FoldRange] {
         self.fold_map.fold_candidates()
     }
 
     /// Replace the folded ranges: fold each candidate starting at one of
     /// `start_lines` and unfold all others. Lines that are not candidates are
     /// ignored. The fold projection is rebuilt once.
-    pub fn set_folded_lines(&mut self, start_lines: impl IntoIterator<Item = usize>) {
+    pub(crate) fn set_folded_lines(&mut self, start_lines: impl IntoIterator<Item = usize>) {
         self.fold_map.clear_folds();
         for line in start_lines {
             self.fold_map.set_folded(line, true);
