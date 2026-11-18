@@ -4669,6 +4669,10 @@ impl<M: InputModeKind> InputBaseState<M> {
 }
 
 impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
+    fn accepts_text_input(&self, window: &mut Window, _cx: &mut Context<Self>) -> bool {
+        self.focus_handle.is_focused(window)
+    }
+
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
