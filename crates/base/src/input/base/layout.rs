@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc};
 
-use gpui::{Bounds, Half, Pixels, ShapedLine, TextAlign, px};
+use gpui::{Bounds, Pixels, ShapedLine, TextAlign, px};
 
 use crate::Side;
 
@@ -230,13 +230,5 @@ impl LastLayout {
                     (y >= top - above && y < top) || (y >= below_top && y < below_top + below);
                 (spacer || (y >= top && y < bottom)).then_some((row, spacer))
             })
-    }
-
-    pub(super) fn alignment_offset(&self, line_width: Pixels) -> Pixels {
-        match self.text_align {
-            TextAlign::Left => px(0.),
-            TextAlign::Center => (self.content_width - line_width).half().max(px(0.)),
-            TextAlign::Right => (self.content_width - line_width).max(px(0.)),
-        }
     }
 }

@@ -580,13 +580,7 @@ mod rendering {
         for (id, line) in BUTTONS {
             let bounds = cx
                 .update_window(handle, |_, window, cx| {
-                    // Tab only reaches Root's binding once something inside
-                    // it holds focus, so the first stop is what Tab does.
-                    if window.focused(cx).is_none() {
-                        window.focus_next(cx);
-                    } else {
-                        window.press("tab", cx);
-                    }
+                    window.press("tab", cx);
                     window.render_frame(cx);
                     window.find(id).bounds()
                 })

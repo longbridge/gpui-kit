@@ -90,9 +90,7 @@ fn checkbox_space_repeat_changes_controlled_value_once_on_release(cx: &mut TestA
     let (handle, content) = common::open_window(cx, None, |_, cx| cx.new(|_| Controls::default()));
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        // Root's Tab binding requires an existing focus path. Start at the
-        // first stop, then traverse to the checkbox using the actual binding.
-        window.focus_next(cx);
+        window.press("tab", cx);
         window.render_frame(cx);
         assert_eq!(window.find_by_label("Save").focused(), Some(true));
         window.press("tab", cx);
