@@ -70,8 +70,12 @@ let state = cx.new(|cx| ListState::new(delegate, window, cx));
 Now use [List] to render list:
 
 ```rs
-div().child(List::new(&state))
+v_flex()
+    .size_full()
+    .child(List::new(&state).flex_1())
 ```
+
+The list fills its parent, so give the parent a height (for example `size_full()` or `h(px(300.))`); otherwise the list collapses to zero height and nothing is shown.
 
 ### List with Sections
 

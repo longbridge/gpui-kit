@@ -209,6 +209,7 @@ pub struct Button {
     /// different things, even though they paint the same today.
     open: bool,
     toggled: Option<bool>,
+    expanded: Option<bool>,
     role: RoleOverride,
     variant: ButtonVariant,
     rounded: ButtonRounded,
@@ -261,6 +262,7 @@ impl Button {
             selected: false,
             open: false,
             toggled: None,
+            expanded: None,
             role: RoleOverride::default(),
             variant: ButtonVariant::default(),
             rounded: ButtonRounded::Medium,
@@ -492,6 +494,16 @@ impl Button {
     /// accessibility focus state alike.
     pub fn track_focus(mut self, focus_handle: &FocusHandle) -> Self {
         self.focus_handle = Some(focus_handle.clone());
+        self
+    }
+
+    /// Expose whether the disclosure controlled by this button is expanded.
+    ///
+    /// When unset, the button does not expose an expanded state. This is
+    /// separate from [`Selectable::open`], which controls the button's visual
+    /// open state.
+    pub fn aria_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
         self
     }
 
@@ -861,6 +873,9 @@ impl RenderOnce for Button {
             } else {
                 gpui::accesskit::Toggled::False
             })
+        })
+        .when_some(self.expanded, |this, expanded| {
+            this.aria_expanded(expanded)
         })
         .track_focus(&focus_handle)
         .tab_index(self.tab_index)

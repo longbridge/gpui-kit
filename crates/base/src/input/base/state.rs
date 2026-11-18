@@ -382,6 +382,7 @@ pub struct PrepaintCaretGeometry {
     line_height: Pixels,
     input_bounds: Bounds<Pixels>,
     scroll_offset: Point<Pixels>,
+    pub(super) scroll_y_f64: f64,
     /// A resize owns visibility while its requested repaint settles.
     pub(super) resize_reveal_owned: bool,
 }
@@ -398,6 +399,7 @@ impl PrepaintCaretGeometry {
             line_height,
             input_bounds,
             scroll_offset,
+            scroll_y_f64: f64::from(f32::from(scroll_offset.y)),
             resize_reveal_owned: false,
         }
     }
@@ -537,6 +539,12 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) overscroll: Overscroll,
     /// The deferred scroll offset to apply on next layout.
     pub(crate) deferred_scroll_offset: Option<Point<Pixels>>,
+    /// Authoritative `f64` vertical scroll offset (`<= 0.0`) to preserve precision past `2^24` px.
+    pub(crate) scroll_y_f64: f64,
+    pub(crate) deferred_scroll_y_f64: Option<f64>,
+    pub(crate) last_synced_handle_y: Cell<Pixels>,
+    /// Authoritative `f64` scrollable height in pixels.
+    pub(crate) scroll_height_f64: f64,
     /// The size of the scrollable content.
     pub(crate) scroll_size: gpui::Size<Pixels>,
     pub(super) editor_scrollbar_snapshot: Cell<Option<EditorScrollbarSnapshot>>,
@@ -753,7 +761,9 @@ impl<M: InputModeKind> InputBaseState<M> {
     #[doc(hidden)]
     pub fn cursor_layout(&self) -> Option<(Bounds<Pixels>, Pixels)> {
         let layout = self.last_layout.as_ref()?;
-        Some((layout.cursor_bounds?, layout.line_height))
+        let mut bounds = layout.cursor_bounds?;
+        bounds.origin.y -= self.scroll_handle.offset().y;
+        Some((bounds, layout.line_height))
     }
 
     /// Caret geometry from the latest prepaint, for caret-anchored popups.
@@ -1040,6 +1050,10 @@ impl<M: InputModeKind> InputBaseState<M> {
             scroll_bounce: crate::ScrollBounce::enabled_by_default(),
             overscroll: Overscroll::default(),
             scroll_size: gpui::size(px(0.), px(0.)),
+            scroll_y_f64: 0.0,
+            deferred_scroll_y_f64: None,
+            last_synced_handle_y: Cell::new(px(0.)),
+            scroll_height_f64: 0.0,
             editor_scrollbar_snapshot: Cell::new(None),
             overview_ruler_rows: Default::default(),
             longest_line_width: Cell::new(None),
@@ -1263,10 +1277,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         let line_height = last_layout.line_height;
         let target_row = self.text.offset_to_point(offset.min(self.text.len())).row;
 
-        let mut y_offset = last_layout.visible_top;
+        let mut row_offset: isize = 0;
         for (vi, line) in last_layout.lines.iter().enumerate() {
             let buffer_line = last_layout.visible_buffer_lines[vi];
             if buffer_line == target_row {
+                let y_offset = last_layout.local_row_y(row_offset);
                 let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
                 let local_offset = offset.saturating_sub(prev_lines_offset).min(line.len());
                 let pos = line
@@ -1277,7 +1292,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (vi, sub_line_index, Some(adjusted_pos));
             }
 
-            y_offset += line.size(line_height).height;
+            row_offset += line.wrapped_lines.len() as isize;
         }
         (0, 0, None)
     }
@@ -1426,8 +1441,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         // override the cursor-follow scroll for the next painted frame to keep
         // the start visible; the deferred offset is consumed during that paint.
         self.scroll_handle.set_offset(point(px(0.), px(0.)));
+        self.scroll_y_f64 = 0.0;
+        self.last_synced_handle_y.set(px(0.));
         if self.is_single_line() {
             self.deferred_scroll_offset = Some(point(px(0.), px(0.)));
+            self.deferred_scroll_y_f64 = Some(0.0);
         }
     }
 
@@ -2413,10 +2431,41 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.delete_selections(
             true,
             EditIntent::Atomic,
-            |s, offset| offset..s.next_end_of_word_at(offset),
+            |s, offset| offset..s.next_word_delete_end_at(offset, !cfg!(target_os = "macos")),
             window,
             cx,
         );
+    }
+
+    /// Return where a forward word delete starting at `offset` stops.
+    ///
+    /// With `stop_at_whitespace` (Windows and Linux `Ctrl+Delete`, as in
+    /// Notepad and VS Code), a line break or a run of blanks is deleted on its
+    /// own instead of together with the word after it. macOS `Option+Delete`
+    /// deletes through to the end of the next word.
+    pub(super) fn next_word_delete_end_at(&self, offset: usize, stop_at_whitespace: bool) -> usize {
+        if stop_at_whitespace && !self.masked {
+            let mut chars = self.text.slice(offset..self.text.len()).chars();
+            match chars.next() {
+                Some('\r') => {
+                    let next = if chars.next() == Some('\n') { 2 } else { 1 };
+                    return offset + next;
+                }
+                Some('\n') => return offset + 1,
+                Some(c) if c.is_whitespace() => {
+                    let mut end = offset + c.len_utf8();
+                    for c in chars {
+                        if c == '\n' || c == '\r' || !c.is_whitespace() {
+                            break;
+                        }
+                        end += c.len_utf8();
+                    }
+                    return end;
+                }
+                _ => {}
+            }
+        }
+        self.next_end_of_word_at(offset)
     }
 
     pub(super) fn enter(&mut self, action: &Enter, window: &mut Window, cx: &mut Context<Self>) {
@@ -2982,6 +3031,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let delta = event.delta.pixel_delta(line_height);
 
         let old_offset = self.scroll_handle.offset();
+        let old_y_f64 = self.effective_scroll_y_f64();
         let precise = matches!(event.delta, gpui::ScrollDelta::Pixels(_));
         if !precise || !self.scroll_bounce || cx.reduce_motion() || !self.overflows_vertically() {
             let displaced = self.overscroll.offset() != 0.;
@@ -3003,12 +3053,14 @@ impl<M: InputModeKind> InputBaseState<M> {
                 self.input_bounds.size.height.as_f32(),
                 cx.background_executor().now(),
                 |dy| {
-                    let before = self.scroll_handle.offset();
-                    self.update_scroll_offset(
-                        Some(point(before.x + delta.x, before.y + px(dy))),
+                    let before_x = self.scroll_handle.offset().x;
+                    let before_y = self.effective_scroll_y_f64();
+                    self.update_scroll_offset_parts(
+                        before_x + delta.x,
+                        before_y + f64::from(dy),
                         cx,
                     );
-                    (self.scroll_handle.offset().y - before.y).as_f32()
+                    (self.scroll_y_f64 - before_y) as f32
                 },
             );
             self.overscroll = overscroll;
@@ -3033,13 +3085,20 @@ impl<M: InputModeKind> InputBaseState<M> {
                 );
                 cx.notify();
             }
-            self.update_scroll_offset(Some(old_offset + delta), cx);
+            self.update_scroll_offset_parts(
+                old_offset.x + delta.x,
+                old_y_f64 + f64::from(f32::from(delta.y)),
+                cx,
+            );
         }
 
         // Text that has room to scroll keeps a scroll over it even where the
         // text ends, so reaching the end does not scroll the region around the
         // input; text that fits leaves the scroll to that region.
-        if self.scroll_handle.offset() != old_offset || self.overflows_along(delta) {
+        if self.scroll_handle.offset() != old_offset
+            || (self.scroll_y_f64 - old_y_f64).abs() > f64::EPSILON
+            || self.overflows_along(delta)
+        {
             cx.stop_propagation();
         }
 
@@ -3077,33 +3136,69 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Whether multi-line text is taller than the input.
     fn overflows_vertically(&self) -> bool {
-        self.is_multi_line() && self.scroll_size.height > self.input_bounds.size.height
+        self.is_multi_line()
+            && self.content_height_f64() > f64::from(f32::from(self.input_bounds.size.height))
     }
 
+    pub(super) fn effective_scroll_y_f64(&self) -> f64 {
+        let handle_y = self.scroll_handle.offset().y;
+        if handle_y != self.last_synced_handle_y.get() {
+            f64::from(f32::from(handle_y))
+        } else {
+            self.scroll_y_f64
+        }
+    }
+
+    pub(super) fn update_scroll_offset_parts(
+        &mut self,
+        mut x: Pixels,
+        mut y_f64: f64,
+        cx: &mut Context<Self>,
+    ) {
+        let content_height_f64 = self.content_height_f64();
+        let viewport_height_f64 = f64::from(f32::from(self.input_bounds.size.height));
+        y_f64 = if self.is_single_line() {
+            0.0
+        } else {
+            super::element::clamp_vertical_scroll_offset_f64(
+                y_f64,
+                content_height_f64,
+                viewport_height_f64,
+            )
+        };
+        x = clamp_horizontal_scroll_offset(
+            x,
+            self.scroll_size.width,
+            self.input_bounds.size.width,
+            self.text_align,
+        );
+        let handle_y = px(y_f64 as f32);
+        let prev_handle = self.scroll_handle.offset();
+        let y_changed = (self.scroll_y_f64 - y_f64).abs() > f64::EPSILON
+            || self.last_synced_handle_y.get() != handle_y
+            || prev_handle.y != handle_y;
+        self.scroll_y_f64 = y_f64;
+        self.last_synced_handle_y.set(handle_y);
+        let next_handle = point(x, handle_y);
+        if prev_handle != next_handle || y_changed {
+            if prev_handle != next_handle {
+                self.scroll_handle.set_offset(next_handle);
+            }
+            cx.notify();
+        }
+    }
+
+    #[allow(dead_code)]
     pub(super) fn update_scroll_offset(
         &mut self,
         offset: Option<Point<Pixels>>,
         cx: &mut Context<Self>,
     ) {
-        let mut offset = offset.unwrap_or(self.scroll_handle.offset());
-        let safe_y_range =
-            (-self.scroll_size.height + self.input_bounds.size.height).min(px(0.0))..px(0.);
-
-        offset.y = if self.is_single_line() {
-            px(0.)
-        } else {
-            offset.y.clamp(safe_y_range.start, safe_y_range.end)
+        let (x, y_f64) = match offset {
+            Some(offset) => (offset.x, f64::from(f32::from(offset.y))),
+            None => (self.scroll_handle.offset().x, self.effective_scroll_y_f64()),
         };
-        offset.x = clamp_horizontal_scroll_offset(
-            offset.x,
-            self.scroll_size.width,
-            self.input_bounds.size.width,
-            self.text_align,
-        );
-        if self.scroll_handle.offset() != offset {
-            self.scroll_handle.set_offset(offset);
-            cx.notify();
-        }
+        self.update_scroll_offset_parts(x, y_f64, cx);
     }
 
     /// Scroll to make the given offset visible.
@@ -3140,7 +3235,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
 
         let mut scroll_offset = self.scroll_handle.offset();
-        let was_offset = scroll_offset;
+        let was_y_f64 = self.effective_scroll_y_f64();
         let line_height = last_layout.line_height;
 
         let point = self.text.offset_to_point(offset);
@@ -3151,7 +3246,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         let display_row = self
             .display_map
             .offset_to_display_row(offset, self.line_end_affinity_at(offset));
-        let row_offset_y = line_height * display_row;
+        let line_height_f64 = f64::from(f32::from(line_height));
+        let row_offset_y_f64 = line_height_f64 * (display_row as f64);
 
         // For Right alignment use 0 margin: the cursor indicator is clamped inside bounds
         // in layout_cursors, so shifting the text here would cause a first-click visual jump.
@@ -3194,28 +3290,33 @@ impl<M: InputModeKind> InputBaseState<M> {
             } else {
                 px(0.)
             };
-        scroll_offset.y = super::element::reveal_row(
-            scroll_offset.y,
-            row_offset_y,
-            line_height,
-            bounds.size.height,
-            edge_height,
+        let mut target_y_f64 = super::element::reveal_row_f64(
+            was_y_f64,
+            row_offset_y_f64,
+            line_height_f64,
+            f64::from(f32::from(bounds.size.height)),
+            f64::from(f32::from(edge_height)),
         );
 
         // Avoid necessary scroll, when it was already in the correct position.
         if direction == Some(MoveDirection::Up) {
-            scroll_offset.y = scroll_offset.y.max(was_offset.y);
+            target_y_f64 = target_y_f64.max(was_y_f64);
         } else if direction == Some(MoveDirection::Down) {
-            scroll_offset.y = scroll_offset.y.min(was_offset.y);
+            target_y_f64 = target_y_f64.min(was_y_f64);
         }
 
         // Clamp the deferred target into the same safe range that
         // `update_scroll_offset` enforces on persist, so paint never shows an
         // over-scrolled frame before the post-paint clamp pulls it back.
-        let safe_y_min = (-self.scroll_size.height + self.input_bounds.size.height).min(px(0.));
+        target_y_f64 = super::element::clamp_vertical_scroll_offset_f64(
+            target_y_f64,
+            self.content_height_f64(),
+            f64::from(f32::from(self.input_bounds.size.height)),
+        );
         scroll_offset.x = scroll_offset.x.min(px(0.));
-        scroll_offset.y = scroll_offset.y.clamp(safe_y_min, px(0.));
+        scroll_offset.y = px(target_y_f64 as f32);
         self.deferred_scroll_offset = Some(scroll_offset);
+        self.deferred_scroll_y_f64 = Some(target_y_f64);
         cx.notify();
     }
 
@@ -3610,7 +3711,9 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Current scroll offset of the editor viewport.
     pub fn scroll_offset(&self) -> gpui::Point<gpui::Pixels> {
-        self.scroll_handle.offset()
+        let mut offset = self.scroll_handle.offset();
+        offset.y = px(self.effective_scroll_y_f64() as f32);
+        offset
     }
 
     /// Set scroll offset of the editor viewport.
@@ -3618,7 +3721,39 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// The offset will be clamped to the valid range, and applied after the next layout.
     pub fn set_scroll_offset(&mut self, offset: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
         self.deferred_scroll_offset = Some(offset);
+        self.deferred_scroll_y_f64 = Some(f64::from(f32::from(offset.y)));
         cx.notify();
+    }
+
+    /// Authoritative vertical scroll offset in `f64` pixels (`<= 0.0`).
+    pub fn scroll_y_f64(&self) -> f64 {
+        self.effective_scroll_y_f64()
+    }
+
+    /// Set vertical scroll offset in `f64` pixels without `f32` quantization.
+    pub fn set_scroll_y_f64(&mut self, y: f64, cx: &mut Context<Self>) {
+        let x = self
+            .deferred_scroll_offset
+            .map_or_else(|| self.scroll_handle.offset().x, |offset| offset.x);
+        self.deferred_scroll_offset = Some(point(x, px(y as f32)));
+        self.deferred_scroll_y_f64 = Some(y);
+        cx.notify();
+    }
+
+    /// Scroll vertically by `delta_y` in `f64` pixels without `f32` quantization.
+    pub fn scroll_by_y_f64(&mut self, delta_y: f64, cx: &mut Context<Self>) {
+        let current_x = self.scroll_handle.offset().x;
+        let next_y = self.effective_scroll_y_f64() + delta_y;
+        self.update_scroll_offset_parts(current_x, next_y, cx);
+    }
+
+    /// Authoritative vertical scrollable content height in `f64` pixels.
+    pub fn content_height_f64(&self) -> f64 {
+        if self.scroll_height_f64 > 0.0 {
+            self.scroll_height_f64
+        } else {
+            f64::from(f32::from(self.scroll_size.height))
+        }
     }
 
     /// Laid-out line height; `None` before first layout.
@@ -3781,7 +3916,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // - included the scroll offset.
         let inner_position = position - bounds.origin - point(line_number_width, px(0.));
 
-        let mut y_offset = last_layout.visible_top;
+        let mut row_offset: isize = 0;
         // Position relative to the last line walked, kept for a pointer that ends up
         // below every line.
         let mut last_line_pos = None;
@@ -3794,6 +3929,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             .enumerate()
         {
             let line_start_offset = last_layout.visible_line_byte_offsets[vi];
+            let y_offset = last_layout.local_row_y(row_offset);
 
             // Calculate line origin for this display row
             let line_origin = point(px(0.), y_offset);
@@ -3824,7 +3960,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (self.resolve_index(line_start_offset), false, 0);
             }
 
-            y_offset += line_layout.size(line_height).height;
+            row_offset += line_layout.wrapped_lines.len() as isize;
             last_line_pos = Some(pos);
         }
 
@@ -4200,8 +4336,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             // Input's ScrollHandle uses negative-y-is-down; negate the positive-towards-bottom delta.
             let scroll_delta = delta.map(|d| -d);
             self.auto_scroll.set(scroll_delta, cx, |delta, state, cx| {
-                let current = state.scroll_handle.offset();
-                state.update_scroll_offset(Some(point(current.x, current.y + delta)), cx);
+                state.scroll_by_y_f64(f64::from(f32::from(delta)), cx);
                 if let Some(pos) = state.auto_scroll.last_drag_position {
                     let (offset, line_end_affinity, columns_past_line_end) =
                         state.resolve_mouse_position(pos);
@@ -4669,6 +4804,10 @@ impl<M: InputModeKind> InputBaseState<M> {
 }
 
 impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
+    fn accepts_text_input(&self, window: &mut Window, _cx: &mut Context<Self>) -> bool {
+        self.focus_handle.is_focused(window)
+    }
+
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
@@ -5161,7 +5300,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         let mut start_origin = None;
         let mut end_origin = None;
         let line_number_origin = point(line_number_width, px(0.));
-        let mut y_offset = last_layout.visible_top;
+        let mut row_offset: isize = 0;
 
         let start_row = self
             .text
@@ -5177,6 +5316,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 break;
             }
 
+            let y_offset = last_layout.local_row_y(row_offset);
             let buffer_line = last_layout.visible_buffer_lines[vi];
             let index_offset = last_layout.visible_line_byte_offsets[vi];
 
@@ -5196,7 +5336,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 end_origin = Some(p + point(px(0.), y_offset));
             }
 
-            y_offset += line.size(line_height).height;
+            row_offset += line.wrapped_lines.len() as isize;
         }
 
         let start_origin = start_origin.or_else(|| {
@@ -5230,14 +5370,15 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         let inner_point = self.last_bounds?.localize(&point)?
             - gpui::point(last_layout.line_number_width, last_layout.visible_top);
 
-        let mut line_top = px(0.);
+        let mut row_offset: usize = 0;
         for (vi, line) in last_layout.lines.iter().enumerate() {
             let offset = last_layout.visible_line_byte_offsets[vi];
+            let line_top = last_layout.line_height * (row_offset as f32);
             let line_point = inner_point - gpui::point(px(0.), line_top);
             if let Some(utf8_index) = line.index_for_position(line_point, last_layout) {
                 return Some(self.offset_to_utf16(self.resolve_index(offset + utf8_index)));
             }
-            line_top += line.size(last_layout.line_height).height;
+            row_offset += line.wrapped_lines.len();
         }
 
         None
@@ -7748,7 +7889,7 @@ mod tests {
                 let (caret, _) = state.cursor_layout().expect("caret painted");
                 let viewport = state.input_bounds();
                 let scroll_y = state.scroll_handle.offset().y;
-                let top = caret.origin.y - viewport.origin.y + scroll_y;
+                let top = caret.origin.y + scroll_y - viewport.origin.y;
                 assert!(
                     top >= px(0.) && top + caret.size.height <= viewport.size.height,
                     "caret top {top:?} outside viewport height {:?} (scroll {scroll_y:?})",
@@ -8098,8 +8239,7 @@ mod tests {
             let range = state.search_session.matcher.matched_ranges()[1].clone();
             let layout = state.last_layout.as_ref().unwrap();
             let (_, _, position) = state.line_and_position_for_offset(range.end);
-            let y = position.expect("wrapped match must be laid out").y
-                + state.scroll_handle.offset().y;
+            let y = position.expect("wrapped match must be laid out").y;
             assert!(y >= layout.line_height * 2. - px(0.1));
             assert!(
                 y + layout.line_height * 3. <= state.last_bounds.unwrap().size.height + px(0.1),
@@ -8776,6 +8916,43 @@ mod tests {
                 state.set_value("aaa bbb ccc", window, cx);
                 state.select_word(9, window, cx);
                 assert_eq!(state.selected_range(), 8..11);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_ctrl_delete_stops_at_whitespace(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                // Indentation goes on its own, the word after it stays.
+                state.set_value("    four leading spaces", window, cx);
+                assert_eq!(state.next_word_delete_end_at(0, true), 4);
+                assert_eq!(state.next_word_delete_end_at(4, true), 8);
+                assert_eq!(state.next_word_delete_end_at(8, true), 9);
+                // macOS Option+Delete still takes the blanks and the word.
+                assert_eq!(state.next_word_delete_end_at(0, false), 8);
+
+                // At a line end only the line break goes, not the next
+                // line's indentation or first word.
+                state.set_value("one\n    two", window, cx);
+                assert_eq!(state.next_word_delete_end_at(3, true), 4);
+                state.set_value("one\r\n  two", window, cx);
+                assert_eq!(state.next_word_delete_end_at(3, true), 5);
+                // Trailing blanks stop at the line break.
+                state.set_value("one  \ntwo", window, cx);
+                assert_eq!(state.next_word_delete_end_at(3, true), 5);
+
+                state.set_value("    four leading spaces", window, cx);
+                state.set_selected_range(0..0, cx);
+                state.delete_next_word(&DeleteToNextWordEnd, window, cx);
+                #[cfg(not(target_os = "macos"))]
+                assert_eq!(state.value(), "four leading spaces");
+                #[cfg(target_os = "macos")]
+                assert_eq!(state.value(), " leading spaces");
             });
         });
     }
@@ -10122,6 +10299,71 @@ mod tests {
                 assert_eq!(state.selected_range(), selection_after_edit);
             });
         });
+    }
+
+    /// fold_all, fold_at_level and unfold_all change only the folded set; the
+    /// candidates stay. A level counts the candidates that contain a range.
+    #[gpui::test]
+    fn test_fold_all_and_fold_at_level(cx: &mut TestAppContext) {
+        use crate::input::FoldRange;
+
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        let input = view.input;
+
+        // Level 1: 0..=9; level 2: 1..=4 and 5..=8; level 3: 2..=3.
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", window, cx);
+                state.apply_highlighter_fold_candidates(
+                    vec![
+                        FoldRange::new(0, 9),
+                        FoldRange::new(1, 4),
+                        FoldRange::new(2, 3),
+                        FoldRange::new(5, 8),
+                    ],
+                    cx,
+                );
+            });
+        });
+        let folded = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| {
+                input.read_with(cx, |state, _| {
+                    state
+                        .display_map
+                        .folded_ranges()
+                        .iter()
+                        .map(|f| f.start_line)
+                        .collect::<Vec<_>>()
+                })
+            })
+        };
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_all(cx)));
+        assert_eq!(folded(&mut cx), vec![0, 1, 2, 5]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(2, cx)));
+        assert_eq!(folded(&mut cx), vec![1, 5]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(1, cx)));
+        assert_eq!(folded(&mut cx), vec![0]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(3, cx)));
+        assert_eq!(folded(&mut cx), vec![2]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.unfold_all(cx)));
+        assert!(folded(&mut cx).is_empty());
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| assert_eq!(state.fold_candidates().len(), 4));
+        });
+
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                assert!(state.set_folded(5, true, cx));
+                assert!(!state.set_folded(6, true, cx));
+            })
+        });
+        assert_eq!(folded(&mut cx), vec![5]);
     }
 
     /// Unfolding at a position opens exactly the folds hiding it.
@@ -13571,6 +13813,72 @@ impl InputBaseState<crate::input::EditorMode> {
             self.display_map.clear_folds();
         }
         cx.notify();
+    }
+
+    /// Fold or unfold the fold candidate that starts at `start_line`
+    /// (a 0-based buffer line). Returns false when no candidate starts there
+    /// or folding is disabled.
+    pub fn set_folded(&mut self, start_line: usize, folded: bool, cx: &mut Context<Self>) -> bool {
+        if !self.mode.is_folding() || !self.display_map.is_fold_candidate(start_line) {
+            return false;
+        }
+        self.display_map.set_folded(start_line, folded);
+        cx.notify();
+        true
+    }
+
+    /// Fold every fold candidate.
+    pub fn fold_all(&mut self, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
+        let lines: Vec<usize> = self
+            .display_map
+            .fold_candidates()
+            .iter()
+            .map(|c| c.start_line)
+            .collect();
+        self.display_map.set_folded_lines(lines);
+        cx.notify();
+    }
+
+    /// Unfold every folded range. Fold candidates are kept.
+    pub fn unfold_all(&mut self, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
+        self.display_map.clear_folds();
+        cx.notify();
+    }
+
+    /// Fold the candidates at one nesting level and unfold all others, as
+    /// Zed's `editor::FoldAtLevel`. Level 1 is a candidate that no other
+    /// candidate contains; level 2 is one inside a level-1 candidate, and so on.
+    pub fn fold_at_level(&mut self, level: usize, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
+        // One pass: the candidates are sorted by start line with unique starts,
+        // so the stack holds the end lines of the candidates that contain the
+        // current one, and its length is the depth.
+        let mut open: Vec<usize> = Vec::new();
+        let mut lines = Vec::new();
+        for c in self.display_map.fold_candidates() {
+            while open.last().is_some_and(|&end| end < c.end_line) {
+                open.pop();
+            }
+            if open.len() + 1 == level {
+                lines.push(c.start_line);
+            }
+            open.push(c.end_line);
+        }
+        self.display_map.set_folded_lines(lines);
+        cx.notify();
+    }
+
+    /// The fold candidates, as reported by the highlighter.
+    pub fn fold_candidates(&self) -> &[crate::input::FoldRange] {
+        self.display_map.fold_candidates()
     }
 
     /// Unfold any folded ranges that hide the given position.

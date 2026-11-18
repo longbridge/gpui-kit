@@ -96,6 +96,37 @@ impl PopoverState {
         self.transition_to(open, false, window, cx);
     }
 
+    /// Moves focus into the popover when it opens, or back to where it was
+    /// when it closes. On close, `restore` is set only if focus was inside the
+    /// popover, and holds the handle to give focus back to, if any. Skipped if
+    /// a later transition has already flipped `open`.
+    fn move_focus(
+        &self,
+        opening: bool,
+        restore: Option<Option<FocusHandle>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if self.open != opening {
+            return;
+        }
+        if opening {
+            self.tracked_focus_handle
+                .clone()
+                .unwrap_or_else(|| self.focus_handle.clone())
+                .focus(window, cx);
+            return;
+        }
+        match restore {
+            Some(Some(previous)) => previous.focus(window, cx),
+            // Nothing had focus when the popover opened, so nothing has it now. Left
+            // alone, focus would stay on the closed popover's own handle, which is no
+            // longer in the tree.
+            Some(None) => window.blur(cx),
+            None => {}
+        }
+    }
+
     #[doc(hidden)]
     pub fn toggle_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.transition_to(!self.open, true, window, cx);
@@ -116,16 +147,37 @@ impl PopoverState {
         }
         self.set_open(opening, cx);
 
+        // Read now, while the last frame still has the popover's content.
+        let restore = if self.open {
+            None
+        } else {
+            let previous = self.previous_focus_handle.take();
+            self.focus_handle
+                .contains_focused(window, cx)
+                .then_some(previous)
+        };
+        if announce {
+            self.move_focus(self.open, restore, window, cx);
+        } else {
+            // A controlled popover syncs `open` while it renders, and that can
+            // be in the middle of another element's prepaint: `MotionReveal`
+            // lays out its child there. Elements before it have already
+            // reported focus to the accessibility tree for this frame, so
+            // focus moves after the frame instead of reporting a second one.
+            let state = cx.entity().downgrade();
+            let opening = self.open;
+            window.defer(cx, move |window, cx| {
+                _ = state.update(cx, |state, cx| {
+                    state.move_focus(opening, restore, window, cx)
+                });
+            });
+        }
+
         if self.open {
             // Weak: the subscription is stored on this state, so a strong
             // handle would keep the state, and its deferred-popover
             // registration, alive after its trigger is gone.
             let state = cx.entity().downgrade();
-            self.tracked_focus_handle
-                .clone()
-                .unwrap_or_else(|| self.focus_handle.clone())
-                .focus(window, cx);
-
             self.dismiss_subscription =
                 Some(
                     window.subscribe(&cx.entity(), cx, move |_, _: &DismissEvent, window, cx| {
@@ -135,16 +187,6 @@ impl PopoverState {
                 );
         } else {
             self.dismiss_subscription = None;
-            let previous = self.previous_focus_handle.take();
-            if self.focus_handle.contains_focused(window, cx) {
-                match previous {
-                    Some(previous) => previous.focus(window, cx),
-                    // Nothing had focus when the popover opened, so nothing has it now. Left
-                    // alone, focus would stay on the closed popover's own handle, which is no
-                    // longer in the tree.
-                    None => window.blur(cx),
-                }
-            }
         }
 
         if announce && let Some(callback) = self.on_open_change.as_ref() {
