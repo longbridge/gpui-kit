@@ -1345,6 +1345,8 @@ pub(crate) struct LineLayout {
     /// indentation when [`WrappingIndent::Same`] is used.
     pub(crate) wrap_indent: Pixels,
     pub(crate) longest_width: Pixels,
+    /// The edge this line's rows are aligned to.
+    pub(crate) align: TextAlign,
     pub(crate) whitespace_indicators: Option<WhitespaceIndicators>,
     /// Whitespace indicators: (line_index, x_position, the tab's width, or `None` for a space)
     pub(crate) whitespace_chars: Vec<(usize, Pixels, Option<Pixels>)>,
@@ -1358,6 +1360,7 @@ impl LineLayout {
         Self {
             len: 0,
             longest_width: px(0.),
+            align: TextAlign::Left,
             wrapped_lines: SmallVec::new(),
             wrap_indent: px(0.),
             whitespace_chars: Vec::new(),
@@ -1387,6 +1390,40 @@ impl LineLayout {
         } else {
             self.wrap_indent
         }
+    }
+
+    /// The edge a paragraph starts at: the right for one whose first strong
+    /// character reads right to left (UAX #9, P2 and P3), else the left.
+    pub(crate) fn start_align(&self) -> TextAlign {
+        let direction = self
+            .wrapped_lines
+            .iter()
+            .map(|row| unicode_bidi::get_base_direction(row.text.as_ref()))
+            .find(|direction| *direction != unicode_bidi::Direction::Mixed);
+        if direction == Some(unicode_bidi::Direction::Rtl) {
+            TextAlign::Right
+        } else {
+            TextAlign::Left
+        }
+    }
+
+    /// Where the given visual line starts, from the left of a text area
+    /// `content_width` wide: its indent and its alignment.
+    ///
+    /// Each visual line is aligned on its own, by its own width, as it is
+    /// painted, so the caret, a selection and a click land where it is drawn.
+    pub(crate) fn row_x(&self, line_index: usize, content_width: Pixels) -> Pixels {
+        let indent = self.line_indent(line_index);
+        let width = self
+            .wrapped_lines
+            .get(line_index)
+            .map_or(px(0.), |line| line.width);
+        indent
+            + match self.align {
+                TextAlign::Left => px(0.),
+                TextAlign::Center => (content_width - width).half().max(px(0.)),
+                TextAlign::Right => (content_width - width).max(px(0.)),
+            }
     }
 
     pub(crate) fn lines(mut self, wrapped_lines: SmallVec<[ShapedLine; 1]>) -> Self {
@@ -1468,8 +1505,6 @@ impl LineLayout {
         let mut acc_len = 0;
         let mut offset_y = px(0.);
 
-        let x_offset = last_layout.alignment_offset(self.longest_width);
-
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let is_last = i + 1 == self.wrapped_lines.len();
 
@@ -1486,8 +1521,7 @@ impl LineLayout {
 
             if matches {
                 let x = line.x_for_index(offset.saturating_sub(acc_len))
-                    + x_offset
-                    + self.line_indent(i);
+                    + self.row_x(i, last_layout.content_width);
                 return Some(point(x, offset_y));
             }
 
@@ -1507,13 +1541,11 @@ impl LineLayout {
     /// reports the caret affinity that a wrap boundary needs.
     pub(crate) fn closest_index_for_x(&self, x: Pixels, last_layout: &LastLayout) -> usize {
         let mut acc_len = 0;
-        let x_offset = last_layout.alignment_offset(self.longest_width);
-        let x = x - x_offset;
 
         for (i, line) in self.wrapped_lines.iter().enumerate() {
-            let line_indent = self.line_indent(i);
-            if x <= line_indent + line.width {
-                return acc_len + line.closest_index_for_x(x - line_indent);
+            let x = x - self.row_x(i, last_layout.content_width);
+            if x <= line.width {
+                return acc_len + line.closest_index_for_x(x);
             }
             acc_len += line.len;
         }
@@ -1532,12 +1564,11 @@ impl LineLayout {
     ) -> Option<(usize, usize, Pixels)> {
         let mut offset = 0;
         let mut line_top = px(0.);
-        let x_offset = last_layout.alignment_offset(self.longest_width);
 
         for (i, line) in self.wrapped_lines.iter().enumerate() {
             let line_bottom = line_top + last_layout.line_height;
             if pos.y >= line_top && pos.y < line_bottom {
-                return Some((i, offset, pos.x - x_offset - self.line_indent(i)));
+                return Some((i, offset, pos.x - self.row_x(i, last_layout.content_width)));
             }
 
             offset += line.len;
@@ -1625,13 +1656,12 @@ impl LineLayout {
     /// Paint only the glyph background quads of this line.
     ///
     /// gpui's [`ShapedLine::paint`] does not draw backgrounds, so every line painted with
-    /// [`Self::paint`] needs this called first, with the same origin and align width.
+    /// [`Self::paint`] needs this called first, with the same origin and content width.
     pub(crate) fn paint_background(
         &self,
         pos: Point<Pixels>,
         line_height: Pixels,
-        text_align: TextAlign,
-        align_width: Option<Pixels>,
+        content_width: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -1643,10 +1673,10 @@ impl LineLayout {
 
         for (ix, line) in self.wrapped_lines.iter().enumerate() {
             _ = line.paint_background(
-                pos + point(self.line_indent(ix), ix * line_height),
+                pos + point(self.row_x(ix, content_width), ix * line_height),
                 line_height,
-                text_align,
-                align_width,
+                TextAlign::Left,
+                None,
                 window,
                 cx,
             );
@@ -1657,17 +1687,16 @@ impl LineLayout {
         &self,
         pos: Point<Pixels>,
         line_height: Pixels,
-        text_align: TextAlign,
-        align_width: Option<Pixels>,
+        content_width: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) {
         for (ix, line) in self.wrapped_lines.iter().enumerate() {
             _ = line.paint(
-                pos + point(self.line_indent(ix), ix * line_height),
+                pos + point(self.row_x(ix, content_width), ix * line_height),
                 line_height,
-                text_align,
-                align_width,
+                TextAlign::Left,
+                None,
                 window,
                 cx,
             );
@@ -1677,7 +1706,7 @@ impl LineLayout {
         if let Some(indicators) = self.whitespace_indicators.as_ref() {
             for (line_index, x_position, tab_width) in &self.whitespace_chars {
                 let origin = point(
-                    pos.x + *x_position + self.line_indent(*line_index),
+                    pos.x + *x_position + self.row_x(*line_index, content_width),
                     pos.y + *line_index as f32 * line_height,
                 );
 
@@ -1690,8 +1719,8 @@ impl LineLayout {
                             _ = indicators.tab.paint(
                                 origin,
                                 line_height,
-                                text_align,
-                                align_width,
+                                TextAlign::Left,
+                                None,
                                 window,
                                 cx,
                             );
@@ -1701,8 +1730,8 @@ impl LineLayout {
                         _ = indicators.space.paint(
                             origin,
                             line_height,
-                            text_align,
-                            align_width,
+                            TextAlign::Left,
+                            None,
                             window,
                             cx,
                         );
@@ -2552,6 +2581,32 @@ mod tests {
         let line = wrapper.line(0).unwrap();
         assert_eq!(line.indent, 0);
         assert_eq!(line.wrapped_lines.as_slice(), [0..5, 5..13, 13..21, 21..24]);
+    }
+
+    #[test]
+    fn a_paragraph_starts_at_the_edge_it_reads_from() {
+        let row = |text: &str, width: f32| {
+            let mut row = InputLine::from(ShapedLine::default());
+            row.text = text.to_owned().into();
+            row.width = px(width);
+            row
+        };
+        // Arabic-Indic digits are weak, so the first strong character decides.
+        let mut arabic = LineLayout::new()
+            .inline_lines(smallvec::smallvec![row("١٢ مرحبا", 60.), row("hello", 40.)]);
+        assert_eq!(arabic.start_align(), TextAlign::Right);
+        arabic.align = arabic.start_align();
+        assert_eq!(
+            arabic.row_x(0, px(100.)),
+            px(40.),
+            "each row by its own width"
+        );
+        assert_eq!(arabic.row_x(1, px(100.)), px(60.));
+
+        let english = LineLayout::new().inline_lines(smallvec::smallvec![row("hi مرحبا", 60.)]);
+        assert_eq!(english.start_align(), TextAlign::Left);
+        let neutral = LineLayout::new().inline_lines(smallvec::smallvec![row("12 !", 30.)]);
+        assert_eq!(neutral.start_align(), TextAlign::Left);
     }
 
     #[test]
