@@ -23,6 +23,7 @@ use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffDecoration, DiffFile,
     DiffGutterMarker, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition,
     DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffSpanHighlight, DiffState,
+    DiffTextPosition,
 };
 ```
 
@@ -224,7 +225,9 @@ self.diff.update(cx, |state, cx| {
 ```
 
 `scroll_to_line` reveals supplied context and expands a collapsed file when
-needed; it cannot reveal lines absent from the patch. `scroll_to_file` shows a
+needed; it cannot reveal lines absent from the patch — `has_line` says whether
+the patch carries a line, so the application can decide where a navigation
+lands before scrolling. `scroll_to_file` shows a
 file's header, including a file without source rows, for example from a file
 list. Change navigation moves between changed groups across all files and wraps
 at the ends. Put display mode and navigation commands in the application's
@@ -495,7 +498,9 @@ Diff::new(&self.diff).span_highlights([DiffSpanHighlight::new(
 The span is a byte range in the line's content, before tab expansion. Its fill
 paints over syntax, inline emphasis and decorations, and a text selection still
 shows above it. Without `with_background`, the fill is a translucent warning
-color; `with_foreground` sets the text color over a strong fill.
+color; `with_foreground` sets the text color over a strong fill. A fully
+transparent background leaves whatever the line shows beneath the span, and
+`with_underline` underlines the span in its text color — the way a link reads.
 
 Like annotations, decorations, markers and span highlights are supplied on
 every render, so the current builder call is their only source.
@@ -519,6 +524,20 @@ retains its ordinary border.
 `on_line_click` reports a click on a line's code that is not a text-selection
 drag, with the line's position and the click event. `on_line_hover` reports the
 line under the pointer, or `None` when it leaves.
+
+Below the line level, `on_text_hover` reports the character under the pointer
+with the held modifiers, or `None` over no source text: a `DiffTextPosition`
+carries the line's position, the character's byte offset in the line's content
+(the unit span highlight spans use) and the line's text, so the handler can
+read the word around the offset. While the diff has focus it also fires when a
+modifier goes down or up with the pointer at rest, so a link can light up on
+the key alone. `on_text_click` handles a click on a character before
+`on_line_click`; returning `true` claims the click and keeps the line handler
+out of it. `text_cursor` sets the pointer shown over source text, such as a
+pointing hand while the hovered span is a link. Together with an underlined
+span highlight this hosts the usual link idiom: mark the word under
+Cmd/Ctrl-hover, follow it on Cmd/Ctrl-click, while plain clicks keep selecting
+text and lines.
 
 These defaults apply while the code body is focused:
 
