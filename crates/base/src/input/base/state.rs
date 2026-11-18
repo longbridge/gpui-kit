@@ -2413,7 +2413,23 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.delete_selections(
             true,
             EditIntent::Atomic,
-            |s, offset| offset..s.next_end_of_word_at(offset),
+            |s, offset| {
+                let end = s.next_end_of_word_at(offset);
+                let deleted_text = s.text.slice(offset..end).to_string();
+                if deleted_text
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace)
+                {
+                    let whitespace_len = deleted_text
+                        .char_indices()
+                        .find(|(_, character)| !character.is_whitespace())
+                        .map_or(deleted_text.len(), |(index, _)| index);
+                    offset..offset + whitespace_len
+                } else {
+                    offset..end
+                }
+            },
             window,
             cx,
         );
