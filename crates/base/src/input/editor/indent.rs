@@ -123,7 +123,7 @@ impl<M: InputModeKind> TextElement<M> {
         let tab_size = state.mode.tab_size();
         let line_height = last_layout.line_height;
         let mut builder = PathBuilder::stroke(px(1.));
-        let mut offset_y = last_layout.visible_top;
+        let mut row_offset: isize = 0;
         let mut last_indents = vec![];
 
         for (&buffer_line, line_layout) in last_layout
@@ -131,6 +131,7 @@ impl<M: InputModeKind> TextElement<M> {
             .iter()
             .zip(last_layout.lines.iter())
         {
+            let offset_y = last_layout.local_row_y(row_offset);
             let line = state.text.slice_line(buffer_line);
             let mut current_indents = vec![];
             if line.len() > 0 {
@@ -157,7 +158,7 @@ impl<M: InputModeKind> TextElement<M> {
                 current_indents = last_indents.clone();
             }
 
-            offset_y += line_layout.wrapped_lines.len() * line_height;
+            row_offset += line_layout.wrapped_lines.len() as isize;
             last_indents = current_indents;
         }
 
