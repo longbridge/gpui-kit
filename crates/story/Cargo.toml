@@ -19,10 +19,10 @@ lsp-types.workspace = true
 
 async-channel = "2.3.1"
 autocorrect = "2.14.2"
-chrono = "0.4"
 csv = "1.4"
 fake = { version = "2.10.0", features = ["dummy"] }
 itertools = "0.14.0"
+jiff = "1.0"
 rand = "0.8"
 regex = "1"
 serde = "1"

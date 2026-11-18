@@ -253,6 +253,22 @@ impl DisplayMap {
         }
     }
 
+    /// The width text is wrapped at, or `None` when it is not wrapped.
+    pub(crate) fn wrap_width(&self) -> Option<Pixels> {
+        self.wrap_map.wrapper().wrap_width()
+    }
+
+    /// Wrap the next replacement of the whole text at `wrap_width`, leaving the current rows as
+    /// they are. Only valid right before such a replacement, which rewraps every line.
+    pub(crate) fn prepare_wrap_width(&mut self, wrap_width: Pixels) {
+        self.wrap_map.prepare_wrap_width(wrap_width);
+    }
+
+    /// The font and size text is measured in.
+    pub(crate) fn font(&self) -> (&Font, Pixels) {
+        self.wrap_map.wrapper().font()
+    }
+
     /// Set font parameters
     pub fn set_font(&mut self, font: Font, font_size: Pixels, cx: &mut App) {
         self.wrap_map.set_font(font, font_size, cx);

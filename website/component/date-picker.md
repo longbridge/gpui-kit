@@ -30,11 +30,11 @@ DatePicker::new(&date_picker)
 ### With Initial Date
 
 ```rust
-use chrono::Local;
+use jiff::ZonedDateTime;
 
 let date_picker = cx.new(|cx| {
     let mut picker = DatePickerState::new(window, cx);
-    picker.set_date(Local::now().naive_local().date(), window, cx);
+    picker.set_date(ZonedDateTime::now().date(), window, cx);
     picker
 });
 
@@ -44,7 +44,7 @@ DatePicker::new(&date_picker)
 ### Date Range Picker
 
 ```rust
-use chrono::{Local, Days};
+use jiff::{ToSpan as _, ZonedDateTime};
 
 // Range mode picker
 let range_picker = cx.new(|cx| DatePickerState::range(window, cx));
@@ -54,10 +54,10 @@ DatePicker::new(&range_picker)
 
 // With initial range
 let range_picker = cx.new(|cx| {
-    let now = Local::now().naive_local().date();
+    let now = ZonedDateTime::now().date();
     let mut picker = DatePickerState::new(window, cx);
     picker.set_date(
-        (now, now.checked_add_days(Days::new(7)).unwrap()),
+        (now, now + 7.days()),
         window,
         cx,
     );
@@ -77,12 +77,12 @@ selected date again — or double-clicking a date — confirms it and closes the
 popup, as do Enter, Escape and a click outside.
 
 ```rust
-use chrono::NaiveTime;
+use jiff::civil;
 
 let date_time_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .time_precision(TimePrecision::Minute) // or TimePrecision::Second
-        .default_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+        .default_time(civil::time(9, 0, 0, 0))
 });
 
 DatePicker::new(&date_time_picker)
@@ -106,10 +106,10 @@ Read and write the whole value with `date_time` and `set_date_time`; `date`
 and `set_date` still address the date part and keep the current time.
 
 ```rust
-use chrono::Local;
+use jiff::ZonedDateTime;
 
 date_time_picker.update(cx, |state, cx| {
-    state.set_date_time(Local::now().naive_local(), window, cx);
+    state.set_date_time(ZonedDateTime::now().datetime(), window, cx);
 });
 
 if let DateTime::Single(Some(at)) = date_time_picker.read(cx).date_time() {
@@ -211,15 +211,15 @@ DatePicker::new(&date_picker)
 ### Disabled Date Range
 
 ```rust
-use chrono::{Local, Days};
+use jiff::{ToSpan as _, ZonedDateTime};
 
-let now = Local::now().naive_local().date();
+let now = ZonedDateTime::now().date();
 
 let date_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::range(
             Some(now),
-            now.checked_add_days(Days::new(7)),
+            now.checked_add(7.days()).ok(),
         ))
 });
 
@@ -233,7 +233,7 @@ let date_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::interval(
             Some(now),
-            now.checked_add_days(Days::new(5))
+            now.checked_add(5.days()).ok()
         ))
 });
 
@@ -257,7 +257,7 @@ DatePicker::new(&date_picker)
 let date_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::custom(|date| {
-            date.weekday() == chrono::Weekday::Mon
+            date.weekday() == jiff::civil::Weekday::Monday
         }))
 });
 ```
@@ -269,11 +269,9 @@ By default, the date picker shows 50 years before and after the current year in 
 The `range` argument uses a **half-open interval** `(start, end)` where `end` is **exclusive**. Pass `(1900, current_year + 1)` to include `current_year`.
 
 ```rust
-use chrono::Datelike;
-
 // Birthday picker: allow years from 1900 to the current year (inclusive)
 let birthday_picker = cx.new(|cx| {
-    let current_year = chrono::Local::now().year();
+    let current_year = i32::from(jiff::ZonedDateTime::now().year());
     let mut picker = DatePickerState::new(window, cx)
         .date_format("%Y-%m-%d");
     picker.set_year_range((1900, current_year + 1), window, cx);
@@ -292,20 +290,22 @@ DatePicker::new(&birthday_picker)
 ### Single Date Presets
 
 ```rust
-use chrono::{Utc, Duration};
+use jiff::{ToSpan as _, ZonedDateTime};
+
+let today = ZonedDateTime::now().date();
 
 let presets = vec![
     DateRangePreset::single(
         "Yesterday",
-        (Utc::now() - Duration::days(1)).naive_local().date(),
+        today - 1.day(),
     ),
     DateRangePreset::single(
         "Last Week",
-        (Utc::now() - Duration::weeks(1)).naive_local().date(),
+        today - 1.week(),
     ),
     DateRangePreset::single(
         "Last Month",
-        (Utc::now() - Duration::days(30)).naive_local().date(),
+        today - 30.days(),
     ),
 ];
 
@@ -319,18 +319,18 @@ DatePicker::new(&date_picker)
 let range_presets = vec![
     DateRangePreset::range(
         "Last 7 Days",
-        (Utc::now() - Duration::days(7)).naive_local().date(),
-        Utc::now().naive_local().date(),
+        today - 7.days(),
+        today,
     ),
     DateRangePreset::range(
         "Last 30 Days",
-        (Utc::now() - Duration::days(30)).naive_local().date(),
-        Utc::now().naive_local().date(),
+        today - 30.days(),
+        today,
     ),
     DateRangePreset::range(
         "Last 90 Days",
-        (Utc::now() - Duration::days(90)).naive_local().date(),
-        Utc::now().naive_local().date(),
+        today - 90.days(),
+        today,
     ),
 ];
 
@@ -383,12 +383,12 @@ DatePicker::new(&date_picker)
 ### Business Days Only
 
 ```rust
-use chrono::Weekday;
+use jiff::civil::Weekday;
 
 let business_days_picker = cx.new(|cx| {
     DatePickerState::new(window, cx)
         .disabled_matcher(calendar::Matcher::custom(|date| {
-            matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
+            matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday)
         }))
 });
 
@@ -399,8 +399,6 @@ DatePicker::new(&business_days_picker)
 ### Date Range with Max Duration
 
 ```rust
-use chrono::Days;
-
 let max_30_days_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
 cx.subscribe(&max_30_days_picker, |view, picker, event, _| {
@@ -409,7 +407,7 @@ cx.subscribe(&max_30_days_picker, |view, picker, event, _| {
             let Date::Range(Some(start), Some(end)) = value.date() else {
                 return;
             };
-            let duration = end.signed_duration_since(start).num_days();
+            let duration = (end - start).get_days();
             if duration > 30 {
                 // Reset to start date only if range exceeds 30 days
                 picker.update(cx, |state, cx| {
@@ -428,20 +426,19 @@ DatePicker::new(&max_30_days_picker)
 ### Quarter Presets
 
 ```rust
-use chrono::{NaiveDate, Datelike};
+use jiff::{ZonedDateTime, civil};
 
-fn quarter_start(year: i32, quarter: u32) -> NaiveDate {
+fn quarter_start(year: i16, quarter: i8) -> civil::Date {
     let month = (quarter - 1) * 3 + 1;
-    NaiveDate::from_ymd_opt(year, month, 1).unwrap()
+    civil::date(year, month, 1)
 }
 
-fn quarter_end(year: i32, quarter: u32) -> NaiveDate {
+fn quarter_end(year: i16, quarter: i8) -> civil::Date {
     let month = quarter * 3;
-    let start = NaiveDate::from_ymd_opt(year, month, 1).unwrap();
-    NaiveDate::from_ymd_opt(year, month, start.days_in_month()).unwrap()
+    civil::date(year, month, 1).last_of_month()
 }
 
-let year = Local::now().year();
+let year = ZonedDateTime::now().year();
 let quarterly_presets = vec![
     DateRangePreset::range("Q1", quarter_start(year, 1), quarter_end(year, 1)),
     DateRangePreset::range("Q2", quarter_start(year, 2), quarter_end(year, 2)),
@@ -463,7 +460,7 @@ let event_date = cx.new(|cx| {
         .date_format("%B %d, %Y")
         .disabled_matcher(calendar::Matcher::custom(|date| {
             // Disable past dates
-            *date < Local::now().naive_local().date()
+            *date < ZonedDateTime::now().date()
         }));
     picker
 });

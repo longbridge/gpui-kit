@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc};
 
-use gpui::{Bounds, Half, Pixels, ShapedLine, TextAlign, px};
+use gpui::{Bounds, Pixels, ShapedLine, TextAlign};
 
 use super::{WrappingIndent, display_map::LineLayout};
 
@@ -36,13 +36,5 @@ impl LastLayout {
     pub(crate) fn line(&self, row: usize) -> Option<&LineLayout> {
         let pos = self.visible_buffer_lines.binary_search(&row).ok()?;
         self.lines.get(pos)
-    }
-
-    pub(super) fn alignment_offset(&self, line_width: Pixels) -> Pixels {
-        match self.text_align {
-            TextAlign::Left => px(0.),
-            TextAlign::Center => (self.content_width - line_width).half().max(px(0.)),
-            TextAlign::Right => (self.content_width - line_width).max(px(0.)),
-        }
     }
 }

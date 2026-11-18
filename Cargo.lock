@@ -2863,10 +2863,10 @@ name = "example-editor"
 version = "0.10.0"
 dependencies = [
  "autocorrect",
- "chrono",
  "color-lsp",
  "gpui-component-story",
  "gpui-kit",
+ "jiff",
  "lsp-types 0.97.0",
  "serde_json",
  "smol",
@@ -3793,7 +3793,6 @@ dependencies = [
  "anyhow",
  "ashpd",
  "async-channel",
- "chrono",
  "criterion",
  "data-url",
  "futures",
@@ -3809,6 +3808,7 @@ dependencies = [
  "indoc",
  "instant",
  "itertools 0.13.0",
+ "jiff",
  "lsp-types 0.97.0",
  "markdown",
  "markup5ever_rcdom",
@@ -3827,6 +3827,7 @@ dependencies = [
  "smol",
  "sys-locale",
  "tracing",
+ "unicode-bidi",
  "unicode-linebreak",
  "unicode-segmentation",
  "web-time",
@@ -3837,13 +3838,13 @@ dependencies = [
 name = "gpui-base-examples"
 version = "0.10.0"
 dependencies = [
- "chrono",
  "gpui-base",
  "gpui-fast",
  "gpui-fast-platform",
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-pre-reqwest-client",
+ "jiff",
  "syntect",
 ]
 
@@ -3851,7 +3852,6 @@ dependencies = [
 name = "gpui-base-examples-wasm"
 version = "0.10.0"
 dependencies = [
- "chrono",
  "console_error_panic_hook",
  "console_log",
  "gpui-base",
@@ -3860,6 +3860,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-pre-reqwest-client",
+ "jiff",
  "log",
  "syntect",
  "tracing-wasm",
@@ -3872,7 +3873,6 @@ version = "0.10.0"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
- "chrono",
  "core-text",
  "cpal",
  "enum-iterator",
@@ -3886,6 +3886,7 @@ dependencies = [
  "indoc",
  "instant",
  "itertools 0.13.0",
+ "jiff",
  "log",
  "lsp-types 0.97.0",
  "markdown",
@@ -3972,7 +3973,6 @@ dependencies = [
  "anyhow",
  "async-channel",
  "autocorrect",
- "chrono",
  "csv",
  "dirs 6.0.0",
  "fake",
@@ -3983,6 +3983,7 @@ dependencies = [
  "gpui-shell",
  "gtk",
  "itertools 0.14.0",
+ "jiff",
  "lsp-types 0.97.0",
  "rand 0.8.8",
  "regex",
@@ -4348,7 +4349,6 @@ dependencies = [
 name = "gpui-kit"
 version = "0.10.0"
 dependencies = [
- "chrono",
  "gpui-base",
  "gpui-component",
  "gpui-fast",
@@ -4359,6 +4359,7 @@ dependencies = [
  "gpui-pre-macros",
  "gpui-pre-platform",
  "gpui-pre-web",
+ "jiff",
  "lsp-types 0.97.0",
 ]
 
@@ -4941,7 +4942,6 @@ dependencies = [
  "anyhow",
  "async-channel",
  "cap-std",
- "chrono",
  "flate2",
  "fs2",
  "gpui-base",
@@ -4956,6 +4956,7 @@ dependencies = [
  "gpui-webview",
  "image",
  "instant",
+ "jiff",
  "lb-wry",
  "libc",
  "quickjs-jit",
@@ -5850,6 +5851,60 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cc767b5763de45e810109520123bb2829a653f3a7ed9be40b2bc4f81158f595"
+dependencies = [
+ "jiff-core",
+ "jiff-static",
+ "jiff-tzdb-platform",
+ "js-sys",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "wasm-bindgen",
+ "windows-link 0.2.1",
+]
+
+[[package]]
+name = "jiff-core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "894f7ac42105f584100691b3bf6e6b92dd12fcfa225f6c397f95c8a94b47b68f"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "955491488dc99b572ea6d67b172dcd98787d00744b1fb44a5689b4e6413695a6"
+dependencies = [
+ "jiff-core",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc65b284afcfa8f6cf189c7274c805505314a7ab975c60e1f548bff56525420e"
+dependencies = [
+ "jiff-tzdb",
 ]
 
 [[package]]
