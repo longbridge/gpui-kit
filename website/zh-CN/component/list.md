@@ -68,8 +68,12 @@ let state = cx.new(|cx| ListState::new(delegate, window, cx));
 渲染列表：
 
 ```rs
-div().child(List::new(&state))
+v_flex()
+    .size_full()
+    .child(List::new(&state).flex_1())
 ```
+
+List 会撑满父容器，所以父容器需要有高度（例如 `size_full()` 或 `h(px(300.))`），否则列表高度为 0，什么都不显示。
 
 ### 分组列表
 
