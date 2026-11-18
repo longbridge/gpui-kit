@@ -1307,7 +1307,6 @@ impl<M: InputModeKind> TextElement<M> {
             .zip(last_layout.lines.iter())
         {
             let mut offset = line_offset;
-            let alignment = last_layout.alignment_offset(line.longest_width);
             for (row, shaped) in line.wrapped_lines.iter().enumerate() {
                 let y = last_layout.local_row_y(row_offset);
                 let end = offset + shaped.len;
@@ -1318,10 +1317,9 @@ impl<M: InputModeKind> TextElement<M> {
                 // A wrap boundary is not a newline and must not get such a cell.
                 let newline = is_last && range.start <= end && range.end > end;
                 if start_ix < end_ix || newline {
-                    let indent = if row == 0 { px(0.) } else { line.wrap_indent };
-                    let left = alignment + indent + shaped.x_for_index(start_ix.min(end) - offset);
-                    let right = alignment
-                        + indent
+                    let row_x = line.row_x(row, last_layout.content_width);
+                    let left = row_x + shaped.x_for_index(start_ix.min(end) - offset);
+                    let right = row_x
                         + if newline {
                             shaped.width + last_layout.space_width
                         } else {
@@ -2067,9 +2065,7 @@ impl<M: InputModeKind> TextElement<M> {
                 if state.display_map.is_folded_at(buffer_line)
                     && let Some(last) = line.wrapped_lines.last()
                 {
-                    let indent = if rows > 1 { line.wrap_indent } else { px(0.) };
-                    let end =
-                        last_layout.alignment_offset(line.longest_width) + indent + last.width;
+                    let end = line.row_x(rows - 1, last_layout.content_width) + last.width;
                     folded.push((buffer_line, top, rows, end));
                 }
                 row_offset += rows as isize;
@@ -3560,7 +3556,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let margin = visible_display_rows.len();
         let shaped_display_rows = visible_display_rows.start.saturating_sub(margin)
             ..visible_display_rows.end.saturating_add(margin);
-        let lines = Self::layout_lines(
+        let mut lines = Self::layout_lines(
             &state,
             &display_text,
             &last_layout,
@@ -3571,6 +3567,16 @@ impl<M: InputModeKind> Element for TextElement<M> {
             whitespace_indicators,
             window,
         );
+        // A text area starts each paragraph at the edge it reads from, the way
+        // a native text view's natural alignment does; a field and a code
+        // editor keep one alignment for the whole.
+        for line in &mut lines {
+            line.align = if state.is_single_line() || state.is_code_editor() {
+                state.text_align
+            } else {
+                line.start_align()
+            };
+        }
 
         let mut longest_line_width = wrap_width.unwrap_or(px(0.));
         // 1. Single line
@@ -4115,8 +4121,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             line.paint_background(
                 p,
                 line_height,
-                text_align,
-                Some(prepaint.last_layout.content_width),
+                prepaint.last_layout.content_width,
                 window,
                 cx,
             );
@@ -4195,11 +4200,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
             );
 
             // Paint the actual line
-            _ = line.paint(
+            line.paint(
                 p,
                 line_height,
-                text_align,
-                Some(prepaint.last_layout.content_width),
+                prepaint.last_layout.content_width,
                 window,
                 cx,
             );
@@ -5554,14 +5558,8 @@ mod tests {
                     state.deferred_scroll_offset = deferred;
                 });
                 let mut bounds = input_bounds;
-                let (carets, offset, _, _) = element.layout_cursors(
-                    &layout,
-                    &mut bounds,
-                    scroll_size,
-                    false,
-                    false,
-                    cx,
-                );
+                let (carets, offset, _, _) =
+                    element.layout_cursors(&layout, &mut bounds, scroll_size, false, false, cx);
                 assert_eq!(offset.x, px(0.));
                 assert_eq!(bounds.origin.x, input_bounds.origin.x);
                 assert_eq!(carets.len(), baseline.len());
@@ -5692,14 +5690,8 @@ mod tests {
                         state.deferred_scroll_offset = Some(point(minimum, px(0.)));
                     });
                     let mut bounds = input_bounds;
-                    let (expected, _, _, _) = element.layout_cursors(
-                        &layout,
-                        &mut bounds,
-                        scroll_size,
-                        false,
-                        false,
-                        cx,
-                    );
+                    let (expected, _, _, _) =
+                        element.layout_cursors(&layout, &mut bounds, scroll_size, false, false, cx);
 
                     for target in [minimum - px(100.), px(100.)] {
                         editor.update(cx, |state, _| {
@@ -5763,26 +5755,14 @@ mod tests {
                     state.deferred_scroll_offset = None;
                 });
                 let mut bounds = input_bounds;
-                let (baseline, _, _, _) = element.layout_cursors(
-                    &layout,
-                    &mut bounds,
-                    scroll_size,
-                    false,
-                    false,
-                    cx,
-                );
+                let (baseline, _, _, _) =
+                    element.layout_cursors(&layout, &mut bounds, scroll_size, false, false, cx);
                 editor.update(cx, |state, _| {
                     state.deferred_scroll_offset = Some(point(px(-60.), px(0.)));
                 });
                 let mut bounds = input_bounds;
-                let (carets, offset, _, _) = element.layout_cursors(
-                    &layout,
-                    &mut bounds,
-                    scroll_size,
-                    false,
-                    false,
-                    cx,
-                );
+                let (carets, offset, _, _) =
+                    element.layout_cursors(&layout, &mut bounds, scroll_size, false, false, cx);
                 assert_eq!(offset.x, px(-60.));
                 assert_eq!(carets.len(), 3);
                 for (caret, original) in carets.iter().zip(baseline) {
