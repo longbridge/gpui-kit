@@ -98,15 +98,20 @@ struct InlineFlowFrameState {
     /// What `layouts` were laid out from. A frame whose items or typography
     /// differ starts over.
     key: Option<FlowLayoutKey>,
-    /// The layouts of `key`, one per wrap width the flow was measured at:
-    /// taffy probes a flow at more than one width in a frame (unconstrained,
-    /// then the column's). A frame that changes nothing finds every width
-    /// here and wraps and shapes nothing.
+    /// The layouts of `key`, one per wrap width the flow was measured at,
+    /// least recently used first. A frame that changes nothing finds every
+    /// width here and wraps and shapes nothing; a resize replaces the
+    /// widths it changes, not the ones still measured.
     layouts: Vec<Rc<InlineFlowLayout>>,
 }
 
-/// How many wrap widths a flow keeps a layout for.
-const LAYOUTS_PER_FLOW: usize = 3;
+/// How many wrap widths a flow keeps a layout for. In one frame taffy
+/// measures a flow at up to four: unconstrained, at its max-content width,
+/// at its container's width and, in a box that shrinks to its text, at the
+/// width it shrinks to. The same document shown twice shares the first two
+/// and adds two of its own. A frame that measures more widths than are kept
+/// evicts each one before it is measured again, and finds none.
+const LAYOUTS_PER_FLOW: usize = 6;
 
 impl InlineFlowFrameState {
     fn fragment_state(&mut self, fragment_ix: usize) -> Arc<Mutex<InlineState>> {
@@ -129,16 +134,20 @@ impl InlineFlowFrameState {
         self.key = Some(key);
     }
 
-    /// The layout at `wrap_width`, if the key was laid out there already.
-    fn layout_at(&self, wrap_width: Option<Pixels>) -> Option<Rc<InlineFlowLayout>> {
-        self.layouts
+    /// The layout at `wrap_width`, if the key was laid out there already,
+    /// which becomes the most recently used.
+    fn layout_at(&mut self, wrap_width: Option<Pixels>) -> Option<Rc<InlineFlowLayout>> {
+        let ix = self
+            .layouts
             .iter()
-            .find(|layout| layout.wrap_width == wrap_width)
-            .cloned()
+            .position(|layout| layout.wrap_width == wrap_width)?;
+        self.layouts[ix..].rotate_left(1);
+        self.layouts.last().cloned()
     }
 
-    /// Keeps `layout`, in place of the oldest one when the flow has been
-    /// measured at more widths than it keeps.
+    /// Keeps `layout` as the most recently used, in place of the least
+    /// recently used when the flow has been measured at more widths than it
+    /// keeps.
     fn push_layout(&mut self, layout: Rc<InlineFlowLayout>) {
         if self.layouts.len() >= LAYOUTS_PER_FLOW {
             self.layouts.remove(0);
@@ -1893,6 +1902,35 @@ mod tests {
             }
         }
 
+        /// The same answer in a bubble per width, each shrinking to its text,
+        /// as a chat lays out a reply. Two bubbles share the flow's layouts:
+        /// nothing between them carries an id.
+        struct Bubbles {
+            state: Entity<TextViewState>,
+            widths: Vec<Pixels>,
+        }
+
+        impl Render for Bubbles {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .size_full()
+                    .children(self.widths.iter().map(|width| {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .max_w(*width)
+                            .child(TextView::new(&self.state))
+                    }))
+            }
+        }
+
+        /// Wraps in a 300px bubble, and its longest line is narrower than
+        /// the bubble, so the bubble shrinks to it.
+        const BUBBLE_ANSWER: &str = "Call `foo` now, then **bold** the result and pass \
+            it to `bar` before the next frame lays the answer out once more.";
+
         fn draw(cx: &mut VisualTestContext) {
             cx.update(|window, cx| window.draw(cx).clear(cx));
         }
@@ -1920,6 +1958,37 @@ mod tests {
             }
 
             assert_eq!(layouts(), after_first_frame, "a frame that changes nothing");
+        }
+
+        fn assert_bubbles_are_not_laid_out_again(widths: Vec<Pixels>, cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let (_, cx) = cx.add_window_view(|_, cx| Bubbles {
+                state: cx.new(|cx| TextViewState::markdown(BUBBLE_ANSWER, cx)),
+                widths,
+            });
+            cx.run_until_parked();
+            draw(cx);
+            let after_first_frame = layouts();
+
+            for _ in 0..3 {
+                draw(cx);
+            }
+
+            assert_eq!(layouts(), after_first_frame, "a frame that changes nothing");
+        }
+
+        /// A bubble that shrinks to its text has taffy measure the flow at
+        /// four widths a frame: unconstrained, at its max-content width, at
+        /// the bubble's width, and at the width it shrinks to.
+        #[gpui::test]
+        fn a_flow_that_shrinks_to_its_text_is_not_laid_out_again(cx: &mut TestAppContext) {
+            assert_bubbles_are_not_laid_out_again(vec![px(300.)], cx);
+        }
+
+        /// The second bubble shares the first two widths and adds two more.
+        #[gpui::test]
+        fn a_flow_shown_twice_is_not_laid_out_again(cx: &mut TestAppContext) {
+            assert_bubbles_are_not_laid_out_again(vec![px(300.), px(220.)], cx);
         }
 
         #[gpui::test]
@@ -1963,6 +2032,31 @@ mod tests {
 
             assert!(layouts() > before, "a new text has a new layout");
         }
+    }
+
+    /// A resize changes the column's width every frame: the widths still
+    /// measured (unconstrained, max-content) stay, the stale ones go.
+    #[test]
+    fn a_flow_keeps_the_widths_it_used_last() {
+        let measured_at = |width: usize| {
+            Rc::new(InlineFlowLayout {
+                wrap_width: Some(px(width as f32)),
+                ..Default::default()
+            })
+        };
+        let mut state = InlineFlowFrameState::default();
+        for width in 0..LAYOUTS_PER_FLOW {
+            state.push_layout(measured_at(width));
+        }
+
+        assert!(state.layout_at(Some(px(0.))).is_some());
+        state.push_layout(measured_at(LAYOUTS_PER_FLOW));
+
+        assert!(state.layout_at(Some(px(0.))).is_some(), "a width in use");
+        assert!(
+            state.layout_at(Some(px(1.))).is_none(),
+            "the least recently used"
+        );
     }
 
     #[test]
