@@ -140,6 +140,12 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Fold or unfold all candidates with a single projection rebuild.
+    pub fn set_all_folded(&mut self, folded: bool) {
+        self.fold_map.set_all_folded(folded);
+        self.rebuild_fold_projection();
+    }
+
     /// Toggle fold at the given start_line
     pub fn toggle_fold(&mut self, start_line: usize) {
         self.fold_map.toggle_fold(start_line);
