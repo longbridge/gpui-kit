@@ -392,27 +392,28 @@ impl SidebarItem for SidebarMenuItem {
                         this.text_color(cx.theme().muted_foreground)
                     })
                     .when(!is_disabled, |this| {
-                        this.on_click({
-                            let open_state = open_state.clone();
-                            move |ev, window, cx| {
-                                if click_to_open {
-                                    if let Some(ref s) = open_state {
-                                        s.update(cx, |is_open: &mut bool, cx| {
-                                            *is_open = true;
-                                            cx.notify();
-                                        });
+                        this.when(cx.theme().pointer_cursor, |this| this.cursor_pointer())
+                            .on_click({
+                                let open_state = open_state.clone();
+                                move |ev, window, cx| {
+                                    if click_to_open {
+                                        if let Some(ref s) = open_state {
+                                            s.update(cx, |is_open: &mut bool, cx| {
+                                                *is_open = true;
+                                                cx.notify();
+                                            });
+                                        }
+                                    } else if click_to_toggle {
+                                        if let Some(ref s) = open_state {
+                                            s.update(cx, |is_open: &mut bool, cx| {
+                                                *is_open = !*is_open;
+                                                cx.notify();
+                                            });
+                                        }
                                     }
-                                } else if click_to_toggle {
-                                    if let Some(ref s) = open_state {
-                                        s.update(cx, |is_open: &mut bool, cx| {
-                                            *is_open = !*is_open;
-                                            cx.notify();
-                                        });
-                                    }
+                                    handler(ev, window, cx)
                                 }
-                                handler(ev, window, cx)
-                            }
-                        })
+                            })
                     })
                     .map(|this| {
                         if let Some(tooltip) = collapsed_tooltip {

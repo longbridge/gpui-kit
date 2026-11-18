@@ -205,6 +205,9 @@ impl RenderOnce for Radio {
             .id(self.id.clone())
             .checked(self.checked)
             .disabled(self.disabled)
+            .when(!disabled && cx.theme().pointer_cursor, |this| {
+                this.cursor_pointer()
+            })
             .track_focus(&focus_handle)
             .tab_stop(self.tab_stop)
             .tab_index(self.tab_index)

@@ -84,6 +84,11 @@
           "type": ["boolean", "null"],
           "default": true
         },
+        "pointer_cursor": {
+          "description": "Whether controls that act when clicked show the pointing hand, default is false.",
+          "type": ["boolean", "null"],
+          "default": false
+        },
         "colors": {
           "description": "The colors of the theme.",
           "$ref": "#/$defs/ThemeConfigColors",

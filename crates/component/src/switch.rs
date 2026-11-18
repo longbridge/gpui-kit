@@ -243,6 +243,9 @@ impl RenderOnce for Switch {
                 .when_some(on_click, |this, on_click| {
                     this.on_change(move |next, _, window, cx| on_click(&next, window, cx))
                 })
+                .when(!self.disabled && cx.theme().pointer_cursor, |this| {
+                    this.cursor_pointer()
+                })
                 .tab_stop(self.tab_stop)
                 .tab_index(self.tab_index)
                 .track_focus(&focus_handle)

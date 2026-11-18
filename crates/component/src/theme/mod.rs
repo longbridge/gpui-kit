@@ -212,6 +212,14 @@ pub struct Theme {
     /// space or can be clipped.
     #[serde(default = "default_true")]
     pub focus_ring: bool,
+    /// Whether controls that act when clicked show the pointing hand, default
+    /// false.
+    ///
+    /// Off, they keep the arrow, as macOS and Windows controls do, and only
+    /// links point. An application following the web's convention, where
+    /// every clickable control points, turns it on here.
+    #[serde(default)]
+    pub pointer_cursor: bool,
     pub transparent: Hsla,
     /// Show the scrollbar mode, default: Scrolling
     #[serde(alias = "scrollbar_show")]
@@ -802,6 +810,7 @@ impl From<&ThemeColor> for Theme {
             window_radius: px(0.),
             shadow: true,
             focus_ring: true,
+            pointer_cursor: false,
             scrollbar_mode: ScrollbarMode::default(),
             notification: NotificationSettings::default(),
             list: ListSettings::default(),

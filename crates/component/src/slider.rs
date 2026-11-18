@@ -243,7 +243,8 @@ impl RenderOnce for Slider {
                 .start(start)
                 .disabled(self.disabled)
                 .when(!self.disabled, |this| {
-                    this.absolute()
+                    this.when(cx.theme().pointer_cursor, |this| this.cursor_pointer())
+                        .absolute()
                         .when(axis.is_horizontal(), |this| {
                             this.top(px(-5.)).inset_s(position, cx).ms(-px(8.), cx)
                         })

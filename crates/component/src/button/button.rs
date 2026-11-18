@@ -682,7 +682,10 @@ impl RenderOnce for Button {
             .justify_center()
             .cursor_default()
             .when(
-                interactive && (self.variant.is_link() || self.variant.is_text()),
+                interactive
+                    && (self.variant.is_link()
+                        || self.variant.is_text()
+                        || cx.theme().pointer_cursor),
                 |this| this.cursor_pointer(),
             )
             .when(

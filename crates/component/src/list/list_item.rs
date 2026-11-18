@@ -211,7 +211,8 @@ impl RenderOnce for ListItem {
             .refine_style(&self.style)
             .when_some(accessibility_label, |this, label| this.aria_label(label))
             .when(is_selectable, |this| {
-                this.when_some(self.on_click, |this, on_click| this.on_click(on_click))
+                this.when(cx.theme().pointer_cursor, |this| this.cursor_pointer())
+                    .when_some(self.on_click, |this, on_click| this.on_click(on_click))
                     .when_some(self.on_mouse_enter, |this, on_mouse_enter| {
                         this.on_mouse_move(move |ev, window, cx| (on_mouse_enter)(ev, window, cx))
                     })

@@ -135,6 +135,7 @@ impl RenderOnce for MenuItemElement {
                     this.bg(cx.theme().tokens.accent)
                         .text_color(cx.theme().accent_foreground)
                 })
+                .when(cx.theme().pointer_cursor, |this| this.cursor_pointer())
                 .when(self.selected, |this| {
                     this.bg(cx.theme().tokens.accent)
                         .text_color(cx.theme().accent_foreground)

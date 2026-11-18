@@ -77,6 +77,10 @@ pub struct ThemeConfig {
     /// Set shadows in the theme, for example the Input and Button, default is true.
     #[serde(rename = "shadow")]
     pub shadow: Option<bool>,
+    /// Whether controls that act when clicked show the pointing hand, default
+    /// is false.
+    #[serde(rename = "pointer_cursor")]
+    pub pointer_cursor: Option<bool>,
 
     /// The colors of the theme.
     pub colors: ThemeConfigColors,
@@ -1124,6 +1128,9 @@ impl Theme {
         if let Some(shadow) = config.shadow {
             self.shadow = shadow;
         }
+        if let Some(pointer_cursor) = config.pointer_cursor {
+            self.pointer_cursor = pointer_cursor;
+        }
 
         self.tokens = self.colors.apply_config(&config, &default_colors);
         self.mode = config.mode;
@@ -1224,6 +1231,20 @@ mod tests {
         assert_eq!(theme.window_radius, px(0.));
         theme.apply_config(&std::rc::Rc::new(config));
         assert_eq!(theme.window_radius, px(10.));
+    }
+
+    #[test]
+    fn test_apply_config_reads_the_pointer_cursor() {
+        let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Pointing",
+            "mode": "dark",
+            "pointer_cursor": true
+        }))
+        .unwrap();
+        let mut theme = Theme::default();
+        assert!(!theme.pointer_cursor);
+        theme.apply_config(&std::rc::Rc::new(config));
+        assert!(theme.pointer_cursor);
     }
 
     #[test]

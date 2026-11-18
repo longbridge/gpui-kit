@@ -601,7 +601,8 @@ where
                             |this| this.focus_ring_style(window, cx),
                         )
                         .when(allow_open, |this| {
-                            this.on_click(cx.listener(Self::toggle_menu))
+                            this.when(cx.theme().pointer_cursor, |this| this.cursor_pointer())
+                                .on_click(cx.listener(Self::toggle_menu))
                         })
                         .child(
                             h_flex()

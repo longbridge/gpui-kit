@@ -1004,6 +1004,9 @@ impl RenderOnce for Tab {
                     .border_b(normal_style.borders.bottom)
                     .border_color(normal_style.border_color)
             })
+            .when(!self.disabled && cx.theme().pointer_cursor, |this| {
+                this.cursor_pointer()
+            })
             .hover(|this| {
                 // Always register the hover style: GPUI only refreshes the cached
                 // hover state while one is present. If the selected tab skipped it,

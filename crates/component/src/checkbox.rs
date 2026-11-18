@@ -301,6 +301,9 @@ impl RenderOnce for Checkbox {
                         .refine_style(&instance_style)
                 })
             })
+            .when(!self.disabled && cx.theme().pointer_cursor, |this| {
+                this.cursor_pointer()
+            })
             .tab_stop(self.tab_stop)
             .tab_index(self.tab_index)
             .track_focus(&focus_handle)
