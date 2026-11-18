@@ -10128,6 +10128,71 @@ mod tests {
         });
     }
 
+    /// fold_all, fold_at_level and unfold_all change only the folded set; the
+    /// candidates stay. A level counts the candidates that contain a range.
+    #[gpui::test]
+    fn test_fold_all_and_fold_at_level(cx: &mut TestAppContext) {
+        use crate::input::FoldRange;
+
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        let input = view.input;
+
+        // Level 1: 0..=9; level 2: 1..=4 and 5..=8; level 3: 2..=3.
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", window, cx);
+                state.apply_highlighter_fold_candidates(
+                    vec![
+                        FoldRange::new(0, 9),
+                        FoldRange::new(1, 4),
+                        FoldRange::new(2, 3),
+                        FoldRange::new(5, 8),
+                    ],
+                    cx,
+                );
+            });
+        });
+        let folded = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| {
+                input.read_with(cx, |state, _| {
+                    state
+                        .display_map
+                        .folded_ranges()
+                        .iter()
+                        .map(|f| f.start_line)
+                        .collect::<Vec<_>>()
+                })
+            })
+        };
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_all(cx)));
+        assert_eq!(folded(&mut cx), vec![0, 1, 2, 5]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(2, cx)));
+        assert_eq!(folded(&mut cx), vec![1, 5]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(1, cx)));
+        assert_eq!(folded(&mut cx), vec![0]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.fold_at_level(3, cx)));
+        assert_eq!(folded(&mut cx), vec![2]);
+
+        cx.update(|_, cx| input.update(cx, |state, cx| state.unfold_all(cx)));
+        assert!(folded(&mut cx).is_empty());
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| assert_eq!(state.fold_candidates().len(), 4));
+        });
+
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                assert!(state.set_folded(5, true, cx));
+                assert!(!state.set_folded(6, true, cx));
+            })
+        });
+        assert_eq!(folded(&mut cx), vec![5]);
+    }
+
     /// Unfolding at a position opens exactly the folds hiding it.
     ///
     /// A fold keeps its own first and last line visible, so a position on
@@ -13575,6 +13640,72 @@ impl InputBaseState<crate::input::EditorMode> {
             self.display_map.clear_folds();
         }
         cx.notify();
+    }
+
+    /// Fold or unfold the fold candidate that starts at `start_line`
+    /// (a 0-based buffer line). Returns false when no candidate starts there
+    /// or folding is disabled.
+    pub fn set_folded(&mut self, start_line: usize, folded: bool, cx: &mut Context<Self>) -> bool {
+        if !self.mode.is_folding() || !self.display_map.is_fold_candidate(start_line) {
+            return false;
+        }
+        self.display_map.set_folded(start_line, folded);
+        cx.notify();
+        true
+    }
+
+    /// Fold every fold candidate.
+    pub fn fold_all(&mut self, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
+        let lines: Vec<usize> = self
+            .display_map
+            .fold_candidates()
+            .iter()
+            .map(|c| c.start_line)
+            .collect();
+        self.display_map.set_folded_lines(lines);
+        cx.notify();
+    }
+
+    /// Unfold every folded range. Fold candidates are kept.
+    pub fn unfold_all(&mut self, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
+        self.display_map.clear_folds();
+        cx.notify();
+    }
+
+    /// Fold the candidates at one nesting level and unfold all others, as
+    /// Zed's `editor::FoldAtLevel`. Level 1 is a candidate that no other
+    /// candidate contains; level 2 is one inside a level-1 candidate, and so on.
+    pub fn fold_at_level(&mut self, level: usize, cx: &mut Context<Self>) {
+        if !self.mode.is_folding() {
+            return;
+        }
+        // One pass: the candidates are sorted by start line with unique starts,
+        // so the stack holds the end lines of the candidates that contain the
+        // current one, and its length is the depth.
+        let mut open: Vec<usize> = Vec::new();
+        let mut lines = Vec::new();
+        for c in self.display_map.fold_candidates() {
+            while open.last().is_some_and(|&end| end < c.end_line) {
+                open.pop();
+            }
+            if open.len() + 1 == level {
+                lines.push(c.start_line);
+            }
+            open.push(c.end_line);
+        }
+        self.display_map.set_folded_lines(lines);
+        cx.notify();
+    }
+
+    /// The fold candidates, as reported by the highlighter.
+    pub fn fold_candidates(&self) -> &[crate::input::FoldRange] {
+        self.display_map.fold_candidates()
     }
 
     /// Unfold any folded ranges that hide the given position.
