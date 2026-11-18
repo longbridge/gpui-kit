@@ -290,6 +290,19 @@ Button::new("btn")
     .selected(true)
 ```
 
+For a disclosure button, expose the controlled region's current state on the
+button's accessibility node:
+
+```rust
+Button::new("details")
+    .label("Details")
+    .track_focus(&self.details_focus)
+    .aria_expanded(self.details_open)
+```
+
+`aria_expanded` is omitted unless set. It describes disclosure state and is
+independent of the button's visual `open` state.
+
 ## Button Group
 
 ```rust
