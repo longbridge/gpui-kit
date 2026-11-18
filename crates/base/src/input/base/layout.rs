@@ -131,6 +131,7 @@ pub(super) struct LastLayout {
     pub(super) visible_buffer_lines: Vec<usize>,
     pub(super) visible_line_byte_offsets: Vec<usize>,
     pub(super) visible_top: Pixels,
+    pub(super) anchor_display_row: usize,
     pub(super) visible_range_offset: Range<usize>,
     pub(super) lines: Rc<Vec<LineLayout>>,
     pub(super) line_height: Pixels,
@@ -230,5 +231,15 @@ impl LastLayout {
                     (y >= top - above && y < top) || (y >= below_top && y < below_top + below);
                 (spacer || (y >= top && y < bottom)).then_some((row, spacer))
             })
+    }
+
+    #[cfg(test)]
+    pub(super) fn local_row_y(&self, row_offset: isize) -> Pixels {
+        self.visible_top + self.line_height * (row_offset as f32)
+    }
+
+    pub(super) fn display_row_y(&self, display_row: usize) -> Pixels {
+        let delta = display_row as f64 - self.anchor_display_row as f64;
+        self.visible_top + px((f64::from(f32::from(self.line_height)) * delta) as f32)
     }
 }

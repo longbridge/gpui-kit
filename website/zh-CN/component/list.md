@@ -37,7 +37,7 @@ impl ListDelegate for MyListDelegate {
         &mut self,
         ix: IndexPath,
         _window: &mut Window,
-        _cx: &mut Context<TableState<Self>>,
+        _cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
         self.items.get(ix.row).map(|item| {
             ListItem::new(ix)
@@ -68,8 +68,12 @@ let state = cx.new(|cx| ListState::new(delegate, window, cx));
 渲染列表：
 
 ```rs
-div().child(List::new(&state))
+v_flex()
+    .size_full()
+    .child(List::new(&state).flex_1())
 ```
+
+List 会撑满父容器，所以父容器需要有高度（例如 `size_full()` 或 `h(px(300.))`），否则列表高度为 0，什么都不显示。
 
 ### 分组列表
 
@@ -96,7 +100,7 @@ impl ListDelegate for MyListDelegate {
         &mut self,
         section: usize,
         _window: &mut Window,
-        cx: &mut Context<TableState<Self>>,
+        cx: &mut Context<ListState<Self>>,
     ) -> Option<impl IntoElement> {
         let title = match section {
             0 => "Section 1",
@@ -126,7 +130,7 @@ fn render_item(
     &mut self,
     ix: IndexPath,
     _window: &mut Window,
-    cx: &mut Context<TableState<Self>>,
+    cx: &mut Context<ListState<Self>>,
 ) -> Option<Self::Item> {
     self.items.get(ix.row).map(|item| {
         ListItem::new(ix)
@@ -188,7 +192,7 @@ impl ListDelegate for MyListDelegate {
     fn render_loading(
         &mut self,
         _window: &mut Window,
-        _cx: &mut Context<TableState<Self>>,
+        _cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
         v_flex()
             .justify_center()
@@ -291,7 +295,7 @@ ListItem::new(ix)
 
 ```rust
 impl ListDelegate for MyListDelegate {
-    fn render_empty(&mut self, _window: &mut Window, cx: &mut Context<TableState<Self>>) -> impl IntoElement {
+    fn render_empty(&mut self, _window: &mut Window, cx: &mut Context<ListState<Self>>) -> impl IntoElement {
         v_flex()
             .size_full()
             .justify_center()
