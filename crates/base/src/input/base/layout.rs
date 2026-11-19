@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc};
 
-use gpui::{Bounds, Half, Pixels, ShapedLine, TextAlign, px};
+use gpui::{Bounds, Pixels, ShapedLine, TextAlign, px};
 
 use super::{WrappingIndent, display_map::LineLayout};
 
@@ -16,6 +16,7 @@ pub(super) struct LastLayout {
     pub(super) visible_buffer_lines: Vec<usize>,
     pub(super) visible_line_byte_offsets: Vec<usize>,
     pub(super) visible_top: Pixels,
+    pub(super) anchor_display_row: usize,
     pub(super) visible_range_offset: Range<usize>,
     pub(super) lines: Rc<Vec<LineLayout>>,
     pub(super) line_height: Pixels,
@@ -38,11 +39,12 @@ impl LastLayout {
         self.lines.get(pos)
     }
 
-    pub(super) fn alignment_offset(&self, line_width: Pixels) -> Pixels {
-        match self.text_align {
-            TextAlign::Left => px(0.),
-            TextAlign::Center => (self.content_width - line_width).half().max(px(0.)),
-            TextAlign::Right => (self.content_width - line_width).max(px(0.)),
-        }
+    pub(super) fn local_row_y(&self, row_offset: isize) -> Pixels {
+        self.visible_top + self.line_height * (row_offset as f32)
+    }
+
+    pub(super) fn display_row_y(&self, display_row: usize) -> Pixels {
+        let delta = display_row as f64 - self.anchor_display_row as f64;
+        self.visible_top + px((f64::from(f32::from(self.line_height)) * delta) as f32)
     }
 }

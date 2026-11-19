@@ -170,6 +170,23 @@ impl DisplayMap {
         self.rebuild_fold_projection();
     }
 
+    /// Get all fold candidates (the ranges that can be folded)
+    #[inline]
+    pub(crate) fn fold_candidates(&self) -> &[FoldRange] {
+        self.fold_map.fold_candidates()
+    }
+
+    /// Replace the folded ranges: fold each candidate starting at one of
+    /// `start_lines` and unfold all others. Lines that are not candidates are
+    /// ignored. The fold projection is rebuilt once.
+    pub(crate) fn set_folded_lines(&mut self, start_lines: impl IntoIterator<Item = usize>) {
+        self.fold_map.clear_folds();
+        for line in start_lines {
+            self.fold_map.set_folded(line, true);
+        }
+        self.rebuild_fold_projection();
+    }
+
     // ==================== Text and Layout Updates ====================
 
     /// Adjust folds and candidates for a text edit before updating the wrap map.
@@ -251,6 +268,22 @@ impl DisplayMap {
         if self.wrap_map.set_tab_size(tab_size, cx) {
             self.rebuild_fold_projection();
         }
+    }
+
+    /// The width text is wrapped at, or `None` when it is not wrapped.
+    pub(crate) fn wrap_width(&self) -> Option<Pixels> {
+        self.wrap_map.wrapper().wrap_width()
+    }
+
+    /// Wrap the next replacement of the whole text at `wrap_width`, leaving the current rows as
+    /// they are. Only valid right before such a replacement, which rewraps every line.
+    pub(crate) fn prepare_wrap_width(&mut self, wrap_width: Pixels) {
+        self.wrap_map.prepare_wrap_width(wrap_width);
+    }
+
+    /// The font and size text is measured in.
+    pub(crate) fn font(&self) -> (&Font, Pixels) {
+        self.wrap_map.wrapper().font()
     }
 
     /// Set font parameters

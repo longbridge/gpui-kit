@@ -37,7 +37,7 @@ impl ListDelegate for MyListDelegate {
         &mut self,
         ix: IndexPath,
         _window: &mut Window,
-        _cx: &mut Context<TableState<Self>>,
+        _cx: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
         self.items.get(ix.row).map(|item| {
             ListItem::new(ix)
@@ -57,30 +57,36 @@ impl ListDelegate for MyListDelegate {
     }
 }
 
+// 创建列表
 let delegate = MyListDelegate {
     items: vec!["Item 1".into(), "Item 2".into(), "Item 3".into()],
     selected_index: None,
 };
 
+/// 创建列表状态。
 let state = cx.new(|cx| ListState::new(delegate, window, cx));
 ```
 
 渲染列表：
 
 ```rs
-div().child(List::new(&state))
+v_flex()
+    .size_full()
+    .child(List::new(&state).flex_1())
 ```
+
+List 会撑满父容器，所以父容器需要有高度（例如 `size_full()` 或 `h(px(300.))`），否则列表高度为 0，什么都不显示。
 
 ### 分组列表
 
-注意：`items_count` 为 `0` 的 section 会被自动隐藏，不会渲染 header 或 footer。
+**注意：**`items_count` 为 `0` 的 section 会被自动隐藏，不会渲染 header 或 footer。
 
 ```rust
 impl ListDelegate for MyListDelegate {
     type Item = ListItem;
 
     fn sections_count(&self, _cx: &App) -> usize {
-        3
+        3 // section 数量
     }
 
     fn items_count(&self, section: usize, _cx: &App) -> usize {
@@ -96,7 +102,7 @@ impl ListDelegate for MyListDelegate {
         &mut self,
         section: usize,
         _window: &mut Window,
-        cx: &mut Context<TableState<Self>>,
+        cx: &mut Context<ListState<Self>>,
     ) -> Option<impl IntoElement> {
         let title = match section {
             0 => "Section 1",
@@ -116,6 +122,22 @@ impl ListDelegate for MyListDelegate {
                 .child(title)
         )
     }
+
+    fn render_section_footer(
+        &mut self,
+        section: usize,
+        _window: &mut Window,
+        cx: &mut Context<ListState<Self>>,
+    ) -> Option<impl IntoElement> {
+        Some(
+            div()
+                .px_2()
+                .py_1()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("End of section {}", section + 1))
+        )
+    }
 }
 ```
 
@@ -126,7 +148,7 @@ fn render_item(
     &mut self,
     ix: IndexPath,
     _window: &mut Window,
-    cx: &mut Context<TableState<Self>>,
+    cx: &mut Context<ListState<Self>>,
 ) -> Option<Self::Item> {
     self.items.get(ix.row).map(|item| {
         ListItem::new(ix)
@@ -163,6 +185,7 @@ impl ListDelegate for MyListDelegate {
         _window: &mut Window,
         _cx: &mut Context<ListState<Self>>,
     ) -> Task<()> {
+        // 按查询词过滤列表项
         self.filtered_items = self.all_items
             .iter()
             .filter(|item| item.to_lowercase().contains(&query.to_lowercase()))
@@ -188,8 +211,9 @@ impl ListDelegate for MyListDelegate {
     fn render_loading(
         &mut self,
         _window: &mut Window,
-        _cx: &mut Context<TableState<Self>>,
+        _cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
+        // 自定义加载视图
         v_flex()
             .justify_center()
             .items_center()
@@ -209,7 +233,7 @@ impl ListDelegate for MyListDelegate {
     }
 
     fn load_more_threshold(&self) -> usize {
-        20
+        20 // 距底部还剩 20 项时触发
     }
 
     fn load_more(&mut self, window: &mut Window, cx: &mut Context<ListState<Self>>) {
@@ -219,9 +243,11 @@ impl ListDelegate for MyListDelegate {
 
         self.is_loading = true;
         cx.spawn_in(window, async move |view, window| {
+            // 模拟 API 请求
             Timer::after(Duration::from_secs(1)).await;
 
             view.update_in(window, |view, _, cx| {
+                // 追加列表项
                 view.delegate_mut().load_more_items();
                 view.delegate_mut().is_loading = false;
                 cx.notify();
@@ -234,6 +260,7 @@ impl ListDelegate for MyListDelegate {
 ### 列表事件
 
 ```rust
+// 订阅列表事件
 let _subscription = cx.subscribe(&state, |_, _, event: &ListEvent, _| {
     match event {
         ListEvent::Select(ix) => {
@@ -247,6 +274,35 @@ let _subscription = cx.subscribe(&state, |_, _, event: &ListEvent, _| {
         }
     }
 });
+```
+
+### 列表项样式
+
+```rust
+// 带悬停效果的基础列表项
+ListItem::new(ix)
+    .child(Label::new("Basic Item"))
+    .selected(is_selected)
+
+// 带勾选图标的列表项
+ListItem::new(ix)
+    .child(Label::new("Checkable Item"))
+    .check_icon(IconName::Check)
+    .confirmed(is_confirmed)
+
+// 禁用的列表项
+ListItem::new(ix)
+    .child(Label::new("Disabled Item"))
+    .disabled(true)
+
+// 分隔线
+ListSeparatorItem::new()
+    .child(
+        div()
+            .h_px()
+            .w_full()
+            .bg(cx.theme().border)
+    )
 ```
 
 ### 拖拽重排
@@ -291,7 +347,7 @@ ListItem::new(ix)
 
 ```rust
 impl ListDelegate for MyListDelegate {
-    fn render_empty(&mut self, _window: &mut Window, cx: &mut Context<TableState<Self>>) -> impl IntoElement {
+    fn render_empty(&mut self, _window: &mut Window, cx: &mut Context<ListState<Self>>) -> impl IntoElement {
         v_flex()
             .size_full()
             .justify_center()
@@ -317,30 +373,124 @@ impl ListDelegate for MyListDelegate {
 
 ```rust
 List::new(&state)
-    .max_h(px(400.))
-    .scrollbar_visible(false)
-    .paddings(Edges::all(px(8.)))
+    .max_h(px(400.))                    // 设置最大高度
+    .scrollbar_visible(false)           // 隐藏滚动条
+    .paddings(Edges::all(px(8.)))       // 设置内边距
 ```
 
 ### 滚动控制
 
 ```rust
+// 滚动到指定列表项
 state.update(cx, |state, cx| {
     state.scroll_to_item(
-        IndexPath::new(0).section(1),
+        IndexPath::new(0).section(1),  // section 1 的第 0 行
         ScrollStrategy::Center,
         window,
         cx,
     );
 });
 
+// 滚动到选中项
 state.update(cx, |state, cx| {
     state.scroll_to_selected_item(window, cx);
 });
 
+// 只设置选中项，不滚动
 state.update(cx, |state, cx| {
     state.set_selected_index(Some(IndexPath::new(5)), window, cx);
 });
+```
+
+## 示例
+
+### 文件浏览器
+
+```rust
+struct FileBrowserDelegate {
+    files: Vec<FileInfo>,
+    selected: Option<IndexPath>,
+}
+
+#[derive(Clone)]
+struct FileInfo {
+    name: String,
+    is_directory: bool,
+    size: Option<u64>,
+}
+
+impl ListDelegate for FileBrowserDelegate {
+    type Item = ListItem;
+
+    fn render_item(&mut self, ix: IndexPath, window: &mut Window, cx: &mut Context<ListState<Self>>) -> Option<Self::Item> {
+        self.files.get(ix.row).map(|file| {
+            let icon = if file.is_directory {
+                IconName::Folder
+            } else {
+                IconName::File
+            };
+
+            ListItem::new(ix)
+                .child(
+                    h_flex()
+                        .items_center()
+                        .justify_between()
+                        .w_full()
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_2()
+                                .child(Icon::new(icon))
+                                .child(Label::new(file.name.clone()))
+                        )
+                        .when_some(file.size, |this, size| {
+                            this.child(
+                                Label::new(format_size(size))
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                            )
+                        })
+                )
+                .selected(Some(ix) == self.selected)
+        })
+    }
+}
+```
+
+### 按首字母分组的通讯录
+
+```rust
+struct ContactListDelegate {
+    contacts_by_letter: BTreeMap<char, Vec<Contact>>,
+    selected: Option<IndexPath>,
+}
+
+impl ListDelegate for ContactListDelegate {
+    type Item = ListItem;
+
+    fn sections_count(&self, _cx: &App) -> usize {
+        self.contacts_by_letter.len()
+    }
+
+    fn render_section_header(&mut self, section: usize, _window: &mut Window, cx: &mut Context<ListState<Self>>) -> Option<impl IntoElement> {
+        let letter = self.contacts_by_letter.keys().nth(section)?;
+
+        Some(
+            div()
+                .px_3()
+                .py_2()
+                .bg(cx.theme().background)
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(
+                    Label::new(letter.to_string())
+                        .text_lg()
+                        .text_color(cx.theme().accent_foreground)
+                        .font_weight(FontWeight::BOLD)
+                )
+        )
+    }
+}
 ```
 
 ## 滚动回弹

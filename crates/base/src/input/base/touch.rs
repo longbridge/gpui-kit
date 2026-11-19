@@ -263,8 +263,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Input's ScrollHandle uses negative-y-is-down; negate the positive-towards-bottom delta.
         let scroll_delta = delta.map(|delta| -delta);
         self.auto_scroll.set(scroll_delta, cx, |delta, state, cx| {
-            let current = state.scroll_handle.offset();
-            state.update_scroll_offset(Some(point(current.x, current.y + delta)), cx);
+            state.scroll_by_y_f64(f64::from(f32::from(delta)), cx);
             if let Some(position) = state.auto_scroll.last_drag_position {
                 state.extend_edge_drag_to(position, cx);
             }

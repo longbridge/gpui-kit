@@ -5,12 +5,14 @@ use gpui_base::LogicalStyledExt as _;
 use crate::{
     ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
 };
+#[cfg(target_os = "linux")]
+use gpui::Subscription;
 use gpui::{
     AnyElement, App, Background, ClickEvent, Context, Decorations, Hsla, InteractiveElement,
     IntoElement, MouseButton, ParentElement, Pixels, Render, RenderOnce, Rgba,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TitlebarOptions, Window,
-    WindowControlArea, WindowOptions, div, linear_color_stop, linear_gradient,
-    prelude::FluentBuilder as _, px, rems,
+    WindowButton, WindowButtonLayout, WindowControlArea, WindowOptions, div, linear_color_stop,
+    linear_gradient, prelude::FluentBuilder as _, px, rems,
 };
 use gpui_base::TestSupportExt as _;
 use smallvec::SmallVec;
@@ -118,6 +120,41 @@ enum ControlIcon {
     Close {
         on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
     },
+}
+
+fn window_button_layout(_cx: &App) -> WindowButtonLayout {
+    #[cfg(target_os = "linux")]
+    {
+        _cx.button_layout()
+            .unwrap_or_else(WindowButtonLayout::linux_default)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        WindowButtonLayout {
+            left: [None; gpui::MAX_BUTTONS_PER_SIDE],
+            right: [
+                Some(WindowButton::Minimize),
+                Some(WindowButton::Maximize),
+                Some(WindowButton::Close),
+            ],
+        }
+    }
+}
+
+fn supported_buttons(
+    buttons: [Option<WindowButton>; gpui::MAX_BUTTONS_PER_SIDE],
+    supported: gpui::WindowControls,
+) -> SmallVec<[WindowButton; gpui::MAX_BUTTONS_PER_SIDE]> {
+    buttons
+        .into_iter()
+        .flatten()
+        .filter(|button| match button {
+            WindowButton::Minimize => supported.minimize,
+            WindowButton::Maximize => supported.maximize,
+            WindowButton::Close => true,
+        })
+        .collect()
 }
 
 impl ControlIcon {
@@ -250,13 +287,15 @@ impl RenderOnce for ControlIcon {
 
 #[derive(IntoElement)]
 struct WindowControls {
+    id: &'static str,
+    buttons: [Option<WindowButton>; gpui::MAX_BUTTONS_PER_SIDE],
     on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
 }
 
 impl RenderOnce for WindowControls {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         if cfg!(target_os = "macos") || cfg!(target_family = "wasm") {
-            return div().id("window-controls").test_support();
+            return div().id(self.id).test_support();
         }
 
         // Under server-side decorations the window manager already renders
@@ -270,33 +309,31 @@ impl RenderOnce for WindowControls {
         // title bar's window-menu overlay.
         #[cfg(target_os = "linux")]
         if !matches!(window.window_decorations(), Decorations::Client { .. }) {
-            return div().id("window-controls").test_support();
+            return div().id(self.id).test_support();
         }
 
         // The window manager declares which controls it can honor; a tiling
-        // compositor may support neither minimize nor maximize. Close is
-        // always ours to offer.
+        // compositor may support neither minimize nor maximize.
         let supported = window.window_controls();
 
         // In RTL the controls sit on the start (left) edge, close outermost.
         h_flex()
             .flex_row_dir(cx)
-            .id("window-controls")
+            .id(self.id)
             .test_support()
             .items_center()
             .flex_shrink_0()
             .h_full()
-            .when(supported.minimize, |this| {
-                this.child(ControlIcon::minimize())
-            })
-            .when(supported.maximize, |this| {
-                this.child(if window.is_maximized() {
-                    ControlIcon::restore()
-                } else {
-                    ControlIcon::maximize()
-                })
-            })
-            .child(ControlIcon::close(self.on_close_window))
+            .children(
+                supported_buttons(self.buttons, supported)
+                    .into_iter()
+                    .map(|button| match button {
+                        WindowButton::Minimize => ControlIcon::minimize(),
+                        WindowButton::Maximize if window.is_maximized() => ControlIcon::restore(),
+                        WindowButton::Maximize => ControlIcon::maximize(),
+                        WindowButton::Close => ControlIcon::close(self.on_close_window.clone()),
+                    }),
+            )
     }
 }
 
@@ -314,6 +351,9 @@ impl ParentElement for TitleBar {
 
 struct TitleBarState {
     should_move: bool,
+    #[cfg(target_os = "linux")]
+    // Keep the title bar in sync with system button-layout changes.
+    _button_layout_subscription: Subscription,
 }
 
 // TODO: Remove this when GPUI has released v0.2.3
@@ -330,20 +370,27 @@ impl RenderOnce for TitleBar {
         let is_linux = cfg!(target_os = "linux");
         let is_macos = cfg!(target_os = "macos");
 
-        let state = window.use_state(cx, |_, _| TitleBarState { should_move: false });
+        let state = window.use_state(cx, |_window, _state_cx| TitleBarState {
+            should_move: false,
+            #[cfg(target_os = "linux")]
+            _button_layout_subscription: _state_cx
+                .observe_button_layout_changed(_window, |_, _, cx| cx.notify()),
+        });
         let radii = crate::window_corner_radii(window, cx);
+        let button_layout = window_button_layout(cx);
 
         div().flex_shrink_0().child(
             div()
                 .id("title-bar")
                 .flex_row_dir(cx)
+                .when(is_linux, |this| this.flex_row())
                 .items_center()
                 .justify_between()
                 .h(TITLE_BAR_HEIGHT)
                 // macOS draws its traffic lights on the left whatever the
                 // direction; elsewhere the padding is on the start edge.
                 .map(|this| {
-                    if is_macos {
+                    if is_macos || is_linux {
                         this.pl(TITLE_BAR_LEFT_PADDING)
                     } else {
                         this.ps(TITLE_BAR_LEFT_PADDING, cx)
@@ -405,6 +452,13 @@ impl RenderOnce for TitleBar {
                         }
                     },
                 ))
+                .when(is_linux, |this| {
+                    this.child(WindowControls {
+                        id: "window-controls-start",
+                        buttons: button_layout.left,
+                        on_close_window: self.on_close_window.clone(),
+                    })
+                })
                 .child(
                     h_flex()
                         .id("bar")
@@ -435,6 +489,8 @@ impl RenderOnce for TitleBar {
                         .children(self.children),
                 )
                 .child(WindowControls {
+                    id: "window-controls",
+                    buttons: button_layout.right,
                     on_close_window: self.on_close_window,
                 }),
         )
@@ -451,6 +507,37 @@ mod tests {
     use std::cell::Cell;
 
     use crate::button::Button;
+
+    #[test]
+    fn linux_window_controls_follow_layout_order_and_capabilities() {
+        let layout = WindowButtonLayout {
+            left: [
+                Some(WindowButton::Close),
+                Some(WindowButton::Minimize),
+                None,
+            ],
+            right: [
+                Some(WindowButton::Maximize),
+                Some(WindowButton::Close),
+                None,
+            ],
+        };
+        let supported = gpui::WindowControls {
+            fullscreen: true,
+            maximize: false,
+            minimize: true,
+            window_menu: true,
+        };
+
+        assert_eq!(
+            supported_buttons(layout.left, supported).as_slice(),
+            [WindowButton::Close, WindowButton::Minimize]
+        );
+        assert_eq!(
+            supported_buttons(layout.right, supported).as_slice(),
+            [WindowButton::Close]
+        );
+    }
 
     const BUTTON: &str = "title-bar-button";
 

@@ -92,9 +92,9 @@ gpui_web.workspace = true
 gpui-fast-web = { workspace = true, optional = true }
 
 [dev-dependencies]
-chrono = "0.4.38"
 gpui = { workspace = true, features = ["test-support"] }
 gpui-fast = { workspace = true, features = ["test-support"] }
+jiff = "1.0"
 lsp-types.workspace = true
 
 [[test]]

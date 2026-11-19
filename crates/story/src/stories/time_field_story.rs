@@ -1,10 +1,10 @@
-use chrono::NaiveTime;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, Size, StyledExt,
     time_field::{HourCycle, TimeField, TimeFieldEvent, TimeFieldState, TimePrecision},
     v_flex,
 };
 use gpui_kit::*;
+use jiff::civil::{self, Time};
 
 use crate::{ChangeStorySize, section, story_toolbar};
 
@@ -14,7 +14,7 @@ pub struct TimeFieldStory {
     twelve_hour: Entity<TimeFieldState>,
     disabled: Entity<TimeFieldState>,
     invalid: Entity<TimeFieldState>,
-    value: NaiveTime,
+    value: Time,
     size: Size,
     _subscriptions: Vec<Subscription>,
 }
@@ -39,7 +39,7 @@ impl TimeFieldStory {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let value = NaiveTime::from_hms_opt(9, 30, 0).unwrap();
+        let value = civil::time(9, 30, 0, 0);
         let field = |precision: TimePrecision,
                      hour_cycle: HourCycle,
                      window: &mut Window,

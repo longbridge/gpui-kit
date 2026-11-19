@@ -93,10 +93,48 @@ function watchHostTheme(wasm, applied) {
   sync();
 }
 
+// Firefox can report `devicePixelContentBoxSize` in CSS pixels instead of
+// device pixels (e.g. under fractional display scaling or page zoom). The
+// upstream `gpui_web` these examples build against trusts that size, so it
+// shrinks the window's logical bounds by `devicePixelRatio`: the content is
+// drawn larger than the canvas while pointer events stay in CSS pixels, and
+// clicks land up and to the left of what is drawn (#3950).
+//
+// Mirror the check GPUI Fast applies (longbridge/gpui-fast#143): keep the
+// browser's exact size when it agrees with the CSS content box scaled by
+// `devicePixelRatio`, and otherwise derive it from the content box. Remove
+// this once the GPUI web platform the docs use carries that fix.
+function correctDevicePixelContentBoxSize() {
+  const proto = window.ResizeObserverEntry?.prototype;
+  const descriptor = proto && Object.getOwnPropertyDescriptor(proto, 'devicePixelContentBoxSize');
+  if (!descriptor?.get) return;
+
+  Object.defineProperty(proto, 'devicePixelContentBoxSize', {
+    ...descriptor,
+    get() {
+      const sizes = descriptor.get.call(this);
+      const device = sizes?.[0];
+      const { width, height } = this.contentRect;
+      const dpr = window.devicePixelRatio || 1;
+      const expectedWidth = width * dpr;
+      const expectedHeight = height * dpr;
+      if (
+        device &&
+        Math.abs(device.inlineSize - expectedWidth) <= 1 &&
+        Math.abs(device.blockSize - expectedHeight) <= 1
+      ) {
+        return sizes;
+      }
+      return [{ inlineSize: Math.round(expectedWidth), blockSize: Math.round(expectedHeight) }];
+    },
+  });
+}
+
 async function init() {
   const loadingEl = document.getElementById('loading');
 
   watchPlatformInput();
+  correctDevicePixelContentBoxSize();
 
   try {
     // Import the WASM module

@@ -58,16 +58,22 @@ mod menu;
 mod overlays;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod painted_text;
+#[cfg(all(feature = "test-support", feature = "gpui-fast", feature = "component"))]
+mod popover_a11y;
 #[cfg(feature = "test-support")]
 mod query_helpers;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod root;
+#[cfg(all(feature = "test-support", feature = "component"))]
+mod root_focus;
 #[cfg(all(feature = "assets", feature = "test-support", feature = "component"))]
 mod search;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod semantic_controls;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod slider_steps;
+#[cfg(all(feature = "test-support", feature = "component"))]
+mod tab_focus;
 mod test_macro;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod text_selection;
