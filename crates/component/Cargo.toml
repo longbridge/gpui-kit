@@ -152,7 +152,7 @@ uuid = "1.10"
 num-traits = "0.2"
 
 # Calendar
-chrono = "0.4.38"
+jiff = "1.0"
 
 # Code Editor
 lsp-types.workspace = true

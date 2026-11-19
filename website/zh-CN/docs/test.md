@@ -118,7 +118,7 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 | Menu | 菜单项名称与选中状态、菜单焦点作用域、子菜单边界 |
 | Notification | Alert 角色与边界；关闭按钮沿用 Button 观察 |
 | Progress / ProgressCircle | 进度指示器角色与名称；`ElementSnapshot::value()` 不读取数值型无障碍属性 |
-| TitleBar | `title-bar` 与 `window-controls` 边界；窗口控制按钮（`minimize`、`maximize` 或 `restore`、`close`）仅在标题栏自行绘制时可读 |
+| TitleBar | `title-bar`、尾侧 `window-controls` 与可选起始侧 `window-controls-start` 边界；窗口控制按钮（`minimize`、`maximize` 或 `restore`、`close`）仅在标题栏自行绘制时可读 |
 | Dock | 区域、分组与内容边界及焦点作用域；Tab 保留原生选中状态 |
 
 优先使用构造函数 ID。Input 和 Select 支持 `.id("name")`，默认 ID 包含状态 entity ID。

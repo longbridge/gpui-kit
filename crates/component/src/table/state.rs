@@ -541,7 +541,14 @@ where
     }
 
     /// Sets the selected row to the given index.
+    ///
+    /// This does not scroll; call [`TableState::scroll_to_row`] to reveal the
+    /// row. Clicks and keyboard navigation still scroll the selection into view.
     pub fn set_selected_row(&mut self, row_ix: usize, cx: &mut Context<Self>) {
+        self.select_row(row_ix, false, cx);
+    }
+
+    pub(super) fn select_row(&mut self, row_ix: usize, scroll: bool, cx: &mut Context<Self>) {
         let is_down = match self.selected_row {
             Some(selected_row) => row_ix > selected_row,
             None => true,
@@ -550,7 +557,7 @@ where
         self.selection_mode = SelectionMode::Row;
         self.right_clicked_row = None;
         self.selected_row = Some(row_ix);
-        if let Some(row_ix) = self.selected_row {
+        if scroll {
             self.vertical_scroll_handle.scroll_to_item(
                 row_ix,
                 if is_down {
@@ -594,10 +601,17 @@ where
     }
 
     /// Sets the selected col to the given index.
+    ///
+    /// This does not scroll; call [`TableState::scroll_to_col`] to reveal the
+    /// column. Clicks and keyboard navigation still scroll the selection into view.
     pub fn set_selected_col(&mut self, col_ix: usize, cx: &mut Context<Self>) {
+        self.select_col(col_ix, false, cx);
+    }
+
+    fn select_col(&mut self, col_ix: usize, scroll: bool, cx: &mut Context<Self>) {
         self.selection_mode = SelectionMode::Column;
         self.selected_col = Some(col_ix);
-        if let Some(col_ix) = self.selected_col {
+        if scroll {
             self.scroll_to_col(col_ix, cx);
         }
         cx.emit(TableEvent::SelectColumn(col_ix));
@@ -623,7 +637,8 @@ where
     ///
     /// This method:
     /// - Switches the table to cell selection mode
-    /// - Scrolls to make the cell visible (centered vertically)
+    /// - Does not scroll; call [`TableState::scroll_to_row`] and
+    ///   [`TableState::scroll_to_col`] to reveal the cell
     /// - Emits a [`TableEvent::SelectCell`] event
     ///
     /// # Example
@@ -635,14 +650,19 @@ where
     /// });
     /// ```
     pub fn set_selected_cell(&mut self, row_ix: usize, col_ix: usize, cx: &mut Context<Self>) {
+        self.select_cell(row_ix, col_ix, false, cx);
+    }
+
+    fn select_cell(&mut self, row_ix: usize, col_ix: usize, scroll: bool, cx: &mut Context<Self>) {
         self.selection_mode = SelectionMode::Cell;
         self.selected_cell = Some((row_ix, col_ix));
         self.right_clicked_cell = None;
 
-        // Scroll to the cell
-        self.vertical_scroll_handle
-            .scroll_to_item(row_ix, ScrollStrategy::Center);
-        self.scroll_to_col(col_ix, cx);
+        if scroll {
+            self.vertical_scroll_handle
+                .scroll_to_item(row_ix, ScrollStrategy::Center);
+            self.scroll_to_col(col_ix, cx);
+        }
 
         cx.emit(TableEvent::SelectCell(row_ix, col_ix));
         cx.notify();
@@ -650,7 +670,7 @@ where
 
     /// Sets the selection as one value; [`TableSelection::None`] clears it.
     ///
-    /// Scrolls and emits exactly as the matching `set_selected_*` or
+    /// Like the matching `set_selected_*` it does not scroll, and emits as the matching `set_selected_*` or
     /// [`TableState::clear_selection`] call would.
     pub fn set_selection(&mut self, selection: TableSelection, cx: &mut Context<Self>) {
         match selection {
@@ -899,7 +919,7 @@ where
 
         cx.stop_propagation();
         if self.selects_row_on_click(e, cx) {
-            self.set_selected_row(row_ix, cx);
+            self.select_row(row_ix, true, cx);
         }
 
         if e.click_count() == 2 {
@@ -926,7 +946,7 @@ where
             return;
         }
 
-        self.set_selected_col(col_ix, cx)
+        self.select_col(col_ix, true, cx)
     }
 
     fn on_cell_click(
@@ -957,11 +977,11 @@ where
             && !is_double_click
             && self.selects_row_on_click(e, cx);
         if should_escalate_to_row {
-            self.set_selected_row(row_ix, cx);
+            self.select_row(row_ix, true, cx);
             return;
         }
 
-        self.set_selected_cell(row_ix, col_ix, cx);
+        self.select_cell(row_ix, col_ix, true, cx);
 
         if is_double_click {
             cx.emit(TableEvent::DoubleClickedCell(row_ix, col_ix));
@@ -1001,10 +1021,10 @@ where
                 } else {
                     row_ix
                 };
-                self.set_selected_cell(new_row, col_ix, cx);
+                self.select_cell(new_row, col_ix, true, cx);
             } else {
                 // No cell selected, select first cell
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1022,7 +1042,7 @@ where
             }
         }
 
-        self.set_selected_row(selected_row, cx);
+        self.select_row(selected_row, true, cx);
     }
 
     pub(super) fn action_select_next(
@@ -1046,10 +1066,10 @@ where
                 } else {
                     row_ix
                 };
-                self.set_selected_cell(new_row, col_ix, cx);
+                self.select_cell(new_row, col_ix, true, cx);
             } else {
                 // No cell selected, select first cell
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1070,7 +1090,7 @@ where
             _ => 0,
         };
 
-        self.set_selected_row(selected_row, cx);
+        self.select_row(selected_row, true, cx);
     }
 
     pub(super) fn action_select_first_column(
@@ -1082,10 +1102,10 @@ where
         // Cell selection mode: move to first cell in current row
         if self.selection_mode.is_cell() {
             if let Some((row_ix, _)) = self.selected_cell {
-                self.set_selected_cell(row_ix, 0, cx);
+                self.select_cell(row_ix, 0, true, cx);
             } else {
                 // No cell selected, select first cell of first row
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1093,13 +1113,13 @@ where
         // Row selection mode: Home goes to the first row, as in a list
         if self.selection_mode.is_row() && self.row_selectable {
             if self.delegate.rows_count(cx) > 0 {
-                self.set_selected_row(0, cx);
+                self.select_row(0, true, cx);
             }
             return;
         }
 
         // Column selection mode
-        self.set_selected_col(0, cx);
+        self.select_col(0, true, cx);
     }
 
     pub(super) fn action_select_last_column(
@@ -1113,10 +1133,10 @@ where
         // Cell selection mode: move to last cell in current row
         if self.selection_mode.is_cell() {
             if let Some((row_ix, _)) = self.selected_cell {
-                self.set_selected_cell(row_ix, columns_count.saturating_sub(1), cx);
+                self.select_cell(row_ix, columns_count.saturating_sub(1), true, cx);
             } else {
                 // No cell selected, select last cell of first row
-                self.set_selected_cell(0, columns_count.saturating_sub(1), cx);
+                self.select_cell(0, columns_count.saturating_sub(1), true, cx);
             }
             return;
         }
@@ -1125,13 +1145,13 @@ where
         if self.selection_mode.is_row() && self.row_selectable {
             let rows_count = self.delegate.rows_count(cx);
             if rows_count > 0 {
-                self.set_selected_row(rows_count - 1, cx);
+                self.select_row(rows_count - 1, true, cx);
             }
             return;
         }
 
         // Column selection mode
-        self.set_selected_col(columns_count.saturating_sub(1), cx);
+        self.select_col(columns_count.saturating_sub(1), true, cx);
     }
 
     pub(super) fn action_select_page_up(
@@ -1146,10 +1166,10 @@ where
         if self.selection_mode.is_cell() {
             if let Some((row_ix, col_ix)) = self.selected_cell {
                 let target = row_ix.saturating_sub(step);
-                self.set_selected_cell(target, col_ix, cx);
+                self.select_cell(target, col_ix, true, cx);
             } else {
                 // No cell selected, select first cell
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1160,7 +1180,7 @@ where
         }
         let current = self.selected_row.unwrap_or(0);
         let target = current.saturating_sub(step);
-        self.set_selected_row(target, cx);
+        self.select_row(target, true, cx);
     }
 
     pub(super) fn action_select_page_down(
@@ -1181,10 +1201,10 @@ where
             if let Some((row_ix, col_ix)) = self.selected_cell {
                 let max_row = rows_count.saturating_sub(1);
                 let target = (row_ix + step).min(max_row);
-                self.set_selected_cell(target, col_ix, cx);
+                self.select_cell(target, col_ix, true, cx);
             } else {
                 // No cell selected, select first cell
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1196,7 +1216,7 @@ where
         let current = self.selected_row.unwrap_or(0);
         let max_row = rows_count.saturating_sub(1);
         let target = (current + step).min(max_row);
-        self.set_selected_row(target, cx);
+        self.select_row(target, true, cx);
     }
 
     pub(super) fn action_select_prev_col(
@@ -1217,10 +1237,10 @@ where
                 } else {
                     col_ix
                 };
-                self.set_selected_cell(row_ix, new_col, cx);
+                self.select_cell(row_ix, new_col, true, cx);
             } else {
                 // No cell selected, select first cell
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1234,7 +1254,7 @@ where
                 selected_col = columns_count.saturating_sub(1);
             }
         }
-        self.set_selected_col(selected_col, cx);
+        self.select_col(selected_col, true, cx);
     }
 
     pub(super) fn action_select_next_col(
@@ -1255,10 +1275,10 @@ where
                 } else {
                     col_ix
                 };
-                self.set_selected_cell(row_ix, new_col, cx);
+                self.select_cell(row_ix, new_col, true, cx);
             } else {
                 // No cell selected, select first cell
-                self.set_selected_cell(0, 0, cx);
+                self.select_cell(0, 0, true, cx);
             }
             return;
         }
@@ -1273,7 +1293,7 @@ where
             }
         }
 
-        self.set_selected_col(selected_col, cx);
+        self.select_col(selected_col, true, cx);
     }
 
     /// Scroll table when mouse position is near the edge of the table bounds.
@@ -1872,7 +1892,7 @@ where
                     this.on_click(cx.listener(move |table, e: &ClickEvent, _window, cx| {
                         cx.stop_propagation();
                         if table.selects_row_on_click(e, cx) {
-                            table.set_selected_row(row_ix, cx);
+                            table.select_row(row_ix, true, cx);
                         }
                     }))
                 })
@@ -3090,6 +3110,60 @@ mod tests {
                 .y)
                 > end
         );
+    }
+
+    #[gpui::test]
+    fn programmatic_selection_keeps_the_viewport_but_keyboard_reveals(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate, window, cx)))
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        let offset = |cx: &mut gpui::VisualTestContext| {
+            state.read_with(cx, |state, _| {
+                state
+                    .vertical_scroll_handle
+                    .0
+                    .borrow()
+                    .base_handle
+                    .offset()
+                    .y
+            })
+        };
+
+        // Select row 0, then scroll far away from it.
+        state.update(cx, |state, cx| state.set_selected_row(0, cx));
+        state.update(cx, |state, cx| state.scroll_to_row(39, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let scrolled = offset(cx);
+        assert!(scrolled < px(0.));
+
+        // A refresh re-asserts the selection on another off-screen row.
+        state.update(cx, |state, cx| state.set_selected_row(2, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(offset(cx), scrolled);
+        state.update(cx, |state, cx| state.set_selected_cell(1, 0, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(offset(cx), scrolled);
+        state.update(cx, |state, cx| {
+            state.set_selection(TableSelection::Row(3), cx)
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(offset(cx), scrolled);
+
+        // Keyboard navigation still brings the selection into view.
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.action_select_next(&SelectDown, window, cx)
+            })
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_row()),
+            Some(4)
+        );
+        assert!(offset(cx) > scrolled);
     }
 
     struct ThreeRowsDelegate;

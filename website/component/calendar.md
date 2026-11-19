@@ -30,11 +30,11 @@ Calendar::new(&state)
 ### Calendar with Initial Date
 
 ```rust
-use chrono::Local;
+use jiff::ZonedDateTime;
 
 let state = cx.new(|cx| {
     let mut state = CalendarState::new(window, cx);
-    state.set_date(Local::now().naive_local().date(), window, cx);
+    state.set_date(ZonedDateTime::now().date(), window, cx);
     state
 });
 
@@ -44,13 +44,13 @@ Calendar::new(&state)
 ### Date Range Calendar
 
 ```rust
-use chrono::{Local, Days};
+use jiff::{ToSpan as _, ZonedDateTime};
 
 let state = cx.new(|cx| {
     let mut state = CalendarState::new(window, cx);
-    let now = Local::now().naive_local().date();
+    let now = ZonedDateTime::now().date();
     state.set_date(
-        Date::Range(Some(now), now.checked_add_days(Days::new(7))),
+        Date::Range(Some(now), now.checked_add(7.days()).ok()),
         window,
         cx
     );
@@ -108,15 +108,15 @@ Calendar::new(&state)
 ### Disabled Date Range
 
 ```rust
-use chrono::{Local, Days};
+use jiff::{ToSpan as _, ZonedDateTime};
 
-let now = Local::now().naive_local().date();
+let now = ZonedDateTime::now().date();
 
 let state = cx.new(|cx| {
     CalendarState::new(window, cx)
         .disabled_matcher(Matcher::range(
             Some(now),
-            now.checked_add_days(Days::new(7)),
+            now.checked_add(7.days()).ok(),
         ))
 });
 
@@ -130,8 +130,8 @@ Calendar::new(&state)
 let state = cx.new(|cx| {
     CalendarState::new(window, cx)
         .disabled_matcher(Matcher::interval(
-            Some(now.checked_sub_days(Days::new(30)).unwrap()),
-            now.checked_add_days(Days::new(30))
+            Some(now - 30.days()),
+            now.checked_add(30.days()).ok()
         ))
 });
 
@@ -155,7 +155,7 @@ Calendar::new(&state)
 let state = cx.new(|cx| {
     CalendarState::new(window, cx)
         .disabled_matcher(Matcher::custom(|date| {
-            date.weekday() == chrono::Weekday::Mon
+            date.weekday() == jiff::civil::Weekday::Monday
         }))
 });
 
@@ -165,7 +165,7 @@ Calendar::new(&state)
 let state = cx.new(|cx| {
     CalendarState::new(window, cx)
         .disabled_matcher(Matcher::custom(|date| {
-            *date < Local::now().naive_local().date()
+            *date < ZonedDateTime::now().date()
         }))
 });
 
@@ -226,12 +226,12 @@ Calendar::new(&state)
 ### Business Days Only Calendar
 
 ```rust
-use chrono::Weekday;
+use jiff::civil::Weekday;
 
 let state = cx.new(|cx| {
     CalendarState::new(window, cx)
         .disabled_matcher(Matcher::custom(|date| {
-            matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
+            matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday)
         }))
 });
 
@@ -241,14 +241,14 @@ Calendar::new(&state)
 ### Holiday Calendar
 
 ```rust
-use chrono::NaiveDate;
+use jiff::civil;
 use std::collections::HashSet;
 
 // Define holidays
-let holidays: HashSet<NaiveDate> = [
-    NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(), // New Year
-    NaiveDate::from_ymd_opt(2024, 7, 4).unwrap(), // Independence Day
-    NaiveDate::from_ymd_opt(2024, 12, 25).unwrap(), // Christmas
+let holidays: HashSet<civil::Date> = [
+    civil::date(2024, 1, 1), // New Year
+    civil::date(2024, 7, 4), // Independence Day
+    civil::date(2024, 12, 25), // Christmas
 ].into_iter().collect();
 
 let state = cx.new(|cx| {
@@ -314,8 +314,8 @@ let event_calendar = cx.new(|cx| {
     let mut state = CalendarState::new(window, cx);
     // Disable past dates and weekends
     state = state.disabled_matcher(Matcher::custom(|date| {
-        let now = Local::now().naive_local().date();
-        *date < now || matches!(date.weekday(), Weekday::Sat | Weekday::Sun)
+        let now = ZonedDateTime::now().date();
+        *date < now || matches!(date.weekday(), Weekday::Saturday | Weekday::Sunday)
     }));
     state
 });
@@ -358,7 +358,7 @@ Calendar::new(&report_calendar)
 ```rust
 use std::collections::HashSet;
 
-let unavailable_dates: HashSet<NaiveDate> = get_unavailable_dates();
+let unavailable_dates: HashSet<civil::Date> = get_unavailable_dates();
 
 let availability_calendar = cx.new(|cx| {
     CalendarState::new(window, cx)
