@@ -59,6 +59,14 @@ impl ResizableState {
         &self.sizes
     }
 
+    /// Whether a resize handle is being dragged.
+    ///
+    /// Starting a drag does not notify, so read this while rendering during
+    /// the drag rather than relying on a notification when it starts.
+    pub fn is_resizing(&self) -> bool {
+        self.resizing_panel_ix.is_some()
+    }
+
     /// Programmatically resize the panel at `ix` to `size`, redistributing
     /// space among siblings using the same logic as a drag.
     ///
@@ -266,6 +274,7 @@ impl ResizableState {
     pub fn clear(&mut self) {
         self.panels.clear();
         self.sizes.clear();
+        self.resizing_panel_ix = None;
     }
 
     #[inline]
@@ -850,6 +859,7 @@ mod tests {
     fn dragging_the_handle_resizes_and_emits_once(cx: &mut TestAppContext) {
         let (cx, state, resizes) = harness(cx);
         let boundary = cx.debug_bounds("second-panel").unwrap().left();
+        assert!(!state.read_with(cx, |state, _| state.is_resizing()));
 
         cx.simulate_mouse_down(
             point(boundary - px(2.), px(50.)),
@@ -866,6 +876,7 @@ mod tests {
             Some(MouseButton::Left),
             Modifiers::default(),
         );
+        assert!(state.read_with(cx, |state, _| state.is_resizing()));
         cx.simulate_mouse_up(
             point(px(220.), px(50.)),
             MouseButton::Left,
@@ -874,6 +885,7 @@ mod tests {
 
         state.read_with(cx, |state, _| {
             assert_eq!(state.sizes(), &vec![px(220.), px(180.)]);
+            assert!(!state.is_resizing());
         });
         assert_eq!(resizes.get(), 1);
     }
@@ -985,6 +997,63 @@ mod tests {
             assert_eq!(state.read(cx).resizing_panel_ix, None);
             assert_eq!(resizes.get(), 0);
         });
+    }
+
+    #[gpui::test]
+    fn clearing_mid_drag_stops_resizing(cx: &mut TestAppContext) {
+        let (cx, state, _) = harness(cx);
+        let boundary = cx.debug_bounds("second-panel").unwrap().left();
+        cx.simulate_mouse_down(
+            point(boundary - px(2.), px(50.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(boundary + px(10.), px(50.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        assert!(state.read_with(cx, |state, _| state.is_resizing()));
+
+        state.update(cx, |state, _| state.clear());
+        assert!(!state.read_with(cx, |state, _| state.is_resizing()));
+    }
+
+    #[gpui::test]
+    fn stopping_the_drag_ends_resizing(cx: &mut TestAppContext) {
+        let (cx, state, resizes) = harness(cx);
+        let boundary = cx.debug_bounds("second-panel").unwrap().left();
+        cx.simulate_mouse_down(
+            point(boundary - px(2.), px(50.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_move(
+            point(px(220.), px(50.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        assert!(state.read_with(cx, |state, _| state.is_resizing()));
+
+        // No mouse up follows a cancelled drag.
+        cx.update(|window, cx| {
+            cx.stop_active_drag(window);
+            window.draw(cx).clear(cx);
+        });
+        let sizes = state.read_with(cx, |state, _| {
+            assert!(!state.is_resizing());
+            state.sizes().clone()
+        });
+        assert_eq!(resizes.get(), 1);
+
+        // Moving the mouse afterwards no longer resizes.
+        cx.simulate_mouse_move(
+            point(px(260.), px(50.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        assert_eq!(state.read_with(cx, |state, _| state.sizes().clone()), sizes);
+        assert_eq!(resizes.get(), 1);
     }
 
     /// Reports every state its divider is rendered in, so a drag can be watched
