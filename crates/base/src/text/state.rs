@@ -20,7 +20,7 @@ use gpui::{
 use crate::{
     AutoScroll, ElementExt, TextSelection,
     async_util::{Receiver, Sender, unbounded},
-    input::{self, SelectAll},
+    input::{self, SelectAll, a11y_text::A11yTextRuns},
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, LinkFn, MarkdownExtensions,
         RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TaskToggleHandlerFn,
@@ -673,6 +673,19 @@ impl TextViewState {
             self.parsed_content.document.clone(),
             self.rendered_index.clone(),
         )
+    }
+
+    /// The rendered text as AccessKit text runs, so a screen reader can read the body.
+    ///
+    /// The runs follow [`Self::rendered_text`], which tracks the document as its parses land,
+    /// so text set or streamed in reaches the tree with the frame that shows it. A select-all
+    /// is reported as the selection; any other selection is not mapped yet, so the view
+    /// reports none rather than a wrong one.
+    pub(super) fn accessibility_text_runs(&self, scale: f32) -> Option<A11yTextRuns> {
+        let text = self.rendered_text();
+        let text = text.as_str();
+        let selection = self.select_all.then_some((0, text.len()));
+        A11yTextRuns::capture(text, selection, scale, |_| None)
     }
 
     /// Replace the range highlights, whose ranges index the current rendered text.
@@ -2325,6 +2338,37 @@ mod tests {
             assert!(!state.has_view_selection());
             assert_eq!(state.selected_text(), "");
         });
+    }
+
+    /// A screen reader reads the rendered body, not the Markdown source, and
+    /// reads text set or streamed in once its parse lands.
+    #[gpui::test]
+    fn accessibility_text_follows_the_rendered_text(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("Hello **world**", cx)));
+        cx.run_until_parked();
+        let runs = |state: &Entity<TextViewState>, cx: &mut TestAppContext| {
+            state.read_with(cx, |state, _| state.accessibility_text_runs(1.).unwrap())
+        };
+
+        let first = runs(&state, cx);
+        assert_eq!(first.text().trim_end(), "Hello world");
+        assert_eq!(first.selection(), None);
+
+        state.update(cx, |state, cx| state.push_str("\n\n- item", cx));
+        cx.run_until_parked();
+        assert_eq!(runs(&state, cx).text().trim_end(), "Hello world\nitem");
+
+        state.update(cx, |state, cx| state.set_text("Other", cx));
+        cx.run_until_parked();
+        assert_eq!(runs(&state, cx).text().trim_end(), "Other");
+
+        state.update(cx, |state, cx| state.select_all(cx));
+        let selected = runs(&state, cx);
+        assert_eq!(
+            selected.selection(),
+            Some((0, selected.text().chars().count()))
+        );
     }
 
     #[gpui::test]

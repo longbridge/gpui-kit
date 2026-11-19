@@ -44,7 +44,7 @@ pub use token_presentation::{
     InlineTokenHoverListener, InlineTokenRenderer,
 };
 #[path = "base/a11y_text.rs"]
-mod a11y_text;
+pub(crate) mod a11y_text;
 #[path = "base/kind.rs"]
 mod kind;
 #[path = "editor/language.rs"]
