@@ -366,29 +366,12 @@ impl Element for InlineObject {
         }
         if let Some(link) = self.link.clone() {
             window.set_cursor_style(CursorStyle::PointingHand, hitbox);
-            let context_handler = view
-                .as_ref()
-                .and_then(|view| view.read(cx).link_context_menu_handler.clone());
-            let handles_secondary = context_handler.is_some();
-            if let Some(handler) = context_handler {
-                let hitbox = hitbox.clone();
-                let url = link.url.clone();
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                    if phase.bubble()
-                        && event.button == MouseButton::Right
-                        && hitbox.is_hovered(window)
-                    {
-                        handler(&url, event, window, cx);
-                    }
-                });
-            }
             let link_hitbox = hitbox.clone();
             let link_view = view.clone();
             let handler = self.link_click_handler.clone();
             window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, window, cx| {
                 if !phase.bubble()
                     || !link_hitbox.is_hovered(window)
-                    || (handles_secondary && event.button == MouseButton::Right)
                     || link_view
                         .as_ref()
                         .is_some_and(|view| view.read(cx).has_selection(cx))

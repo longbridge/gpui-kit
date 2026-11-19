@@ -1519,40 +1519,17 @@ impl Element for Inline {
             });
         }
 
-        let text_view_state = GlobalState::global(cx).text_view_state();
-        let context_handler = text_view_state
-            .as_ref()
-            .and_then(|state| state.read(cx).link_context_menu_handler.clone());
-        let handles_secondary = context_handler.is_some();
-        if let Some(handler) = context_handler.filter(|_| !self.links.is_empty()) {
-            let links = self.links.clone();
-            let text_layout = text_layout.clone();
-            let hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                if phase.bubble()
-                    && event.button == MouseButton::Right
-                    && hitbox.is_hovered(window)
-                    && let Some(link) =
-                        Self::link_for_position(&text_layout, &links, event.position)
-                {
-                    handler(&link.url, event, window, cx);
-                }
-            });
-        }
-
         if !is_selection {
             // click to open link
             window.on_mouse_event({
                 let links = self.links.clone();
                 let text_layout = text_layout.clone();
                 let hitbox = hitbox.clone();
+                let text_view_state = GlobalState::global(cx).text_view_state();
                 let link_click_handler = self.link_click_handler.clone();
 
                 move |event: &MouseUpEvent, phase, window, cx| {
-                    if !phase.bubble()
-                        || !hitbox.is_hovered(window)
-                        || (handles_secondary && event.button == MouseButton::Right)
-                    {
+                    if !phase.bubble() || !hitbox.is_hovered(window) {
                         return;
                     }
                     if text_view_state

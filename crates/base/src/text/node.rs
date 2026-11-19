@@ -19,9 +19,8 @@ use crate::{
     GlobalState, ScrollableMask, Scrollbar, StyledExt, h_flex,
     scrollable_mask::horizontal_scroll_area,
     text::{
-        CodeBlockActionsFn, CodeBlockHighlighterFn, Link, LinkClickHandlerFn,
-        LinkContextMenuHandlerFn, LinkFn, MarkdownExtensions, MarkdownNode, TableActionsFn,
-        TaskToggleEvent, TaskToggleHandlerFn,
+        CodeBlockActionsFn, CodeBlockHighlighterFn, Link, LinkClickHandlerFn, LinkFn,
+        MarkdownExtensions, MarkdownNode, TableActionsFn, TaskToggleEvent, TaskToggleHandlerFn,
         document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
             Inline, InlineHighlight, InlineState, code_insets, combine_highlights, fade_highlights,
@@ -2789,7 +2788,6 @@ pub(crate) struct NodeContext {
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,
     pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
-    pub(crate) link_context_menu_handler: Option<Arc<LinkContextMenuHandlerFn>>,
     /// Replaces each link before it is drawn; links are kept as written when
     /// `None`.
     pub(crate) link_hook: Option<Arc<LinkFn>>,
@@ -3099,6 +3097,7 @@ impl Paragraph {
                         .into_any_element(),
                     );
                 }
+                let link_click_handler = node_cx.link_click_handler.clone();
                 let image_link = image.link.as_ref().and_then(|link| node_cx.link(link, cx));
                 child_nodes.push(
                     img(node_cx.image_source(image))
@@ -3107,12 +3106,7 @@ impl Paragraph {
                         .max_w(relative(1.))
                         .when_some(image.width, |this, width| this.w(width))
                         .when_some(image_link, |this, link| {
-                            linked_image(
-                                this,
-                                link.url,
-                                node_cx.link_click_handler.clone(),
-                                node_cx.link_context_menu_handler.clone(),
-                            )
+                            linked_image(this, link.url, link_click_handler.clone())
                         })
                         .into_any_element(),
                 );
