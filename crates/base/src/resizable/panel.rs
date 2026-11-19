@@ -470,13 +470,30 @@ impl Element for ResizePanelGroupElement {
         _: &mut Self::RequestLayoutState,
         _: &mut Self::PrepaintState,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
+        // A drag cancelled with `cx.stop_active_drag` gets no mouse up, so end
+        // it after this frame instead of leaving `is_resizing()` stuck.
+        if self.state.read(cx).resizing_panel_ix.is_some() && !cx.has_active_drag() {
+            let state = self.state.clone();
+            let on_resize = self.on_resize.clone();
+            window.defer(cx, move |window, cx| {
+                if state.read(cx).resizing_panel_ix.is_none() || cx.has_active_drag() {
+                    return;
+                }
+                state.update(cx, |state, cx| {
+                    state.done_resizing(cx);
+                    cx.notify();
+                });
+                on_resize(&state, window, cx);
+            });
+        }
+
         window.on_mouse_event({
             let state = self.state.clone();
             let axis = self.axis;
             move |e: &MouseMoveEvent, phase, window, cx| {
-                if !phase.bubble() {
+                if !phase.bubble() || !cx.has_active_drag() {
                     return;
                 }
                 let Some(ix) = state.read(cx).resizing_panel_ix else {
