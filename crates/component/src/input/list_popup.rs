@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Bounds, Context, Edges, Entity, Focusable as _, InteractiveElement,
-    IntoElement, MouseDownEvent, ParentElement, Pixels, Styled as _, Subscription, Window,
+    IntoElement, MouseDownEvent, ParentElement, Pixels, Styled as _, Subscription, Task, Window,
     deferred, rems,
 };
 use gpui_base::{DeferredPopover, GlobalState};
@@ -52,13 +52,7 @@ impl<D: ListDelegate> InputList for Entity<ListState<D>> {
             }),
             cx.subscribe_in(self, window, |menu, _, event: &ListEvent, _, cx| {
                 match event {
-                    ListEvent::Confirm(_) => {
-                        // The confirm wrote the text, and its change must not
-                        // lead to a search.
-                        menu.list.cancel_search(cx);
-                        menu.searched = None;
-                        menu.close(cx);
-                    }
+                    ListEvent::Confirm(_) => menu.accept(cx),
                     ListEvent::Cancel => menu.close(cx),
                     ListEvent::Select(_) => {}
                 }
@@ -128,6 +122,17 @@ pub(super) struct Menu {
     open: bool,
     /// The query the list last searched for.
     searched: Option<String>,
+    /// The input's text as last seen, so that a change event that leaves the
+    /// text as it was starts nothing.
+    text: Option<String>,
+    /// The search the last change asked for. It starts after the change's
+    /// effects are done, so that accepting a row, which writes the text before
+    /// the list reports the accept, can drop it.
+    pending_search: Task<()>,
+    /// Set from accepting a row until its effects are done: a change in that
+    /// time is the accepted value being written, wherever it is written from.
+    accepting: bool,
+    _end_accepting: Task<()>,
     /// The input's bounds as last laid out, which the popup is placed against
     /// and which a press may land in without closing it.
     field: Bounds<Pixels>,
@@ -149,6 +154,10 @@ impl Menu {
             list,
             open: false,
             searched: None,
+            text: None,
+            pending_search: Task::ready(()),
+            accepting: false,
+            _end_accepting: Task::ready(()),
             field: Bounds::default(),
             _deferred: None,
             _subscriptions: [
@@ -170,19 +179,41 @@ impl Menu {
             // Only what the user types searches: a change made in code to an
             // input they are not in leaves the list alone.
             InputEvent::Change if input.focus_handle(cx).is_focused(window) => {
-                // The input also emits this when Enter leaves its text as it was,
-                // which is no reason to open the popup again.
                 let query = input.read(cx).value().trim().to_string();
-                if self.searched.as_ref() == Some(&query) {
+                if self.text.as_ref() == Some(&query) {
                     return;
                 }
-                self.open = true;
-                self.search(query, window, cx);
+                self.text = Some(query.clone());
+                if self.accepting {
+                    return;
+                }
+                self.pending_search = cx.spawn_in(window, async move |menu, cx| {
+                    _ = menu.update_in(cx, |menu, window, cx| {
+                        menu.open = true;
+                        menu.search(query, window, cx);
+                        cx.notify();
+                    });
+                });
+                return;
             }
             InputEvent::Blur => self.close(cx),
             _ => return,
         }
         cx.notify();
+    }
+
+    /// A row was accepted, by key or click: close, and let the text it writes
+    /// start no search. The write may come before this, from the delegate's
+    /// `confirm`, or after it, from a `ListEvent::Confirm` subscription.
+    fn accept(&mut self, cx: &mut Context<Self>) {
+        self.list.cancel_search(cx);
+        // The list's rows are for the text before the accept.
+        self.searched = None;
+        self.accepting = true;
+        self._end_accepting = cx.spawn(async move |menu, cx| {
+            _ = menu.update(cx, |menu, _| menu.accepting = false);
+        });
+        self.close(cx);
     }
 
     fn search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -193,6 +224,7 @@ impl Menu {
 
     fn close(&mut self, cx: &mut Context<Self>) {
         self.open = false;
+        self.pending_search = Task::ready(());
         self.sync_token(cx);
     }
 
@@ -211,6 +243,7 @@ impl Menu {
     /// first when the list holds results for some other text.
     fn open_with(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
         self.open = true;
+        self.pending_search = Task::ready(());
         if self.searched.as_ref() == Some(&query) {
             self.list.select_first(window, cx);
             self.sync_token(cx);
@@ -282,6 +315,13 @@ impl ListPopup {
             field,
         } = self;
 
+        // Read when a key arrives rather than at render: a change or a
+        // search may have opened or closed the popup since.
+        let showing = {
+            let menu = menu.clone();
+            move |cx: &App| editable && menu.read(cx).is_showing(cx)
+        };
+
         let mut element = element
             .on_prepaint({
                 let menu = menu.clone();
@@ -289,17 +329,18 @@ impl ListPopup {
             })
             .capture_action({
                 let (menu, input, list) = (menu.clone(), input.clone(), list.clone());
+                let showing = showing.clone();
                 move |_: &MoveDown, window, cx| {
                     if !editable {
                         return;
                     }
-                    if visible {
+                    if showing(cx) {
                         list.select_next(window, cx);
                     } else {
                         let query = input.read(cx).value().trim().to_string();
                         menu.update(cx, |menu, cx| menu.open_with(query, window, cx));
                         // With nothing to offer, Down is the input's.
-                        if !menu.read(cx).is_showing(cx) {
+                        if !showing(cx) {
                             return;
                         }
                     }
@@ -307,18 +348,18 @@ impl ListPopup {
                 }
             })
             .capture_action({
-                let list = list.clone();
+                let (list, showing) = (list.clone(), showing.clone());
                 move |_: &MoveUp, window, cx| {
-                    if visible {
+                    if showing(cx) {
                         list.select_prev(window, cx);
                         cx.stop_propagation();
                     }
                 }
             })
             .capture_action({
-                let list = list.clone();
+                let (list, showing) = (list.clone(), showing.clone());
                 move |_: &Escape, window, cx| {
-                    if visible {
+                    if showing(cx) {
                         list.cancel(window, cx);
                         cx.stop_propagation();
                     }
@@ -327,12 +368,13 @@ impl ListPopup {
             .capture_action({
                 let (menu, list) = (menu.clone(), list.clone());
                 move |_: &Enter, window, cx| {
-                    if visible && list.has_selection(cx) {
+                    if showing(cx) && list.has_selection(cx) {
                         list.confirm(window, cx);
                         cx.stop_propagation();
                     } else {
-                        // The input submits its text. Results still on their
-                        // way must not open the popup afterwards.
+                        // The input submits its text. A search the typing
+                        // asked for, or results still on their way, must not
+                        // open the popup afterwards.
                         menu.update(cx, |menu, cx| {
                             menu.close(cx);
                             cx.notify();
@@ -409,6 +451,7 @@ mod tests {
         items: Vec<&'static str>,
         selected: Option<IndexPath>,
         latency: Duration,
+        write: Write,
         started: Rc<RefCell<Vec<String>>>,
     }
 
@@ -466,6 +509,9 @@ mod tests {
         }
 
         fn confirm(&mut self, _: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+            if self.write != Write::InConfirm {
+                return;
+            }
             let Some(item) = self.selected.and_then(|ix| self.items.get(ix.row)) else {
                 return;
             };
@@ -474,12 +520,25 @@ mod tests {
         }
     }
 
+    /// Where the accepted value is written.
+    #[derive(Clone, Copy, Default, PartialEq)]
+    enum Write {
+        /// In the delegate's `confirm`, before the list reports the accept.
+        #[default]
+        InConfirm,
+        /// In a `ListEvent::Confirm` subscription that hears it before the popup.
+        OnEventFirst,
+        /// In a `ListEvent::Confirm` subscription that hears it after the popup.
+        OnEventLast,
+    }
+
     #[derive(Clone, Copy, Default)]
     struct Mode {
         disabled: bool,
         readonly: bool,
         unfocused: bool,
         latency: Duration,
+        write: Write,
     }
 
     struct Harness {
@@ -562,14 +621,16 @@ mod tests {
                 items: Vec::new(),
                 selected: None,
                 latency: mode.latency,
+                write: mode.write,
                 started: log,
             };
             let list = cx.new(|cx| ListState::new(delegate, window, cx));
-            *captured.borrow_mut() = Some(input.clone());
+            *captured.borrow_mut() = Some((input.clone(), list.clone()));
             let harness = cx.new(|_| Harness { input, list, mode });
             Root::new(harness, window, cx)
         });
-        let input: Entity<InputState> = slot.borrow().clone().unwrap();
+        let (input, list): (Entity<InputState>, Entity<ListState<Delegate>>) =
+            slot.borrow().clone().unwrap();
         let mut cx = VisualTestContext::from_window(*window.deref(), cx);
         if !mode.unfocused {
             cx.update(|window, cx| input.update(cx, |input, cx| input.focus(window, cx)));
@@ -584,14 +645,44 @@ mod tests {
             })
             .detach();
         });
+        // The popup subscribes to the list when it first renders.
+        if mode.write == Write::OnEventFirst {
+            write_on_confirm_event(&input, &list, &mut cx);
+        }
         let mut fixture = Fixture {
-            input,
+            input: input.clone(),
             started,
             entered,
             cx,
         };
         fixture.draw();
+        if mode.write == Write::OnEventLast {
+            write_on_confirm_event(&input, &list, &mut fixture.cx);
+        }
         fixture
+    }
+
+    fn write_on_confirm_event(
+        input: &Entity<InputState>,
+        list: &Entity<ListState<Delegate>>,
+        cx: &mut VisualTestContext,
+    ) {
+        let input = input.clone();
+        cx.update(|window, cx| {
+            let window = window.window_handle();
+            cx.subscribe(list, move |list, event: &ListEvent, cx| {
+                let ListEvent::Confirm(ix) = event else {
+                    return;
+                };
+                let Some(item) = list.read(cx).delegate().items.get(ix.row).copied() else {
+                    return;
+                };
+                _ = window.update(cx, |_, window, cx| {
+                    input.update(cx, |input, cx| input.replace_all(item, window, cx))
+                });
+            })
+            .detach();
+        });
     }
 
     #[gpui::test]
@@ -697,6 +788,55 @@ mod tests {
         // Async results reach the view holding the input, so the row is there.
         f.click_first_row();
         assert_eq!(f.value(), "cpu.load");
+    }
+
+    /// Accepting a row searches nothing and leaves the popup closed, wherever
+    /// the value is written; typing afterwards searches again.
+    fn accept_and_type_on(cx: &mut TestAppContext, write: Write, latency_ms: u64) {
+        let mut f = mount(
+            cx,
+            Mode {
+                latency: Duration::from_millis(latency_ms),
+                write,
+                ..Mode::default()
+            },
+        );
+        f.typed("cpu");
+        f.wait(300);
+        f.started.borrow_mut().clear();
+        f.keys("down enter");
+        f.wait(500);
+        assert_eq!(f.value(), "cpu.load");
+        assert!(f.started.borrow().is_empty(), "searched after accepting");
+
+        // The popup stayed closed, so Enter is the input's.
+        f.keys("enter");
+        assert_eq!(f.entered.get(), 1);
+        assert_eq!(f.value(), "cpu.load");
+
+        f.typed("x");
+        f.wait(300);
+        assert_eq!(*f.started.borrow(), ["cpu.loadx"]);
+    }
+
+    #[gpui::test]
+    fn accepting_with_a_local_search_searches_nothing(cx: &mut TestAppContext) {
+        accept_and_type_on(cx, Write::InConfirm, 0);
+    }
+
+    #[gpui::test]
+    fn writing_on_the_confirm_event_heard_first(cx: &mut TestAppContext) {
+        accept_and_type_on(cx, Write::OnEventFirst, 0);
+    }
+
+    #[gpui::test]
+    fn writing_on_the_confirm_event_heard_last(cx: &mut TestAppContext) {
+        accept_and_type_on(cx, Write::OnEventLast, 0);
+    }
+
+    #[gpui::test]
+    fn writing_on_the_confirm_event_with_a_remote_search(cx: &mut TestAppContext) {
+        accept_and_type_on(cx, Write::OnEventFirst, 200);
     }
 
     #[gpui::test]

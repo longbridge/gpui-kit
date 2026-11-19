@@ -322,15 +322,63 @@ v_flex()
 `list` 让输入框在用户输入时于下方显示一个 [List](list.md)，同时仍接受任意文本，相当于 HTML 的 `<input list>`。当字段接受自由文本、而已知值能帮助用户输入时（例如主机名或指标名），可以使用它。如果值必须是列表中的某一项，请改用 [Combobox](combobox.md)。若要补全光标处的词（例如 `$变量` 或 `@提及`），请像 Input story 中的 Completion 示例那样，在输入框周围组合一个菜单。
 
 ```rust
+struct HostDelegate {
+    input: Entity<InputState>,
+    api: Api,
+    hosts: Vec<Host>,
+    selected: Option<IndexPath>,
+}
+
+impl ListDelegate for HostDelegate {
+    type Item = ListItem;
+
+    // 返回的任务被替换时，旧任务会被丢弃：开头的定时器就是防抖，
+    // 旧查询的结果也不会覆盖新查询。
+    fn perform_search(&mut self, query: &str, window: &mut Window, cx: &mut Context<ListState<Self>>) -> Task<()> {
+        let (api, query) = (self.api.clone(), query.to_string());
+        cx.spawn_in(window, async move |list, cx| {
+            cx.background_executor().timer(Duration::from_millis(200)).await;
+            let hosts = api.search_hosts(&query).await.unwrap_or_default();
+            _ = list.update(cx, |list, cx| {
+                list.delegate_mut().hosts = hosts;
+                cx.notify();
+            });
+        })
+    }
+
+    fn items_count(&self, _: usize, _: &App) -> usize {
+        self.hosts.len()
+    }
+
+    fn render_item(&mut self, ix: IndexPath, _: &mut Window, _: &mut Context<ListState<Self>>) -> Option<ListItem> {
+        let host = self.hosts.get(ix.row)?;
+        Some(ListItem::new(ix.row).child(host.name.clone()))
+    }
+
+    fn set_selected_index(&mut self, ix: Option<IndexPath>, _: &mut Window, _: &mut Context<ListState<Self>>) {
+        self.selected = ix;
+    }
+
+    // 写入接受后的值，它可以和行的标题不同。
+    fn confirm(&mut self, _: bool, window: &mut Window, cx: &mut Context<ListState<Self>>) {
+        if let Some(host) = self.selected.and_then(|ix| self.hosts.get(ix.row)) {
+            let id = host.id.clone();
+            self.input.update(cx, |input, cx| input.replace_all(id, window, cx));
+        }
+    }
+}
+
 let input = cx.new(|cx| InputState::new(window, cx));
 let hosts = cx.new(|cx| ListState::new(HostDelegate::new(input.clone()), window, cx));
 
 Input::new(&input).list(&hosts)
 ```
 
-`HostDelegate` 是普通的 `ListDelegate`，完整示例见 Input story。`perform_search` 返回的任务被替换时，旧任务会被丢弃，所以在任务开头等一个定时器就是防抖，旧查询的结果也不会覆盖新查询。固定列表就是在 `perform_search` 中同步过滤并返回 `Task::ready(())` 的 delegate。
+固定列表就是在 `perform_search` 中同步过滤并返回 `Task::ready(())` 的 delegate。
 
-和所有 `List` 一样，匹配、防抖、分组、分页和行的渲染都由 delegate 决定。delegate 有行或 `loading` 返回 true 时才显示弹层，并且只在输入框获得焦点时显示。没有行时弹层隐藏，因为自由文本不需要“无结果”提示；搜索失败可以显示为一行。只有用户输入才会触发搜索，代码修改未聚焦的输入框不会。请在 `confirm` 中写入接受的值（可以和行的标题不同），不要在 `ListEvent::Confirm` 订阅中写入，因为弹层关闭后写入的改动会被当作用户输入。禁用或只读的输入框不提供列表。
+和所有 `List` 一样，匹配、防抖、分组、分页和行的渲染都由 delegate 决定。delegate 有行或 `loading` 返回 true 时才显示弹层，并且只在输入框获得焦点时显示。没有行时弹层隐藏，因为自由文本不需要“无结果”提示；搜索失败可以显示为一行。只有用户输入才会触发搜索，代码修改未聚焦的输入框不会。接受的值可以在 `confirm` 中写入，也可以在 `ListEvent::Confirm` 订阅中写入，这次改动不会触发搜索。禁用或只读的输入框不提供列表。
+
+每个输入框使用各自的 `ListState`，并且不要开启 `searchable`：输入框本身就是搜索框，开启后弹层里会再出现一个搜索框。
 
 | 按键 | 操作 |
 | --- | --- |

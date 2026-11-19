@@ -308,8 +308,7 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.start_search(query, window, cx);
-        self._set_selected_index(None, window, cx);
+        self.search(query, false, window, cx);
     }
 
     /// Drop the search in flight, with whatever its delegate task still had to do.
@@ -355,10 +354,22 @@ where
     }
 
     fn start_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.search(query, true, window, cx);
+    }
+
+    /// Search with `query`, highlighting the first row when `highlight_first`
+    /// and there are rows, and nothing otherwise.
+    fn search(
+        &mut self,
+        query: String,
+        highlight_first: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.set_searching(true, window, cx);
         let search = self.delegate.perform_search(&query, window, cx);
 
-        if self.rows_cache.len() > 0 {
+        if highlight_first && self.rows_cache.len() > 0 {
             self._set_selected_index(Some(IndexPath::default()), window, cx);
         } else {
             self._set_selected_index(None, window, cx);

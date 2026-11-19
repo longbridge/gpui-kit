@@ -415,7 +415,9 @@ Input::new(&input).list(&hosts)
 
 A fixed list is a delegate whose `perform_search` filters synchronously and returns `Task::ready(())`.
 
-The delegate owns the search, like any `List`: matching, debouncing, sections, paging and rows. The popup shows while the delegate has rows or `loading` returns true, and only while the input has focus. With no rows it hides, because free text needs no "No results"; show a failed search as a row. Only typing searches, so a change made in code to an unfocused input does not. Write the accepted value in `confirm`, not in a `ListEvent::Confirm` subscription, because a change written after the popup closes counts as typing. A disabled or read-only input offers none.
+The delegate owns the search, like any `List`: matching, debouncing, sections, paging and rows. The popup shows while the delegate has rows or `loading` returns true, and only while the input has focus. With no rows it hides, because free text needs no "No results"; show a failed search as a row. Only typing searches, so a change made in code to an unfocused input does not. Write the accepted value in `confirm` or in a `ListEvent::Confirm` subscription; that change starts no search. A disabled or read-only input offers none.
+
+Give each input its own `ListState`, created without `searchable`: the field is the search box, and a searchable list would show a second one inside the popup.
 
 | Key | Action |
 | --- | --- |
