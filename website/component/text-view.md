@@ -297,11 +297,6 @@ use gpui_kit::component::text::markdown;
 
 markdown("[Open the project](https://github.com/longbridge/gpui-kit)")
     .on_link_click(|url, event, _window, cx| {
-        if event.is_right_click() {
-            println!("Show a context menu for {url}");
-            return;
-        }
-
         match event {
             ClickEvent::Mouse(click) if click.up.modifiers.control => {
                 println!("Open {url} in an internal view");
@@ -315,6 +310,12 @@ Installing a handler consumes the link event and disables the default URL
 opening behavior. If no handler is installed, links continue to use
 `App::open_url` as usual. The callback is used for both text links and linked
 images.
+
+Use `on_link_context_menu` to build a secondary-click menu for a link. The
+callback receives the resolved URL and the mouse-down event before the
+containing view handles that press, including when the link is selected.
+Installing this handler routes the secondary button to the menu while primary
+and middle clicks continue to use `on_link_click`.
 
 ## Task Lists
 

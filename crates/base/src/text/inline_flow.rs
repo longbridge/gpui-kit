@@ -10,13 +10,12 @@ use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
     GlobalElementId, Hsla, ImageSource, InspectorElementId, InteractiveElement as _, IntoElement,
     LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, Refineable as _, ShapedLine,
-    SharedString, Size, StatefulInteractiveElement as _, StyleRefinement, Styled, StyledImage as _,
-    TextRun, TextStyle, WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative,
-    size,
+    SharedString, Size, StyleRefinement, Styled, StyledImage as _, TextRun, TextStyle, WhiteSpace,
+    Window, img, point, prelude::FluentBuilder as _, px, relative, size,
 };
 
 use super::state::ParagraphRows;
-use crate::text::text_view::{LinkClickHandlerFn, handle_link_click};
+use crate::text::text_view::{LinkClickHandlerFn, linked_image};
 
 use super::{
     inline::{Inline, InlineHighlight, InlineState, code_insets, text_runs, text_size_ranges},
@@ -347,6 +346,7 @@ impl InlineFlow {
         _title: &str,
         size: Size<Pixels>,
         link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+        cx: &App,
     ) -> AnyElement {
         img(source.clone())
             .id(ix)
@@ -355,31 +355,10 @@ impl InlineFlow {
             .w(size.width)
             .h(size.height)
             .when_some(link.clone(), |this, link| {
-                let aux_link = link.clone();
-                let aux_link_click_handler = link_click_handler.clone();
-                this.cursor_pointer()
-                    .on_click(move |event, window, cx| {
-                        crate::TextSelection::end(window, cx);
-                        cx.stop_propagation();
-                        handle_link_click(
-                            &link_click_handler,
-                            link.url.clone(),
-                            event.clone(),
-                            window,
-                            cx,
-                        );
-                    })
-                    .on_aux_click(move |event, window, cx| {
-                        crate::TextSelection::end(window, cx);
-                        cx.stop_propagation();
-                        handle_link_click(
-                            &aux_link_click_handler,
-                            aux_link.url.clone(),
-                            event.clone(),
-                            window,
-                            cx,
-                        );
-                    })
+                let context_handler = crate::GlobalState::global(cx)
+                    .text_view_state()
+                    .and_then(|state| state.read(cx).link_context_menu_handler.clone());
+                linked_image(this, link.url, link_click_handler, context_handler)
             })
             .into_any_element()
     }
@@ -795,6 +774,7 @@ impl Element for InlineFlow {
                         title.as_str(),
                         fragment_size,
                         self.link_click_handler.clone(),
+                        cx,
                     );
                     element.prepaint_as_root(
                         bounds.origin + origin,

@@ -3,9 +3,10 @@ use std::{ops::Range, rc::Rc, sync::Arc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AnyView, App, Bounds, ClickEvent, ContentMask, Element, ElementId, Entity, Global,
-    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
-    LayoutId, MouseButton, ParentElement, Pixels, Refineable as _, SharedString, StyleRefinement,
-    Styled, Window, div, point, px,
+    GlobalElementId, Hitbox, HitboxBehavior, Img, InspectorElementId, InteractiveElement,
+    IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Refineable as _,
+    SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
+    point, px,
 };
 
 use crate::StyledExt;
@@ -148,6 +149,9 @@ impl Link {
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+pub(crate) type LinkContextMenuHandlerFn =
+    dyn Fn(&SharedString, &MouseDownEvent, &mut Window, &mut App) + Send + Sync;
+
 pub(crate) type LinkTooltipFn =
     dyn Fn(&SharedString, &mut Window, &mut App) -> AnyView + Send + Sync;
 pub(crate) type TaskToggleHandlerFn = dyn Fn(&TaskToggleEvent, &mut Window, &mut App) + Send + Sync;
@@ -193,6 +197,44 @@ impl TaskToggleEvent {
 /// Kept by the element only, so unlike the handlers the state carries, it
 /// may hold a `ScrollHandle`.
 pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
+
+pub(super) fn linked_image(
+    image: Stateful<Img>,
+    url: SharedString,
+    click_handler: Option<Arc<LinkClickHandlerFn>>,
+    context_handler: Option<Arc<LinkContextMenuHandlerFn>>,
+) -> Stateful<Img> {
+    let handles_secondary = context_handler.is_some();
+    let click_url = url.clone();
+    let primary_handler = click_handler.clone();
+    image
+        .cursor_pointer()
+        .when_some(context_handler, |image, handler| {
+            let url = url.clone();
+            image.on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                handler(&url, event, window, cx);
+            })
+        })
+        .on_click(move |event, window, cx| {
+            TextSelection::end(window, cx);
+            cx.stop_propagation();
+            handle_link_click(
+                &primary_handler,
+                click_url.clone(),
+                event.clone(),
+                window,
+                cx,
+            );
+        })
+        .on_aux_click(move |event, window, cx| {
+            if handles_secondary && event.is_right_click() {
+                return;
+            }
+            TextSelection::end(window, cx);
+            cx.stop_propagation();
+            handle_link_click(&click_handler, url.clone(), event.clone(), window, cx);
+        })
+}
 
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
@@ -249,6 +291,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    link_context_menu_handler: Option<Arc<LinkContextMenuHandlerFn>>,
     link_hook: Option<Arc<LinkFn>>,
     link_tooltip: Option<Arc<LinkTooltipFn>>,
     task_toggle_handler: Option<Arc<TaskToggleHandlerFn>>,
@@ -302,6 +345,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_context_menu_handler: None,
             link_hook: None,
             link_tooltip: None,
             task_toggle_handler: None,
@@ -332,6 +376,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_context_menu_handler: None,
             link_hook: None,
             link_tooltip: None,
             task_toggle_handler: None,
@@ -362,6 +407,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            link_context_menu_handler: None,
             link_hook: None,
             link_tooltip: None,
             task_toggle_handler: None,
@@ -543,6 +589,20 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Handle a secondary mouse press on a rendered link, including when
+    /// the text is selected. The handler receives the resolved URL and press
+    /// event before a containing element handles that press.
+    ///
+    /// With a handler installed, secondary release does not activate links.
+    /// Other buttons still use [`Self::on_link_click`].
+    pub fn on_link_context_menu<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&SharedString, &MouseDownEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.link_context_menu_handler = Some(Arc::new(handler));
         self
     }
 
@@ -915,6 +975,7 @@ impl Element for TextView {
             state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
+            state.link_context_menu_handler = self.link_context_menu_handler.clone();
             state.link_hook = self.link_hook.clone();
             state.link_tooltip = self.link_tooltip.clone();
             state.task_toggle_handler = self.task_toggle_handler.clone();

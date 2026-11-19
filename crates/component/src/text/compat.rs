@@ -1,7 +1,7 @@
 use gpui::{
     AnyElement, AnyView, App, Bounds, ClickEvent, Element, ElementId, Entity, GlobalElementId,
-    HighlightStyle, InspectorElementId, IntoElement, LayoutId, Pixels, Refineable as _, RenderOnce,
-    SharedString, StyleRefinement, Styled, Window,
+    HighlightStyle, InspectorElementId, IntoElement, LayoutId, MouseDownEvent, Pixels,
+    Refineable as _, RenderOnce, SharedString, StyleRefinement, Styled, Window,
 };
 
 use std::time::Duration;
@@ -183,6 +183,15 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.inner = self.inner.on_link_click(f);
+        self
+    }
+    /// Handles a secondary mouse press on a link, preserving the selection.
+    /// See [`gpui_base::text::TextView::on_link_context_menu`].
+    pub fn on_link_context_menu<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&SharedString, &MouseDownEvent, &mut Window, &mut App) + Send + Sync + 'static,
+    {
+        self.inner = self.inner.on_link_context_menu(f);
         self
     }
     /// Replaces each link before it is drawn; `None` draws it as plain text.

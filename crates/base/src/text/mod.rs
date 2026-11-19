@@ -115,3 +115,6 @@ impl RenderOnce for Text {
         }
     }
 }
+
+#[cfg(test)]
+mod link_context_tests;
