@@ -11,19 +11,23 @@ fn main() {
 mod rendering {
     use gpui_kit::{
         App, AppContext, AssetSource, Bounds, Context, Entity, Focusable as _, HeadlessAppContext,
-        MouseButton, Pixels, Render, Result, Rgba, SharedString, Window,
+        MouseButton, Pixels, Render, Result, Rgba, SharedString, StrikethroughStyle, TextAlign,
+        TextStyle, UnderlineStyle, Window,
         assets::Assets,
+        base::input::EditorLineNumberRenderer,
+        canvas,
         component::{
             ActiveTheme, IconName, IndexPath, Theme, ThemeMode,
             button::{Button, ButtonVariants as _},
             checkbox::Checkbox,
-            input::{Input, InputState},
+            input::{Editor as CodeEditor, EditorState, GutterStyle, Input, InputState},
             list::{List, ListDelegate, ListItem, ListState},
             menu::{PopupMenu, PopupMenuItem},
             table::{Column, DataTable, TableDelegate, TableState},
             text::{TextView, TextViewState},
         },
-        div, hsla,
+        div, font, hsla, open_window as open_kit_window,
+        platform::current_platform,
         prelude::*,
         px, size,
         test::{TestEventExt, TestQueryExt, TestWindowExt},
@@ -289,6 +293,266 @@ mod rendering {
         assert!(
             populated != hidden,
             "value() alone cannot detect invisible text"
+        );
+    }
+
+    fn gutter_lane_contains_digits_wider_than_plus() {
+        let mut font_bytes = include_bytes!("../../story-web/fonts/Inter-Regular.ttf").to_vec();
+        let text_system = current_platform(true).text_system();
+        text_system
+            .add_fonts(vec![Cow::Owned(font_bytes.clone())])
+            .unwrap();
+        // The bundled file retains its variable-font family name.
+        let descriptor = font("Inter Variable");
+        let font_id = text_system.font_id(&descriptor).unwrap();
+        let plus_glyph = text_system.glyph_for_char(font_id, '+').unwrap().0 as usize;
+
+        // Keep real shaping and glyph outlines, but narrow '+' in this in-memory
+        // fixture so a punctuation-based lane cannot pass on the host's fonts.
+        let table_count = u16::from_be_bytes(font_bytes[4..6].try_into().unwrap()) as usize;
+        let table = font_bytes[12..]
+            .chunks_exact(16)
+            .take(table_count)
+            .find(|table| &table[..4] == b"hmtx")
+            .unwrap();
+        let metrics_offset = u32::from_be_bytes(table[8..12].try_into().unwrap()) as usize;
+        let advance_offset = metrics_offset + plus_glyph * 4;
+        let advance = u16::from_be_bytes(
+            font_bytes[advance_offset..advance_offset + 2]
+                .try_into()
+                .unwrap(),
+        );
+        font_bytes[advance_offset..advance_offset + 2]
+            .copy_from_slice(&(advance / 2).to_be_bytes());
+
+        let mut cx = context(Arc::new(Assets));
+        cx.update(|cx| {
+            cx.text_system()
+                .add_fonts(vec![Cow::Owned(font_bytes)])
+                .unwrap()
+        });
+        let handle = open_window(&mut cx, (160., 80.), |_, _| Checked);
+        cx.update_window(handle, |_, window, cx| {
+            let body = TextStyle {
+                font_family: descriptor.family.clone(),
+                font_size: px(16.).into(),
+                ..Default::default()
+            };
+            let text_system = window.text_system();
+            let font_id = text_system.resolve_font(&body.font());
+            let plus_width = text_system.layout_width(font_id, px(16.), '+');
+            let widest_digit = ('0'..='9')
+                .max_by(|left, right| {
+                    text_system
+                        .layout_width(font_id, px(16.), *left)
+                        .partial_cmp(&text_system.layout_width(font_id, px(16.), *right))
+                        .unwrap()
+                })
+                .unwrap();
+            let digit_width = text_system.layout_width(font_id, px(16.), widest_digit);
+            assert!(
+                digit_width > plus_width,
+                "the fixture must expose the regression"
+            );
+            let gutter = GutterStyle::default();
+            for digit_count in [3, 4, 7] {
+                let number = widest_digit
+                    .to_string()
+                    .repeat(digit_count)
+                    .parse()
+                    .unwrap();
+                let (base_lane, _) = ().measure_line_numbers(digit_count, &body, window);
+                let (component_lane, _) = gutter.measure_line_numbers(digit_count, &body, window);
+                for (lane, label) in [
+                    (
+                        base_lane,
+                        ().shape_line_number(number, false, &body, window, cx),
+                    ),
+                    (
+                        component_lane,
+                        gutter.shape_line_number(number, false, &body, window, cx),
+                    ),
+                ] {
+                    assert!((lane - digit_width * digit_count).abs() < px(0.001));
+                    assert!(
+                        label.width <= lane + px(0.001),
+                        "the actual number must fit"
+                    );
+                }
+            }
+        })
+        .unwrap();
+    }
+
+    struct GutterLabels {
+        body_style: TextStyle,
+    }
+
+    struct GutterBaselineEditor {
+        state: Entity<EditorState>,
+    }
+
+    impl Render for GutterBaselineEditor {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            CodeEditor::new(&self.state)
+                .size_full()
+                .text_size(px(16.))
+                .gutter_style(
+                    GutterStyle::default()
+                        .with_line_number_font_size(px(12.))
+                        .with_line_number_color(hsla(0., 1., 0.5, 1.))
+                        .with_active_line_number_color(hsla(0., 1., 0.5, 1.)),
+                )
+        }
+    }
+
+    fn gutter_baselines_stay_fixed_when_line_contents_change() {
+        let mut cx = context(Arc::new(Assets));
+        let (handle, view) = cx.update(|cx| {
+            open_kit_window(Default::default(), cx, |window, cx| {
+                cx.new(|cx| GutterBaselineEditor {
+                    state: cx.new(|cx| EditorState::new(window, cx).default_value("A\n\nA")),
+                })
+            })
+            .unwrap()
+        });
+        let handle = handle.into();
+        let state = cx.update(|cx| view.read(cx).state.clone());
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        let (gutter_left, body_left, first_row_top, line_height) = cx
+            .update_window(handle, |_, _, cx| {
+                let state = state.read(cx);
+                let first_row = state.range_to_bounds(&(0..1)).unwrap();
+                (
+                    state.input_bounds().left(),
+                    first_row.left(),
+                    first_row.top(),
+                    first_row.size.height,
+                )
+            })
+            .unwrap();
+        // Only label placement matters here, not antialiasing coverage. Keep
+        // colored body glyphs out of the measurement and retain exact bounds
+        // so even a one-device-pixel baseline shift fails the regression.
+        let gutter_bounds = |capture: &Capture| {
+            let bounds: [_; 3] = std::array::from_fn(|row| {
+                let top = capture.device(first_row_top + line_height * row);
+                let bottom = capture.device(first_row_top + line_height * (row + 1));
+                let mut bounds = None::<(i32, i32, i32, i32)>;
+                for y in top..bottom {
+                    for x in capture.device(gutter_left)..capture.device(body_left) {
+                        let [red, green, blue] = capture.get_pixel(x, y);
+                        if red > green + 32 && red > blue + 32 {
+                            bounds = Some(match bounds {
+                                Some((left, top, right, bottom)) => {
+                                    (left.min(x), top.min(y), right.max(x), bottom.max(y))
+                                }
+                                None => (x, y, x, y),
+                            });
+                        }
+                    }
+                }
+                bounds
+            });
+            bounds
+        };
+        let initial = Capture::take(&mut cx, handle);
+        let expected = gutter_bounds(&initial);
+        assert!(
+            expected.iter().all(Option::is_some),
+            "line-number glyphs must be visible"
+        );
+        for text in ["A\nA\nA", "A\n漢😀A\nA", "A\n\nA"] {
+            cx.update_window(handle, |_, window, cx| {
+                state.update(cx, |state, cx| {
+                    state.set_value(text, window, cx);
+                    state.set_selected_range(0..0, cx);
+                });
+                window.render_frame(cx);
+            })
+            .unwrap();
+            let actual = Capture::take(&mut cx, handle);
+            assert_eq!(
+                gutter_bounds(&actual),
+                expected,
+                "line-number bounds changed for {text:?}"
+            );
+        }
+    }
+
+    impl Render for GutterLabels {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let body_style = self.body_style.clone();
+            div().size_full().bg(cx.theme().background).child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, cx| {
+                        let line = GutterStyle::default().shape_line_number(
+                            123,
+                            false,
+                            &body_style,
+                            window,
+                            cx,
+                        );
+                        line.paint_background(
+                            bounds.origin,
+                            px(24.),
+                            TextAlign::Left,
+                            None,
+                            window,
+                            cx,
+                        )
+                        .unwrap();
+                        line.paint(bounds.origin, px(24.), TextAlign::Left, None, window, cx)
+                            .unwrap();
+                    },
+                )
+                .size_full(),
+            )
+        }
+    }
+
+    fn gutter_labels_ignore_body_decorations() {
+        let mut cx = context(Arc::new(Assets));
+        let (handle, view) = cx.update(|cx| {
+            open_kit_window(Default::default(), cx, |_, cx| {
+                cx.new(|_| GutterLabels {
+                    body_style: TextStyle::default(),
+                })
+            })
+            .unwrap()
+        });
+        let handle = handle.into();
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        let clean = Capture::take(&mut cx, handle);
+        let background = &clean.raw[clean.raw.len() - 4..];
+        assert!(
+            clean.raw.chunks_exact(4).any(|pixel| pixel != background),
+            "the comparison must include visible line-number glyphs"
+        );
+        cx.update(|cx| {
+            view.update(cx, |view, cx| {
+                view.body_style.background_color = Some(cx.theme().danger);
+                view.body_style.underline = Some(UnderlineStyle {
+                    thickness: px(2.),
+                    color: Some(cx.theme().danger),
+                    wavy: false,
+                });
+                view.body_style.strikethrough = Some(StrikethroughStyle {
+                    thickness: px(2.),
+                    color: Some(cx.theme().danger),
+                });
+                cx.notify();
+            })
+        });
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        let decorated = Capture::take(&mut cx, handle);
+        assert!(
+            clean.raw == decorated.raw,
+            "body annotations must not alter gutter pixels"
         );
     }
 
@@ -1001,6 +1265,15 @@ mod rendering {
     }
 
     pub fn run() {
+        println!("running gutter_lane_contains_digits_wider_than_plus");
+        gutter_lane_contains_digits_wider_than_plus();
+        println!("passed gutter_lane_contains_digits_wider_than_plus");
+        println!("running gutter_labels_ignore_body_decorations");
+        gutter_labels_ignore_body_decorations();
+        println!("passed gutter_labels_ignore_body_decorations");
+        println!("running gutter_baselines_stay_fixed_when_line_contents_change");
+        gutter_baselines_stay_fixed_when_line_contents_change();
+        println!("passed gutter_baselines_stay_fixed_when_line_contents_change");
         println!("running pixels_detect_missing_check_even_when_checked_state_is_correct");
         pixels_detect_missing_check_even_when_checked_state_is_correct();
         println!("passed pixels_detect_missing_check_even_when_checked_state_is_correct");
@@ -1037,6 +1310,6 @@ mod rendering {
             table_shows_keyboard_focus_only(focus_ring);
             println!("passed table_shows_keyboard_focus_only (focus_ring = {focus_ring})");
         }
-        println!("rendering: 13 passed (real offscreen renderer)");
+        println!("rendering: 16 passed (real offscreen renderer)");
     }
 }
