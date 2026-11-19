@@ -2,9 +2,9 @@
 use crate::input::Copy;
 use crate::{StyledExt, TextSelectionLayer};
 use gpui::{
-    AnyElement, AnyView, App, AppContext, ClipboardItem, Context, Div, Entity, Global,
+    Action, AnyElement, AnyView, App, AppContext, ClipboardItem, Context, Div, Entity, Global,
     InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, Stateful, StyleRefinement,
-    Styled, Window, actions, div,
+    Styled, Subscription, Window, actions, div,
 };
 use std::{any::TypeId, rc::Rc};
 
@@ -121,6 +121,11 @@ pub struct Root {
     view: AnyView,
     style: StyleRefinement,
     plugins: Vec<Plugin>,
+    /// Runs Tab and Shift-Tab while nothing in the window is focused. GPUI
+    /// dispatches a keystroke from the focused element, or from the window's
+    /// root element when nothing is focused, which is above the root's key
+    /// context, so the bindings below match nothing there.
+    _unfocused_tab: Subscription,
 }
 
 impl Root {
@@ -179,6 +184,30 @@ impl Root {
             .try_global::<PluginRegistry>()
             .map(|e| e.0.clone())
             .unwrap_or_default();
+        let window_handle = window.window_handle();
+        let unfocused_tab = cx.observe_keystrokes(move |_, event, window, cx| {
+            // Only a key no binding took, in this window, with nothing focused.
+            if event.action.is_some()
+                || window.window_handle() != window_handle
+                || window.focused(cx).is_some()
+            {
+                return;
+            }
+            let bound_to = |action: &dyn Action, cx: &App| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_action(action)
+                    .any(|binding| {
+                        binding.match_keystrokes(std::slice::from_ref(&event.keystroke))
+                            == Some(false)
+                    })
+            };
+            if bound_to(&Tab, cx) {
+                advance_focus(window, cx, Window::focus_next);
+            } else if bound_to(&TabPrev, cx) {
+                advance_focus(window, cx, Window::focus_prev);
+            }
+        });
         Self {
             view: view.into(),
             style: StyleRefinement::default(),
@@ -186,6 +215,7 @@ impl Root {
                 .into_iter()
                 .map(|(_, build)| build(window, cx))
                 .collect(),
+            _unfocused_tab: unfocused_tab,
         }
     }
 

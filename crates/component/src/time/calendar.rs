@@ -1,8 +1,8 @@
-use chrono::Weekday;
 use gpui::{
     App, ElementId, Entity, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     SharedString, StyleRefinement, Styled, Window, prelude::FluentBuilder as _, px,
 };
+use jiff::civil::Weekday;
 use rust_i18n::t;
 
 use crate::{ActiveTheme, Icon, IconName, Sizable, Size, StyledExt as _};
@@ -52,7 +52,7 @@ impl Calendar {
             state: state.clone(),
             style: StyleRefinement::default(),
             number_of_months: 1,
-            first_day_of_week: Weekday::Sun,
+            first_day_of_week: Weekday::Sunday,
         }
     }
     pub fn number_of_months(mut self, count: usize) -> Self {
@@ -229,12 +229,11 @@ fn end_chevron(cx: &App) -> IconName {
 #[cfg(test)]
 mod tests {
     use super::{CalendarItemKind, Date, uses_compact_text};
-    use chrono::NaiveDate;
 
     #[test]
     fn date_display_is_stable() {
         assert_eq!(
-            Date::Single(Some(NaiveDate::from_ymd_opt(2024, 8, 3).unwrap())).to_string(),
+            Date::Single(Some(jiff::civil::date(2024, 8, 3))).to_string(),
             "2024-08-03"
         );
         assert_eq!(Date::Single(None).to_string(), "nil");

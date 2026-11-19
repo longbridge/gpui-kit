@@ -13,12 +13,25 @@ pub struct EditorScrollbarContext {
     pub(crate) viewport: Bounds<Pixels>,
     pub(crate) scroll_viewport: Size<Pixels>,
     pub(crate) content: Size<Pixels>,
+    pub(crate) content_height_f64: f64,
+    pub(crate) scroll_y_f64: f64,
     pub(crate) axis: ScrollbarAxis,
 }
 
 impl EditorScrollbarContext {
     pub fn axis(&self) -> ScrollbarAxis {
         self.axis
+    }
+
+    /// Authoritative vertical content height in `f64` pixels (including padding
+    /// when combined via `scroll_viewport_size`).
+    pub fn content_height_f64(&self) -> f64 {
+        self.content_height_f64
+    }
+
+    /// Authoritative vertical scroll offset in `f64` pixels (`<= 0.0`).
+    pub fn scroll_y_f64(&self) -> f64 {
+        self.scroll_y_f64
     }
 
     /// The editor's viewport without padding, for consumers that need its

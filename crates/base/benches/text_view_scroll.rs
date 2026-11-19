@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 use gpui::{
     AppContext as _, BenchAppContext, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window,
-    div, point, px,
+    div, point, prelude::FluentBuilder as _, px, relative,
 };
 use gpui_base::text::{TextView, TextViewState};
 
@@ -70,43 +70,61 @@ struct Chat {
     /// The parsed answer, held the way a chat holds a streamed message.
     answer: Entity<TextViewState>,
     scroll: ScrollHandle,
+    /// Shows the answer in a bubble that shrinks to its text, the way a chat
+    /// shows a reply, so taffy measures each paragraph at four widths a frame.
+    bubble: bool,
 }
 
 impl Render for Chat {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let answer = TextView::new(&self.answer);
         div().size_full().child(
             div()
                 .id("viewport")
                 .size_full()
                 .overflow_y_scroll()
                 .track_scroll(&self.scroll)
-                .child(
-                    div()
-                        .w_full()
-                        .px(px(20.))
-                        .child(TextView::new(&self.answer)),
-                ),
+                .child(div().w_full().px(px(20.)).map(|this| {
+                    if self.bubble {
+                        this.flex().child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_start()
+                                .max_w(relative(0.8))
+                                .child(answer),
+                        )
+                    } else {
+                        this.child(answer)
+                    }
+                })),
         )
     }
 }
 
 #[gpui::bench]
 fn text_view_scroll(cx: &mut BenchAppContext) {
-    scroll_answer(markdown(), cx);
+    scroll_answer(markdown(), false, cx);
 }
 
 #[gpui::bench]
 fn text_view_scroll_inline_code(cx: &mut BenchAppContext) {
-    scroll_answer(markdown_with_inline_code(), cx);
+    scroll_answer(markdown_with_inline_code(), false, cx);
 }
 
-fn scroll_answer(markdown: String, cx: &mut BenchAppContext) {
+#[gpui::bench]
+fn text_view_scroll_inline_code_bubble(cx: &mut BenchAppContext) {
+    scroll_answer(markdown_with_inline_code(), true, cx);
+}
+
+fn scroll_answer(markdown: String, bubble: bool, cx: &mut BenchAppContext) {
     cx.update(gpui_base::init);
     let mut window = cx.add_empty_window();
     let chat = window.update(|window, cx| {
         window.replace_root(cx, |_, cx| Chat {
             answer: cx.new(|cx| TextViewState::markdown(&markdown, cx)),
             scroll: ScrollHandle::new(),
+            bubble,
         })
     });
     // The Markdown parse is a background task; scroll only once it is in.
@@ -127,5 +145,10 @@ fn scroll_answer(markdown: String, cx: &mut BenchAppContext) {
     });
 }
 
-gpui::bench_group!(benches, text_view_scroll, text_view_scroll_inline_code);
+gpui::bench_group!(
+    benches,
+    text_view_scroll,
+    text_view_scroll_inline_code,
+    text_view_scroll_inline_code_bubble
+);
 gpui::bench_main!(benches);

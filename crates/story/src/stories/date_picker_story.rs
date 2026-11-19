@@ -1,4 +1,3 @@
-use chrono::{Datelike, Days, Duration, Utc};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Size, StyledExt, calendar,
     date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset},
@@ -9,6 +8,7 @@ use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
     ParentElement as _, Render, Styled as _, Subscription, Window, div, px,
 };
+use jiff::{ToSpan as _, civil};
 
 use crate::{ChangeStorySize, section, story_toolbar};
 
@@ -50,7 +50,7 @@ impl DatePickerStory {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let now = chrono::Local::now().naive_local().date();
+        let now = jiff::ZonedDateTime::now().date();
         let date_picker = cx.new(|cx| {
             let mut picker = DatePickerState::new(window, cx).disabled_matcher(vec![0, 6]);
             picker.set_date(now, window, cx);
@@ -61,35 +61,27 @@ impl DatePickerStory {
                 .date_format("%Y-%m-%d")
                 .disabled_matcher(calendar::Matcher::range(
                     Some(now),
-                    now.checked_add_days(Days::new(7)),
+                    now.checked_add(7.days()).ok(),
                 ));
-            picker.set_date(
-                now.checked_sub_days(Days::new(1)).unwrap_or_default(),
-                window,
-                cx,
-            );
+            picker.set_date(now.checked_sub(1.day()).unwrap_or_default(), window, cx);
             picker
         });
         let date_picker_small = cx.new(|cx| {
             let mut picker = DatePickerState::new(window, cx).disabled_matcher(
-                calendar::Matcher::interval(Some(now), now.checked_add_days(Days::new(5))),
+                calendar::Matcher::interval(Some(now), now.checked_add(5.days()).ok()),
             );
             picker.set_date(now, window, cx);
             picker
         });
         let data_picker_custom = cx.new(|cx| {
             let mut picker = DatePickerState::new(window, cx)
-                .disabled_matcher(calendar::Matcher::custom(|date| date.day0() < 5));
+                .disabled_matcher(calendar::Matcher::custom(|date| date.day() <= 5));
             picker.set_date(now, window, cx);
             picker
         });
         let date_range_picker = cx.new(|cx| {
             let mut picker = DatePickerState::new(window, cx);
-            picker.set_date(
-                (now, now.checked_add_days(Days::new(4)).unwrap()),
-                window,
-                cx,
-            );
+            picker.set_date((now, now + 4.days()), window, cx);
             picker
         });
 
@@ -97,7 +89,7 @@ impl DatePickerStory {
 
         let birthday_picker = cx.new(|cx| {
             let mut picker = DatePickerState::new(window, cx);
-            picker.set_year_range((1927, now.year() + 1), cx);
+            picker.set_year_range((1927, i32::from(now.year()) + 1), cx);
             picker
         });
 
@@ -105,19 +97,19 @@ impl DatePickerStory {
 
         let date_time_picker = cx.new(|cx| {
             let mut picker = DatePickerState::new(window, cx).time_precision(TimePrecision::Minute);
-            picker.set_date_time(chrono::Local::now().naive_local(), window, cx);
+            picker.set_date_time(jiff::ZonedDateTime::now().datetime(), window, cx);
             picker
         });
         let date_time_second_picker = cx.new(|cx| {
             DatePickerState::new(window, cx)
                 .time_precision(TimePrecision::Second)
-                .default_time(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+                .default_time(civil::time(9, 0, 0, 0))
         });
         let date_time_12h_picker = cx.new(|cx| {
             DatePickerState::new(window, cx)
                 .time_precision(TimePrecision::Minute)
                 .hour_cycle(HourCycle::H12)
-                .default_time(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+                .default_time(civil::time(9, 0, 0, 0))
         });
 
         let _subscriptions = vec![
@@ -181,41 +173,17 @@ impl Focusable for DatePickerStory {
 
 impl Render for DatePickerStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let today = jiff::ZonedDateTime::now().date();
         let presets = vec![
-            DateRangePreset::single(
-                "Yesterday",
-                (Utc::now() - Duration::days(1)).naive_local().date(),
-            ),
-            DateRangePreset::single(
-                "Last Week",
-                (Utc::now() - Duration::weeks(1)).naive_local().date(),
-            ),
-            DateRangePreset::single(
-                "Last Month",
-                (Utc::now() - Duration::days(30)).naive_local().date(),
-            ),
+            DateRangePreset::single("Yesterday", today - 1.day()),
+            DateRangePreset::single("Last Week", today - 1.week()),
+            DateRangePreset::single("Last Month", today - 30.days()),
         ];
         let range_presets = vec![
-            DateRangePreset::range(
-                "Last 7 Days",
-                (Utc::now() - Duration::days(7)).naive_local().date(),
-                Utc::now().naive_local().date(),
-            ),
-            DateRangePreset::range(
-                "Last 14 Days",
-                (Utc::now() - Duration::days(14)).naive_local().date(),
-                Utc::now().naive_local().date(),
-            ),
-            DateRangePreset::range(
-                "Last 30 Days",
-                (Utc::now() - Duration::days(30)).naive_local().date(),
-                Utc::now().naive_local().date(),
-            ),
-            DateRangePreset::range(
-                "Last 90 Days",
-                (Utc::now() - Duration::days(90)).naive_local().date(),
-                Utc::now().naive_local().date(),
-            ),
+            DateRangePreset::range("Last 7 Days", today - 7.days(), today),
+            DateRangePreset::range("Last 14 Days", today - 14.days(), today),
+            DateRangePreset::range("Last 30 Days", today - 30.days(), today),
+            DateRangePreset::range("Last 90 Days", today - 90.days(), today),
         ];
 
         v_flex()
