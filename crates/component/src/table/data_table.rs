@@ -43,6 +43,8 @@ pub(super) struct TableOptions {
     pub(super) size: Size,
     /// Height of each header row. `None` uses [`Size::table_row_height`].
     pub(super) header_row_height: Option<Pixels>,
+    /// Set whether clicking anywhere on a sortable column's header sorts it.
+    pub(super) sort_on_header_click: Option<bool>,
 }
 
 impl Default for TableOptions {
@@ -56,6 +58,7 @@ impl Default for TableOptions {
             fixed_cols_border: true,
             size: Size::default(),
             header_row_height: None,
+            sort_on_header_click: None,
         }
     }
 }
@@ -70,7 +73,9 @@ impl Default for TableOptions {
 /// - **Resizable Columns**: Drag column borders to resize
 /// - **Movable Columns**: Drag column headers to reorder
 /// - **Fixed Columns**: Pin columns to the left or right side
-/// - **Sortable Columns**: Click column headers to sort
+/// - **Sortable Columns**: Click column headers to sort (opt-in via
+///   [`DataTable::sort_on_header_click`]; otherwise only the sort icon
+///   toggles the sort)
 /// - **Context Menus**: Right-click support for rows and cells
 ///
 /// # Cell Selection Mode
@@ -186,6 +191,17 @@ where
         self.options.scrollbar_mode = Some(mode);
         self
     }
+
+    /// Set whether clicking anywhere on a sortable column's header sorts it.
+    ///
+    /// Defaults to `false` — only the sort icon in the header toggles the
+    /// sort, and a click on the header itself keeps its other behavior (such
+    /// as selecting the whole column). Sortable columns cycle their sort;
+    /// columns without a sort keep their usual header behavior either way.
+    pub fn sort_on_header_click(mut self, sort_on_header_click: bool) -> Self {
+        self.options.sort_on_header_click = Some(sort_on_header_click);
+        self
+    }
 }
 
 impl<D> Sizable for DataTable<D>
@@ -221,7 +237,11 @@ where
         let focus_ring_enabled = self.focus_ring_enabled;
         let focus_handle = self.state.focus_handle(cx);
         let (role, rows_count, columns_count) = self.state.update(cx, |state, cx| {
+            let sort_on_header_click = self.options.sort_on_header_click;
             state.options = self.options;
+            if let Some(sort_on_header_click) = sort_on_header_click {
+                state.sort_on_header_click = sort_on_header_click;
+            }
             // A table that selects rows or cells is a grid.
             let role = if state.row_selectable || state.cell_selectable {
                 gpui::Role::Grid
@@ -286,8 +306,9 @@ mod tests {
     use super::*;
     use crate::{
         FocusableExt as _,
-        table::{Column, TableState},
+        table::{Column, ColumnSort, TableState},
     };
+    use std::{cell::RefCell, rc::Rc};
 
     struct RowsDelegate;
 
@@ -392,6 +413,113 @@ mod tests {
         assert!(
             cx.debug_bounds("focus-ring").is_none(),
             "`focus_ring(false)` must not draw a ring"
+        );
+    }
+
+    struct SortRecorderDelegate {
+        sorts: Rc<RefCell<Vec<(usize, ColumnSort)>>>,
+    }
+
+    impl TableDelegate for SortRecorderDelegate {
+        fn columns_count(&self, _: &App) -> usize {
+            1
+        }
+        fn rows_count(&self, _: &App) -> usize {
+            3
+        }
+        fn column(&self, _: usize, _: &App) -> Column {
+            Column::new("name", "Name").sortable()
+        }
+        fn render_td(
+            &mut self,
+            row: usize,
+            _: usize,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) -> impl IntoElement {
+            div().child(row.to_string())
+        }
+        fn perform_sort(
+            &mut self,
+            col_ix: usize,
+            sort: ColumnSort,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) {
+            self.sorts.borrow_mut().push((col_ix, sort));
+        }
+    }
+
+    struct SortHarness {
+        state: Entity<TableState<SortRecorderDelegate>>,
+        sort_on_header_click: bool,
+    }
+
+    impl Render for SortHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(400.))
+                .h(px(200.))
+                .child(DataTable::new(&self.state).sort_on_header_click(self.sort_on_header_click))
+        }
+    }
+
+    /// A click on the header of a sortable column sorts it only when the
+    /// table opts in (`sort_on_header_click`); by default only the sort
+    /// icon toggles the sort (#3362).
+    #[gpui::test]
+    fn header_click_sorts_only_when_opted_in(cx: &mut TestAppContext) {
+        use gpui::{Modifiers, point};
+
+        cx.update(crate::init);
+        let sorts = Rc::new(RefCell::new(Vec::new()));
+
+        // Default: only the sort icon toggles the sort, so a click on the
+        // header itself never sorts.
+        let sorts_for_delegate = sorts.clone();
+        let (view, cx) = cx.add_window_view(move |window, cx| SortHarness {
+            state: cx.new(|cx| {
+                TableState::new(
+                    SortRecorderDelegate {
+                        sorts: sorts_for_delegate,
+                    },
+                    window,
+                    cx,
+                )
+            }),
+            sort_on_header_click: false,
+        });
+        let _state = view.read_with(cx, |view, _| view.state.clone());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_click(point(px(60.), px(16.)), Modifiers::default());
+        assert!(
+            sorts.borrow().is_empty(),
+            "a header click must not sort by default; sorted {sorts:?}"
+        );
+
+        // Opted in: the same click sorts the column (Default -> Descending).
+        let sorts_for_delegate = sorts.clone();
+        let (view, cx) = cx.add_window_view(move |window, cx| SortHarness {
+            state: cx.new(|cx| {
+                TableState::new(
+                    SortRecorderDelegate {
+                        sorts: sorts_for_delegate,
+                    },
+                    window,
+                    cx,
+                )
+            }),
+            sort_on_header_click: true,
+        });
+        let _state = view.read_with(cx, |view, _| view.state.clone());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_click(point(px(60.), px(16.)), Modifiers::default());
+        assert_eq!(
+            sorts.borrow().as_slice(),
+            [(0, ColumnSort::Descending)],
+            "an opted-in header click sorts the column"
         );
     }
 }

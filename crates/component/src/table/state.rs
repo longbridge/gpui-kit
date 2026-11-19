@@ -263,6 +263,14 @@ pub struct TableState<D: TableDelegate> {
     /// escalates the selection to the whole row so users can still pick rows; row
     /// escalation requires `row_selectable` to be enabled.
     pub row_header: bool,
+    /// Whether clicking anywhere on a sortable column's header sorts it,
+    /// default is `false`.
+    ///
+    /// When `false`, only the sort icon in the header toggles the sort, and a
+    /// click on the header itself keeps its other behavior (such as selecting
+    /// the whole column). When `true`, a click on a sortable column's header
+    /// cycles its sort; columns without a sort still select as usual.
+    pub sort_on_header_click: bool,
     /// Whether the table can sort.
     pub sortable: bool,
     /// Whether the table can resize columns.
@@ -339,6 +347,7 @@ where
             select_on_modifier_click: true,
             cell_selectable: false,
             row_header: true,
+            sort_on_header_click: false,
             sortable: true,
             col_movable: true,
             col_resizable: true,
@@ -438,6 +447,18 @@ where
     /// requires `row_selectable` to be enabled.
     pub fn row_header(mut self, row_header: bool) -> Self {
         self.row_header = row_header;
+        self
+    }
+
+    /// Set whether clicking anywhere on a sortable column's header sorts it,
+    /// default is `false`.
+    ///
+    /// When `false`, only the sort icon toggles the sort. When `true`, a
+    /// click on a sortable column's header cycles its sort (the icon remains
+    /// the direction indicator), while columns without a sort keep their
+    /// other header behavior, such as selecting the whole column.
+    pub fn sort_on_header_click(mut self, sort_on_header_click: bool) -> Self {
+        self.sort_on_header_click = sort_on_header_click;
         self
     }
 
@@ -933,7 +954,21 @@ where
         self.select_on_modifier_click || !(modifiers.secondary(cx) || modifiers.shift)
     }
 
-    fn on_col_head_click(&mut self, col_ix: usize, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_col_head_click(&mut self, col_ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        // A click on a sortable header sorts the column when the table opts
+        // in (`sort_on_header_click`); columns without a sort keep the
+        // header's other behavior, such as selecting the whole column.
+        if self.sort_on_header_click && self.sortable {
+            let sortable = self
+                .col_groups
+                .get(col_ix)
+                .is_some_and(|g| g.column.sort.is_some());
+            if sortable {
+                self.perform_sort(col_ix, window, cx);
+                return;
+            }
+        }
+
         if !self.col_selectable {
             return;
         }
