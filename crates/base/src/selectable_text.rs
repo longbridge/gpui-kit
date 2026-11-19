@@ -6,7 +6,9 @@ use gpui::{
     SharedString, StyledText, Subscription, TextStyleRefinement, Window, transparent_black,
 };
 
-use crate::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
+use crate::{
+    TextSelectionHandle, TextSelectionRegistration, TextSelectionRun, text::RevealHandlerFn,
+};
 
 /// Plain text that participates in the window-scoped [`TextSelection`](crate::TextSelection).
 ///
@@ -24,6 +26,8 @@ pub struct SelectableText {
     document_order: u64,
     text_style: Option<TextStyleRefinement>,
     selection_color: Option<Hsla>,
+    reveal_range: Option<Range<usize>>,
+    reveal_handler: Option<Box<RevealHandlerFn>>,
 }
 
 impl SelectableText {
@@ -50,6 +54,8 @@ impl SelectableText {
             document_order: 0,
             text_style: None,
             selection_color: None,
+            reveal_range: None,
+            reveal_handler: None,
         }
     }
 
@@ -81,6 +87,47 @@ impl SelectableText {
     pub fn selection_color(mut self, color: Hsla) -> Self {
         self.selection_color = Some(color);
         self
+    }
+
+    /// Request that the visual line containing the start of this UTF-8 byte
+    /// range scroll into view. A valid range requests another reveal on each
+    /// prepaint while it is supplied. Invalid ranges are ignored.
+    pub fn reveal_range(mut self, range: Range<usize>) -> Self {
+        self.reveal_range = Some(range);
+        self
+    }
+
+    /// Receive the requested line's bounds in window coordinates during
+    /// prepaint, for containers that manage scrolling through a custom handle.
+    /// Without a handler, the element requests GPUI autoscroll.
+    pub fn on_reveal(
+        mut self,
+        handler: impl Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.reveal_handler = Some(Box::new(handler));
+        self
+    }
+
+    fn reveal(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let Some(range) = self.reveal_range.as_ref() else {
+            return;
+        };
+        if self.text.get(range.clone()).is_none() {
+            return;
+        }
+        let layout = self.styled_text.layout();
+        let Some(position) = layout.position_for_index(range.start) else {
+            return;
+        };
+        let line = Bounds::new(
+            gpui::point(bounds.left(), position.y),
+            gpui::size(bounds.size.width, layout.line_height()),
+        );
+        if let Some(handler) = self.reveal_handler.as_ref() {
+            handler(line, window, cx);
+        } else {
+            window.request_autoscroll(line);
+        }
     }
 
     fn paint_selection(
@@ -218,6 +265,7 @@ impl Element for SelectableText {
             .with_text_bounds(vec![bounds])
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
+        self.reveal(bounds, window, cx);
         hitbox
     }
 
@@ -366,6 +414,53 @@ mod tests {
             let _ = window.draw(cx);
             assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
         });
+    }
+
+    struct RevealTestView {
+        first: Rc<Cell<Option<Bounds<gpui::Pixels>>>>,
+        last: Rc<Cell<Option<Bounds<gpui::Pixels>>>>,
+        invalid: Rc<Cell<Option<Bounds<gpui::Pixels>>>>,
+    }
+
+    impl Render for RevealTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let text = "é alpha beta gamma delta epsilon";
+            let reveal = |id, range, observed: Rc<Cell<_>>| {
+                div().w(px(80.)).child(
+                    SelectableText::new(id, text)
+                        .reveal_range(range)
+                        .on_reveal(move |bounds, _, _| observed.set(Some(bounds))),
+                )
+            };
+            div()
+                .flex()
+                .items_start()
+                .child(TextSelectionLayer)
+                .child(reveal("first", 0..2, self.first.clone()))
+                .child(reveal("last", 26..33, self.last.clone()))
+                .child(reveal("invalid", 1..2, self.invalid.clone()))
+        }
+    }
+
+    #[gpui::test]
+    fn reveal_reports_the_wrapped_line_and_ignores_invalid_utf8(cx: &mut TestAppContext) {
+        let first = Rc::new(Cell::new(None));
+        let last = Rc::new(Cell::new(None));
+        let invalid = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view(|_, _| RevealTestView {
+            first: first.clone(),
+            last: last.clone(),
+            invalid: invalid.clone(),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+
+        let first = first.get().expect("first line bounds");
+        let last = last.get().expect("last line bounds");
+        assert!(last.top() >= first.bottom());
+        assert_eq!(last.size.height, first.size.height);
+        assert_eq!(invalid.get(), None);
     }
 
     struct CachedText {
