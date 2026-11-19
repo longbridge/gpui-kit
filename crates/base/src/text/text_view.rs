@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use crate::StyledExt;
+use crate::input::a11y_text::A11yTextRuns;
 use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
@@ -733,6 +734,9 @@ pub struct TextViewPrepaintState {
     clip_bottom: Option<Pixels>,
     /// The touch handles this view owns, with their hitboxes.
     touch_handles: crate::TouchHandleLayout,
+    /// The rendered text for the accessibility tree, captured only while an
+    /// assistive client is connected.
+    a11y_text_runs: Option<Rc<A11yTextRuns>>,
 }
 
 /// Absorbs sub-pixel layout jitter: a line ending within a pixel of the box
@@ -827,6 +831,22 @@ impl Element for TextView {
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
         None
+    }
+
+    /// A document whose text runs carry the rendered body, so a screen reader
+    /// reads the text itself and not only the controls inside it.
+    fn a11y_role(&self) -> Option<gpui::Role> {
+        Some(gpui::Role::Document)
+    }
+
+    fn a11y_synthetic_children(
+        &mut self,
+        prepaint: &mut Self::PrepaintState,
+        builder: &mut gpui::A11ySubtreeBuilder,
+    ) {
+        if let Some(runs) = &prepaint.a11y_text_runs {
+            runs.push(builder);
+        }
     }
 
     fn request_layout(
@@ -1084,10 +1104,18 @@ impl Element for TextView {
         } else {
             crate::TouchHandleLayout::default()
         };
+        let a11y_text_runs = window
+            .is_a11y_active()
+            .then(|| {
+                let scale = window.scale_factor();
+                state.update(cx, |state, _| state.accessibility_text_runs(scale))
+            })
+            .flatten();
         TextViewPrepaintState {
             hitbox,
             clip_bottom,
             touch_handles,
+            a11y_text_runs,
         }
     }
 

@@ -1,4 +1,4 @@
-//! An input's text as AccessKit text runs.
+//! An input's or a text view's text as AccessKit text runs.
 //!
 //! AccessKit gives an assistive client a field's text, caret and selection only when the
 //! field's node has `Role::TextRun` children (`accesskit_consumer` `supports_text_ranges`):
@@ -40,7 +40,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     && layout.visible_line_byte_offsets.first() == Some(&0)
                     && layout.lines[0].len() == text.len()
             });
-        A11yTextRuns::capture(&text, selection, window.scale_factor(), |bytes| {
+        A11yTextRuns::capture(&text, Some(selection), window.scale_factor(), |bytes| {
             has_layout.then(|| self.range_to_bounds(&bytes)).flatten()
         })
     }
@@ -66,8 +66,9 @@ struct Run {
 /// The field's text runs and its selection, as character positions in those runs.
 pub(crate) struct A11yTextRuns {
     runs: Vec<Run>,
-    anchor: usize,
-    focus: usize,
+    /// The (anchor, focus) character indices, or None where nothing is selected and there
+    /// is no caret, as in read-only text.
+    selection: Option<(usize, usize)>,
 }
 
 /// One grapheme of the field: its bytes in the text and, when known, its laid-out bounds.
@@ -78,11 +79,11 @@ pub(crate) struct Grapheme<'a> {
 }
 
 impl A11yTextRuns {
-    /// `selection` is the active selection as byte offsets (anchor, focus); `bounds_of` gives a
-    /// byte range's laid-out bounds in window coordinates, or None.
+    /// `selection` is the active selection as byte offsets (anchor, focus), or None; `bounds_of`
+    /// gives a byte range's laid-out bounds in window coordinates, or None.
     pub(crate) fn capture(
         text: &str,
-        selection: (usize, usize),
+        selection: Option<(usize, usize)>,
         scale: f32,
         bounds_of: impl Fn(std::ops::Range<usize>) -> Option<Bounds<Pixels>>,
     ) -> Option<Self> {
@@ -118,19 +119,36 @@ impl A11yTextRuns {
         }
         Some(Self {
             runs,
-            anchor: character_index(text, selection.0),
-            focus: character_index(text, selection.1),
+            selection: selection.map(|(anchor, focus)| {
+                (character_index(text, anchor), character_index(text, focus))
+            }),
         })
     }
 
-    pub(crate) fn push(self, builder: &mut gpui::A11ySubtreeBuilder) {
+    /// The whole text, as the runs hold it.
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> String {
+        self.runs.iter().map(|run| run.text.as_str()).collect()
+    }
+
+    /// The (anchor, focus) character indices of the selection, if any.
+    #[cfg(test)]
+    pub(crate) fn selection(&self) -> Option<(usize, usize)> {
+        self.selection
+    }
+
+    pub(crate) fn push(&self, builder: &mut gpui::A11ySubtreeBuilder) {
         let ids: Vec<_> = (0..self.runs.len())
             .map(|index| builder.synthetic_node_id(("text-run", index)))
             .collect();
-        let anchor = position(&self.runs, &ids, self.anchor);
-        let focus = position(&self.runs, &ids, self.focus);
+        let selection = self
+            .selection
+            .map(|(anchor, focus)| accesskit::TextSelection {
+                anchor: position(&self.runs, &ids, anchor),
+                focus: position(&self.runs, &ids, focus),
+            });
         let mut previous_continues = false;
-        for (index, run) in self.runs.into_iter().enumerate() {
+        for (index, run) in self.runs.iter().enumerate() {
             let id = ids[index];
             let mut node = accesskit::Node::new(accesskit::Role::TextRun);
             if run.continues {
@@ -140,21 +158,21 @@ impl A11yTextRuns {
                 node.set_previous_on_line(ids[index - 1]);
             }
             previous_continues = run.continues;
-            node.set_value(run.text);
-            node.set_character_lengths(run.character_lengths);
-            node.set_word_starts(run.word_starts);
-            if let Some((positions, widths)) = run.geometry {
-                node.set_character_positions(positions);
-                node.set_character_widths(widths);
+            node.set_value(run.text.as_str());
+            node.set_character_lengths(run.character_lengths.as_slice());
+            node.set_word_starts(run.word_starts.as_slice());
+            if let Some((positions, widths)) = &run.geometry {
+                node.set_character_positions(positions.as_slice());
+                node.set_character_widths(widths.as_slice());
             }
             if let Some(bounds) = run.bounds {
                 node.set_bounds(bounds);
             }
             builder.push_child(id, node);
         }
-        builder
-            .parent_node()
-            .set_text_selection(accesskit::TextSelection { anchor, focus });
+        if let Some(selection) = selection {
+            builder.parent_node().set_text_selection(selection);
+        }
     }
 }
 
@@ -289,7 +307,15 @@ mod tests {
     use super::*;
 
     fn capture(text: &str, selection: (usize, usize)) -> A11yTextRuns {
-        A11yTextRuns::capture(text, selection, 1.0, |_| None).unwrap()
+        A11yTextRuns::capture(text, Some(selection), 1.0, |_| None).unwrap()
+    }
+
+    fn anchor(runs: &A11yTextRuns) -> usize {
+        runs.selection.unwrap().0
+    }
+
+    fn focus(runs: &A11yTextRuns) -> usize {
+        runs.selection.unwrap().1
     }
 
     fn texts(runs: &A11yTextRuns) -> Vec<&str> {
@@ -306,7 +332,7 @@ mod tests {
     fn a_single_line_is_one_run() {
         let runs = capture("abc", (1, 1));
         assert_eq!(texts(&runs), ["abc"]);
-        assert_eq!(at(&runs, runs.focus), (0, 1));
+        assert_eq!(at(&runs, focus(&runs)), (0, 1));
         assert_eq!(at(&runs, 3), (0, 3));
     }
 
@@ -333,7 +359,7 @@ mod tests {
     fn a_trailing_break_gets_an_empty_last_line() {
         let runs = capture("ab\n", (3, 3));
         assert_eq!(texts(&runs), ["ab\n", ""]);
-        assert_eq!(at(&runs, runs.focus), (1, 0));
+        assert_eq!(at(&runs, focus(&runs)), (1, 0));
     }
 
     #[test]
@@ -341,8 +367,8 @@ mod tests {
         let text = "one\ntwo";
         // Reversed: anchor after "tw", focus after "o".
         let runs = capture(text, (6, 1));
-        assert_eq!(at(&runs, runs.anchor), (1, 2));
-        assert_eq!(at(&runs, runs.focus), (0, 1));
+        assert_eq!(at(&runs, anchor(&runs)), (1, 2));
+        assert_eq!(at(&runs, focus(&runs)), (0, 1));
     }
 
     #[test]
@@ -357,6 +383,13 @@ mod tests {
         // The end of a full run stays in it.
         assert_eq!(at(&runs, RUN_CHARACTERS), (0, RUN_CHARACTERS));
         assert_eq!(at(&runs, RUN_CHARACTERS + 4), (2, 0));
+    }
+
+    #[test]
+    fn text_without_a_selection_has_no_caret() {
+        let runs = A11yTextRuns::capture("ab\ncd", None, 1.0, |_| None).unwrap();
+        assert_eq!(texts(&runs), ["ab\n", "cd"]);
+        assert!(runs.selection.is_none());
     }
 
     #[test]
