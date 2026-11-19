@@ -175,9 +175,7 @@ fn render_item(
 
 ### List with Search
 
-The list automatically includes a search input by default. Implement `perform_search` to handle queries:
-
-And you should use `searchable(true)` when creating the `ListState` to show search input.
+To show a search input, call `searchable(true)` when creating the `ListState`, and implement `perform_search` to handle queries:
 
 ```rust
 impl ListDelegate for MyListDelegate {
