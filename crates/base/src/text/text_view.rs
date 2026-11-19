@@ -736,7 +736,7 @@ pub struct TextViewPrepaintState {
     touch_handles: crate::TouchHandleLayout,
     /// The rendered text for the accessibility tree, captured only while an
     /// assistive client is connected.
-    a11y_text_runs: Option<A11yTextRuns>,
+    a11y_text_runs: Option<Rc<A11yTextRuns>>,
 }
 
 /// Absorbs sub-pixel layout jitter: a line ending within a pixel of the box
@@ -844,7 +844,7 @@ impl Element for TextView {
         prepaint: &mut Self::PrepaintState,
         builder: &mut gpui::A11ySubtreeBuilder,
     ) {
-        if let Some(runs) = prepaint.a11y_text_runs.take() {
+        if let Some(runs) = &prepaint.a11y_text_runs {
             runs.push(builder);
         }
     }
@@ -1107,9 +1107,8 @@ impl Element for TextView {
         let a11y_text_runs = window
             .is_a11y_active()
             .then(|| {
-                state
-                    .read(cx)
-                    .accessibility_text_runs(window.scale_factor())
+                let scale = window.scale_factor();
+                state.update(cx, |state, _| state.accessibility_text_runs(scale))
             })
             .flatten();
         TextViewPrepaintState {

@@ -4,6 +4,7 @@ use std::time::Instant;
 use std::{
     ops::{Range, RangeInclusive},
     pin::Pin,
+    rc::Rc,
     sync::{Arc, Mutex, OnceLock},
     task::Poll,
     time::Duration,
@@ -151,6 +152,9 @@ pub struct TextViewState {
     multi_click_selection: Option<TextViewMultiClickSelection>,
     selected_text_override: Option<String>,
     select_all: bool,
+    /// The last text runs built for the accessibility tree, with the
+    /// (revision, select-all, scale) they were built for.
+    a11y_text_runs: Option<((usize, bool, f32), Rc<A11yTextRuns>)>,
     pub(super) auto_scroll: AutoScroll,
     pub(super) selection_adapter: TextViewSelectionAdapter,
 
@@ -232,6 +236,7 @@ impl TextViewState {
             multi_click_selection: None,
             selected_text_override: None,
             select_all: false,
+            a11y_text_runs: None,
             selectable: false,
             hover_cursor: None,
             selection_format: SelectionFormat::default(),
@@ -681,11 +686,22 @@ impl TextViewState {
     /// so text set or streamed in reaches the tree with the frame that shows it. A select-all
     /// is reported as the selection; any other selection is not mapped yet, so the view
     /// reports none rather than a wrong one.
-    pub(super) fn accessibility_text_runs(&self, scale: f32) -> Option<A11yTextRuns> {
+    ///
+    /// The runs are kept until the text, the select-all or the scale changes, so a long
+    /// document is not split into characters again on every frame.
+    pub(super) fn accessibility_text_runs(&mut self, scale: f32) -> Option<Rc<A11yTextRuns>> {
+        let key = (self.committed_revision, self.select_all, scale);
+        if let Some((cached, runs)) = &self.a11y_text_runs
+            && *cached == key
+        {
+            return Some(runs.clone());
+        }
         let text = self.rendered_text();
         let text = text.as_str();
         let selection = self.select_all.then_some((0, text.len()));
-        A11yTextRuns::capture(text, selection, scale, |_| None)
+        let runs = Rc::new(A11yTextRuns::capture(text, selection, scale, |_| None)?);
+        self.a11y_text_runs = Some((key, runs.clone()));
+        Some(runs)
     }
 
     /// Replace the range highlights, whose ranges index the current rendered text.
@@ -2348,12 +2364,14 @@ mod tests {
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("Hello **world**", cx)));
         cx.run_until_parked();
         let runs = |state: &Entity<TextViewState>, cx: &mut TestAppContext| {
-            state.read_with(cx, |state, _| state.accessibility_text_runs(1.).unwrap())
+            state.update(cx, |state, _| state.accessibility_text_runs(1.).unwrap())
         };
 
         let first = runs(&state, cx);
         assert_eq!(first.text().trim_end(), "Hello world");
         assert_eq!(first.selection(), None);
+        // An unchanged document reuses its runs.
+        assert!(Rc::ptr_eq(&first, &runs(&state, cx)));
 
         state.update(cx, |state, cx| state.push_str("\n\n- item", cx));
         cx.run_until_parked();

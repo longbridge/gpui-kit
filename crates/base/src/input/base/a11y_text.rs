@@ -137,7 +137,7 @@ impl A11yTextRuns {
         self.selection
     }
 
-    pub(crate) fn push(self, builder: &mut gpui::A11ySubtreeBuilder) {
+    pub(crate) fn push(&self, builder: &mut gpui::A11ySubtreeBuilder) {
         let ids: Vec<_> = (0..self.runs.len())
             .map(|index| builder.synthetic_node_id(("text-run", index)))
             .collect();
@@ -148,7 +148,7 @@ impl A11yTextRuns {
                 focus: position(&self.runs, &ids, focus),
             });
         let mut previous_continues = false;
-        for (index, run) in self.runs.into_iter().enumerate() {
+        for (index, run) in self.runs.iter().enumerate() {
             let id = ids[index];
             let mut node = accesskit::Node::new(accesskit::Role::TextRun);
             if run.continues {
@@ -158,12 +158,12 @@ impl A11yTextRuns {
                 node.set_previous_on_line(ids[index - 1]);
             }
             previous_continues = run.continues;
-            node.set_value(run.text);
-            node.set_character_lengths(run.character_lengths);
-            node.set_word_starts(run.word_starts);
-            if let Some((positions, widths)) = run.geometry {
-                node.set_character_positions(positions);
-                node.set_character_widths(widths);
+            node.set_value(run.text.as_str());
+            node.set_character_lengths(run.character_lengths.as_slice());
+            node.set_word_starts(run.word_starts.as_slice());
+            if let Some((positions, widths)) = &run.geometry {
+                node.set_character_positions(positions.as_slice());
+                node.set_character_widths(widths.as_slice());
             }
             if let Some(bounds) = run.bounds {
                 node.set_bounds(bounds);
