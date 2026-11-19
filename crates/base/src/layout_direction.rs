@@ -121,27 +121,45 @@ macro_rules! logical_edge {
 pub trait LogicalStyledExt: Styled + Sized {
     logical_edge!(
         /// Padding on the start edge.
-        ps, pl, pr, DefiniteLength
+        ps,
+        pl,
+        pr,
+        DefiniteLength
     );
     logical_edge!(
         /// Padding on the end edge.
-        pe, pr, pl, DefiniteLength
+        pe,
+        pr,
+        pl,
+        DefiniteLength
     );
     logical_edge!(
         /// Margin on the start edge.
-        ms, ml, mr, Length
+        ms,
+        ml,
+        mr,
+        Length
     );
     logical_edge!(
         /// Margin on the end edge.
-        me, mr, ml, Length
+        me,
+        mr,
+        ml,
+        Length
     );
     logical_edge!(
         /// Inset from the start edge of the positioned ancestor.
-        inset_s, left, right, Length
+        inset_s,
+        left,
+        right,
+        Length
     );
     logical_edge!(
         /// Inset from the end edge of the positioned ancestor.
-        inset_e, right, left, Length
+        inset_e,
+        right,
+        left,
+        Length
     );
 
     /// Border width on the start edge.

@@ -290,6 +290,15 @@ impl BaseDialogRoot {
     }
 }
 
+impl Styled for BaseDialogRoot {
+    fn style(&mut self) -> &mut StyleRefinement {
+        match self {
+            Self::Dialog(root) => root.style(),
+            Self::AlertDialog(root) => root.style(),
+        }
+    }
+}
+
 impl IntoElement for BaseDialogRoot {
     type Element = <gpui_base::Dialog as IntoElement>::Element;
     fn into_element(self) -> Self::Element {
@@ -736,6 +745,13 @@ impl RenderOnce for Dialog {
                             .take()
                             .expect("Dialog base host is always present")
                             .layer(self.id, is_topmost)
+                            // Base anchors the host to the whole viewport, which includes the
+                            // client-decoration shadow inset; keep it and its backdrop inside
+                            // the visible window frame.
+                            .top(window_paddings.top)
+                            .left(window_paddings.left)
+                            .w(view_size.width)
+                            .h(view_size.height)
                             .focus_handle(self.focus_handle.clone())
                             .close_on_escape(self.props.keyboard && !closing)
                             .close_on_backdrop_press(self.props.overlay_closable && !closing)
