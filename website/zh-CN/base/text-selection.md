@@ -24,7 +24,7 @@ order: 3
 
 用 `SelectableText::highlights` 标记搜索匹配，用 `SelectableText::reveal_range` 把当前匹配的起始位置所在的视觉行滚动到可见区域。两者都使用显示文本中的 UTF-8 字节偏移。高亮不会改变选中或复制的文字。
 
-在 GPUI 的 `List` 中可使用默认的自动滚动请求。自定义滚动容器可使用 `SelectableText::on_reveal`，根据回调提供的行边界（窗口坐标）更新滚动位置。只在定位尚未完成时传入范围。
+在 GPUI 的 `List` 中可使用默认的自动滚动请求。自定义滚动容器可使用 `SelectableText::on_reveal`，根据回调提供的行边界（窗口坐标）更新滚动位置。范围每次变化时只定位一次，因此可以一直传入，不会妨碍用户滚动。
 
 ## 创建稳定句柄
 

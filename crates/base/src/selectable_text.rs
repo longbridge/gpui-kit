@@ -30,6 +30,10 @@ pub struct SelectableText {
     reveal_handler: Option<Box<RevealHandlerFn>>,
 }
 
+/// The range last revealed by a [`SelectableText`], so a reveal only runs
+/// when the requested range changes.
+struct RevealedRange(Range<usize>);
+
 impl SelectableText {
     /// Creates a run that owns its own selection.
     pub fn new(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Self {
@@ -90,8 +94,9 @@ impl SelectableText {
     }
 
     /// Request that the visual line containing the start of this UTF-8 byte
-    /// range scroll into view. A valid range requests another reveal on each
-    /// prepaint while it is supplied. Invalid ranges are ignored.
+    /// range scroll into view. The line is revealed once when the range is
+    /// first supplied or changes, matching `TextViewState::reveal_range`, so
+    /// the user can scroll away afterwards. Invalid ranges are ignored.
     pub fn reveal_range(mut self, range: Range<usize>) -> Self {
         self.reveal_range = Some(range);
         self
@@ -108,11 +113,24 @@ impl SelectableText {
         self
     }
 
-    fn reveal(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
-        let Some(range) = self.reveal_range.as_ref() else {
+    fn reveal(
+        &self,
+        global_id: Option<&GlobalElementId>,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let (Some(range), Some(global_id)) = (self.reveal_range.as_ref(), global_id) else {
             return;
         };
         if self.text.get(range.clone()).is_none() {
+            return;
+        }
+        let changed = window.with_element_state(global_id, |revealed: Option<RevealedRange>, _| {
+            let changed = revealed.is_none_or(|revealed| revealed.0 != *range);
+            (changed, RevealedRange(range.clone()))
+        });
+        if !changed {
             return;
         }
         let layout = self.styled_text.layout();
@@ -265,7 +283,7 @@ impl Element for SelectableText {
             .with_text_bounds(vec![bounds])
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
-        self.reveal(bounds, window, cx);
+        self.reveal(global_id, bounds, window, cx);
         hitbox
     }
 
@@ -461,6 +479,29 @@ mod tests {
         assert!(last.top() >= first.bottom());
         assert_eq!(last.size.height, first.size.height);
         assert_eq!(invalid.get(), None);
+    }
+
+    #[gpui::test]
+    fn reveal_runs_once_per_range(cx: &mut TestAppContext) {
+        let first = Rc::new(Cell::new(None));
+        let last = Rc::new(Cell::new(None));
+        let invalid = Rc::new(Cell::new(None));
+        let (view, cx) = cx.add_window_view(|_, _| RevealTestView {
+            first: first.clone(),
+            last: last.clone(),
+            invalid: invalid.clone(),
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(first.take().is_some());
+
+        // Redrawing with the same range must not reveal again.
+        cx.update(|window, cx| {
+            view.update(cx, |_, cx| cx.notify());
+            let _ = window.draw(cx);
+        });
+        assert_eq!(first.get(), None);
     }
 
     struct CachedText {

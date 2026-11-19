@@ -87,8 +87,8 @@ do not change the selected or copied text.
 
 For a GPUI list, use the default autoscroll request. For a custom container,
 use `SelectableText::on_reveal` and scroll its handle to the supplied line
-bounds, which are in window coordinates. Pass the range only while the reveal
-is pending.
+bounds, which are in window coordinates. The line is revealed once each time
+the range changes, so it can stay set while the user scrolls.
 
 ## Create a stable handle
 
