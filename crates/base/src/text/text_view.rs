@@ -3,9 +3,9 @@ use std::{ops::Range, rc::Rc, sync::Arc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AnyView, App, Bounds, ClickEvent, ContentMask, Element, ElementId, Entity, Global,
-    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
-    LayoutId, MouseButton, ParentElement, Pixels, Refineable as _, SharedString, StyleRefinement,
-    Styled, Window, div, point, px,
+    GlobalElementId, Hitbox, HitboxBehavior, Img, InspectorElementId, InteractiveElement,
+    IntoElement, LayoutId, MouseButton, ParentElement, Pixels, Refineable as _, SharedString,
+    Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point, px,
 };
 
 use crate::StyledExt;
@@ -193,6 +193,28 @@ impl TaskToggleEvent {
 /// Kept by the element only, so unlike the handlers the state carries, it
 /// may hold a `ScrollHandle`.
 pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
+
+/// Make a linked image activate its link on primary and auxiliary clicks.
+pub(super) fn linked_image(
+    image: Stateful<Img>,
+    url: SharedString,
+    click_handler: Option<Arc<LinkClickHandlerFn>>,
+) -> Stateful<Img> {
+    let aux_url = url.clone();
+    let aux_handler = click_handler.clone();
+    image
+        .cursor_pointer()
+        .on_click(move |event, window, cx| {
+            TextSelection::end(window, cx);
+            cx.stop_propagation();
+            handle_link_click(&click_handler, url.clone(), event.clone(), window, cx);
+        })
+        .on_aux_click(move |event, window, cx| {
+            TextSelection::end(window, cx);
+            cx.stop_propagation();
+            handle_link_click(&aux_handler, aux_url.clone(), event.clone(), window, cx);
+        })
+}
 
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
