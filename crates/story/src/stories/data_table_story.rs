@@ -1381,8 +1381,16 @@ impl Render for DataTableStory {
                     GoToTablePosition::Bottom => {
                         table.scroll_to_row(table.delegate().rows_count(cx) - 1, cx)
                     }
-                    GoToTablePosition::Cell53 => table.set_selected_cell(5, 3, cx),
-                    GoToTablePosition::Cell107 => table.set_selected_cell(10, 7, cx),
+                    GoToTablePosition::Cell53 => {
+                        table.set_selected_cell(5, 3, cx);
+                        table.scroll_to_row(5, cx);
+                        table.scroll_to_col(3, cx);
+                    }
+                    GoToTablePosition::Cell107 => {
+                        table.set_selected_cell(10, 7, cx);
+                        table.scroll_to_row(10, cx);
+                        table.scroll_to_col(7, cx);
+                    }
                 });
             }))
             .on_action(cx.listener(
