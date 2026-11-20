@@ -56,6 +56,14 @@ gpui-kit = "{{gpui_kit_version}}"
 
 The `{{gpui_kit_version}}` requirement selects a compatible Kit release. Kit's default features include the styled components and default icon assets. It brings in matching GPUI crates, so an application using this setup does not need to list GPUI separately. `use gpui_kit::*;` imports GPUI's re-exported API; the layers are reachable as `gpui_kit::component`, `gpui_kit::base`, `gpui_kit::assets`, and `gpui_kit::platform`.
 
+### Wayland-only Linux builds
+
+Linux builds include Wayland and X11 by default. To build for Wayland only while keeping the styled components and icons, use this dependency. The resulting app can start without `libxkbcommon-x11`. If you already disable default features and need X11, add `"x11"` to your feature list. Cargo combines features across dependencies, so another crate can enable X11 for the same build.
+
+```toml
+gpui-kit = { version = "{{gpui_kit_version}}", default-features = false, features = ["component", "assets"] }
+```
+
 ### Optional GPUI Fast backend
 
 Enable `gpui-fast` to use [GPUI Fast](https://github.com/longbridge/gpui-fast)

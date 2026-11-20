@@ -56,6 +56,14 @@ gpui-kit = "{{gpui_kit_version}}"
 
 `{{gpui_kit_version}}` 要求会选择兼容的 Kit 版本。Kit 的默认特性包含带样式的组件和默认图标资源，并会引入配套的 GPUI crate；按此方式构建的应用无需单独声明 GPUI。`use gpui_kit::*;` 导入 Kit 重导出的 GPUI API；各层分别可通过 `gpui_kit::component`、`gpui_kit::base`、`gpui_kit::assets` 和 `gpui_kit::platform` 访问。
 
+### 仅使用 Wayland 的 Linux 构建
+
+Linux 构建默认支持 Wayland 和 X11。要仅使用 Wayland 并保留带样式的组件和图标，请使用以下依赖配置。这样构建的应用可以在没有 `libxkbcommon-x11` 的系统上启动。如果已禁用默认特性且需要 X11，请在特性列表中加入 `"x11"`。Cargo 会合并依赖启用的特性，因此其他 crate 仍可能为同一次构建启用 X11。
+
+```toml
+gpui-kit = { version = "{{gpui_kit_version}}", default-features = false, features = ["component", "assets"] }
+```
+
 ### 可选的 GPUI Fast 后端
 
 启用 `gpui-fast` 后，可以使用 [GPUI Fast](https://github.com/longbridge/gpui-fast)
