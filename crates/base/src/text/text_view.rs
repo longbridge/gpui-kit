@@ -3,12 +3,13 @@ use std::{ops::Range, rc::Rc, sync::Arc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AnyView, App, Bounds, ClickEvent, ContentMask, Element, ElementId, Entity, Global,
-    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
-    LayoutId, MouseButton, ParentElement, Pixels, Refineable as _, SharedString, StyleRefinement,
-    Styled, Window, div, point, px,
+    GlobalElementId, Hitbox, HitboxBehavior, Img, InspectorElementId, InteractiveElement,
+    IntoElement, LayoutId, MouseButton, ParentElement, Pixels, Refineable as _, SharedString,
+    Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point, px,
 };
 
 use crate::StyledExt;
+use crate::input::a11y_text::A11yTextRuns;
 use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
@@ -193,6 +194,28 @@ impl TaskToggleEvent {
 /// Kept by the element only, so unlike the handlers the state carries, it
 /// may hold a `ScrollHandle`.
 pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
+
+/// Make a linked image activate its link on primary and auxiliary clicks.
+pub(super) fn linked_image(
+    image: Stateful<Img>,
+    url: SharedString,
+    click_handler: Option<Arc<LinkClickHandlerFn>>,
+) -> Stateful<Img> {
+    let aux_url = url.clone();
+    let aux_handler = click_handler.clone();
+    image
+        .cursor_pointer()
+        .on_click(move |event, window, cx| {
+            TextSelection::end(window, cx);
+            cx.stop_propagation();
+            handle_link_click(&click_handler, url.clone(), event.clone(), window, cx);
+        })
+        .on_aux_click(move |event, window, cx| {
+            TextSelection::end(window, cx);
+            cx.stop_propagation();
+            handle_link_click(&aux_handler, aux_url.clone(), event.clone(), window, cx);
+        })
+}
 
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
@@ -711,6 +734,9 @@ pub struct TextViewPrepaintState {
     clip_bottom: Option<Pixels>,
     /// The touch handles this view owns, with their hitboxes.
     touch_handles: crate::TouchHandleLayout,
+    /// The rendered text for the accessibility tree, captured only while an
+    /// assistive client is connected.
+    a11y_text_runs: Option<Rc<A11yTextRuns>>,
 }
 
 /// Absorbs sub-pixel layout jitter: a line ending within a pixel of the box
@@ -805,6 +831,22 @@ impl Element for TextView {
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
         None
+    }
+
+    /// A document whose text runs carry the rendered body, so a screen reader
+    /// reads the text itself and not only the controls inside it.
+    fn a11y_role(&self) -> Option<gpui::Role> {
+        Some(gpui::Role::Document)
+    }
+
+    fn a11y_synthetic_children(
+        &mut self,
+        prepaint: &mut Self::PrepaintState,
+        builder: &mut gpui::A11ySubtreeBuilder,
+    ) {
+        if let Some(runs) = &prepaint.a11y_text_runs {
+            runs.push(builder);
+        }
     }
 
     fn request_layout(
@@ -1062,10 +1104,18 @@ impl Element for TextView {
         } else {
             crate::TouchHandleLayout::default()
         };
+        let a11y_text_runs = window
+            .is_a11y_active()
+            .then(|| {
+                let scale = window.scale_factor();
+                state.update(cx, |state, _| state.accessibility_text_runs(scale))
+            })
+            .flatten();
         TextViewPrepaintState {
             hitbox,
             clip_bottom,
             touch_handles,
+            a11y_text_runs,
         }
     }
 

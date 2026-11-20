@@ -78,6 +78,18 @@ impl Render for AppView {
 
 `TextSelectionLayer` is a zero-sized element. Keep it first and mount only one per window. Calling `TextSelection::activate_scope` before the first prepaint stores the scope until the layer binds its window state.
 
+## Reveal a match in plain text
+
+Use `SelectableText::highlights` to mark search matches and
+`SelectableText::reveal_range` to scroll the active match's first visual line
+into view. Both take UTF-8 byte offsets into the displayed string. Highlights
+do not change the selected or copied text.
+
+For a GPUI list, use the default autoscroll request. For a custom container,
+use `SelectableText::on_reveal` and scroll its handle to the supplied line
+bounds, which are in window coordinates. The line is revealed once each time
+the range changes, so it can stay set while the user scrolls.
+
 ## Create a stable handle
 
 Create one handle for the semantic lifetime of the participant. Do not create a new handle every frame.

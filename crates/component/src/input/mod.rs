@@ -1,5 +1,6 @@
 mod clear_button;
 mod content_type;
+mod gutter_style;
 mod input;
 mod token;
 pub use gpui_base::input::{
@@ -8,6 +9,7 @@ pub use gpui_base::input::{
 };
 pub use token::InputToken;
 pub mod language_config;
+mod list_popup;
 mod number_input;
 mod otp_input;
 mod overlay;
@@ -45,6 +47,7 @@ pub use gpui_base::input::{
     highlight_prefix,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
+pub use gutter_style::GutterStyle;
 #[doc(hidden)]
 mod editor;
 mod group;

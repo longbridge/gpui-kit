@@ -138,6 +138,8 @@ pub(super) struct LastLayout {
     pub(super) wrap_width: Option<Pixels>,
     pub(super) wrapping_indent: WrappingIndent,
     pub(super) line_number_width: Pixels,
+    /// Resolved gap between the text and the gutter columns for this frame.
+    pub(super) gutter_gap: Pixels,
     /// Width reserved between the line numbers and the outer edge of the gutter
     /// for gutter markers, zero when none can be painted. Part of
     /// `line_number_width`.

@@ -879,6 +879,13 @@ impl DiffState {
         }
     }
 
+    /// Whether the patch carries the source line at `position`, shown or
+    /// folded. A line beyond the context the patch was made with is not
+    /// there to scroll to.
+    pub fn has_line(&self, position: &DiffLinePosition) -> bool {
+        self.line_index(position).is_some()
+    }
+
     /// Scrolls to the header of the file at `path`, a [`DiffFile::path`].
     pub fn scroll_to_file(&mut self, path: &str, cx: &mut Context<Self>) {
         let Some(item_ix) = self

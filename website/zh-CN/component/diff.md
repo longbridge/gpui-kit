@@ -20,6 +20,7 @@ use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffDecoration, DiffFile,
     DiffGutterMarker, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition,
     DiffLineRange, DiffMode, DiffParseOptions, DiffSide, DiffSpanHighlight, DiffState,
+    DiffTextPosition,
 };
 ```
 
@@ -192,7 +193,8 @@ self.diff.update(cx, |state, cx| {
 });
 ```
 
-`scroll_to_line` 会按需展开 patch 已提供的隐藏上下文和已收起的文件，不能显示 patch 中不存在的行。
+`scroll_to_line` 会按需展开 patch 已提供的隐藏上下文和已收起的文件，不能显示 patch 中不存在的行；
+`has_line` 回答 patch 是否携带某一行，应用可以先判断再决定导航落在哪里。
 `scroll_to_file` 滚动到文件头，没有源文本行的文件也可以定位，适合配合文件列表使用。
 变更导航跨所有文件在各个变更组之间移动，到达两端后循环。
 显示模式切换与导航命令由应用放置在工具栏或菜单中。
@@ -417,7 +419,8 @@ Diff::new(&self.diff).span_highlights([DiffSpanHighlight::new(
 
 范围是该行内容中的字节区间，按 Tab 展开之前计算。它的背景绘制在语法高亮、行内强调和装饰之上，
 文本选区仍显示在它上面。不调用 `with_background` 时，使用半透明的 warning 颜色；
-`with_foreground` 设置背景较深时的文字颜色。
+`with_foreground` 设置背景较深时的文字颜色。完全透明的背景会保留该行原本显示的内容，
+`with_underline` 按文字颜色加下划线——也就是链接的样子。
 
 与批注一样，装饰、marker 和字符高亮在每次渲染时传入，当前的 builder 调用就是它们唯一的数据来源。
 
@@ -433,6 +436,14 @@ Shift+滚轮手势）滚动长行，不改变垂直位置。启用软换行后�
 
 `on_line_click` 报告对某行代码的点击（文本拖选除外），并提供该行位置和点击事件。
 `on_line_hover` 报告指针所在的行，指针离开时报告 `None`。
+
+在行以下的粒度上，`on_text_hover` 报告指针下的字符和当前按住的修饰键，指针不在源文本上时报告
+`None`：`DiffTextPosition` 携带所在行的位置、字符在该行内容中的字节偏移（与字符高亮的
+span 同一单位）以及该行文本，处理器因此能读出偏移附近的词。diff 获得焦点时，指针静止、
+仅修饰键按下或抬起也会触发，链接可以只凭按键亮起。`on_text_click` 先于 `on_line_click`
+处理对字符的点击，返回 `true` 表示占用该次点击，行处理器不再收到它。`text_cursor`
+设置源文本上显示的指针，例如悬停的 span 是链接时显示手形。配合带下划线的字符高亮，
+就是常见的链接习惯用法：Cmd/Ctrl 悬停标出链接，Cmd/Ctrl 点击跳转，普通点击仍然选择文本和行。
 
 以下默认快捷键在代码区域聚焦时生效：
 
