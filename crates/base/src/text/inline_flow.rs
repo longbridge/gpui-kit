@@ -1019,6 +1019,18 @@ fn layout_flow(
 thread_local! {
     /// How many flows were laid out (wrapped and shaped) on this thread.
     pub(super) static FLOW_LAYOUTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many items, wrap fragments, spans and ranges laying out a flow's
+    /// lines looked at on this thread. A line's share must not grow with the
+    /// rest of its paragraph.
+    pub(super) static LINE_WORK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts `units` of line work for the tests (`LINE_WORK`).
+fn count_line_work(units: usize) {
+    #[cfg(test)]
+    LINE_WORK.with(|work| work.set(work.get() + units));
+    #[cfg(not(test))]
+    let _ = units;
 }
 
 fn layout_measured_flow(
@@ -1034,8 +1046,9 @@ fn layout_measured_flow(
     FLOW_LAYOUTS.with(|layouts| layouts.set(layouts.get() + 1));
     let rem_size = window.rem_size();
     let line_height = plain_line_height(text_style, rem_size, window);
-    let total_len = items.iter().map(MeasureItem::len).sum::<usize>();
-    if total_len == 0 {
+    let font_size = text_style.font_size.to_pixels(rem_size);
+    let flow = FlowItems::new(items, font_size, rem_size);
+    if flow.len() == 0 {
         return InlineFlowLayout::default();
     }
 
@@ -1062,75 +1075,66 @@ fn layout_measured_flow(
         })
         .collect::<Vec<_>>();
     let line_ranges = line_ranges(
-        items,
+        &flow,
         &image_sizes,
         &objects,
         text_style,
         wrap_width,
         window,
     );
-    let font_size = text_style.font_size.to_pixels(rem_size);
     let mut fragments = Vec::new();
     let mut empty_lines = Vec::new();
     let mut max_width = Pixels::ZERO;
     let mut y = Pixels::ZERO;
 
+    // `LineLayout` is the metric source used by the text paint path. Its
+    // descent is normalized positive by native backends, whereas
+    // `FontMetrics::descent` remains signed. Start with the same shaped
+    // body metrics used below for every text fragment rather than mixing
+    // those two conventions through `TextSystem::baseline_offset`.
+    let body_runs = text_runs(1, text_style, &[]);
+    let body_line = shape_line(" ".into(), font_size, &body_runs, window);
+    let body_baseline = centered_baseline(&body_line, line_height);
+    // Like a plain text line, the body line box is the line height even
+    // when the font's glyphs are taller; runs may overflow it as far as
+    // body glyphs do.
+    let body_overflow_above = (body_line.ascent - body_baseline).max(Pixels::ZERO);
+    let body_overflow_below = (body_line.descent - (line_height - body_baseline)).max(Pixels::ZERO);
+
     for line_range in line_ranges {
         let mut line_fragments = Vec::new();
         let mut line_width = Pixels::ZERO;
-        // `LineLayout` is the metric source used by the text paint path. Its
-        // descent is normalized positive by native backends, whereas
-        // `FontMetrics::descent` remains signed. Start with the same shaped
-        // body metrics used below for every text fragment rather than mixing
-        // those two conventions through `TextSystem::baseline_offset`.
-        let body_runs = text_runs(1, text_style, &[]);
-        let body_line = shape_line(" ".into(), font_size, &body_runs, window);
-        let body_baseline = centered_baseline(&body_line, line_height);
-        // Like a plain text line, the body line box is the line height even
-        // when the font's glyphs are taller; runs may overflow it as far as
-        // body glyphs do.
-        let body_overflow_above = (body_line.ascent - body_baseline).max(Pixels::ZERO);
-        let body_overflow_below =
-            (body_line.descent - (line_height - body_baseline)).max(Pixels::ZERO);
         let mut line_ascent = body_baseline;
         let mut line_descent = line_height - body_baseline;
-        let mut item_start = 0;
 
-        for (item_ix, item) in items.iter().enumerate() {
-            let item_end = item_start + item.len();
-            if item_end <= line_range.start {
-                item_start = item_end;
-                continue;
-            }
-            if item_start >= line_range.end {
-                break;
-            }
-
+        for (item_ix, item, item_range) in flow.over(&line_range) {
+            let (item_start, item_end) = (item_range.start, item_range.end);
             match item {
-                MeasureItem::Text {
-                    text,
-                    links,
-                    highlights,
-                } => {
+                MeasureItem::Text { text, .. } => {
+                    let ranges = flow.text_ranges(item_ix);
                     let local_start = line_range.start.max(item_start) - item_start;
                     let local_end = line_range.end.min(item_end) - item_start;
-                    for (segment, scale) in
-                        text_size_ranges(text.len(), highlights, font_size, window.rem_size())
-                    {
+                    for (segment, scale) in ranges.sizes().overlapping(local_start..local_end) {
                         let start = local_start.max(segment.start);
                         let end = local_end.min(segment.end);
                         if start >= end {
                             continue;
                         }
                         let subtext = SharedString::from(text[start..end].to_string());
-                        let mut highlights =
-                            slice_ranges(highlights, start, end, |range, style| {
-                                (range, style.clone())
-                            });
-                        let links =
-                            slice_ranges(links, start, end, |range, link| (range, link.clone()));
+                        let mut highlights = slice_ranges(
+                            ranges.highlights.overlapping(start..end),
+                            start,
+                            end,
+                            |range, style| (range, style.clone()),
+                        );
+                        let links = slice_ranges(
+                            ranges.links.overlapping(start..end),
+                            start,
+                            end,
+                            |range, link| (range, link.clone()),
+                        );
                         let runs = text_runs(subtext.len(), text_style, &highlights);
-                        let segment_font_size = font_size * scale;
+                        let segment_font_size = font_size * *scale;
                         let shaped_line =
                             shape_line(subtext.clone(), segment_font_size, &runs, window);
                         let is_code = highlights.iter().any(|(_, h)| h.font_size_scale.is_some());
@@ -1214,8 +1218,6 @@ fn layout_measured_flow(
                     }
                 }
             }
-
-            item_start = item_end;
         }
 
         if line_range.is_empty() {
@@ -1360,20 +1362,170 @@ fn code_background(
     })
 }
 
+/// A flow's items with what laying their lines out looks up, worked out once
+/// per layout: where each item starts, and each text item's ranges. A line
+/// finds what is on it by binary search, so it costs what it holds rather
+/// than what follows it in the paragraph.
+struct FlowItems<'a> {
+    items: &'a [MeasureItem],
+    /// Where each item starts in the flow, then where the last one ends.
+    starts: Vec<usize>,
+    /// Each text item's ranges, `None` for an object or an image.
+    text_ranges: Vec<Option<TextRanges<'a>>>,
+}
+
+impl<'a> FlowItems<'a> {
+    fn new(items: &'a [MeasureItem], font_size: Pixels, rem_size: Pixels) -> Self {
+        let starts = std::iter::once(0)
+            .chain(items.iter().scan(0, |end, item| {
+                *end += item.len();
+                Some(*end)
+            }))
+            .collect();
+        let text_ranges = items
+            .iter()
+            .map(|item| match item {
+                MeasureItem::Text {
+                    text,
+                    links,
+                    highlights,
+                } => Some(TextRanges::new(
+                    text, highlights, links, font_size, rem_size,
+                )),
+                MeasureItem::Object { .. } | MeasureItem::Image { .. } => None,
+            })
+            .collect();
+        Self {
+            items,
+            starts,
+            text_ranges,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.starts[self.items.len()]
+    }
+
+    fn text_ranges(&self, ix: usize) -> &TextRanges<'a> {
+        self.text_ranges[ix]
+            .as_ref()
+            .expect("only a text item has text ranges")
+    }
+
+    /// The items `range` overlaps, in order, each with its index and its
+    /// range in the flow.
+    fn over(
+        &self,
+        range: &Range<usize>,
+    ) -> impl Iterator<Item = (usize, &'a MeasureItem, Range<usize>)> {
+        let items = self.items;
+        let first = self.starts[1..].partition_point(|end| *end <= range.start);
+        let end = range.end;
+        (first..items.len())
+            .map(move |ix| (ix, &items[ix], self.starts[ix]..self.starts[ix + 1]))
+            .take_while(move |(_, _, item)| item.start < end)
+            .inspect(|_| count_line_work(1))
+    }
+}
+
+/// A text item's highlights, links and runs of one font size.
+struct TextRanges<'a> {
+    highlights: Ranges<'a, InlineHighlight>,
+    links: Ranges<'a, LinkMark>,
+    /// The runs of one font size (`text_size_ranges`), each shaped on its own.
+    sizes: Vec<(Range<usize>, f32)>,
+    sizes_sorted: bool,
+}
+
+impl<'a> TextRanges<'a> {
+    fn new(
+        text: &str,
+        highlights: &'a [(Range<usize>, InlineHighlight)],
+        links: &'a [(Range<usize>, LinkMark)],
+        font_size: Pixels,
+        rem_size: Pixels,
+    ) -> Self {
+        let sizes = text_size_ranges(text.len(), highlights, font_size, rem_size);
+        Self {
+            highlights: Ranges::new(highlights),
+            links: Ranges::new(links),
+            sizes_sorted: are_sorted(&sizes, |(range, _)| range),
+            sizes,
+        }
+    }
+
+    fn sizes(&self) -> Ranges<'_, f32> {
+        Ranges {
+            ranges: &self.sizes,
+            sorted: self.sizes_sorted,
+        }
+    }
+}
+
+/// Ranges over a text, with whether they are sorted. Highlights and links
+/// are built in order without overlapping, so the ones over a line are found
+/// by binary search; ranges that are not are all looked at.
+struct Ranges<'a, T> {
+    ranges: &'a [(Range<usize>, T)],
+    sorted: bool,
+}
+
+impl<'a, T> Ranges<'a, T> {
+    fn new(ranges: &'a [(Range<usize>, T)]) -> Self {
+        Self {
+            ranges,
+            sorted: are_sorted(ranges, |(range, _)| range),
+        }
+    }
+
+    /// The ranges `range` can overlap, in order.
+    fn overlapping(&self, range: Range<usize>) -> &'a [(Range<usize>, T)] {
+        let ranges = overlapping(self.ranges, self.sorted, &range, |(range, _)| range);
+        count_line_work(ranges.len());
+        ranges
+    }
+}
+
+/// Whether `entries` are in order without overlapping, so that the ones a
+/// range overlaps can be found by binary search.
+fn are_sorted<T>(entries: &[T], range: impl Fn(&T) -> &Range<usize>) -> bool {
+    entries
+        .iter()
+        .all(|entry| range(entry).start <= range(entry).end)
+        && entries
+            .windows(2)
+            .all(|pair| range(&pair[0]).end <= range(&pair[1]).start)
+}
+
+/// The entries of `entries` that `range` can overlap: when they are sorted,
+/// the run between those that end before it and those that start after it;
+/// otherwise all of them.
+fn overlapping<'a, T>(
+    entries: &'a [T],
+    sorted: bool,
+    range: &Range<usize>,
+    range_of: impl Fn(&T) -> &Range<usize>,
+) -> &'a [T] {
+    if !sorted {
+        return entries;
+    }
+    let first = entries.partition_point(|entry| range_of(entry).end <= range.start);
+    let len = entries[first..].partition_point(|entry| range_of(entry).start < range.end);
+    &entries[first..first + len]
+}
+
 fn line_ranges(
-    items: &[MeasureItem],
+    flow: &FlowItems,
     image_sizes: &[Option<Size<Pixels>>],
     objects: &[Option<MeasuredInlineObject>],
     text_style: &TextStyle,
     wrap_width: Option<Pixels>,
     window: &mut Window,
 ) -> Vec<Range<usize>> {
-    let total_len = items.iter().map(MeasureItem::len).sum::<usize>();
     let mut hard_lines = Vec::new();
     let mut line_start = 0;
-    let mut item_start = 0;
 
-    for item in items {
+    for (item, item_start) in flow.items.iter().zip(&flow.starts) {
         if let MeasureItem::Text { text, .. } = item {
             for (newline, _) in text.match_indices('\n') {
                 let newline = item_start + newline;
@@ -1381,9 +1533,8 @@ fn line_ranges(
                 line_start = newline + 1;
             }
         }
-        item_start += item.len();
     }
-    hard_lines.push(line_start..total_len);
+    hard_lines.push(line_start..flow.len());
 
     let Some(wrap_width) = wrap_width else {
         return hard_lines;
@@ -1400,61 +1551,55 @@ fn line_ranges(
             ranges.push(hard_line);
             continue;
         }
-        let mut item_start = 0;
         let mut wrap_fragments = Vec::new();
-        for (ix, item) in items.iter().enumerate() {
-            let item_end = item_start + item.len();
-            if item_end > hard_line.start && item_start < hard_line.end {
-                match item {
-                    MeasureItem::Text {
-                        text, highlights, ..
-                    } => {
-                        let start = hard_line.start.max(item_start) - item_start;
-                        let end = hard_line.end.min(item_end) - item_start;
-                        if start < end {
-                            push_text_wrap_fragments(
-                                &mut wrap_fragments,
-                                text,
-                                highlights,
-                                start..end,
-                                text_style,
-                                wrap_width,
-                                window,
-                            );
-                        }
+        for (ix, item, item_range) in flow.over(&hard_line) {
+            match item {
+                MeasureItem::Text { text, .. } => {
+                    let start = hard_line.start.max(item_range.start) - item_range.start;
+                    let end = hard_line.end.min(item_range.end) - item_range.start;
+                    if start < end {
+                        push_text_wrap_fragments(
+                            &mut wrap_fragments,
+                            text,
+                            flow.text_ranges(ix).highlights.overlapping(start..end),
+                            start..end,
+                            text_style,
+                            wrap_width,
+                            window,
+                        );
                     }
-                    MeasureItem::Object { .. } => {
+                }
+                MeasureItem::Object { .. } => {
+                    wrap_fragments.push(WrapLineFragment::element(
+                        objects[ix].as_ref().unwrap().metrics.size.width,
+                        IMAGE_LEN,
+                    ));
+                }
+                MeasureItem::Image { .. } => {
+                    if hard_line.start <= item_range.start && item_range.end <= hard_line.end {
                         wrap_fragments.push(WrapLineFragment::element(
-                            objects[ix].as_ref().unwrap().metrics.size.width,
+                            image_sizes[ix]
+                                .expect("image size should be measured before wrapping")
+                                .width,
                             IMAGE_LEN,
                         ));
                     }
-                    MeasureItem::Image { .. } => {
-                        if hard_line.start <= item_start && item_end <= hard_line.end {
-                            wrap_fragments.push(WrapLineFragment::element(
-                                image_sizes[ix]
-                                    .expect("image size should be measured before wrapping")
-                                    .width,
-                                IMAGE_LEN,
-                            ));
-                        }
-                    }
                 }
             }
-            item_start = item_end;
         }
 
         // The wrapper sums per-character widths, which can be narrower than the
         // shaped run (CoreText sets an isolated full-width `，` at half width).
         // Check each line against the shaped spans and re-wrap it tighter when
         // it overflows, so the painted line never exceeds `wrap_width`.
-        let spans = shaped_spans(items, image_sizes, objects, text_style, &hard_line, window);
+        let spans = shaped_spans(flow, image_sizes, objects, text_style, &hard_line, window);
+        let mut fragments = WrapFragments::new(wrap_fragments);
         let mut start = hard_line.start;
         while start < hard_line.end {
-            let rest = fragments_from(&wrap_fragments, start - hard_line.start);
+            fragments.start_line(start - hard_line.start);
             let mut budget = wrap_width;
-            let mut end = next_wrap(&mut wrapper, &rest, budget, start, hard_line.end);
-            let mut overflow = spans_width(&spans, start..end) - wrap_width;
+            let mut end = fragments.next_wrap(&mut wrapper, budget, start, hard_line.end);
+            let mut overflow = spans.width(start..end) - wrap_width;
             // Shrink the wrapper's budget by the overflow until it breaks earlier,
             // doubling the step while the break stays put. A single glyph wider
             // than the line keeps its line and overflows as before.
@@ -1464,10 +1609,10 @@ fn line_ranges(
                 if budget <= Pixels::ZERO {
                     break;
                 }
-                let tighter = next_wrap(&mut wrapper, &rest, budget, start, hard_line.end);
+                let tighter = fragments.next_wrap(&mut wrapper, budget, start, hard_line.end);
                 if tighter < end {
                     end = tighter;
-                    overflow = spans_width(&spans, start..end) - wrap_width;
+                    overflow = spans.width(start..end) - wrap_width;
                     step = overflow;
                 } else {
                     step = step * 2.;
@@ -1476,7 +1621,7 @@ fn line_ranges(
             // The wrapper can also break a rest that fits: kerning makes a
             // shaped run narrower than its summed characters. A table column
             // sized to its measured text would drop its last character.
-            if end < hard_line.end && spans_width(&spans, start..hard_line.end) <= wrap_width {
+            if end < hard_line.end && spans.fit(start..hard_line.end, wrap_width) {
                 end = hard_line.end;
             }
             ranges.push(start..end);
@@ -1491,58 +1636,172 @@ fn line_ranges(
     ranges
 }
 
-/// Where the first line of `fragments` (which start at byte `start`) wraps at
-/// `wrap_width`; `end` when it all fits.
-fn next_wrap(
-    wrapper: &mut gpui::LineWrapperHandle,
-    fragments: &[WrapLineFragment],
-    wrap_width: Pixels,
-    start: usize,
-    end: usize,
-) -> usize {
-    wrapper
-        .wrap_line(fragments, wrap_width, gpui::IndentAdjustment::SameIndent)
-        .next()
-        .map_or(end, |boundary| (start + boundary.ix).min(end))
+/// How far past its start the first line of a hard line hands the wrapper
+/// fragments.
+const FIRST_WRAP_REACH: usize = 256;
+/// The least a line hands the wrapper past its start.
+const MIN_WRAP_REACH: usize = 32;
+
+/// A hard line's wrap fragments, handed to the line wrapper a line at a time.
+///
+/// The wrapper copies everything it is handed before it looks for a break.
+/// Each line hands it the fragments from where the line starts up to a cut a
+/// little past where the line can end, and a longer stretch only when it
+/// finds no break in that one, so a line costs about its own length.
+struct WrapFragments<'a> {
+    fragments: Vec<WrapLineFragment<'a>>,
+    /// Where the hard line can be cut without moving a break before the cut,
+    /// as offsets in it: after a space that follows an ASCII letter or digit,
+    /// and between two CJK ideographs. Neither a line break opportunity nor a
+    /// grapheme boundary before such a cut depends on the text after it.
+    cuts: Vec<usize>,
+    len: usize,
+    /// Where the current line starts in the hard line.
+    line_start: usize,
+    /// How far past its start the current line hands the wrapper fragments
+    /// at first: twice the previous line, which it is usually close to.
+    reach: usize,
+    /// The fragment the current line starts in, trimmed to start there, and
+    /// where that fragment starts in the hard line.
+    ix: usize,
+    ix_start: usize,
+    /// The fragments last handed to the wrapper, kept for their allocation.
+    input: Vec<WrapLineFragment<'a>>,
 }
 
-/// `fragments` with their first `skip` bytes dropped. Wrap boundaries fall on
-/// character or element starts, so a text fragment is split on a char boundary.
-fn fragments_from<'a>(
-    fragments: &[WrapLineFragment<'a>],
-    skip: usize,
-) -> Vec<WrapLineFragment<'a>> {
-    let mut offset = 0;
-    let mut out = Vec::with_capacity(fragments.len());
-    for fragment in fragments {
-        let len = match fragment {
-            WrapLineFragment::Text { text } => text.len(),
-            WrapLineFragment::Element { len_utf8, .. } => *len_utf8,
-        };
-        if offset + len <= skip {
-            offset += len;
-            continue;
+impl<'a> WrapFragments<'a> {
+    fn new(fragments: Vec<WrapLineFragment<'a>>) -> Self {
+        let mut cuts = Vec::new();
+        let mut len = 0;
+        for fragment in &fragments {
+            if let WrapLineFragment::Text { text } = fragment {
+                let mut previous = None;
+                for (ix, c) in text.char_indices() {
+                    if previous.is_some_and(|previous| is_wrap_cut(previous, c)) {
+                        cuts.push(len + ix + c.len_utf8());
+                    }
+                    previous = Some(c);
+                }
+            }
+            len += fragment_len(fragment);
         }
-        out.push(match fragment {
-            WrapLineFragment::Text { text } => {
-                WrapLineFragment::text(&text[skip.saturating_sub(offset)..])
-            }
-            WrapLineFragment::Element { width, len_utf8 } => {
-                WrapLineFragment::element(*width, *len_utf8)
-            }
-        });
-        offset += len;
+        Self {
+            fragments,
+            cuts,
+            len,
+            line_start: 0,
+            reach: FIRST_WRAP_REACH,
+            ix: 0,
+            ix_start: 0,
+            input: Vec::new(),
+        }
     }
-    out
+
+    /// Starts the next line at `start`, an offset in the hard line. Lines
+    /// start in order, so the fragments before it are not looked at again.
+    fn start_line(&mut self, start: usize) {
+        if start > self.line_start {
+            self.reach = (2 * (start - self.line_start)).max(MIN_WRAP_REACH);
+            self.line_start = start;
+        }
+        while let Some(fragment) = self.fragments.get(self.ix) {
+            let len = fragment_len(fragment);
+            if self.ix_start + len > start {
+                break;
+            }
+            self.ix_start += len;
+            self.ix += 1;
+        }
+        // Wrap boundaries fall on character or element starts, so a text
+        // fragment is split on a char boundary.
+        if let Some(&WrapLineFragment::Text { text }) = self.fragments.get(self.ix)
+            && start > self.ix_start
+        {
+            self.fragments[self.ix] = WrapLineFragment::text(&text[start - self.ix_start..]);
+            self.ix_start = start;
+        }
+    }
+
+    /// Where the current line, which starts at flow offset `start`, wraps at
+    /// `wrap_width`; `end` when the rest of the hard line fits.
+    fn next_wrap(
+        &mut self,
+        wrapper: &mut gpui::LineWrapperHandle,
+        wrap_width: Pixels,
+        start: usize,
+        end: usize,
+    ) -> usize {
+        let mut reach = self.reach;
+        loop {
+            let cut = self
+                .cuts
+                .get(
+                    self.cuts
+                        .partition_point(|cut| *cut < self.line_start + reach),
+                )
+                .copied()
+                .filter(|cut| *cut < self.len);
+            self.input.clear();
+            let mut offset = self.ix_start;
+            for fragment in &self.fragments[self.ix..] {
+                if cut.is_some_and(|cut| offset >= cut) {
+                    break;
+                }
+                let len = fragment_len(fragment);
+                self.input.push(match *fragment {
+                    WrapLineFragment::Text { text } => WrapLineFragment::text(
+                        cut.filter(|cut| offset + len > *cut)
+                            .map_or(text, |cut| &text[..cut - offset]),
+                    ),
+                    WrapLineFragment::Element { width, len_utf8 } => {
+                        WrapLineFragment::element(width, len_utf8)
+                    }
+                });
+                offset += len;
+            }
+            count_line_work(self.input.len());
+            if let Some(boundary) = wrapper
+                .wrap_line(&self.input, wrap_width, gpui::IndentAdjustment::SameIndent)
+                .next()
+            {
+                return (start + boundary.ix).min(end);
+            }
+            if cut.is_none() {
+                return end;
+            }
+            reach *= 2;
+        }
+    }
+}
+
+/// Whether the wrapper can be handed text that ends in `previous` and `last`
+/// and break before them where it would given the text that follows: the
+/// line breaking and grapheme rules decide every boundary up to `last`
+/// without looking past it.
+fn is_wrap_cut(previous: char, last: char) -> bool {
+    let is_ideograph = |c: char| ('\u{4E00}'..='\u{9FFF}').contains(&c);
+    (previous.is_ascii_alphanumeric() && last == ' ')
+        || (is_ideograph(previous) && is_ideograph(last))
+}
+
+fn fragment_len(fragment: &WrapLineFragment) -> usize {
+    match fragment {
+        WrapLineFragment::Text { text } => text.len(),
+        WrapLineFragment::Element { len_utf8, .. } => *len_utf8,
+    }
 }
 
 /// One run of a hard line as the renderer lays it out: text shaped once in
-/// context, or an object / image of fixed width. Ranges are hard-line offsets.
+/// context, or an object / image of fixed width. Ranges are flow offsets.
 enum ShapedSpan {
     Text {
         range: Range<usize>,
         line: Box<ShapedLine>,
         padding: Pixels,
+        /// Each glyph's byte index and x, when the glyphs are in byte order,
+        /// to find an index's x by binary search: `ShapedLine::x_for_index`
+        /// scans the glyphs from the first.
+        glyphs: Option<Vec<(usize, Pixels)>>,
     },
     Fixed {
         range: Range<usize>,
@@ -1551,92 +1810,115 @@ enum ShapedSpan {
 }
 
 fn shaped_spans(
-    items: &[MeasureItem],
+    flow: &FlowItems,
     image_sizes: &[Option<Size<Pixels>>],
     objects: &[Option<MeasuredInlineObject>],
     text_style: &TextStyle,
     hard_line: &Range<usize>,
     window: &mut Window,
-) -> Vec<ShapedSpan> {
+) -> ShapedSpans {
     let font_size = text_style.font_size.to_pixels(window.rem_size());
     let mut spans = Vec::new();
-    let mut item_start = 0;
-    for (ix, item) in items.iter().enumerate() {
-        let item_end = item_start + item.len();
-        if item_end > hard_line.start && item_start < hard_line.end {
-            match item {
-                MeasureItem::Text {
-                    text, highlights, ..
-                } => {
-                    let local_start = hard_line.start.max(item_start) - item_start;
-                    let local_end = hard_line.end.min(item_end) - item_start;
-                    for (segment, scale) in
-                        text_size_ranges(text.len(), highlights, font_size, window.rem_size())
-                    {
-                        let start = local_start.max(segment.start);
-                        let end = local_end.min(segment.end);
-                        if start >= end {
-                            continue;
-                        }
-                        let highlights = slice_ranges(highlights, start, end, |range, style| {
-                            (range, style.clone())
-                        });
-                        let runs = text_runs(end - start, text_style, &highlights);
-                        let line = Box::new(shape_line(
-                            SharedString::from(text[start..end].to_string()),
-                            font_size * scale,
-                            &runs,
-                            window,
-                        ));
-                        let insets = code_insets(&highlights, font_size * scale, window.rem_size());
-                        let padding = insets.left + insets.right;
-                        spans.push(ShapedSpan::Text {
-                            range: item_start + start..item_start + end,
-                            line,
-                            padding,
-                        });
+    for (ix, item, item_range) in flow.over(hard_line) {
+        let (item_start, item_end) = (item_range.start, item_range.end);
+        match item {
+            MeasureItem::Text { text, .. } => {
+                let ranges = flow.text_ranges(ix);
+                let local_start = hard_line.start.max(item_start) - item_start;
+                let local_end = hard_line.end.min(item_end) - item_start;
+                for (segment, scale) in ranges.sizes().overlapping(local_start..local_end) {
+                    let start = local_start.max(segment.start);
+                    let end = local_end.min(segment.end);
+                    if start >= end {
+                        continue;
                     }
+                    let highlights = slice_ranges(
+                        ranges.highlights.overlapping(start..end),
+                        start,
+                        end,
+                        |range, style| (range, style.clone()),
+                    );
+                    let runs = text_runs(end - start, text_style, &highlights);
+                    let line = shape_line(
+                        SharedString::from(text[start..end].to_string()),
+                        font_size * *scale,
+                        &runs,
+                        window,
+                    );
+                    let insets = code_insets(&highlights, font_size * *scale, window.rem_size());
+                    spans.push(ShapedSpan::text(
+                        item_start + start..item_start + end,
+                        line,
+                        insets.left + insets.right,
+                    ));
                 }
-                MeasureItem::Object { .. } => spans.push(ShapedSpan::Fixed {
-                    range: item_start..item_end,
-                    width: objects[ix].as_ref().unwrap().metrics.size.width,
-                }),
-                MeasureItem::Image { .. } => {
-                    if let Some(size) = image_sizes[ix] {
-                        spans.push(ShapedSpan::Fixed {
-                            range: item_start..item_end,
-                            width: size.width,
-                        });
-                    }
+            }
+            MeasureItem::Object { .. } => spans.push(ShapedSpan::Fixed {
+                range: item_range,
+                width: objects[ix].as_ref().unwrap().metrics.size.width,
+            }),
+            MeasureItem::Image { .. } => {
+                if let Some(size) = image_sizes[ix] {
+                    spans.push(ShapedSpan::Fixed {
+                        range: item_range,
+                        width: size.width,
+                    });
                 }
             }
         }
-        item_start = item_end;
     }
-    spans
+    ShapedSpans::new(spans)
 }
 
-/// Painted width of `range`: in-context glyph advances of the shaped spans it
-/// covers, plus the fixed spans that lie inside it.
-fn spans_width(spans: &[ShapedSpan], range: Range<usize>) -> Pixels {
-    spans
-        .iter()
-        .map(|span| match span {
-            ShapedSpan::Text {
+impl ShapedSpan {
+    fn text(range: Range<usize>, line: ShapedLine, padding: Pixels) -> Self {
+        let glyphs = line
+            .runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .map(|glyph| (glyph.index, glyph.position.x))
+            .collect::<Vec<_>>();
+        Self::Text {
+            range,
+            line: Box::new(line),
+            padding,
+            glyphs: glyphs
+                .is_sorted_by_key(|(index, _)| *index)
+                .then_some(glyphs),
+        }
+    }
+
+    fn range(&self) -> &Range<usize> {
+        match self {
+            Self::Text { range, .. } | Self::Fixed { range, .. } => range,
+        }
+    }
+
+    /// The width the span adds to `range`: the advance of its glyphs in it
+    /// plus its padding, or its fixed width when `range` covers it.
+    fn width_in(&self, range: &Range<usize>) -> Pixels {
+        match self {
+            Self::Text {
                 range: span_range,
                 line,
                 padding,
+                glyphs,
             } => {
                 let start = range.start.max(span_range.start);
                 let end = range.end.min(span_range.end);
                 if start >= end {
                     return Pixels::ZERO;
                 }
-                line.x_for_index(end - span_range.start)
-                    - line.x_for_index(start - span_range.start)
+                let x_for_index = |index: usize| match glyphs {
+                    Some(glyphs) => glyphs
+                        .get(glyphs.partition_point(|(glyph, _)| *glyph < index))
+                        .map_or(line.width(), |(_, x)| *x),
+                    None => line.x_for_index(index),
+                };
+                x_for_index(end - span_range.start) - x_for_index(start - span_range.start)
                     + *padding
             }
-            ShapedSpan::Fixed {
+            Self::Fixed {
                 range: span_range,
                 width,
             } => {
@@ -1646,8 +1928,70 @@ fn spans_width(spans: &[ShapedSpan], range: Range<usize>) -> Pixels {
                     Pixels::ZERO
                 }
             }
-        })
-        .sum()
+        }
+    }
+
+    /// Whether the width the span adds to a range is never negative.
+    fn is_nonnegative(&self) -> bool {
+        match self {
+            Self::Text {
+                line,
+                padding,
+                glyphs,
+                ..
+            } => {
+                *padding >= Pixels::ZERO
+                    && glyphs.as_ref().is_some_and(|glyphs| {
+                        glyphs.is_sorted_by(|(_, x), (_, next)| x <= next)
+                            && glyphs.last().is_none_or(|(_, x)| *x <= line.width())
+                    })
+            }
+            Self::Fixed { width, .. } => *width >= Pixels::ZERO,
+        }
+    }
+}
+
+/// A hard line's shaped spans, measured over a line from the spans it
+/// overlaps instead of every span in the hard line.
+struct ShapedSpans {
+    spans: Vec<ShapedSpan>,
+    /// Whether the spans are in order without overlapping, as they are built.
+    sorted: bool,
+    /// Whether no span adds a negative width, so that a sum past a width
+    /// cannot come back under it.
+    nonnegative: bool,
+}
+
+impl ShapedSpans {
+    fn new(spans: Vec<ShapedSpan>) -> Self {
+        Self {
+            sorted: are_sorted(&spans, ShapedSpan::range),
+            nonnegative: spans.iter().all(ShapedSpan::is_nonnegative),
+            spans,
+        }
+    }
+
+    /// Painted width of `range`: in-context glyph advances of the shaped
+    /// spans it covers, plus the fixed spans that lie inside it.
+    fn width(&self, range: Range<usize>) -> Pixels {
+        let spans = overlapping(&self.spans, self.sorted, &range, ShapedSpan::range);
+        count_line_work(spans.len());
+        spans.iter().map(|span| span.width_in(&range)).sum()
+    }
+
+    /// Whether `range` fits in `width`, as `self.width(range) <= width`,
+    /// without measuring past the span that takes it over `width`.
+    fn fit(&self, range: Range<usize>, width: Pixels) -> bool {
+        let mut sum = Pixels::ZERO;
+        for span in overlapping(&self.spans, self.sorted, &range, ShapedSpan::range) {
+            count_line_work(1);
+            sum += span.width_in(&range);
+            if self.nonnegative && sum > width {
+                return false;
+            }
+        }
+        sum <= width
+    }
 }
 
 /// Appends the wrap fragments for `range` of `text`. The line wrapper
@@ -2381,6 +2725,157 @@ mod tests {
             );
             assert!(layout.size.width <= wrap_width, "{:?}", layout.size);
         }
+    }
+
+    /// One chunk of a streamed reply, with `code` and **bold** marks.
+    const CHUNK: &str = "Some prose with `inline code` and **bold text** here. ";
+
+    /// One text item from `source`, with its `code` and **bold** marked the
+    /// way the Markdown renderer marks them.
+    fn marked_text(source: &str) -> MeasureItem {
+        use super::super::inline::test_fonts::MONO;
+        use gpui::{FontWeight, HighlightStyle};
+
+        let mut text = String::new();
+        let mut highlights = Vec::new();
+        for (ix, part) in source.split('`').enumerate() {
+            let start = text.len();
+            if ix % 2 == 1 {
+                text.push_str(part);
+                highlights.push((
+                    start..text.len(),
+                    InlineHighlight {
+                        font_family: Some(MONO.into()),
+                        font_size_scale: Some(0.875),
+                        ..Default::default()
+                    },
+                ));
+                continue;
+            }
+            for (ix, part) in part.split("**").enumerate() {
+                let start = text.len();
+                text.push_str(part);
+                if ix % 2 == 1 {
+                    highlights.push((
+                        start..text.len(),
+                        InlineHighlight::from(HighlightStyle {
+                            font_weight: Some(FontWeight::BOLD),
+                            ..Default::default()
+                        }),
+                    ));
+                }
+            }
+        }
+        MeasureItem::Text {
+            text: text.into(),
+            links: vec![],
+            highlights,
+        }
+    }
+
+    /// A wrapped line looks at what is on it, not at the rest of its
+    /// paragraph: a reply twice as long is twice the work to lay out, where
+    /// rescanning the rest for every line made it four times.
+    #[test]
+    fn a_wrapped_line_costs_what_is_on_it() {
+        use super::super::inline::test_fonts::{BODY, WideMonoTextSystem};
+        use gpui::{Empty, TestApp};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let style = TextStyle {
+            font_family: BODY.into(),
+            font_size: AbsoluteLength::Pixels(px(10.)),
+            ..Default::default()
+        };
+        let mut work = |chunks: usize| {
+            let items = vec![marked_text(&CHUNK.repeat(chunks))];
+            let before = LINE_WORK.with(|work| work.get());
+            let layout = window.update(|_, window, cx| {
+                layout_flow(&items, &[None], &style, Some(px(200.)), window, cx)
+            });
+            let mut rows = layout
+                .fragments
+                .iter()
+                .filter_map(|fragment| match fragment {
+                    PositionedFragment::Text {
+                        selection_bounds, ..
+                    } => Some(selection_bounds.top()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            rows.dedup();
+            (LINE_WORK.with(|work| work.get()) - before, rows.len())
+        };
+
+        let (short, short_lines) = work(40);
+        let (long, _) = work(80);
+
+        assert!(short_lines > 40, "the reply wraps into {short_lines} lines");
+        assert!(
+            long * 2 < short * 5,
+            "{short} units for 40 chunks, {long} for 80"
+        );
+    }
+
+    /// A line hands the wrapper its hard line only up to a cut, and a longer
+    /// stretch when that holds no break. It must break where the wrapper
+    /// breaks the whole rest of the hard line.
+    #[test]
+    fn a_line_cut_short_for_the_wrapper_breaks_where_the_whole_rest_does() {
+        use super::super::inline::test_fonts::{BODY, WideMonoTextSystem};
+        use gpui::{Empty, IndentAdjustment, TestApp, font};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        // A space then a final quote breaks only when a letter follows. The
+        // quote ends at the first line's reach, so a cut there would hide
+        // the letter that decides it.
+        let quote = "and a « quoted »";
+        let lead = "Some prose here. ".repeat(20);
+        let prose = format!(
+            "{}{quote}here, 1.5 $(10) “words”. {lead}",
+            &lead[..FIRST_WRAP_REACH - quote.len()]
+        );
+        let cjk = "中文段落，包含全角标点。还有「引号」和更多文字！".repeat(12);
+        let marks = "e\u{301}e\u{301} 👍🏽 a\u{308}b ".repeat(30);
+        let (head, tail) = prose.split_at(prose.find(" here").unwrap());
+        // `None` is a 400-byte element, such as a code span, with no cut.
+        let fixtures = [
+            vec![Some(&*prose)],
+            vec![Some(&*cjk)],
+            vec![Some(&*marks)],
+            vec![Some(head), None, Some(tail)],
+        ];
+        window.update(|_, window, _| {
+            let mut wrapper = window.text_system().line_wrapper(font(BODY), px(10.));
+            for (fixture, parts) in fixtures.iter().enumerate() {
+                // A break at each of the first 300 characters, past the first reach.
+                for width in (0..300).map(|n| px(2.5 + 5. * n as f32)) {
+                    let element = || WrapLineFragment::element(px(300.), 400);
+                    let parts = parts
+                        .iter()
+                        .map(|part| part.map_or_else(element, WrapLineFragment::text));
+                    let mut fragments = WrapFragments::new(parts.collect());
+                    let len = fragments.len;
+                    let mut start = 0;
+                    while start < len {
+                        fragments.start_line(start);
+                        let whole = wrapper
+                            .wrap_line(
+                                &fragments.fragments[fragments.ix..],
+                                width,
+                                IndentAdjustment::SameIndent,
+                            )
+                            .next()
+                            .map_or(len, |boundary| (start + boundary.ix).min(len));
+                        let end = fragments.next_wrap(&mut wrapper, width, start, len);
+                        assert_eq!(end, whole, "fixture {fixture} at {width:?} from {start}");
+                        start = end;
+                    }
+                }
+            }
+        });
     }
 
     #[test]
