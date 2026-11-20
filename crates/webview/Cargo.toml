@@ -39,3 +39,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 gdkx11 = "0.18"
 gtk = "0.18"
 x11 = { version = "2.21", features = ["xlib"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
