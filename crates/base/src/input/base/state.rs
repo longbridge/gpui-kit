@@ -4817,7 +4817,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         let range = self.range_from_utf16(&range_utf16);
-        adjusted_range.replace(self.range_to_utf16(&range));
+        let range_utf16 = self.range_to_utf16(&range);
+        let utf16_len = range_utf16.len();
+        adjusted_range.replace(range_utf16);
+        if self.masked {
+            // Keep the redacted text aligned with the platform's UTF-16 range.
+            return Some(MASK_CHAR.to_string().repeat(utf16_len));
+        }
         Some(self.text.slice(range).to_string())
     }
 
@@ -8892,6 +8898,29 @@ mod tests {
                     cx.read_from_clipboard().and_then(|item| item.text()),
                     Some("hunter2".to_string())
                 );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_masked_input_redacts_ime_text(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state.masked(true).default_value("a🦀b"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            input_view.input.update(cx, |state, cx| {
+                let mut adjusted = None;
+                assert_eq!(
+                    state.text_for_range(1..5, &mut adjusted, window, cx),
+                    Some("•••".into())
+                );
+                assert_eq!(adjusted, Some(1..4));
+
+                state.set_masked(false, window, cx);
+                assert_eq!(
+                    state.text_for_range(1..5, &mut adjusted, window, cx),
+                    Some("🦀b".into())
+                );
+                assert_eq!(adjusted, Some(1..4));
             });
         });
     }
