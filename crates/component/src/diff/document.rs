@@ -55,6 +55,38 @@ impl DiffLinePosition {
     }
 }
 
+/// One character of a source line, as the pointer finds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffTextPosition {
+    position: DiffLinePosition,
+    offset: usize,
+    text: SharedString,
+}
+
+impl DiffTextPosition {
+    pub(crate) fn new(position: DiffLinePosition, offset: usize, text: SharedString) -> Self {
+        Self {
+            position,
+            offset,
+            text,
+        }
+    }
+    /// The line the character is on.
+    pub fn position(&self) -> &DiffLinePosition {
+        &self.position
+    }
+    /// The character's byte offset in the line's content, before tab
+    /// expansion: the unit [`super::DiffSpanHighlight`] spans use.
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+    /// The line's content, so the handler can read the word around the
+    /// offset without a copy of the patch.
+    pub fn text(&self) -> &SharedString {
+        &self.text
+    }
+}
+
 /// An inclusive range of source lines in one file, identified by its
 /// [`DiffFile::path`].
 ///
