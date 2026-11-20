@@ -132,19 +132,48 @@ impl DiffFile {
     /// A file shown in full, for reference, without changes. It appears as a
     /// single column in every display mode.
     pub fn unchanged(path: impl Into<SharedString>, text: &str) -> Self {
+        Self::excerpts(path, [(1, text)])
+    }
+
+    /// Parts of a file shown for reference, without changes, each keeping
+    /// its own line numbers: `(first line, text)` per part, in file order
+    /// without overlap. A first line below 1 is clamped to 1. Like
+    /// [`Self::unchanged`] it is a single column in every display mode;
+    /// the lines between the parts are simply not there.
+    pub fn excerpts<'a>(
+        path: impl Into<SharedString>,
+        parts: impl IntoIterator<Item = (usize, &'a str)>,
+    ) -> Self {
         let path = path.into();
-        let ranges = line_ranges(text);
-        let pairs = (0..ranges.len())
+        let mut source = String::new();
+        let mut lines = Vec::new();
+        for (first, text) in parts {
+            // A part cut off mid-line must not run into the next one.
+            if !source.is_empty() && !source.ends_with('\n') {
+                source.push('\n');
+            }
+            debug_assert!(
+                lines.last().is_none_or(|(line, _)| first.max(1) > *line),
+                "excerpt parts must come in file order without overlap"
+            );
+            let offset = source.len();
+            lines.extend(
+                line_ranges(text)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ix, range)| {
+                        (first.max(1) + ix, offset + range.start..offset + range.end)
+                    }),
+            );
+            source.push_str(text);
+        }
+        let pairs = (0..lines.len())
             .map(|ix| LinePair::new(None, Some(ix), false))
             .collect();
-        let lines = ranges
-            .into_iter()
-            .enumerate()
-            .map(|(ix, range)| (ix + 1, range));
         DiffFile::new(
             DiffFileStatus::Unchanged,
             FileSide::new(Some(path.clone()), String::new(), []),
-            FileSide::new(Some(path), text.to_owned(), lines),
+            FileSide::new(Some(path), source, lines),
             pairs,
             Vec::new(),
             Vec::new(),
@@ -293,6 +322,30 @@ mod tests {
             "one\r\ntwo\nlast"
         );
         assert!(DiffFile::unchanged("empty", "").pairs().is_empty());
+    }
+
+    #[test]
+    fn excerpts_keep_each_parts_line_numbers() {
+        let file = DiffFile::excerpts(
+            "src/lib.rs",
+            [
+                (40, "fn a() {\n}\n"),
+                (90, "fn b() {}"),
+                (120, "fn c() {}\n"),
+            ],
+        );
+        assert_eq!(file.status(), DiffFileStatus::Unchanged);
+        let numbers: Vec<usize> = (0..file.lines_count(DiffSide::Modified))
+            .map(|ix| file.line_number(DiffSide::Modified, ix))
+            .collect();
+        assert_eq!(numbers, [40, 41, 90, 120]);
+        assert_eq!(file.line_index(DiffSide::Modified, 90), Some(2));
+        assert_eq!(file.line_index(DiffSide::Modified, 60), None);
+        // A part without a final newline does not swallow the next one.
+        assert_eq!(
+            file.text_for_lines(DiffSide::Modified, 90, 120),
+            "fn b() {}\nfn c() {}\n"
+        );
     }
 
     #[test]

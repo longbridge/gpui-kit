@@ -96,14 +96,18 @@ let cut = files.iter().any(DiffFile::is_truncated);
 这些前缀也可能是源代码正文；如果按正文解释能够凑齐 hunk 声明的行数，则优先保留这一解释。
 即使截断的 hunk 没有正文，原始侧和修改侧的 hunk 位置也必须保持有序。
 
-另有两个构造方法用于不属于 patch 的文件，二者在任何显示模式下都只显示一列：
+另有三个构造方法用于不属于 patch 的文件，它们在任何显示模式下都只显示一列：
 
 ```rust
 // 用于参考的完整文件：没有变更，也不折叠。
 let source = DiffFile::unchanged("src/retry.rs", &text);
+// 文件的若干片段，各自保留自己的行号，按文件顺序排列。
+let parts = DiffFile::excerpts("src/retry.rs", [(40, &a), (90, &b)]);
 // 带 Git 冲突标记的工作区文件，支持 diff3 的共同祖先部分。
 let merge = DiffFile::parse_conflicts("src/retry.rs", &working_text)?;
 ```
+
+片段文件中每一行都带自己的文件行号；片段之间的行并不存在，也没有展开控件可以显示它们。
 
 ## 合并冲突
 

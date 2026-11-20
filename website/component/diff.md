@@ -114,15 +114,20 @@ when that interpretation completes the declared hunk, it takes precedence.
 Hunk positions must stay ordered on both sides even when a short hunk supplies
 no lines.
 
-Two constructors cover files that are not part of a patch. Both show one column
-in every display mode:
+Three constructors cover files that are not part of a patch. All show one
+column in every display mode:
 
 ```rust
 // A whole file, for reference, with no changes and no folding.
 let source = DiffFile::unchanged("src/retry.rs", &text);
+// Parts of a file, each at its own line numbers, in file order.
+let parts = DiffFile::excerpts("src/retry.rs", [(40, &a), (90, &b)]);
 // A working file with Git conflict markers, including diff3 bases.
 let merge = DiffFile::parse_conflicts("src/retry.rs", &working_text)?;
 ```
+
+In an excerpt file every line carries its file line number; the lines between
+the parts are simply not there, with no disclosure to reveal them.
 
 ## Merge conflicts
 
