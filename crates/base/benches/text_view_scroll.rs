@@ -1,7 +1,8 @@
 //! Scrolling a long Markdown `TextView`: one frame per iteration, the way a
 //! chat scrolls. Every frame re-renders and re-lays out the visible
 //! paragraphs, so this is where the per-paragraph text costs (shaping-cache
-//! lookups, line wrappers, measurement) show up.
+//! lookups, line wrappers, measurement) show up. Resizing one long paragraph
+//! is where wrapping costs show up: every frame lays it out again.
 //!
 //! Run with `cargo bench -p gpui-base --bench text_view_scroll`.
 
@@ -14,8 +15,8 @@ use std::fmt::Write as _;
 
 use gpui::{
     AppContext as _, BenchAppContext, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, ScrollHandle, StatefulInteractiveElement as _, Styled as _, Window,
-    div, point, prelude::FluentBuilder as _, px, relative,
+    ParentElement as _, Pixels, Render, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
+    Window, div, point, prelude::FluentBuilder as _, px, relative,
 };
 use gpui_base::text::{TextView, TextViewState};
 
@@ -64,6 +65,13 @@ fn markdown_with(inline_code: bool) -> String {
         }
     }
     out
+}
+
+/// A streamed reply that never starts a new paragraph: prose with inline code
+/// and bold, five hundred chunks long, so one `InlineFlow` wraps it into a
+/// few hundred lines.
+fn long_paragraph() -> String {
+    "Some prose with `inline code` and **bold text** here. ".repeat(500)
 }
 
 struct Chat {
@@ -145,10 +153,47 @@ fn scroll_answer(markdown: String, bubble: bool, cx: &mut BenchAppContext) {
     });
 }
 
+/// The long paragraph at a new width every frame, as when the window is
+/// resized: the flow's layout cache misses and the paragraph is wrapped and
+/// laid out again, as it is when a streamed chunk is appended.
+struct Resize {
+    answer: Entity<TextViewState>,
+    width: Pixels,
+}
+
+impl Render for Resize {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().w(self.width).child(TextView::new(&self.answer))
+    }
+}
+
+#[gpui::bench]
+fn text_view_resize_long_paragraph(cx: &mut BenchAppContext) {
+    cx.update(gpui_base::init);
+    let mut window = cx.add_empty_window();
+    let markdown = long_paragraph();
+    let resize = window.update(|window, cx| {
+        window.replace_root(cx, |_, cx| Resize {
+            answer: cx.new(|cx| TextViewState::markdown(&markdown, cx)),
+            width: px(480.),
+        })
+    });
+    cx.run_until_idle();
+
+    // More widths than a flow keeps a layout for, so every frame misses.
+    let mut frame = 0;
+    cx.bench_renderer(resize, move |resize, _, cx| {
+        frame += 1;
+        resize.width = px(480. + (frame % 64) as f32);
+        cx.notify();
+    });
+}
+
 gpui::bench_group!(
     benches,
     text_view_scroll,
     text_view_scroll_inline_code,
-    text_view_scroll_inline_code_bubble
+    text_view_scroll_inline_code_bubble,
+    text_view_resize_long_paragraph
 );
 gpui::bench_main!(benches);
