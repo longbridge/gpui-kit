@@ -3141,6 +3141,7 @@ pub(super) struct PrepaintState {
     cursor_scroll_offset: Point<Pixels>,
     /// row index (zero based), no wrap, same line as the cursor.
     current_row: Option<usize>,
+    active_row: Option<usize>,
     selection_paths: Vec<Path<Pixels>>,
     hover_highlight_path: Option<Path<Pixels>>,
     search_match_paths: Vec<(Path<Pixels>, bool)>,
@@ -3813,6 +3814,13 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 cx,
             );
         cursor_scroll_offset.y = px(final_scroll_y_f64 as f32);
+        let active_row = {
+            let state = self.state.read(cx);
+            current_row.filter(|_| {
+                !state.mode.is_active_line_only_when_focused()
+                    || state.has_selection_focus(window, cx)
+            })
+        };
         // Completion/code-action menus position at the active caret.
         last_layout.cursor_bounds = cursor_infos
             .iter()
@@ -3868,7 +3876,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 .iter()
                 .zip(last_layout.visible_buffer_lines.iter())
             {
-                let is_active = current_row == Some(buffer_line);
+                let is_active = active_row == Some(buffer_line);
                 let number_style = if is_active {
                     &current_line_style
                 } else {
@@ -4026,6 +4034,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             cursor_infos,
             cursor_scroll_offset,
             current_row,
+            active_row,
             selection_paths,
             search_match_paths,
             hover_highlight_path,
@@ -4112,7 +4121,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 .iter()
                 .zip(prepaint.last_layout.visible_buffer_lines.iter())
             {
-                let is_active = prepaint.current_row == Some(buffer_line);
+                let is_active = prepaint.active_row == Some(buffer_line);
                 let p = point(
                     input_bounds.origin.x,
                     origin.y + prepaint.last_layout.local_row_y(row_offset),
@@ -4334,7 +4343,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     input_bounds.origin.x,
                     origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
                 );
-                let is_active = prepaint.current_row == Some(buffer_line);
+                let is_active = prepaint.active_row == Some(buffer_line);
 
                 let height = line_height * *rows as f32;
                 // paint active line number background
@@ -4378,7 +4387,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         // Paint fold icons (only visible on hover or for current line)
         self.paint_fold_icons(
             &mut prepaint.fold_icon_layout,
-            prepaint.current_row,
+            prepaint.active_row,
             window,
             cx,
         );
@@ -4694,7 +4703,7 @@ mod tests {
     use crate::input::{
         Editor, EditorMode, EditorState, FoldPlaceholderRenderer, FoldRange, GutterDecoration,
         GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
-        RangeDecoration, Redo, Undo,
+        Position, RangeDecoration, Redo, Undo,
     };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -5461,6 +5470,96 @@ mod tests {
             assert!(weak_menu.upgrade().is_none());
             assert!(selection_paths(window, cx).is_empty());
         });
+    }
+
+    #[derive(Clone, Default)]
+    struct ActiveLineNumbers(Rc<std::cell::RefCell<Vec<usize>>>);
+
+    impl EditorLineNumberRenderer for ActiveLineNumbers {
+        fn measure_line_numbers(
+            &self,
+            digit_count: usize,
+            body_style: &TextStyle,
+            window: &Window,
+        ) -> (Pixels, Pixels) {
+            ().measure_line_numbers(digit_count, body_style, window)
+        }
+
+        fn shape_line_number(
+            &self,
+            number: usize,
+            is_active: bool,
+            body_style: &TextStyle,
+            window: &Window,
+            cx: &App,
+        ) -> ShapedLine {
+            if is_active {
+                self.0.borrow_mut().push(number);
+            }
+            ().shape_line_number(number, is_active, body_style, window, cx)
+        }
+    }
+
+    struct ActiveLineHarness(Entity<EditorState>, ActiveLineNumbers);
+
+    impl Render for ActiveLineHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(Editor::new(&self.0).with_line_number_renderer(self.1.clone()))
+        }
+    }
+
+    #[gpui::test]
+    fn active_line_follows_the_input_and_its_menu_focus(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for only_when_focused in [false, true] {
+            let numbers = ActiveLineNumbers::default();
+            let mut editor = None;
+            let window = cx.open_window(size(px(240.), px(140.)), |window, cx| {
+                let state = cx.new(|cx| {
+                    EditorState::new(window, cx)
+                        .active_line_only_when_focused(only_when_focused)
+                        .default_value("one\ntwo\nthree")
+                });
+                editor = Some(state.clone());
+                ActiveLineHarness(state, numbers.clone())
+            });
+            let editor = editor.unwrap();
+            let mut cx = VisualTestContext::from_window(window.into(), cx);
+            cx.update(|window, cx| {
+                let menu_focus = cx.focus_handle();
+                let other_focus = cx.focus_handle();
+                let active = |window: &mut Window, cx: &mut App| {
+                    window.draw(cx).clear(cx);
+                    numbers.0.borrow_mut().clear();
+                    window.draw(cx).clear(cx);
+                    numbers.0.borrow().clone()
+                };
+
+                editor.update(cx, |state, cx| {
+                    state.set_cursor_position(Position::new(1, 0), window, cx);
+                    state.focus(window, cx);
+                });
+                assert_eq!(active(window, cx), vec![2]);
+
+                other_focus.focus(window, cx);
+                let unfocused: Vec<usize> = if only_when_focused { vec![] } else { vec![2] };
+                assert_eq!(active(window, cx), unfocused, "{only_when_focused}");
+
+                editor.update(cx, |state, cx| {
+                    state.set_selection_focus(Some(menu_focus.clone()), cx);
+                });
+                menu_focus.focus(window, cx);
+                assert_eq!(active(window, cx), vec![2]);
+
+                other_focus.focus(window, cx);
+                editor.update(cx, |state, cx| {
+                    state.set_active_line_only_when_focused(false, window, cx);
+                });
+                assert_eq!(active(window, cx), vec![2]);
+            });
+        }
     }
 
     /// Paints an input moved by its parent, then counts the views a draw with

@@ -132,6 +132,7 @@ let editor = cx.new(|cx| {
         .folding(true)
         .show_whitespaces(true)
         .scroll_bounce(true)
+        .active_line_only_when_focused(true)
         .default_value(source)
 });
 ```
@@ -140,6 +141,11 @@ let editor = cx.new(|cx| {
 bottom and spring back with precise trackpad or Magic Mouse scrolling, as in the
 [Textarea](./textarea.md#scroll-bounce). The gutter moves with the code; the
 frame and scrollbar stay put. Ordinary mouse-wheel line scrolling does not bounce.
+
+`active_line_only_when_focused(true)` shows the active line number, the
+active-line background and the caret's fold control only while the editor or
+its context menu has focus, so that of several editors on screen only the
+focused one shows an active line.
 
 ## Manual completions
 
