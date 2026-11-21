@@ -146,6 +146,7 @@ impl RenderOnce for ResizablePanelGroup {
         let panels_count = self.children.len();
         state.update(cx, |state, cx| {
             state.sync_panels_count(self.axis, panels_count, cx);
+            state.sync_panel_visibility(self.children.iter().map(|panel| panel.visible), cx);
         });
 
         container
@@ -334,6 +335,7 @@ impl RenderOnce for ResizablePanel {
         let size_range = self.size_range.clone();
         // A fixed panel needs a size to keep; without one it lays out as usual.
         let fixed = self.fixed && self.initial_size.is_some();
+        let previous_panel = state.read(cx).previous_visible_panel(self.panel_ix);
 
         div()
             .id(("resizable-panel", self.panel_ix))
@@ -393,8 +395,7 @@ impl RenderOnce for ResizablePanel {
                 }
             })
             .children(self.children)
-            .when(self.panel_ix > 0, |this| {
-                let ix = self.panel_ix - 1;
+            .when_some(previous_panel, |this, ix| {
                 this.child(
                     resize_handle(("resizable-handle", ix), self.axis)
                         .when_some(self.handle_appearance.clone(), |handle, appearance| {
