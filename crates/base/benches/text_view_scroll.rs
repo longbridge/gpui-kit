@@ -189,11 +189,31 @@ fn text_view_resize_long_paragraph(cx: &mut BenchAppContext) {
     });
 }
 
+/// The long paragraph redrawn at the same width, as when the cursor blinks or
+/// another part of the window changes: the flow finds its layout cached, so
+/// what remains is what the paragraph rebuilds to find it.
+#[gpui::bench]
+fn text_view_redraw_long_paragraph(cx: &mut BenchAppContext) {
+    cx.update(gpui_base::init);
+    let mut window = cx.add_empty_window();
+    let markdown = long_paragraph();
+    let resize = window.update(|window, cx| {
+        window.replace_root(cx, |_, cx| Resize {
+            answer: cx.new(|cx| TextViewState::markdown(&markdown, cx)),
+            width: px(480.),
+        })
+    });
+    cx.run_until_idle();
+
+    cx.bench_renderer(resize, move |_, _, cx| cx.notify());
+}
+
 gpui::bench_group!(
     benches,
     text_view_scroll,
     text_view_scroll_inline_code,
     text_view_scroll_inline_code_bubble,
-    text_view_resize_long_paragraph
+    text_view_resize_long_paragraph,
+    text_view_redraw_long_paragraph
 );
 gpui::bench_main!(benches);
