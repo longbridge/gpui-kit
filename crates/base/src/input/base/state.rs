@@ -4357,6 +4357,9 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// For number inputs (with [`MaskPattern::Number`]), this converts
     /// full-width number characters into their ASCII equivalents,
     /// e.g. `12。5` -> `12.5`.
+    ///
+    /// A single-line input drops line breaks and tabs: a one-line field has
+    /// no line to break and no column to indent, and a tab in it is invisible.
     pub(super) fn normalize_input<'a>(&self, new_text: &'a str) -> Cow<'a, str> {
         let normalized = if matches!(self.mask_pattern, MaskPattern::Number { .. }) {
             normalize_number_input(new_text)
@@ -4364,8 +4367,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             Cow::Borrowed(new_text)
         };
 
-        if self.is_single_line() && normalized.contains(['\n', '\r']) {
-            Cow::Owned(normalized.replace(['\n', '\r'], ""))
+        if self.is_single_line() && normalized.contains(['\n', '\r', '\t']) {
+            Cow::Owned(normalized.replace(['\n', '\r', '\t'], ""))
         } else {
             normalized
         }
@@ -9383,6 +9386,33 @@ mod tests {
         });
 
         cx.run_until_parked();
+    }
+
+    /// Tab is bound to `IndentInline`, which a single-line input propagates.
+    /// Unhandled, the keystroke reaches the input as text, so the field
+    /// drops the tab as it drops a newline. See issue #4069.
+    #[gpui::test]
+    fn test_single_line_removes_tabs(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.run_until_parked();
+
+        cx.simulate_input("a");
+        cx.simulate_keystrokes("tab");
+        cx.simulate_input("b");
+        input.read_with(&cx, |state, _| assert_eq!(state.value(), "ab"));
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("c\td\ne", window, cx);
+                assert_eq!(state.value(), "cde");
+            });
+        });
     }
 
     /// `replace_all` on a multi-line (non-code-editor) input clears the
