@@ -485,7 +485,7 @@ mod tests {
     };
 
     use gpui::{
-        App, AppContext as _, Context, InputEvent as _, InteractiveElement as _, IntoElement,
+        App, AppContext as _, Axis, Context, InputEvent as _, InteractiveElement as _, IntoElement,
         Modifiers, MouseButton, ParentElement as _, Pixels, Render, Styled as _, TestAppContext,
         VisualTestContext, Window, div, point, prelude::FluentBuilder as _, px, size,
     };
