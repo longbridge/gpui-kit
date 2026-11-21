@@ -47,7 +47,6 @@ pub(crate) enum LayoutMode {
         language: Box<EditorLanguage>,
         indent_guides: bool,
         folding: bool,
-        /// Show the active line only while the editor has focus.
         active_line_only_when_focused: bool,
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
@@ -148,6 +147,16 @@ impl LayoutMode {
             self,
             Self::CodeEditor {
                 smart_indent: true,
+                ..
+            }
+        )
+    }
+
+    pub(super) fn is_active_line_only_when_focused(&self) -> bool {
+        matches!(
+            self,
+            Self::CodeEditor {
+                active_line_only_when_focused: true,
                 ..
             }
         )
@@ -273,18 +282,6 @@ impl LayoutMode {
             LayoutMode::CodeEditor { line_number, .. } => *line_number,
             _ => false,
         }
-    }
-
-    /// Return true if a code editor shows its active line only while focused.
-    #[inline]
-    pub(super) fn is_active_line_only_when_focused(&self) -> bool {
-        matches!(
-            self,
-            LayoutMode::CodeEditor {
-                active_line_only_when_focused: true,
-                ..
-            }
-        )
     }
 
     /// Update the syntax highlighter with new text.

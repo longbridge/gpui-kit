@@ -3141,8 +3141,6 @@ pub(super) struct PrepaintState {
     cursor_scroll_offset: Point<Pixels>,
     /// row index (zero based), no wrap, same line as the cursor.
     current_row: Option<usize>,
-    /// The row painted as the active line: `current_row`, unless the editor
-    /// shows its active line only while focused and is not focused.
     active_row: Option<usize>,
     selection_paths: Vec<Path<Pixels>>,
     hover_highlight_path: Option<Path<Pixels>>,
@@ -3816,8 +3814,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 cx,
             );
         cursor_scroll_offset.y = px(final_scroll_y_f64 as f32);
-        // The caret's row stays the anchor for ghost lines; only the active-line
-        // highlight can be hidden while another view has focus.
         let active_row = {
             let state = self.state.read(cx);
             current_row.filter(|_| {
@@ -4707,7 +4703,7 @@ mod tests {
     use crate::input::{
         Editor, EditorMode, EditorState, FoldPlaceholderRenderer, FoldRange, GutterDecoration,
         GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
-        RangeDecoration, Redo, Undo,
+        Position, RangeDecoration, Redo, Undo,
     };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -5476,7 +5472,6 @@ mod tests {
         });
     }
 
-    /// Records the line numbers shaped as active, and shapes them as Base does.
     #[derive(Clone, Default)]
     struct ActiveLineNumbers(Rc<std::cell::RefCell<Vec<usize>>>);
 
@@ -5516,7 +5511,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_active_line_can_follow_focus(cx: &mut TestAppContext) {
+    fn active_line_follows_the_input_and_its_menu_focus(cx: &mut TestAppContext) {
         cx.update(crate::init);
         for only_when_focused in [false, true] {
             let numbers = ActiveLineNumbers::default();
@@ -5535,8 +5530,6 @@ mod tests {
             cx.update(|window, cx| {
                 let menu_focus = cx.focus_handle();
                 let other_focus = cx.focus_handle();
-                // The line numbers a frame shapes as active, after a frame
-                // that may still use the previous focus.
                 let active = |window: &mut Window, cx: &mut App| {
                     window.draw(cx).clear(cx);
                     numbers.0.borrow_mut().clear();
@@ -5545,7 +5538,7 @@ mod tests {
                 };
 
                 editor.update(cx, |state, cx| {
-                    state.set_cursor_position(crate::input::Position::new(1, 0), window, cx);
+                    state.set_cursor_position(Position::new(1, 0), window, cx);
                     state.focus(window, cx);
                 });
                 assert_eq!(active(window, cx), vec![2]);
@@ -5554,15 +5547,12 @@ mod tests {
                 let unfocused: Vec<usize> = if only_when_focused { vec![] } else { vec![2] };
                 assert_eq!(active(window, cx), unfocused, "{only_when_focused}");
 
-                // A popup the editor owns keeps the active line, as it keeps
-                // the selection.
                 editor.update(cx, |state, cx| {
                     state.set_selection_focus(Some(menu_focus.clone()), cx);
                 });
                 menu_focus.focus(window, cx);
                 assert_eq!(active(window, cx), vec![2]);
 
-                // Turning the setting off at runtime shows it again.
                 other_focus.focus(window, cx);
                 editor.update(cx, |state, cx| {
                     state.set_active_line_only_when_focused(false, window, cx);

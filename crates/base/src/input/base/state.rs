@@ -13997,42 +13997,37 @@ impl InputBaseState<crate::input::EditorMode> {
         cx.notify();
     }
 
-    /// Set whether to show the active line only while the editor has focus.
+    /// Set enable/disable showing the active line only while focused.
     ///
-    /// The active line is the caret's line: its line number in the active
-    /// color, the active-line background, and the fold control that follows
-    /// the caret. When true, an editor without focus shows none of them, so
-    /// that of several editors on screen only the focused one shows an active
-    /// line. A popup the editor owns (see [`Self::set_selection_focus`]) keeps
-    /// it shown. Default: false
+    /// Default: false
     #[doc(hidden)]
-    pub fn active_line_only_when_focused(mut self, only_when_focused: bool) -> Self {
+    pub fn active_line_only_when_focused(mut self, active_line_only_when_focused: bool) -> Self {
         if let LayoutMode::CodeEditor {
-            active_line_only_when_focused: value,
+            active_line_only_when_focused: a,
             ..
         } = &mut self.mode
         {
-            *value = only_when_focused;
+            *a = active_line_only_when_focused;
         }
         self
     }
 
-    /// Set whether to show the active line only while focused, at runtime.
+    /// Set showing the active line only while focused.
     pub fn set_active_line_only_when_focused(
         &mut self,
-        only_when_focused: bool,
+        active_line_only_when_focused: bool,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if let LayoutMode::CodeEditor {
-            active_line_only_when_focused: value,
+            active_line_only_when_focused: a,
             ..
         } = &mut self.mode
         {
-            if *value == only_when_focused {
+            if *a == active_line_only_when_focused {
                 return;
             }
-            *value = only_when_focused;
+            *a = active_line_only_when_focused;
         }
         cx.notify();
     }
