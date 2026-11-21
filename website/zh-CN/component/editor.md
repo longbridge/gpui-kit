@@ -112,11 +112,14 @@ let editor = cx.new(|cx| {
         .folding(true)
         .show_whitespaces(true)
         .scroll_bounce(true)
+        .active_line_only_when_focused(true)
         .default_value(source)
 });
 ```
 
 `scroll_bounce(true)` 让超出编辑器高度的代码在触控板或 Magic Mouse 的精细像素滚动到达顶部或底部时越过边缘并弹回，与 [Textarea](./textarea.md#滚动回弹) 相同。行号栏随代码移动，外框和滚动条保持不动；普通鼠标滚轮的按行滚动不触发回弹。
+
+`active_line_only_when_focused(true)` 让当前行的行号、当前行背景和光标所在行的折叠按钮只在编辑器或其右键菜单获得焦点时显示，这样界面上有多个编辑器时，只有获得焦点的那个显示当前行。
 
 ## 主动补全
 

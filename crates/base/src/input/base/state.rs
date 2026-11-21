@@ -13997,6 +13997,41 @@ impl InputBaseState<crate::input::EditorMode> {
         cx.notify();
     }
 
+    /// Set enable/disable showing the active line only while focused.
+    ///
+    /// Default: false
+    #[doc(hidden)]
+    pub fn active_line_only_when_focused(mut self, active_line_only_when_focused: bool) -> Self {
+        if let LayoutMode::CodeEditor {
+            active_line_only_when_focused: a,
+            ..
+        } = &mut self.mode
+        {
+            *a = active_line_only_when_focused;
+        }
+        self
+    }
+
+    /// Set showing the active line only while focused.
+    pub fn set_active_line_only_when_focused(
+        &mut self,
+        active_line_only_when_focused: bool,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let LayoutMode::CodeEditor {
+            active_line_only_when_focused: a,
+            ..
+        } = &mut self.mode
+        {
+            if *a == active_line_only_when_focused {
+                return;
+            }
+            *a = active_line_only_when_focused;
+        }
+        cx.notify();
+    }
+
     /// Set enable/disable automatic closing brackets and quotes.
     ///
     /// When enabled, typing an opener from [`LanguageConfig::auto_closing_pairs`](crate::input::language_config::LanguageConfig::auto_closing_pairs) inserts the
