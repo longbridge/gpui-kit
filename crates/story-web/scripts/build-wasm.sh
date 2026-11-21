@@ -20,12 +20,21 @@ if [[ "$1" == "--release" ]]; then
     echo -e "${YELLOW}Building in release mode${NC}"
 fi
 
+FEATURE_FLAGS=()
+if [[ -n "${FEATURES:-}" ]]; then
+    FEATURE_FLAGS=(--features "$FEATURES")
+    echo -e "${YELLOW}Building with features: $FEATURES${NC}"
+fi
+
 # Step 1: Build WASM
 echo -e "${GREEN}Step 1: Building WASM...${NC}"
 cd "$PROJECT_ROOT"
+if [[ ",${FEATURES:-}," == *",tree-sitter,"* ]]; then
+    source ../../script/wasm-cc-env
+fi
 # ButtonStory's large render tree needs more than wasm-ld's default 1 MiB
 # stack in debug builds. Apply this at the final link, for both build modes.
-cargo rustc -p gpui-component-story-web --target wasm32-unknown-unknown $RELEASE_FLAG -- \
+cargo rustc -p gpui-component-story-web --target wasm32-unknown-unknown $RELEASE_FLAG "${FEATURE_FLAGS[@]}" -- \
     -C link-arg=-zstack-size=8388608
 
 # Determine the build directory

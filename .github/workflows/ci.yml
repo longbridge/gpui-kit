@@ -223,6 +223,24 @@ jobs:
       - name: Check GPUI Fast WebAssembly
         run: cargo check -p gpui-kit --features gpui-fast --target wasm32-unknown-unknown --locked
 
+  tree-sitter-web:
+    name: Tree-sitter (WebAssembly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown
+          components: llvm-tools
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: tree-sitter-web
+      - name: Install system dependencies
+        run: script/bootstrap
+      - name: Check tree-sitter highlighting for WebAssembly
+        run: |
+          source script/wasm-cc-env
+          cargo check -p gpui-component --features tree-sitter-languages --target wasm32-unknown-unknown --locked
+
   gpui-shell-core:
     name: GPUI Shell Core
     runs-on: ubuntu-latest

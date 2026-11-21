@@ -84,7 +84,7 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
             .as_ref()
             .is_none_or(|(cached_text, _)| cached_text != text)
         {
-            let start = std::time::Instant::now();
+            let start = instant::Instant::now();
             let mut progress = |_: &tree_sitter::ParseState| -> ControlFlow<()> {
                 if start.elapsed() > Self::PARSE_BUDGET {
                     ControlFlow::Break(())
@@ -198,7 +198,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "tree-sitter-cmake")]
+    #[cfg(all(feature = "tree-sitter-cmake", not(target_family = "wasm")))]
     #[test]
     fn closed_bracket_comment_is_not_a_line_comment() {
         use gpui_base::input::{Rope, SyntaxContext};

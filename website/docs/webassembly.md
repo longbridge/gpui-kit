@@ -79,6 +79,35 @@ cx.refresh_windows();
 
 Use a raw supported font file such as the TTF in GPUI Web's `examples/hello_web/dynamic_fonts.rs`, not a font-service CSS response that may refer to WOFF2 subsets. That example uses `cx.on_missing_glyphs(...) -> Subscription` to request a font when needed, retains the subscription and download task, checks for a successful HTTP status and nonempty body, then calls `add_fonts` and `refresh_windows`. Font parsing is checked by `add_fonts`; an HTTP 200 alone does not establish that the response is a usable font. Missing-glyph reports are deduplicated and bounded; a dropped report does not schedule its own retry. The gallery currently **does not** download fonts this way; it embeds subsets and uses Canvas fallback. GPUI Web applies Canvas fallback before reporting missing glyphs, so CJK it draws successfully through Canvas will **not** trigger `on_missing_glyphs`. For high-quality CJK typography, decide which font to fetch from your content or language selection, show a loading or failure state, and test layout after installation. A font downloaded from another origin must also satisfy that host's browser CORS policy.
 
+## Syntax highlighting
+
+Both highlighters of the [Editor](../component/editor.md) build for the browser. `syntect` needs nothing beyond the Rust target. The `tree-sitter` features use the same grammars and highlight queries as a native build, so code is marked the same way on both. The grammars are C, and building them for `wasm32-unknown-unknown` needs:
+
+- a clang with the WebAssembly target: the Xcode Command Line Tools on macOS, the `clang` package on Linux;
+- `llvm-ar`, from `rustup component add llvm-tools`. The system `ar` on macOS writes archives that the WebAssembly linker cannot read;
+- the libc headers that the `tree-sitter-language` crate ships for WebAssembly. Most grammar crates do not add them themselves.
+
+[`script/wasm-cc-env`](https://github.com/longbridge/gpui-kit/blob/main/script/wasm-cc-env) sets the three variables the `cc` crate reads for that target — `CC_wasm32_unknown_unknown`, `AR_wasm32_unknown_unknown` and `CFLAGS_wasm32_unknown_unknown` — leaving any you have already set. Source it from inside the workspace you build, so the headers match its `Cargo.lock`:
+
+```sh
+source script/wasm-cc-env
+cargo build --target wasm32-unknown-unknown --release
+```
+
+To try it in the gallery, build it with its `tree-sitter` feature from `crates/story-web`: `FEATURES=tree-sitter make dev`. The published gallery highlights with `syntect`.
+
+Eight languages are not available on WebAssembly yet, because their grammar crates do not build for that target. Their features are accepted there and add no language, so `tree-sitter-languages` still builds; text in those languages is shown without highlighting.
+
+| Feature | Why the grammar does not build for WebAssembly |
+| --- | --- |
+| `tree-sitter-c`, `tree-sitter-csharp`, `tree-sitter-cmake`, `tree-sitter-lua`, `tree-sitter-sql` | The crate's build script compiles libc stubs that `tree-sitter-language` turned into an `#error` for tree-sitter 0.26. |
+| `tree-sitter-bash`, `tree-sitter-swift` | The scanner calls `isdigit` or `exit`, which tree-sitter does not provide to scanners on WebAssembly. |
+| `tree-sitter-cpp` | The scanner needs `wchar_t` and `static_assert`, which the WebAssembly headers do not declare where it includes them. |
+
+On WebAssembly a tree-sitter language belongs to the thread that created it, so `LanguageRegistry::singleton()` returns the registry of the current thread. Register a custom language on the thread that highlights; in a single-threaded build such as the gallery there is only one. Code folding is off in the browser with either highlighter.
+
+Every grammar adds its parse tables to the module. In a release build of the gallery, the 27 languages that build for WebAssembly make the `.wasm` file 21.7 MB larger than with `syntect`, and 1.9 MB larger after gzip: 51.5 MB (10.9 MB gzipped) against 29.8 MB (9.0 MB gzipped). Enable the languages an application needs rather than `tree-sitter-languages`.
+
 ## A smaller GPUI Base example
 
 The [GPUI Base WASM showcase](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/wasm) compiles the same [showcase views](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/showcase) used by its native example. To run it independently from the repository root, install the matching `wasm-bindgen-cli` if you have not already done so:

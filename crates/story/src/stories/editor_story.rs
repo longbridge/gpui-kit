@@ -149,7 +149,7 @@ impl EditorStory {
         // WASM ships without tree-sitter grammars, so it swaps in the `syntect`
         // adapter below. Native keeps the built-in tree-sitter highlighter,
         // which parses incrementally on a background thread.
-        #[cfg(target_family = "wasm")]
+        #[cfg(all(target_family = "wasm", not(feature = "tree-sitter")))]
         {
             editor_state.update(cx, |state, cx| {
                 state.set_highlighter_factory(
@@ -492,7 +492,7 @@ impl CompletionProvider for StoryCompletions {
 
 /// A minimal [`InputHighlighter`] built on `syntect`, for WASM builds, which
 /// ship without tree-sitter grammars.
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", not(feature = "tree-sitter")))]
 mod syntect_highlighter {
     use std::{collections::HashMap, ops::Range, sync::LazyLock};
 

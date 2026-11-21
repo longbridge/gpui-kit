@@ -8,15 +8,15 @@ pub enum Language {
     Plain,
     #[cfg(feature = "tree-sitter-astro")]
     Astro,
-    #[cfg(feature = "tree-sitter-bash")]
+    #[cfg(all(feature = "tree-sitter-bash", not(target_family = "wasm")))]
     Bash,
-    #[cfg(feature = "tree-sitter-c")]
+    #[cfg(all(feature = "tree-sitter-c", not(target_family = "wasm")))]
     C,
-    #[cfg(feature = "tree-sitter-cmake")]
+    #[cfg(all(feature = "tree-sitter-cmake", not(target_family = "wasm")))]
     CMake,
-    #[cfg(feature = "tree-sitter-csharp")]
+    #[cfg(all(feature = "tree-sitter-csharp", not(target_family = "wasm")))]
     CSharp,
-    #[cfg(feature = "tree-sitter-cpp")]
+    #[cfg(all(feature = "tree-sitter-cpp", not(target_family = "wasm")))]
     Cpp,
     #[cfg(feature = "tree-sitter-css")]
     Css,
@@ -42,7 +42,7 @@ pub enum Language {
     JsDoc,
     #[cfg(feature = "tree-sitter-kotlin")]
     Kotlin,
-    #[cfg(feature = "tree-sitter-lua")]
+    #[cfg(all(feature = "tree-sitter-lua", not(target_family = "wasm")))]
     Lua,
     #[cfg(feature = "tree-sitter-make")]
     Make,
@@ -62,11 +62,11 @@ pub enum Language {
     Rust,
     #[cfg(feature = "tree-sitter-scala")]
     Scala,
-    #[cfg(feature = "tree-sitter-sql")]
+    #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
     Sql,
     #[cfg(feature = "tree-sitter-svelte")]
     Svelte,
-    #[cfg(feature = "tree-sitter-swift")]
+    #[cfg(all(feature = "tree-sitter-swift", not(target_family = "wasm")))]
     Swift,
     #[cfg(feature = "tree-sitter-toml")]
     Toml,
@@ -97,15 +97,15 @@ impl Language {
             Self::Plain => "text",
             #[cfg(feature = "tree-sitter-astro")]
             Self::Astro => "astro",
-            #[cfg(feature = "tree-sitter-bash")]
+            #[cfg(all(feature = "tree-sitter-bash", not(target_family = "wasm")))]
             Self::Bash => "bash",
-            #[cfg(feature = "tree-sitter-c")]
+            #[cfg(all(feature = "tree-sitter-c", not(target_family = "wasm")))]
             Self::C => "c",
-            #[cfg(feature = "tree-sitter-cmake")]
+            #[cfg(all(feature = "tree-sitter-cmake", not(target_family = "wasm")))]
             Self::CMake => "cmake",
-            #[cfg(feature = "tree-sitter-csharp")]
+            #[cfg(all(feature = "tree-sitter-csharp", not(target_family = "wasm")))]
             Self::CSharp => "csharp",
-            #[cfg(feature = "tree-sitter-cpp")]
+            #[cfg(all(feature = "tree-sitter-cpp", not(target_family = "wasm")))]
             Self::Cpp => "cpp",
             #[cfg(feature = "tree-sitter-css")]
             Self::Css => "css",
@@ -131,7 +131,7 @@ impl Language {
             Self::JsDoc => "jsdoc",
             #[cfg(feature = "tree-sitter-kotlin")]
             Self::Kotlin => "kotlin",
-            #[cfg(feature = "tree-sitter-lua")]
+            #[cfg(all(feature = "tree-sitter-lua", not(target_family = "wasm")))]
             Self::Lua => "lua",
             #[cfg(feature = "tree-sitter-make")]
             Self::Make => "make",
@@ -151,11 +151,11 @@ impl Language {
             Self::Rust => "rust",
             #[cfg(feature = "tree-sitter-scala")]
             Self::Scala => "scala",
-            #[cfg(feature = "tree-sitter-sql")]
+            #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
             Self::Sql => "sql",
             #[cfg(feature = "tree-sitter-svelte")]
             Self::Svelte => "svelte",
-            #[cfg(feature = "tree-sitter-swift")]
+            #[cfg(all(feature = "tree-sitter-swift", not(target_family = "wasm")))]
             Self::Swift => "swift",
             #[cfg(feature = "tree-sitter-toml")]
             Self::Toml => "toml",
@@ -181,15 +181,15 @@ impl Language {
             "json" | "jsonc" => Some(Self::Json),
             #[cfg(feature = "tree-sitter-astro")]
             "astro" => Some(Self::Astro),
-            #[cfg(feature = "tree-sitter-bash")]
+            #[cfg(all(feature = "tree-sitter-bash", not(target_family = "wasm")))]
             "bash" | "sh" => Some(Self::Bash),
-            #[cfg(feature = "tree-sitter-c")]
+            #[cfg(all(feature = "tree-sitter-c", not(target_family = "wasm")))]
             "c" => Some(Self::C),
-            #[cfg(feature = "tree-sitter-cmake")]
+            #[cfg(all(feature = "tree-sitter-cmake", not(target_family = "wasm")))]
             "cmake" => Some(Self::CMake),
-            #[cfg(feature = "tree-sitter-cpp")]
+            #[cfg(all(feature = "tree-sitter-cpp", not(target_family = "wasm")))]
             "cpp" | "c++" => Some(Self::Cpp),
-            #[cfg(feature = "tree-sitter-csharp")]
+            #[cfg(all(feature = "tree-sitter-csharp", not(target_family = "wasm")))]
             "csharp" | "cs" => Some(Self::CSharp),
             #[cfg(feature = "tree-sitter-css")]
             "css" | "scss" => Some(Self::Css),
@@ -215,7 +215,7 @@ impl Language {
             "jsdoc" => Some(Self::JsDoc),
             #[cfg(feature = "tree-sitter-kotlin")]
             "kt" | "kts" | "ktm" | "kotlin" => Some(Self::Kotlin),
-            #[cfg(feature = "tree-sitter-lua")]
+            #[cfg(all(feature = "tree-sitter-lua", not(target_family = "wasm")))]
             "lua" => Some(Self::Lua),
             #[cfg(feature = "tree-sitter-make")]
             "make" | "makefile" => Some(Self::Make),
@@ -235,11 +235,11 @@ impl Language {
             "rust" | "rs" => Some(Self::Rust),
             #[cfg(feature = "tree-sitter-scala")]
             "scala" => Some(Self::Scala),
-            #[cfg(feature = "tree-sitter-sql")]
+            #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
             "sql" => Some(Self::Sql),
             #[cfg(feature = "tree-sitter-svelte")]
             "svelte" => Some(Self::Svelte),
-            #[cfg(feature = "tree-sitter-swift")]
+            #[cfg(all(feature = "tree-sitter-swift", not(target_family = "wasm")))]
             "swift" => Some(Self::Swift),
             #[cfg(feature = "tree-sitter-toml")]
             "toml" => Some(Self::Toml),
@@ -290,7 +290,7 @@ impl Language {
                 languages.push("css");
                 #[cfg(feature = "tree-sitter-html")]
                 languages.push("html");
-                #[cfg(feature = "tree-sitter-sql")]
+                #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
                 languages.push("sql");
                 #[cfg(feature = "tree-sitter-typescript")]
                 languages.push("typescript");
@@ -311,7 +311,7 @@ impl Language {
                 languages.push("css");
                 #[cfg(feature = "tree-sitter-html")]
                 languages.push("html");
-                #[cfg(feature = "tree-sitter-sql")]
+                #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
                 languages.push("sql");
                 languages.push("typescript");
                 #[cfg(feature = "tree-sitter-javascript")]
@@ -419,14 +419,14 @@ impl Language {
                 "",
                 "",
             ),
-            #[cfg(feature = "tree-sitter-c")]
+            #[cfg(all(feature = "tree-sitter-c", not(target_family = "wasm")))]
             Self::C => (
                 tree_sitter_c::LANGUAGE,
                 tree_sitter_c::HIGHLIGHT_QUERY,
                 "",
                 "",
             ),
-            #[cfg(feature = "tree-sitter-cpp")]
+            #[cfg(all(feature = "tree-sitter-cpp", not(target_family = "wasm")))]
             Self::Cpp => (
                 tree_sitter_cpp::LANGUAGE,
                 tree_sitter_cpp::HIGHLIGHT_QUERY,
@@ -475,7 +475,7 @@ impl Language {
                 "",
                 tree_sitter_ruby::LOCALS_QUERY,
             ),
-            #[cfg(feature = "tree-sitter-bash")]
+            #[cfg(all(feature = "tree-sitter-bash", not(target_family = "wasm")))]
             Self::Bash => (
                 tree_sitter_bash::LANGUAGE,
                 tree_sitter_bash::HIGHLIGHT_QUERY,
@@ -496,7 +496,7 @@ impl Language {
                 "",
                 "",
             ),
-            #[cfg(feature = "tree-sitter-swift")]
+            #[cfg(all(feature = "tree-sitter-swift", not(target_family = "wasm")))]
             Self::Swift => (tree_sitter_swift::LANGUAGE, "", "", ""),
             #[cfg(feature = "tree-sitter-scala")]
             Self::Scala => (
@@ -505,14 +505,14 @@ impl Language {
                 "",
                 tree_sitter_scala::LOCALS_QUERY,
             ),
-            #[cfg(feature = "tree-sitter-sql")]
+            #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
             Self::Sql => (
                 tree_sitter_sequel::LANGUAGE,
                 tree_sitter_sequel::HIGHLIGHTS_QUERY,
                 "",
                 "",
             ),
-            #[cfg(feature = "tree-sitter-csharp")]
+            #[cfg(all(feature = "tree-sitter-csharp", not(target_family = "wasm")))]
             Self::CSharp => (tree_sitter_c_sharp::LANGUAGE, "", "", ""),
             #[cfg(feature = "tree-sitter-graphql")]
             Self::GraphQL => (tree_sitter_graphql::LANGUAGE, "", "", ""),
@@ -525,7 +525,7 @@ impl Language {
                 "",
                 "",
             ),
-            #[cfg(feature = "tree-sitter-cmake")]
+            #[cfg(all(feature = "tree-sitter-cmake", not(target_family = "wasm")))]
             Self::CMake => (tree_sitter_cmake::LANGUAGE, "", "", ""),
             #[cfg(feature = "tree-sitter-typescript")]
             Self::TypeScript => (
@@ -590,7 +590,7 @@ impl Language {
                 "",
                 "",
             ),
-            #[cfg(feature = "tree-sitter-lua")]
+            #[cfg(all(feature = "tree-sitter-lua", not(target_family = "wasm")))]
             Self::Lua => (
                 tree_sitter_lua::LANGUAGE,
                 include_str!("languages/lua/highlights.scm"),
@@ -640,17 +640,17 @@ mod tests {
         assert_eq!(Language::Rust.name(), "rust");
         #[cfg(feature = "tree-sitter-go")]
         assert_eq!(Language::Go.name(), "go");
-        #[cfg(feature = "tree-sitter-c")]
+        #[cfg(all(feature = "tree-sitter-c", not(target_family = "wasm")))]
         assert_eq!(Language::C.name(), "c");
-        #[cfg(feature = "tree-sitter-cpp")]
+        #[cfg(all(feature = "tree-sitter-cpp", not(target_family = "wasm")))]
         assert_eq!(Language::Cpp.name(), "cpp");
-        #[cfg(feature = "tree-sitter-sql")]
+        #[cfg(all(feature = "tree-sitter-sql", not(target_family = "wasm")))]
         assert_eq!(Language::Sql.name(), "sql");
         #[cfg(feature = "tree-sitter-javascript")]
         assert_eq!(Language::JavaScript.name(), "javascript");
         #[cfg(feature = "tree-sitter-zig")]
         assert_eq!(Language::Zig.name(), "zig");
-        #[cfg(feature = "tree-sitter-csharp")]
+        #[cfg(all(feature = "tree-sitter-csharp", not(target_family = "wasm")))]
         assert_eq!(Language::CSharp.name(), "csharp");
         #[cfg(feature = "tree-sitter-typescript")]
         assert_eq!(Language::TypeScript.name(), "typescript");
