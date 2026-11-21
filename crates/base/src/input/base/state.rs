@@ -13997,6 +13997,46 @@ impl InputBaseState<crate::input::EditorMode> {
         cx.notify();
     }
 
+    /// Set whether to show the active line only while the editor has focus.
+    ///
+    /// The active line is the caret's line: its line number in the active
+    /// color, the active-line background, and the fold control that follows
+    /// the caret. When true, an editor without focus shows none of them, so
+    /// that of several editors on screen only the focused one shows an active
+    /// line. A popup the editor owns (see [`Self::set_selection_focus`]) keeps
+    /// it shown. Default: false
+    #[doc(hidden)]
+    pub fn active_line_only_when_focused(mut self, only_when_focused: bool) -> Self {
+        if let LayoutMode::CodeEditor {
+            active_line_only_when_focused: value,
+            ..
+        } = &mut self.mode
+        {
+            *value = only_when_focused;
+        }
+        self
+    }
+
+    /// Set whether to show the active line only while focused, at runtime.
+    pub fn set_active_line_only_when_focused(
+        &mut self,
+        only_when_focused: bool,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let LayoutMode::CodeEditor {
+            active_line_only_when_focused: value,
+            ..
+        } = &mut self.mode
+        {
+            if *value == only_when_focused {
+                return;
+            }
+            *value = only_when_focused;
+        }
+        cx.notify();
+    }
+
     /// Set enable/disable automatic closing brackets and quotes.
     ///
     /// When enabled, typing an opener from [`LanguageConfig::auto_closing_pairs`](crate::input::language_config::LanguageConfig::auto_closing_pairs) inserts the

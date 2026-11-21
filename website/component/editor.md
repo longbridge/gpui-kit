@@ -141,6 +141,12 @@ bottom and spring back with precise trackpad or Magic Mouse scrolling, as in the
 [Textarea](./textarea.md#scroll-bounce). The gutter moves with the code; the
 frame and scrollbar stay put. Ordinary mouse-wheel line scrolling does not bounce.
 
+The active line — the caret's line number, the active-line background and the
+fold control that follows the caret — shows whether or not the editor has focus.
+When several editors are on screen, `active_line_only_when_focused(true)` shows
+it only in the focused one. A popup the editor opens, such as its context menu,
+keeps it shown. Change it later with `set_active_line_only_when_focused`.
+
 ## Manual completions
 
 `ShowCompletions` requests suggestions without editing text. It has **no default

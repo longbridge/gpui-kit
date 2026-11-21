@@ -118,6 +118,8 @@ let editor = cx.new(|cx| {
 
 `scroll_bounce(true)` 让超出编辑器高度的代码在触控板或 Magic Mouse 的精细像素滚动到达顶部或底部时越过边缘并弹回，与 [Textarea](./textarea.md#滚动回弹) 相同。行号栏随代码移动，外框和滚动条保持不动；普通鼠标滚轮的按行滚动不触发回弹。
 
+当前行——光标所在行的行号、当前行背景，以及跟随光标的折叠按钮——默认无论编辑器是否获得焦点都会显示。界面上同时有多个编辑器时，`active_line_only_when_focused(true)` 让只有获得焦点的编辑器显示当前行。编辑器打开的弹出层（例如右键菜单）获得焦点时，当前行仍然显示。之后可用 `set_active_line_only_when_focused` 修改。
+
 ## 主动补全
 
 `ShowCompletions` 可以在不修改文本的情况下请求补全，**没有默认快捷键**。应用应结合平台习惯选择绑定，避开 Ctrl+Space 等输入法快捷键。Editor 的绑定可以使用 `Input && mode == editor` 条件；现有 `Input` 绑定仍然有效。
