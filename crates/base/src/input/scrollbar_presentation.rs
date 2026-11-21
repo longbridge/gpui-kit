@@ -1,5 +1,5 @@
 //! Presentation hook for an editor's existing viewport, without a second scroll system.
-use crate::{ScrollbarAxis, ScrollbarHandle};
+use crate::{ScrollbarAxis, ScrollbarHandle, ScrollbarPlacement};
 use gpui::{AnyElement, App, Bounds, Pixels, Point, ScrollHandle, Size, Window};
 use std::rc::Rc;
 
@@ -16,11 +16,18 @@ pub struct EditorScrollbarContext {
     pub(crate) content_height_f64: f64,
     pub(crate) scroll_y_f64: f64,
     pub(crate) axis: ScrollbarAxis,
+    pub(crate) placement: ScrollbarPlacement,
 }
 
 impl EditorScrollbarContext {
     pub fn axis(&self) -> ScrollbarAxis {
         self.axis
+    }
+
+    /// Where the editor places its scrollbars, as set with
+    /// `scrollbar_placement`, for a supplied scrollbar to follow.
+    pub fn placement(&self) -> ScrollbarPlacement {
+        self.placement
     }
 
     /// Authoritative vertical content height in `f64` pixels (including padding

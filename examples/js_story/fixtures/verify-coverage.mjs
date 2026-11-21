@@ -87,6 +87,12 @@ const NOT_MIRRORED = new Map([
     "Theme is not a component. Every route already renders through the " +
       "active theme, so a swatch board would restate what the gallery shows.",
   ],
+  [
+    "editor_diff",
+    "EditorDiffStory lays out two Editors as a side-by-side diff. The " +
+      "editor route already mirrors the component, and the diff adds no " +
+      "constructor of its own.",
+  ],
 ]);
 const inventoryNameFor = (rustStory) => {
   const name = rustStory.replace(/Story$/, "");

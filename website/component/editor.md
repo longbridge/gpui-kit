@@ -141,6 +141,44 @@ bottom and spring back with precise trackpad or Magic Mouse scrolling, as in the
 [Textarea](./textarea.md#scroll-bounce). The gutter moves with the code; the
 frame and scrollbar stay put. Ordinary mouse-wheel line scrolling does not bounce.
 
+The scrollbars sit on the right and bottom edges by default. Use
+`scrollbar_placement` to move them; a vertical scrollbar on the left sits on
+the editor's left edge, over the line numbers, or clear of the text when the
+gutter is on the right. Like the bottom scrollbar over the last line, a top
+scrollbar overlays the first line rather than reserving space for itself.
+`set_scrollbar_placement` replaces the placement at runtime.
+
+In a mirrored pane with a right gutter and left scrollbar, the horizontal track stops before the gutter while the vertical track stays at the outer edge.
+
+```rust
+EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
+```
+
+The gutter with the line numbers and fold icons sits on the left by default.
+In a side-by-side diff, both gutters can face the center, so the line numbers
+of corresponding lines sit next to each other across the divider. The left pane
+puts its gutter on its right with `gutter_side` — mirrored, the fold icons next
+to the text — and its scrollbar on its outer edge:
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+On either side, the fold icons sit next to the text, then the line numbers,
+then the gutter markers, then the strip of the
+[gutter decorations](#gutter-and-overview-ruler-decorations). Use `gutter_order`
+to list the columns from the text outward; a column left out follows the listed
+ones. In a diff, this puts the change markers between the text and the line
+numbers:
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Markers])
+```
+
+The Editor Diff story shows both layouts, with the two panes scrolling together.
+
 ## Manual completions
 
 `ShowCompletions` requests suggestions without editing text. It has **no default
@@ -361,7 +399,9 @@ The Editor showcase's **Decorations** tab demonstrates both collection types.
 
 Use these collections to mark whole lines outside the text, such as lines that a
 version-control diff added, modified, or deleted. A `GutterDecorationCollection`
-draws in a strip before the line numbers. An `OverviewRulerDecorationCollection`
+draws in a strip at the outer edge of the gutter, before the line numbers and
+the line decoration markers; `gutter_order` can move it, as
+`GutterColumn::Decorations`. An `OverviewRulerDecorationCollection`
 draws on the vertical scrollbar track. Monaco calls this track the overview ruler.
 Create one collection for each surface you want to use.
 
@@ -420,11 +460,238 @@ let ruler = editor.update(cx, |state, cx| {
   in the document, and each mark is at least 6 px tall. Touching marks with the same color in the same lane merge.
 - The marks draw under the scrollbar, whether it is Base's scrollbar or one supplied
   with `set_scrollbar_renderer`. They remain visible while the thumb fades.
+  With `scrollbar_placement` on the left, the track and its marks move to the left
+  edge; a supplied scrollbar reads the placement from `EditorScrollbarContext::placement`.
 - Without `with_color`, both collections use the editor foreground color. For
   version-control colors, read the highlight theme's Zed status keys `created`,
   `modified`, and `deleted` with `status.created(cx)`, `status.modified(cx)`, and
   `status.deleted(cx)`. If a key is missing, these methods use `success`,
   `warning`, and `error`.
+
+### Line decorations
+
+A `LineDecorationCollection` paints whole rows: a background band across a row, a
+marker in its gutter, or both. Its entries come from a `LineDecorationProvider`, which
+the editor asks about the visible buffer rows on every frame it paints.
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::App;
+use gpui_kit::component::{
+    ActiveTheme as _,
+    input::{GutterMarker, LineDecoration, LineDecorationProvider},
+};
+
+/// Zero-based buffer rows, sorted.
+struct AddedRows(Vec<usize>);
+
+impl LineDecorationProvider for AddedRows {
+    fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+        let start = self.0.partition_point(|&row| row < rows.start);
+        let end = self.0.partition_point(|&row| row < rows.end);
+        self.0[start..end]
+            .iter()
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_marker(GutterMarker::DiffAdded)
+            })
+            .collect()
+    }
+}
+
+let added = editor.update(cx, |state, cx| {
+    state.create_line_decorations_collection(Rc::new(AddedRows(vec![2, 3, 7])), cx)
+});
+
+added.set_provider(Rc::new(AddedRows(vec![4])), cx); // The next frame asks this one.
+added.clear(cx);   // Stop painting, keep the collection available for reuse.
+added.dispose(cx); // Invalidate this handle and all its clones.
+```
+
+Because the provider is asked again on every frame, it owns its rows: the editor does
+not move them across edits or clear them when the text is replaced, and it ignores
+decorations outside the rows it asked about. Keep the answer cheap by indexing your
+data by row, and read colors from `cx` when asked so they follow theme changes.
+Collections are independent, like the other decoration collections; later ones paint
+over earlier ones.
+
+A background spans the whole row, gutter included, across all of its soft-wrapped
+lines, under the active line, indent guides, selection and text. A marker is painted
+in a slot of its own, shown only while line numbers are. In the default order the
+slot is on the outer side of the line numbers; `gutter_order` can move it nearer the
+text, as IntelliJ IDEA places its markers. The gutter reserves the slot while any
+collection has a provider, and keeps it as marked rows scroll in and out of view.
+The styled editor sizes the marker at 90% of its effective font size and the gap at
+30%. The icon, reserved slot and vertical centering share the same size, so markers
+follow both interface zoom and an editor-specific `.text_size(...)` change.
+`DiffAdded`, `DiffRemoved`, `DiffChanged`, `Conflict`, `Bookmark` and `Breakpoint`
+take the theme's success, danger, warning and info colors;
+`GutterMarker::Custom { icon, color }` paints an icon asset path as given. Neither
+affects hit testing or focus, and neither has a pointer or keyboard action.
+
+`EditorState::row_bounds(row)` returns the band a row occupies in window coordinates,
+where it is painted: below a multi-line inline completion, rows move down with the
+text. It returns `None` while the row is not laid out. The **Decorations** tab of the Editor showcase
+marks its last three rows with a provider.
+
+`EditorState::hit_test(position)` tells what a point in window coordinates is over, as
+last painted: the text, at the offset a click there places the caret at, or the gutter,
+in one of its `GutterColumn`s or in its margin. Either way it names the buffer row beside
+the point, and whether the point is on one of that row's spacer rows. In the gutter the
+row is `None` above the first row and below the last. `EditorState::gutter_bounds()`
+returns the gutter's painted bounds. Both return `None` before the first paint; neither
+changes what the editor does with a click.
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(position) {
+    match hit.area() {
+        InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. } => {
+            // A line number: `hit.row()` is the buffer row.
+        }
+        InputHitArea::Text { offset, .. } => { /* the text, at `offset` */ }
+        _ => {}
+    }
+}
+```
+
+`EditorState::display_map()` returns `&DisplayMap`, a read-only reference to the
+editor-owned text projection. `DisplayMap`, `BufferPoint`, and `DisplayPoint` are
+available from both `gpui_kit::base::input` and `gpui_kit::component::input`.
+The editor state owns updates; applications can query the map to build custom
+minimaps, synchronized views, or buffer/display coordinate conversions.
+
+```rust
+use gpui_kit::base::input::BufferPoint;
+
+let state = editor.read(cx);
+let map = state.display_map();
+let count = map.display_row_count();
+let rows = map.buffer_line_to_display_row_range(0); // None for a folded line
+let display = map.buffer_pos_to_display_pos(BufferPoint::new(0, 0));
+let buffer = map.display_pos_to_buffer_pos(display);
+let version = map.version();
+```
+
+The map covers the whole prepared text, including lines outside the viewport.
+Wrapping follows the latest prepared layout parameters; before text preparation,
+the map has no display rows. `map.version()` changes on edits, rewrapping,
+fold and spacer changes. Compare versions on the same map to invalidate cached queries;
+scrolling does not change the version.
+
+The map excludes inline completion ghost lines. Display row indices multiplied
+by the line height describe text projection positions, not necessarily painted
+positions: multi-line inline completion shifts later text down without changing
+the map or its version. Use `row_bounds` for actual geometry of visible lines.
+
+Buffer and display indices are zero-based. A buffer line hidden by a fold has
+no display-row range (`None`); use the coordinate conversion methods for
+buffer/display positions.
+
+### Spacers
+
+A `Spacer` is a run of blank rows above or below a buffer line. It holds no text: it has
+no line number, the caret steps over it, a click on it lands on the row of text beside
+it, and line decorations, selections, search matches and inline colors pass it by. Its
+rows are display rows like any other, so the scroll height, scrolling to a line and
+`row_bounds` count them. Two editors shown side by side pad their shorter lines with
+spacers, so that lines paired across them start level however each one wraps, as a
+side-by-side diff does.
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::{App, WeakEntity};
+use gpui_kit::component::input::{EditorState, Spacer, SpacerProvider};
+
+/// Pads each line with the rows by which the same line of `other` wraps taller.
+struct Level {
+    this: WeakEntity<EditorState>,
+    other: WeakEntity<EditorState>,
+}
+
+impl SpacerProvider for Level {
+    fn spacers(&self, lines: Range<usize>, cx: &App) -> Vec<Spacer> {
+        let (Some(this), Some(other)) = (self.this.upgrade(), self.other.upgrade()) else {
+            return Vec::new();
+        };
+        let rows = |editor: &EditorState, line| {
+            editor
+                .display_map()
+                .buffer_line_to_display_row_range(line)
+                .map_or(0, |rows| rows.len())
+        };
+        let (this, other) = (this.read(cx), other.read(cx));
+        lines
+            .filter_map(|line| {
+                let (own, theirs) = (rows(this, line), rows(other, line));
+                (theirs > own).then(|| Spacer::below(line, theirs - own))
+            })
+            .collect()
+    }
+}
+
+let level = Rc::new(Level {
+    this: left.downgrade(),
+    other: right.downgrade(),
+});
+left.update(cx, |state, cx| state.set_spacer_provider(Some(level), cx));
+```
+
+Unlike line decorations, spacers move every row below them, so the editor asks for those
+of every line at once and keeps the answer: when the provider is set, after an edit,
+after the text is wrapped again or a fold changes, and when `refresh_spacers` is called.
+It asks during layout, once the text is wrapped to the editor's width, and outside any
+update of the editor, so the provider may read this editor and others. When the answer
+depends on another editor's rows, call `refresh_spacers` when that editor's
+`display_map().version()` changes. `Spacer::above(0, rows)` pads the top of the text, and
+`with_background` fills the rows, gutter included. A spacer on a line hidden by a fold,
+or past the last line, is not shown. The **Editor Diff** story wraps both sides and pads
+them level.
+
+In the display map, spacer rows are display rows: `display_row_count()` counts them,
+`buffer_line_to_display_row_range(line)` holds only the rows of the line's text,
+`display_row_to_buffer_line(row)` reads a spacer row as the line it stands beside, and
+`is_spacer_row(row)` tells a spacer row from a row of text. `version()` changes when the
+spacers do, so a cache of rows stays valid; a provider answering with the spacers already
+shown leaves it unchanged, so refreshing on a version change settles.
+
+## Gutter context menu
+
+`Editor::context_menu_with` builds the right-click menu knowing what it was opened on:
+besides the capabilities, it is handed the [`hit_test`](#line-decorations) of the click,
+so a menu can be about a row of the gutter and leave the text its usual one, which
+`default_context_menu` builds. A right-click on the gutter moves the caret to the
+row, as one on the text does; `gutter_context_menu_moves_cursor(false)` keeps the
+selection instead while the gutter's menu is open.
+
+```rust
+use gpui_kit::component::input::{Editor, EditorState, default_context_menu};
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .line_number(true)
+        .gutter_context_menu_moves_cursor(false)
+});
+
+Editor::new(&editor).context_menu_with(|menu, capabilities, hit, _, _| {
+    match hit {
+        Some(hit) if hit.is_gutter() => match hit.row() {
+            Some(row) => menu
+                .menu(format!("Bookmark Line {}", row + 1), Box::new(ToggleBookmark))
+                .menu(format!("Copy Line {}", row + 1), Box::new(CopyLine)),
+            None => menu, // below the last line: no menu
+        },
+        _ => default_context_menu(menu, capabilities),
+    }
+})
+```
+
+The builder runs when the menu opens; remember the row there for the actions to read.
+`examples/editor_gutter_menu` bookmarks, selects and copies the line clicked.
 
 ## Value and events
 

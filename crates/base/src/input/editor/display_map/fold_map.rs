@@ -51,6 +51,9 @@ pub(super) struct FoldMap {
     /// Used for lazy evaluation to avoid expensive rebuilds on every text change
     needs_rebuild: bool,
 
+    /// Bumped whenever the folded ranges change.
+    version: usize,
+
     /// Cached wrap_row_count from last rebuild
     /// Used to detect if WrapMap changed and rebuild is needed
     cached_wrap_row_count: usize,
@@ -66,6 +69,7 @@ impl FoldMap {
             folded: Vec::new(),
             needs_rebuild: true,
             cached_wrap_row_count: 0,
+            version: 0,
         }
     }
 
@@ -167,11 +171,15 @@ impl FoldMap {
         self.candidates = candidates;
 
         // Remove any folded ranges that are no longer in candidates
+        let folded = self.folded.len();
         self.folded.retain(|fold| {
             self.candidates
                 .iter()
                 .any(|c| c.start_line == fold.start_line)
         });
+        if self.folded.len() != folded {
+            self.version = self.version.wrapping_add(1);
+        }
     }
 
     /// Merge new candidates extracted from an edited region into existing candidates.
@@ -205,12 +213,17 @@ impl FoldMap {
                     self.folded.push(*candidate);
                     self.folded.sort_by_key(|r| r.start_line);
                     self.needs_rebuild = true;
+                    self.version = self.version.wrapping_add(1);
                 }
             }
         } else {
             // Remove from folded
+            let folded = self.folded.len();
             self.folded.retain(|f| f.start_line != start_line);
             self.needs_rebuild = true;
+            if self.folded.len() != folded {
+                self.version = self.version.wrapping_add(1);
+            }
         }
     }
 
@@ -236,6 +249,12 @@ impl FoldMap {
         &self.candidates
     }
 
+    /// A number that changes whenever the folded ranges change.
+    #[inline]
+    pub(super) fn version(&self) -> usize {
+        self.version
+    }
+
     /// Get all currently folded ranges
     #[inline]
     pub(super) fn folded_ranges(&self) -> &[FoldRange] {
@@ -245,7 +264,10 @@ impl FoldMap {
     /// Clear all folds
     #[inline]
     pub(super) fn clear_folds(&mut self) {
-        self.folded.clear();
+        if !self.folded.is_empty() {
+            self.folded.clear();
+            self.version = self.version.wrapping_add(1);
+        }
     }
 
     /// Adjust folds and candidates after a text edit.
@@ -262,6 +284,7 @@ impl FoldMap {
     ) {
         // Adjust folded ranges
         if !self.folded.is_empty() {
+            self.version = self.version.wrapping_add(1);
             self.folded.retain(|fold| {
                 !(fold.start_line <= edit_end_line && fold.end_line >= edit_start_line)
             });

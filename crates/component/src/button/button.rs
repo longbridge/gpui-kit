@@ -874,9 +874,7 @@ impl RenderOnce for Button {
                 gpui::accesskit::Toggled::False
             })
         })
-        .when_some(self.expanded, |this, expanded| {
-            this.aria_expanded(expanded)
-        })
+        .when_some(self.expanded, |this, expanded| this.aria_expanded(expanded))
         .track_focus(&focus_handle)
         .tab_index(self.tab_index)
         .tab_stop(self.tab_stop)
