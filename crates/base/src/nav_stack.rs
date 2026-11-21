@@ -788,10 +788,9 @@ mod tests {
             let stack = stack.clone();
             move |_, _| Host { stack }
         });
-        stack.update(cx, |stack, cx| {
-            stack.push(root, NavMotion::Immediate, cx);
-            stack.push(second, NavMotion::Animated, cx);
-        });
+        stack.update(cx, |stack, cx| stack.push(root, NavMotion::Immediate, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        stack.update(cx, |stack, cx| stack.push(second, NavMotion::Animated, cx));
 
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(stack.read_with(cx, |stack, _| stack.transit.is_some()));
@@ -808,6 +807,24 @@ mod tests {
         stack.update(cx, |stack, cx| {
             stack.pop(NavMotion::Immediate, cx);
         });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(stack.read_with(cx, |stack, _| stack.transit.is_none()));
+    }
+
+    #[gpui::test]
+    fn a_page_covered_before_it_is_drawn_is_dropped_at_once(cx: &mut TestAppContext) {
+        let stack = cx.new(|_| NavStackState::new());
+        let (root, second) = (page(cx), page(cx));
+        let (_, cx) = cx.add_window_view({
+            let stack = stack.clone();
+            move |_, _| Host { stack }
+        });
+        stack.update(cx, |stack, cx| {
+            stack.push(root, NavMotion::Immediate, cx);
+            stack.push(second, NavMotion::Animated, cx);
+        });
+
+        // The root was never shown, so it has no exit to run.
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(stack.read_with(cx, |stack, _| stack.transit.is_none()));
     }

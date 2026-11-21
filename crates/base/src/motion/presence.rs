@@ -104,6 +104,8 @@ impl Presence {
                 interpolate(sampled, target, self.transition.sample(initial)),
                 status,
             )
+        } else if snapshot.from == snapshot.target {
+            return stable_sample(self.present);
         } else {
             (sampled, status)
         };

@@ -1645,6 +1645,27 @@ mod tests {
     }
 
     #[gpui::test]
+    fn presence_first_sampled_absent_is_absent_without_a_pending_frame(cx: &mut TestAppContext) {
+        let fixture = PresenceFixture::open(cx, false);
+        let absent = *fixture.samples.borrow().last().unwrap();
+        assert_eq!(absent.phase, PresencePhase::Absent);
+        assert_eq!(absent.progress, 0.0);
+        assert!(!absent.should_render());
+        assert_eq!(
+            fixture
+                .window
+                .update(cx, |_, window, cx| window.simulate_next_frame(cx))
+                .unwrap(),
+            0
+        );
+
+        let entering = fixture.render(cx, true);
+        assert_eq!(entering.phase, PresencePhase::Entering);
+        assert_eq!(entering.progress, 0.0);
+        assert!(entering.should_render());
+    }
+
+    #[gpui::test]
     fn reduced_motion_resolves_presence_without_a_pending_frame(cx: &mut TestAppContext) {
         cx.update(|cx| cx.set_reduce_motion(true));
         let fixture = PresenceFixture::open(cx, true);
