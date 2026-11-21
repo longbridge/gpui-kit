@@ -703,6 +703,37 @@ impl TextView {
         self
     }
 
+    /// Register a custom block-level HTML parser.
+    ///
+    /// The parser sees every element of the parsed DOM before the built-in
+    /// tag handling and must be independent of [`Window`] / [`App`]. Store
+    /// any parsed data in a [`MarkdownNode`] and render it later with
+    /// [`Self::html_block_renderer`]. Returning `None` leaves the element to
+    /// the built-in handling.
+    pub fn html_block_parser<F>(mut self, parser: F) -> Self
+    where
+        F: Fn(&markup5ever_rcdom::Node) -> Option<MarkdownNode> + Send + Sync + 'static,
+    {
+        Arc::make_mut(&mut self.markdown_extensions).push_html_block_parser(parser);
+        self
+    }
+
+    /// Register a renderer for a custom block-level HTML node name.
+    ///
+    /// Custom HTML blocks share the name-keyed renderer registry with custom
+    /// Markdown blocks; registering the same name replaces the prior entry.
+    pub fn html_block_renderer<F, E>(
+        self,
+        name: impl Into<SharedString>,
+        renderer: F,
+    ) -> Self
+    where
+        F: Fn(&MarkdownNode, &mut Window, &mut App) -> E + Send + Sync + 'static,
+        E: IntoElement,
+    {
+        self.markdown_block_renderer(name, renderer)
+    }
+
     /// Apply a reusable text view plugin.
     pub fn plugin<P>(self, plugin: P) -> Self
     where
@@ -3037,6 +3068,73 @@ mod tests {
         let view = TextView::markdown("plugin-test", "").plugin(DummyTextViewPlugin);
 
         assert!(view.selectable);
+    }
+
+    #[gpui::test]
+    fn html_block_parser_claims_elements_before_builtin_handling(cx: &mut TestAppContext) {
+        use crate::MarkdownNode;
+        cx.update(crate::init);
+        let renders = Arc::new(AtomicUsize::new(0));
+        struct HtmlBlockRoot {
+            view: Entity<TextViewState>,
+            renders: Arc<AtomicUsize>,
+        }
+        impl Render for HtmlBlockRoot {
+            fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+                let renders = self.renders.clone();
+                div()
+                    .w(px(300.))
+                    .h(px(400.))
+                    .text_size(px(16.))
+                    .child(crate::TextSelectionLayer)
+                    .child(
+                        TextView::new(&self.view).html_block_parser(|node| {
+                            let markup5ever_rcdom::NodeData::Element { ref name, ref attrs, .. } =
+                                node.data
+                            else {
+                                return None;
+                            };
+                            let claimed = &*name.local == "div"
+                                && attrs
+                                    .borrow()
+                                    .iter()
+                                    .any(|attr| &*attr.name.local == "data-mb");
+                            claimed.then(|| {
+                                MarkdownNode::new("mail-block", 7usize).text("claimed text")
+                            })
+                        })
+                        .html_block_renderer("mail-block", move |node: &MarkdownNode, _w, _c| {
+                            assert_eq!(node.data::<usize>(), Some(&7));
+                            renders.fetch_add(1, Ordering::Relaxed);
+                            div()
+                                .debug_selector(|| "html-block-marker".into())
+                                .w(px(40.))
+                                .h(px(20.))
+                        }),
+                    )
+            }
+        }
+        let (_root, cx) = cx.add_window_view(|_, cx| HtmlBlockRoot {
+            view: cx.new(|cx| {
+                TextViewState::html("<p>leading</p><div data-mb=\"7\"></div>", cx)
+            }),
+            renders: renders.clone(),
+        });
+        cx.run_until_parked();
+        // First draw registers the extensions on the state and schedules the
+        // re-parse; the second draws the reparsed document.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let marker = cx
+            .debug_bounds("html-block-marker")
+            .expect("custom html block should render");
+        assert!(marker.size.height > px(0.));
+        assert!(
+            renders.load(Ordering::Relaxed) > 0,
+            "custom html block renderer should have run"
+        );
     }
 
     #[test]
