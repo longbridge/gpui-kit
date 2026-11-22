@@ -23,7 +23,9 @@ const MAX_INJECTION_LANGUAGE_BYTES: usize = 64;
 /// Parse attempts, not resulting layers: a failed parse still spends budget.
 /// Matches past it keep host highlighting but get no injected tokens.
 const MAX_NON_COMBINED_INJECTION_PARSES: usize = 512;
-const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
+/// Budget of one injection layer when the caller bounded the parse. A layer
+/// past it is dropped; an unbounded parse gives its layers no budget either.
+pub(crate) const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
 
 /// A syntax highlighter that supports incremental parsing, multiline text,
 /// and caching of highlight results.
@@ -593,7 +595,8 @@ impl SyntaxHighlighter {
     /// and returns `false`. On timeout the old tree is preserved so highlighting
     /// still works with stale data, but `self.text` is updated so that the
     /// caller can send the current text to a background parse.
-    /// When `timeout` is `None`, parsing runs to completion and always returns `true`.
+    /// When `timeout` is `None`, parsing runs to completion and always returns `true`;
+    /// this includes the injection layers, which otherwise each get a fixed budget.
     pub fn update(
         &mut self,
         edit: Option<InputEdit>,
@@ -681,7 +684,10 @@ impl SyntaxHighlighter {
         let new_tree = new_tree.unwrap();
         self.tree = Some(new_tree.clone());
         self.text = text.clone();
-        self.parse_injection_layers(&new_tree);
+        // A bounded parse keeps the fixed per-layer budget; an unbounded one
+        // lets every layer run to completion like the host grammar.
+        let injection_timeout = timeout.map(|_| INJECTION_PARSE_TIMEOUT);
+        self.parse_injection_layers(&new_tree, injection_timeout);
         true
     }
 
@@ -710,10 +716,14 @@ impl SyntaxHighlighter {
     /// Compute injection layers from a freshly-parsed main tree.
     /// This is pure computation with no side effects and is safe to run on a
     /// background thread.
+    ///
+    /// `timeout` bounds the parse of each layer; a layer past it is dropped.
+    /// `None` parses every layer to completion.
     pub(crate) fn compute_injection_layers(
         data: InjectionParseData,
         tree: &Tree,
         text: &Rope,
+        timeout: Option<Duration>,
     ) -> Vec<InjectionLayer> {
         struct CombinedRanges {
             ranges: Vec<tree_sitter::Range>,
@@ -904,6 +914,7 @@ impl SyntaxHighlighter {
                     old_tree,
                     false,
                     text,
+                    timeout,
                 ) {
                     new_layers.push(layer);
                 }
@@ -931,6 +942,7 @@ impl SyntaxHighlighter {
                 old_tree,
                 true,
                 text,
+                timeout,
             ) {
                 new_layers.push(layer);
             }
@@ -941,6 +953,7 @@ impl SyntaxHighlighter {
 
     /// Parse one injection layer over the given included ranges.
     /// `old_tree`, when given, has been edited to match `text`.
+    /// Returns `None` when the parse exceeds `timeout`.
     fn parse_injection_layer(
         language_name: &SharedString,
         highlight_query: Arc<Query>,
@@ -948,6 +961,7 @@ impl SyntaxHighlighter {
         old_tree: Option<&Tree>,
         combined: bool,
         text: &Rope,
+        timeout: Option<Duration>,
     ) -> Option<InjectionLayer> {
         let (mut parser, grammar) = LanguageRegistry::singleton().parser(language_name).ok()?;
         parser.set_language(&grammar).ok()?;
@@ -955,12 +969,16 @@ impl SyntaxHighlighter {
         let parse_start = Instant::now();
         let mut timed_out = false;
         let mut progress = |_: &tree_sitter::ParseState| -> ControlFlow<()> {
-            if parse_start.elapsed() > INJECTION_PARSE_TIMEOUT {
+            let Some(budget) = timeout else {
+                return ControlFlow::Continue(());
+            };
+
+            if parse_start.elapsed() > budget {
                 timed_out = true;
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
+                return ControlFlow::Break(());
             }
+
+            ControlFlow::Continue(())
         };
         let options = ParseOptions::new().progress_callback(&mut progress);
 
@@ -1005,7 +1023,7 @@ impl SyntaxHighlighter {
 
     /// Parse injection layers after the main tree is updated.
     /// pattern: parse once in update, query many times in render.
-    fn parse_injection_layers(&mut self, tree: &Tree) {
+    fn parse_injection_layers(&mut self, tree: &Tree, timeout: Option<Duration>) {
         let Some(query) = self.injections_query.clone() else {
             self.injection_layers.clear();
             return;
@@ -1020,7 +1038,7 @@ impl SyntaxHighlighter {
                 .map(ReusableInjectionLayer::from)
                 .collect(),
         };
-        self.injection_layers = Self::compute_injection_layers(data, tree, &self.text);
+        self.injection_layers = Self::compute_injection_layers(data, tree, &self.text, timeout);
     }
 
     /// Match the visible ranges of nodes in the Tree for highlighting.
@@ -1898,6 +1916,31 @@ $x = 1;
                 .all(|layer| layer.language_name.as_ref() != "markdown_inline"),
             "plain inline ranges should not create markdown_inline injection layers"
         );
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-languages")]
+    fn test_markdown_inline_injection_without_timeout_runs_to_completion() {
+        fn emphasis_of_b(markdown: &str) -> Option<gpui::FontStyle> {
+            let rope = Rope::from_str(markdown);
+            let mut highlighter = SyntaxHighlighter::new("markdown");
+            assert!(highlighter.update(None, &rope, None));
+            let b = markdown.find("*b*").unwrap() + 1;
+            let theme = HighlightTheme::default_dark();
+            highlighter.styles(&(b..b + 1), theme.as_ref())[0]
+                .1
+                .font_style
+        }
+
+        let heading = "# A *b* c\n\n";
+        assert_eq!(emphasis_of_b(heading), Some(gpui::FontStyle::Italic));
+
+        // 3000 inline ranges, 180 KB: under the injection count and size
+        // limits, but a parse of the combined inline layer well over
+        // `INJECTION_PARSE_TIMEOUT`. Without a timeout it must still finish.
+        let paragraph = "Some *text* with `code` and a [link](https://example.com).\n\n";
+        let long = format!("{heading}{}", paragraph.repeat(3000));
+        assert_eq!(emphasis_of_b(&long), Some(gpui::FontStyle::Italic));
     }
 
     #[test]
