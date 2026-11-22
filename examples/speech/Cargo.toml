@@ -6,7 +6,6 @@ publish = false
 edition.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 cpal = "0.15.3"
 gpui-kit = { workspace = true, features = ["speech"] }
 

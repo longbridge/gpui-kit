@@ -7,7 +7,6 @@ edition = "2024"
 
 [dependencies]
 gpui-kit.workspace = true
-anyhow.workspace = true
 sysinfo = "0.37"
 smol = "2"
 battery = "0.7"
