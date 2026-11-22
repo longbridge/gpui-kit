@@ -1624,10 +1624,6 @@ fn line_ranges(
             if end < hard_line.end && spans.fit(start..hard_line.end, wrap_width) {
                 end = hard_line.end;
             }
-            // UAX #14 never breaks before a closing mark, so a break there is
-            // the wrapper's last resort: a word or code span as wide as the
-            // line. Let the marks hang past the edge, as print does, rather
-            // than start the next line alone.
             if end > start && end < hard_line.end {
                 end += hanging_len(flow, end, hard_line.end);
             }
@@ -1643,9 +1639,6 @@ fn line_ranges(
     ranges
 }
 
-/// The length of the closing marks (at most two) that end a word at `ix`, and
-/// of the spaces after them, before `end`. Marks inside a word (`a.b`, `:a`)
-/// don't hang.
 fn hanging_len(flow: &FlowItems, ix: usize, end: usize) -> usize {
     let Some((_, MeasureItem::Text { text, .. }, item)) = flow.over(&(ix..end)).next() else {
         return 0;
@@ -2674,7 +2667,6 @@ mod tests {
                 links: vec![],
                 highlights: vec![(code..code + span.len(), code_highlight.clone())],
             }];
-            // The code span alone fills the line.
             let wrap_width = WideMonoTextSystem::width_of(span, MONO, font_size);
             let layout = window.update(|_, window, cx| {
                 layout_flow(&items, &[None], &text_style, Some(wrap_width), window, cx)
@@ -2691,13 +2683,10 @@ mod tests {
             lines.into_iter().map(|(_, line)| line).collect::<Vec<_>>()
         };
 
-        // The period and the space after it stay with the span, so the next
-        // line starts with a word.
         assert_eq!(
             lines("It's transform_columns. Next.", "transform_columns"),
             ["It's ", "transform_columns. ", "Next."]
         );
-        // A mark inside a word doesn't hang: the span keeps its `:a`.
         let wrapped = lines("Use transform_columns:a now", "transform_columns:a");
         let wrapped: Vec<_> = wrapped.iter().map(|line| line.trim()).collect();
         assert_eq!(wrapped, ["Use", "transform_columns:a", "now"]);
