@@ -6,6 +6,8 @@ mod composition;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 
 #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
 use composition::NativeWebViewSurface;
@@ -56,7 +58,8 @@ impl WebViewHandle {
 ///
 /// With the `gpui-fast` feature, macOS and Linux host the native view in a window
 /// composition surface, so deferred GPUI overlays render above the page. Without it, the
-/// native view covers GPUI content in its bounds and extends past a container that clips it.
+/// native view covers GPUI content in its bounds. On Windows it can still clip to its
+/// container; elsewhere it extends past a container that clips it.
 ///
 /// [experimental]
 pub struct WebView {
@@ -68,6 +71,8 @@ pub struct WebView {
     zoom: Cell<f64>,
     /// Whether the last geometry update failed, so each failure is logged once until it recovers.
     geometry_failed: Cell<bool>,
+    #[cfg(target_os = "windows")]
+    clip: windows::NativeClip,
     #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
     composition: Option<NativeWebViewSurface>,
     /// The GPUI scale factor the page zoom was last matched to.
@@ -116,6 +121,8 @@ impl WebView {
             bounds: Bounds::default(),
             zoom: Cell::new(1.0),
             geometry_failed: Cell::new(false),
+            #[cfg(target_os = "windows")]
+            clip: windows::NativeClip::default(),
             webview: Rc::new(webview),
             #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
             composition,
@@ -172,13 +179,17 @@ impl WebView {
                 .set_bounds(&self.webview, bounds)
                 .map_err(|error| wry::Error::Io(std::io::Error::other(error)));
         }
+        #[cfg(target_os = "windows")]
+        self.clip
+            .clear(&self.webview)
+            .map_err(|error| wry::Error::Io(std::io::Error::other(error)))?;
         self.webview.set_bounds(bounds)
     }
 
     /// Apply full document bounds and an inherited clip without changing the DOM viewport.
     /// Empty clips hide the native surface while preserving the loaded document.
-    /// Partial clipping requires native window composition; without it, the native view
-    /// takes the full document bounds and extends past the clip.
+    /// Partial clipping is supported on Windows and with native window composition.
+    /// Otherwise, the native view takes the full document bounds and extends past the clip.
     pub fn set_geometry(
         &self,
         document: Bounds<Pixels>,
@@ -201,6 +212,12 @@ impl WebView {
             surface.set_geometry(&self.webview, document, visible)?;
             surface.set_visible(true)?;
             self.webview.set_visible(true)?;
+            return Ok(());
+        }
+        #[cfg(target_os = "windows")]
+        if visible != document {
+            self.clip.set_geometry(&self.webview, document, visible)?;
+            self.set_native_visible(true)?;
             return Ok(());
         }
         #[cfg(target_os = "linux")]
