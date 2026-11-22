@@ -23,13 +23,17 @@ impl Render for Example {
 }
 
 fn main() {
-    gpui_kit::application().run(move |cx| {
-        // This must be called before using any GPUI Component features.
-        gpui_kit::init(cx);
+    gpui_kit::application()
+        // Ships the bundled icon set. Without it, any icon-bearing component
+        // (button icons, `Input` affixes, `TitleBar` controls, …) renders blank.
+        .with_assets(gpui_kit::assets::Assets)
+        .run(move |cx| {
+            // This must be called before using any GPUI Component features.
+            gpui_kit::init(cx);
 
-        // Opens a window with a `Root` wrapping the view, so dialogs, sheets,
-        // notifications and menus work in it.
-        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Example))
-            .expect("Failed to open window");
-    });
+            // Opens a window with a `Root` wrapping the view, so dialogs, sheets,
+            // notifications and menus work in it.
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Example))
+                .expect("Failed to open window");
+        });
 }
