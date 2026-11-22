@@ -870,6 +870,9 @@ impl RenderOnce for Input {
             })
             .items_center()
             .gap(gap_x)
+            // The text element paints in the color it inherits, and a host
+            // other than `Root` may hand down none.
+            .text_color(cx.theme().foreground)
             .refine_style(&self.style)
             .when(
                 focused && self.appearance && self.bordered && self.focus_bordered,
@@ -1484,5 +1487,58 @@ mod tests {
 
         cx.update(|_, cx| set_native_touch_selection(false, cx));
         assert!(overlay(cx) > 0);
+    }
+
+    /// Records the text color the input frame hands down to its addons.
+    #[derive(IntoElement)]
+    struct InheritedColor(Rc<std::cell::Cell<Option<Hsla>>>);
+
+    impl RenderOnce for InheritedColor {
+        fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+            self.0.set(Some(window.text_style().color));
+            div().w(px(8.)).h(px(8.))
+        }
+    }
+
+    /// An input placed straight in a window, with no `Root` to set the text
+    /// color, as a host that embeds it in its own element tree places it.
+    struct BareInput {
+        state: Entity<InputState>,
+        color: Rc<std::cell::Cell<Option<Hsla>>>,
+        text_color: Option<Hsla>,
+    }
+
+    impl gpui::Render for BareInput {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            Input::new(&self.state)
+                .prefix(InheritedColor(self.color.clone()))
+                .when_some(self.text_color, |this, color| this.text_color(color))
+        }
+    }
+
+    #[gpui::test]
+    fn input_text_takes_the_theme_foreground_without_root(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+
+        let foreground = cx.update(|cx| {
+            crate::init(cx);
+            let theme = crate::Theme::global_mut(cx);
+            theme.foreground = gpui::white();
+            theme.foreground
+        });
+        for (text_color, expected) in [(None, foreground), (Some(gpui::red()), gpui::red())] {
+            let color = Rc::new(std::cell::Cell::new(None));
+            let (_, cx) = cx.add_window_view({
+                let color = color.clone();
+                move |window, cx| BareInput {
+                    state: cx.new(|cx| InputState::new(window, cx)),
+                    color,
+                    text_color,
+                }
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(color.get(), Some(expected));
+        }
     }
 }

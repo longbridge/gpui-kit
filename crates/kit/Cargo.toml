@@ -16,7 +16,9 @@ edition.workspace = true
 workspace = true
 
 [features]
-default = ["component", "assets"]
+default = ["component", "assets", "x11"]
+# Linux and FreeBSD keep Wayland enabled when X11 is omitted.
+x11 = ["gpui_platform/x11", "gpui-fast-platform?/x11"]
 # Select GPUI Fast across the core, platforms, and already-enabled layers.
 gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform", "dep:gpui-fast-web", "gpui-base/gpui-fast", "gpui-component?/gpui-fast", "gpui-kit-assets?/gpui-fast"]
 # The styled component library, `gpui_kit::component`. Initializes `gpui-base` too.

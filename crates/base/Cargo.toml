@@ -90,8 +90,8 @@ criterion = "0.8"
 gpui-base = { path = ".", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support", "bench-support"] }
 gpui-fast = { workspace = true, features = ["test-support", "bench-support"] }
-gpui_platform = { workspace = true, features = ["bench-support"] }
-gpui-fast-platform = { workspace = true, features = ["bench-support"] }
+gpui_platform = { workspace = true, features = ["bench-support", "x11"] }
+gpui-fast-platform = { workspace = true, features = ["bench-support", "x11"] }
 # Same minor version as `gpui`'s own, so the crate is shared instead of
 # compiled twice: the test-support image helpers build `Frame`s.
 image = "0.25"
