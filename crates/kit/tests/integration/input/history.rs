@@ -386,15 +386,15 @@ fn normalized_paste_undo_restores_unicode_selection_in_both_directions(cx: &mut 
             );
             cx.write_to_clipboard(ClipboardItem::new_string("中\r\n\t文".into()));
             window.press(PASTE, cx);
-            assert_eq!(window.find("text").value(), Some("[中\t文]"));
+            assert_eq!(window.find("text").value(), Some("[中文]"));
             window.press(UNDO, cx);
             assert_eq!(window.find("text").value(), Some("[e\u{301}🦀]"));
             let state = content.read(cx).text.read(cx);
             assert_eq!(state.selected_range(), 1..8);
             assert_eq!(state.cursor(), if reversed { 1 } else { 8 });
             window.press(REDO, cx);
-            assert_eq!(window.find("text").value(), Some("[中\t文]"));
-            assert_eq!(content.read(cx).text.read(cx).selected_range(), 8..8);
+            assert_eq!(window.find("text").value(), Some("[中文]"));
+            assert_eq!(content.read(cx).text.read(cx).selected_range(), 7..7);
         })
         .unwrap();
     }

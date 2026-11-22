@@ -493,7 +493,7 @@ fn shift_home_and_end_cross_the_anchor_without_resetting_it(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
-fn clipboard_normalization_preserves_tabs_and_unicode_graphemes(cx: &mut TestAppContext) {
+fn clipboard_normalization_strips_tabs_and_preserves_unicode_graphemes(cx: &mut TestAppContext) {
     let (handle, form) = editing_form(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         let input = form.read(cx).first.clone();
@@ -503,7 +503,7 @@ fn clipboard_normalization_preserves_tabs_and_unicode_graphemes(cx: &mut TestApp
         let payload = "e\u{301}\r\n\t👩‍💻\r中\n";
         cx.write_to_clipboard(ClipboardItem::new_string(payload.into()));
         window.press("secondary-v", cx);
-        let value = "[e\u{301}\t👩‍💻中]";
+        let value = "[e\u{301}👩‍💻中]";
         let end = value.len() - 1;
         assert_edit(&input, value, end..end, end, cx);
         window.press("left", cx);
@@ -514,7 +514,7 @@ fn clipboard_normalization_preserves_tabs_and_unicode_graphemes(cx: &mut TestApp
         window.input("X", cx);
         assert_eq!(
             window.find("editing-first").value(),
-            Some("[e\u{301}\tX中]")
+            Some("[e\u{301}X中]")
         );
         window.press("home", cx);
         window.press("right", cx);
@@ -522,7 +522,7 @@ fn clipboard_normalization_preserves_tabs_and_unicode_graphemes(cx: &mut TestApp
         window.press("shift-right", cx);
         assert_eq!(input.read(cx).selected_value(), "e\u{301}");
         window.press("delete", cx);
-        assert_eq!(window.find("editing-first").value(), Some("[\tX中]"));
+        assert_eq!(window.find("editing-first").value(), Some("[X中]"));
     })
     .unwrap();
 }
