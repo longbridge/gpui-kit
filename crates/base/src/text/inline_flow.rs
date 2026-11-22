@@ -1624,6 +1624,13 @@ fn line_ranges(
             if end < hard_line.end && spans.fit(start..hard_line.end, wrap_width) {
                 end = hard_line.end;
             }
+            // UAX #14 never breaks before a closing mark, so a break there is
+            // the wrapper's last resort: a word or code span as wide as the
+            // line. Let the marks hang past the edge, as print does, rather
+            // than start the next line alone.
+            if end > start && end < hard_line.end {
+                end += hanging_len(flow, end, hard_line.end);
+            }
             ranges.push(start..end);
             start = end;
         }
@@ -1634,6 +1641,32 @@ fn line_ranges(
     }
 
     ranges
+}
+
+/// The length of the closing marks (at most two) that end a word at `ix`, and
+/// of the spaces after them, before `end`. Marks inside a word (`a.b`, `:a`)
+/// don't hang.
+fn hanging_len(flow: &FlowItems, ix: usize, end: usize) -> usize {
+    let Some((_, MeasureItem::Text { text, .. }, item)) = flow.over(&(ix..end)).next() else {
+        return 0;
+    };
+    let rest = &text[ix - item.start..end.min(item.end) - item.start];
+    let marks: usize = rest
+        .chars()
+        .take(2)
+        .take_while(|c| {
+            matches!(
+                c,
+                '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '\u{201D}' | '\u{2019}'
+            )
+        })
+        .map(char::len_utf8)
+        .sum();
+    let after = &rest[marks..];
+    if marks == 0 || after.starts_with(|c: char| !c.is_whitespace()) {
+        return 0;
+    }
+    marks + after.len() - after.trim_start_matches(' ').len()
 }
 
 /// How far past its start the first line of a hard line hands the wrapper
@@ -2614,6 +2647,60 @@ mod tests {
                 .any(|(text, y)| *text == "end" && *y > first_y),
             "the trailing word wraps to a second line: {text_lines:?}"
         );
+    }
+    #[test]
+    fn a_period_after_inline_code_as_wide_as_the_line_hangs() {
+        use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::{AbsoluteLength, Empty, HighlightStyle, TestApp};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let font_size = px(10.);
+        let text_style = TextStyle {
+            font_family: SharedString::from(BODY),
+            font_size: AbsoluteLength::Pixels(font_size),
+            ..Default::default()
+        };
+        let code_highlight = InlineHighlight {
+            style: HighlightStyle::default(),
+            font_family: Some(SharedString::from(MONO)),
+            font_size_scale: None,
+            code_style: None,
+        };
+        let mut lines = |text: &'static str, span: &str| {
+            let code = text.find(span).unwrap();
+            let items = vec![MeasureItem::Text {
+                text: SharedString::from(text),
+                links: vec![],
+                highlights: vec![(code..code + span.len(), code_highlight.clone())],
+            }];
+            // The code span alone fills the line.
+            let wrap_width = WideMonoTextSystem::width_of(span, MONO, font_size);
+            let layout = window.update(|_, window, cx| {
+                layout_flow(&items, &[None], &text_style, Some(wrap_width), window, cx)
+            });
+            let mut lines: Vec<(Pixels, String)> = Vec::new();
+            for fragment in &layout.fragments {
+                if let PositionedFragment::Text { text, origin, .. } = fragment {
+                    match lines.last_mut() {
+                        Some((y, line)) if *y == origin.y => line.push_str(&text),
+                        _ => lines.push((origin.y, text.to_string())),
+                    }
+                }
+            }
+            lines.into_iter().map(|(_, line)| line).collect::<Vec<_>>()
+        };
+
+        // The period and the space after it stay with the span, so the next
+        // line starts with a word.
+        assert_eq!(
+            lines("It's transform_columns. Next.", "transform_columns"),
+            ["It's ", "transform_columns. ", "Next."]
+        );
+        // A mark inside a word doesn't hang: the span keeps its `:a`.
+        let wrapped = lines("Use transform_columns:a now", "transform_columns:a");
+        let wrapped: Vec<_> = wrapped.iter().map(|line| line.trim()).collect();
+        assert_eq!(wrapped, ["Use", "transform_columns:a", "now"]);
     }
     #[test]
     fn long_inline_code_wraps_in_mixed_flow() {
