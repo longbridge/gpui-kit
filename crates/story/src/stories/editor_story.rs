@@ -2,7 +2,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui_kit::{
     App, AppContext as _, Context, Entity, HighlightStyle, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Task, Window, div, prelude::FluentBuilder as _, px,
+    Render, SharedString, Styled, Task, Window, div, prelude::FluentBuilder as _, px, rems,
 };
 
 use gpui_kit::component::{
@@ -439,6 +439,14 @@ impl Render for EditorStory {
                     0 => self.styled_editor(&self.editor_state).into_any_element(),
                     1 => self
                         .styled_editor(&self.decorations_state)
+                        .gutter_style(
+                            GutterStyle::default()
+                                .with_gap(rems(0.5))
+                                .with_line_number_font_family(cx.theme().font_family.clone())
+                                .with_line_number_font_size(rems(0.75))
+                                .with_line_number_color(cx.theme().muted_foreground)
+                                .with_active_line_number_color(cx.theme().foreground),
+                        )
                         .into_any_element(),
                     _ => v_flex()
                         .size_full()

@@ -1,6 +1,10 @@
 use crate::common;
 use gpui_kit::{
-    AppContext, Context, TestAppContext, Window, component::label::Label, div, prelude::*,
+    AppContext, Context, Entity, TestAppContext, Window,
+    base::text::{TextView, TextViewState},
+    component::label::Label,
+    div,
+    prelude::*,
 };
 
 /// The Quick Start renders its greeting with `Label`, which exposes its text in
@@ -47,4 +51,64 @@ fn quick_start_text_is_in_the_accessibility_tree(cx: &mut TestAppContext) {
         assert!(!tree.contains("Bare string"), "{tree}");
     })
     .unwrap();
+}
+
+/// A selectable TextView sits beside a named button, as in a chat transcript.
+/// Its rendered body, not its Markdown source, must reach the accessibility
+/// tree, and follow the text as it streams in.
+struct Transcript {
+    text: Entity<TextViewState>,
+}
+impl Render for Transcript {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(TextView::new(&self.text).selectable(true).scrollable(false))
+            .child(Label::new("Send"))
+    }
+}
+
+#[gpui_kit::test]
+fn text_view_body_is_in_the_accessibility_tree(cx: &mut TestAppContext) {
+    // See `quick_start_text_is_in_the_accessibility_tree` for why this re-runs.
+    if std::env::var("GPUI_A11Y_ACTIVE").as_deref() != Ok("1") {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "a11y_text::text_view_body_is_in_the_accessibility_tree",
+                "--nocapture",
+            ])
+            .env("GPUI_A11Y_ACTIVE", "1")
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "accessibility tree check failed: {status}"
+        );
+        return;
+    }
+
+    cx.update(gpui_kit::init);
+    let text = cx.new(|cx| TextViewState::markdown("Hello **world**", cx));
+    cx.run_until_parked();
+    let (handle, _) = common::open_window(cx, None, {
+        let text = text.clone();
+        move |_, cx| cx.new(|_| Transcript { text })
+    });
+    let tree = |cx: &mut TestAppContext| {
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+            window.debug_a11y_tree_json().expect("accessibility tree")
+        })
+        .unwrap()
+    };
+
+    let first = tree(cx);
+    assert!(first.contains("Hello world"), "{first}");
+    assert!(!first.contains("**world**"), "{first}");
+
+    text.update(cx, |text, cx| text.push_str(" again", cx));
+    cx.run_until_parked();
+    let streamed = tree(cx);
+    assert!(streamed.contains("Hello world again"), "{streamed}");
 }

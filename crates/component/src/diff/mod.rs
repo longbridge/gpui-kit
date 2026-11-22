@@ -13,7 +13,9 @@ mod state;
 
 pub use conflict::{DiffConflict, DiffConflictResolution};
 pub use decoration::{DiffDecoration, DiffGutterMarker, DiffSpanHighlight};
-pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
+pub use document::{
+    DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide, DiffTextPosition,
+};
 pub use parser::{DiffParseError, DiffParseOptions};
 pub use presentation::DiffInlineUnit;
 pub use state::{DiffEvent, DiffState};
@@ -196,6 +198,9 @@ type MarkerRenderer = Rc<dyn Fn(&DiffGutterMarker, &mut Window, &mut App) -> Any
 type RangeHandler = Rc<dyn Fn(&DiffLineRange, &mut Window, &mut App)>;
 type ClickHandler = Rc<dyn Fn(&DiffLinePosition, &ClickEvent, &mut Window, &mut App)>;
 type HoverHandler = Rc<dyn Fn(Option<&DiffLinePosition>, &mut Window, &mut App)>;
+type TextHoverHandler =
+    Rc<dyn Fn(Option<&DiffTextPosition>, gpui::Modifiers, &mut Window, &mut App)>;
+type TextClickHandler = Rc<dyn Fn(&DiffTextPosition, &ClickEvent, &mut Window, &mut App) -> bool>;
 
 #[derive(Default)]
 struct HeaderSlots {
@@ -242,6 +247,9 @@ pub struct Diff {
     on_add_annotation: Option<RangeHandler>,
     on_line_click: Option<ClickHandler>,
     on_line_hover: Option<HoverHandler>,
+    on_text_hover: Option<TextHoverHandler>,
+    on_text_click: Option<TextClickHandler>,
+    text_cursor: Option<gpui::CursorStyle>,
 }
 
 fn file_renderer<F, E>(render: F) -> FileRenderer
@@ -276,6 +284,9 @@ impl Diff {
             on_add_annotation: None,
             on_line_click: None,
             on_line_hover: None,
+            on_text_hover: None,
+            on_text_click: None,
+            text_cursor: None,
         }
     }
     /// Shows the original and modified line-number lanes. Default is true.
@@ -496,6 +507,8 @@ impl Diff {
         self
     }
     /// Handles a click on a line's code, outside a text-selection drag.
+    /// A click that [`Self::on_text_click`] claims does not reach this
+    /// handler.
     pub fn on_line_click<F>(mut self, handler: F) -> Self
     where
         F: Fn(&DiffLinePosition, &ClickEvent, &mut Window, &mut App) + 'static,
@@ -509,6 +522,36 @@ impl Diff {
         F: Fn(Option<&DiffLinePosition>, &mut Window, &mut App) + 'static,
     {
         self.on_line_hover = Some(Rc::new(handler));
+        self
+    }
+    /// Reports the character under the pointer and the held modifiers, or
+    /// `None` when the pointer is over no source text. Fires as the pointer
+    /// moves and, while the diff has focus, when a modifier goes down or up
+    /// with the pointer at rest - so a link can light up on the key alone.
+    pub fn on_text_hover<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Option<&DiffTextPosition>, gpui::Modifiers, &mut Window, &mut App) + 'static,
+    {
+        self.on_text_hover = Some(Rc::new(handler));
+        self
+    }
+    /// Handles a click on a character of source text, outside a
+    /// text-selection drag. The text handler runs first and its return
+    /// value decides who wins: true claims the click and
+    /// [`Self::on_line_click`] is not called for it; false lets the click
+    /// fall through to the line handler. A click that lands on no
+    /// character goes to the line handler directly.
+    pub fn on_text_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&DiffTextPosition, &ClickEvent, &mut Window, &mut App) -> bool + 'static,
+    {
+        self.on_text_click = Some(Rc::new(handler));
+        self
+    }
+    /// The pointer shown over source text, such as a pointing hand while
+    /// the hovered span is a link.
+    pub fn text_cursor(mut self, cursor: gpui::CursorStyle) -> Self {
+        self.text_cursor = Some(cursor);
         self
     }
 }
@@ -628,6 +671,8 @@ fn render_diff(
         on_add_annotation: props.on_add_annotation,
         on_line_click: props.on_line_click,
         on_line_hover: props.on_line_hover,
+        on_text_click: props.on_text_click,
+        text_cursor: props.text_cursor,
         selection: state.selection().clone(),
         selected_lines: state.selected_lines(),
         selected: state.selected_span(),
@@ -675,6 +720,7 @@ fn render_diff(
             horizontal.clone(),
             state.selection().clone(),
             state.geometry().clone(),
+            props.on_text_hover.clone(),
         ))
         .when(has_rows && !soft_wrap, |this| {
             this.child(
@@ -820,6 +866,21 @@ fn render_diff(
         .test_support()
         .track_focus(&state.focus_handle(cx))
         .key_context("Diff")
+        // A key alone changes what the pointer is over: with it held, the
+        // word beneath may be a link. Heard only while the diff has focus.
+        .when_some(props.on_text_hover, |this, handler| {
+            let geometry = state.geometry().clone();
+            this.on_modifiers_changed(move |event, window, cx| {
+                // The borrow ends before the handler runs: it may repaint,
+                // which rebuilds the geometry.
+                let hover = geometry
+                    .borrow()
+                    .text_hover_after(window.mouse_position(), event.modifiers);
+                if let Some(hit) = hover {
+                    handler(hit.as_ref(), event.modifiers, window, cx);
+                }
+            })
+        })
         .role(gpui::accesskit::Role::Document)
         .aria_label(label);
     v_flex()
@@ -881,6 +942,8 @@ struct CodePresentation {
     on_add_annotation: Option<RangeHandler>,
     on_line_click: Option<ClickHandler>,
     on_line_hover: Option<HoverHandler>,
+    on_text_click: Option<TextClickHandler>,
+    text_cursor: Option<gpui::CursorStyle>,
     selection: gpui_base::TextSelectionHandle,
     selected_lines: Option<DiffLineRange>,
     selected: Option<SelectedLines>,
@@ -1665,6 +1728,11 @@ fn line_highlights(
                             .unwrap_or_else(|| cx.theme().warning.opacity(0.5)),
                     ),
                     color: span.foreground(),
+                    underline: span.is_underlined().then(|| gpui::UnderlineStyle {
+                        thickness: px(1.),
+                        color: span.foreground(),
+                        wavy: false,
+                    }),
                     ..Default::default()
                 },
             ));
@@ -1909,19 +1977,36 @@ fn code_line(
             )
             .to_string(),
         )
-        .when_some(code.on_line_click.clone(), |this, handler| {
-            let position = position.clone();
-            this.on_click(move |event, window, cx| {
-                // A drag selects text; only a stationary press is a click.
-                if let ClickEvent::Mouse(mouse) = event {
-                    let moved = mouse.up.position - mouse.down.position;
-                    if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
-                        return;
+        .when_some(code.text_cursor, |this, cursor| this.cursor(cursor))
+        .when(
+            code.on_line_click.is_some() || code.on_text_click.is_some(),
+            |this| {
+                let position = position.clone();
+                let line_click = code.on_line_click.clone();
+                let text_click = code.on_text_click.clone();
+                let geometry = code.geometry.clone();
+                this.on_click(move |event, window, cx| {
+                    // A drag selects text; only a stationary press is a click.
+                    if let ClickEvent::Mouse(mouse) = event {
+                        let moved = mouse.up.position - mouse.down.position;
+                        if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
+                            return;
+                        }
+                        // The borrow ends before the handler runs: it
+                        // may repaint, which rebuilds the geometry.
+                        let hit = geometry.borrow().text_at(mouse.up.position);
+                        if let (Some(handler), Some(hit)) = (&text_click, hit)
+                            && handler(&hit, event, window, cx)
+                        {
+                            return;
+                        }
                     }
-                }
-                handler(&position, event, window, cx)
-            })
-        })
+                    if let Some(handler) = &line_click {
+                        handler(&position, event, window, cx)
+                    }
+                })
+            },
+        )
         .child(text);
     h_flex()
         .id("line-row")
@@ -2121,6 +2206,8 @@ mod decoration_tests;
 mod header_tests;
 #[cfg(test)]
 mod newline_tests;
+#[cfg(test)]
+mod pointer_tests;
 #[cfg(test)]
 mod review_tests;
 #[cfg(test)]

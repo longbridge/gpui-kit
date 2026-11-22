@@ -3216,11 +3216,19 @@ directory with no manifest, which has no `id` to use.
 ### 18.3 Authority travels with the code, not with the moment
 
 Each loaded plugin holds a `Policy` — its grant, its storage, its native modules —
-built once from its manifest at load. The policy rides on the **call frame**
-(`scope::Frame`), so every call to `fs` or `localStorage` answers with the
-grant of whichever plugin owns the code that is running. Two plugins loaded at
-once hold two different grants at the same time, and neither can see the other's
-files.
+built once at load from its manifest and the manager's host modules. The policy
+rides on the **call frame** (`scope::Frame`), so every call to `fs` or
+`localStorage` answers with the grant of whichever plugin owns the code that is
+running. Two plugins loaded at once hold two different grants at the same time,
+and neither can see the other's files.
+
+`PluginManager::with_host_module` adds a host module to the manager; calling it
+once per module is the whole builder. Every plugin that manager loads can import
+every module added, whatever its manifest declares: host modules are
+host-granted API, not a manifest permission, so a manifest neither lists nor
+limits them. Modules stay with their manager, so one host's modules do not reach
+another manager's plugins; a host that needs a different set per plugin builds
+one manager per set.
 
 This replaced a single process-wide slot with a guard installed around each call
 into a plugin. The guard could not be made correct, and the reason is worth

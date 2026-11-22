@@ -44,7 +44,7 @@ pub use token_presentation::{
     InlineTokenHoverListener, InlineTokenRenderer,
 };
 #[path = "base/a11y_text.rs"]
-mod a11y_text;
+pub(crate) mod a11y_text;
 #[path = "base/kind.rs"]
 mod kind;
 #[path = "editor/language.rs"]
@@ -99,7 +99,7 @@ pub use diagnostics::{
     DiagnosticSummary, DiagnosticTag, RelatedInformation,
 };
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
-pub use editor::{Editor, EditorState};
+pub use editor::{Editor, EditorLineNumberRenderer, EditorState};
 pub use highlighting::{
     DiagnosticColors, FoldIconRenderer, FoldPlaceholderRenderer, HighlightStyleResolver,
     InputEditorStyle, InputHighlighter, InputHighlighterFactory, SharedHighlightStyleResolver,

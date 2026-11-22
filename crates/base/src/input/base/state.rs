@@ -42,7 +42,8 @@ use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::rope_ext::{next_grapheme_boundary, previous_grapheme_boundary};
 use crate::input::{
-    InputEdit, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    EditorLineNumberRenderer, InputEdit, InputExtras as _, Position, RopeExt as _,
+    element::RIGHT_MARGIN, layout::LastLayout,
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
@@ -4356,6 +4357,9 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// For number inputs (with [`MaskPattern::Number`]), this converts
     /// full-width number characters into their ASCII equivalents,
     /// e.g. `12。5` -> `12.5`.
+    ///
+    /// A single-line input drops line breaks and tabs: a one-line field has
+    /// no line to break and no column to indent, and a tab in it is invisible.
     pub(super) fn normalize_input<'a>(&self, new_text: &'a str) -> Cow<'a, str> {
         let normalized = if matches!(self.mask_pattern, MaskPattern::Number { .. }) {
             normalize_number_input(new_text)
@@ -4363,8 +4367,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             Cow::Borrowed(new_text)
         };
 
-        if self.is_single_line() && normalized.contains(['\n', '\r']) {
-            Cow::Owned(normalized.replace(['\n', '\r'], ""))
+        if self.is_single_line() && normalized.contains(['\n', '\r', '\t']) {
+            Cow::Owned(normalized.replace(['\n', '\r', '\t'], ""))
         } else {
             normalized
         }
@@ -4816,7 +4820,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         _cx: &mut Context<Self>,
     ) -> Option<String> {
         let range = self.range_from_utf16(&range_utf16);
-        adjusted_range.replace(self.range_to_utf16(&range));
+        let range_utf16 = self.range_to_utf16(&range);
+        let utf16_len = range_utf16.len();
+        adjusted_range.replace(range_utf16);
+        if self.masked {
+            // Keep the redacted text aligned with the platform's UTF-16 range.
+            return Some(MASK_CHAR.to_string().repeat(utf16_len));
+        }
         Some(self.text.slice(range).to_string())
     }
 
@@ -5401,6 +5411,17 @@ impl<M: InputModeKind> Focusable for InputBaseState<M> {
 
 impl<M: InputModeKind> Render for InputBaseState<M> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_with_line_numbers((), window, cx)
+    }
+}
+
+impl<M: InputModeKind> InputBaseState<M> {
+    pub(crate) fn render_with_line_numbers<R: EditorLineNumberRenderer>(
+        &mut self,
+        line_number_renderer: R,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         // Before anything reads it: the element resolves this style during
         // layout and paint, and both happen after this call in the same frame.
         self.editor_style = self
@@ -5596,7 +5617,11 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                     .pb(self.editor_paddings.bottom)
                     .pl(self.editor_paddings.left)
             })
-            .child(TextElement::new(entity.clone()).placeholder(self.placeholder.clone()))
+            .child(
+                TextElement::new(entity.clone())
+                    .with_line_number_renderer(line_number_renderer)
+                    .placeholder(self.placeholder.clone()),
+            )
             .when(self.shows_scrollbar(), |this| {
                 this.child(EditorScrollbar::new(entity.clone()))
             });
@@ -8881,6 +8906,29 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_masked_input_redacts_ime_text(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state.masked(true).default_value("a🦀b"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            input_view.input.update(cx, |state, cx| {
+                let mut adjusted = None;
+                assert_eq!(
+                    state.text_for_range(1..5, &mut adjusted, window, cx),
+                    Some("•••".into())
+                );
+                assert_eq!(adjusted, Some(1..4));
+
+                state.set_masked(false, window, cx);
+                assert_eq!(
+                    state.text_for_range(1..5, &mut adjusted, window, cx),
+                    Some("🦀b".into())
+                );
+                assert_eq!(adjusted, Some(1..4));
+            });
+        });
+    }
+
+    #[gpui::test]
     fn test_masked_input_collapses_word_boundaries(cx: &mut TestAppContext) {
         let input_view = InputView::build(cx, |state| state);
         let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
@@ -9338,6 +9386,33 @@ mod tests {
         });
 
         cx.run_until_parked();
+    }
+
+    /// Tab is bound to `IndentInline`, which a single-line input propagates.
+    /// Unhandled, the keystroke reaches the input as text, so the field
+    /// drops the tab as it drops a newline. See issue #4069.
+    #[gpui::test]
+    fn test_single_line_removes_tabs(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        cx.run_until_parked();
+
+        cx.simulate_input("a");
+        cx.simulate_keystrokes("tab");
+        cx.simulate_input("b");
+        input.read_with(&cx, |state, _| assert_eq!(state.value(), "ab"));
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("c\td\ne", window, cx);
+                assert_eq!(state.value(), "cde");
+            });
+        });
     }
 
     /// `replace_all` on a multi-line (non-code-editor) input clears the
@@ -13948,6 +14023,41 @@ impl InputBaseState<crate::input::EditorMode> {
                 return;
             }
             *l = line_number;
+        }
+        cx.notify();
+    }
+
+    /// Set enable/disable showing the active line only while focused.
+    ///
+    /// Default: false
+    #[doc(hidden)]
+    pub fn active_line_only_when_focused(mut self, active_line_only_when_focused: bool) -> Self {
+        if let LayoutMode::CodeEditor {
+            active_line_only_when_focused: a,
+            ..
+        } = &mut self.mode
+        {
+            *a = active_line_only_when_focused;
+        }
+        self
+    }
+
+    /// Set showing the active line only while focused.
+    pub fn set_active_line_only_when_focused(
+        &mut self,
+        active_line_only_when_focused: bool,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let LayoutMode::CodeEditor {
+            active_line_only_when_focused: a,
+            ..
+        } = &mut self.mode
+        {
+            if *a == active_line_only_when_focused {
+                return;
+            }
+            *a = active_line_only_when_focused;
         }
         cx.notify();
     }

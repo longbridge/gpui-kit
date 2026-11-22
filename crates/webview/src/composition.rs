@@ -69,8 +69,9 @@ impl NativeWebViewSurface {
             .set_bounds(bounds.to_device_pixels(scale))?;
         // WKWebView remains owned by Wry, on its creating UI thread.
         // Its frame is local to the managed surface, whose frame is window-relative.
-        webview.webview().setFrame(NSRect::new(
-            NSPoint::new(0., 0.),
+        webview.webview().setFrame(document_frame(
+            0.,
+            extent.height,
             NSSize::new(extent.width, extent.height),
         ));
         Ok(())
@@ -88,11 +89,9 @@ impl NativeWebViewSurface {
             .platform_surface()?
             .set_bounds(visible.to_device_pixels(scale))?;
         let offset = document.origin - visible.origin;
-        webview.webview().setFrame(NSRect::new(
-            NSPoint::new(
-                f64::from(offset.x),
-                f64::from(visible.size.height - offset.y - document.size.height),
-            ),
+        webview.webview().setFrame(document_frame(
+            f64::from(offset.x),
+            f64::from(visible.size.height - offset.y),
             NSSize::new(
                 f64::from(document.size.width),
                 f64::from(document.size.height),
@@ -129,6 +128,14 @@ impl NativeWebViewSurface {
     }
 }
 
+// WebKit truncates the view size to whole points. Expand the child, not the
+// clip, and keep its top edge fixed in the container's bottom-up coordinates.
+fn document_frame(left: f64, top: f64, mut size: NSSize) -> NSRect {
+    size.width = size.width.ceil();
+    size.height = size.height.ceil();
+    NSRect::new(NSPoint::new(left, top - size.height), size)
+}
+
 // Staging positions must remain window-relative at every display scale.
 fn logical_bounds(
     rect: wry::Rect,
@@ -144,6 +151,14 @@ fn logical_bounds(
 mod tests {
     use super::*;
     use wry::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
+
+    #[test]
+    fn fractional_document_covers_the_clip_without_moving_its_top_edge() {
+        let frame = document_frame(-4.5, 145.5, NSSize::new(200.25, 140.5));
+        assert_eq!(frame.size, NSSize::new(201., 141.));
+        assert_eq!(frame.origin.x, -4.5);
+        assert_eq!(frame.origin.y + frame.size.height, 145.5);
+    }
 
     #[test]
     fn retina_physical_bounds_keep_the_child_inside_its_container() {

@@ -29,7 +29,7 @@ use crate::{
         inline_flow::{InlineFlow, InlineFlowItem, slice_ranges},
         range_highlight::{RangeHighlightFrame, RevealAt, RevealRequest},
         stream_fade::{StreamFadeFrame, TextLeafKey},
-        text_view::handle_link_click,
+        text_view::linked_image,
     },
     theme::ActiveTheme as _,
 };
@@ -1625,8 +1625,8 @@ pub struct Paragraph {
     pub(super) link_refs: HashMap<SharedString, SharedString>,
 
     pub(crate) state: Arc<Mutex<InlineState>>,
-    /// What the plain (text-only) render path derives from `children`, kept
-    /// between frames; see [`ParagraphRender`].
+    /// What the render paths derive from `children`, kept between frames;
+    /// see [`ParagraphRender`] and [`FlowRender`].
     pub(super) render_cache: ParagraphRenderCache,
 }
 
@@ -1638,12 +1638,19 @@ pub struct Paragraph {
 /// (`invalidate_render_cache`). Streaming reparses deep-clone the document on
 /// every append, and an empty clone made every paragraph rebuild.
 #[derive(Default)]
-pub(super) struct ParagraphRenderCache(Mutex<Option<Arc<ParagraphRender>>>);
+pub(super) struct ParagraphRenderCache {
+    /// The plain (text-only) path's render.
+    plain: Mutex<Option<Arc<ParagraphRender>>>,
+    /// The inline-flow path's render.
+    flow: Mutex<Option<Arc<FlowRender>>>,
+}
 
 impl Clone for ParagraphRenderCache {
     fn clone(&self) -> Self {
-        let cached = self.0.lock().ok().and_then(|cache| cache.clone());
-        Self(Mutex::new(cached))
+        Self {
+            plain: Mutex::new(self.plain.lock().ok().and_then(|cache| cache.clone())),
+            flow: Mutex::new(self.flow.lock().ok().and_then(|cache| cache.clone())),
+        }
     }
 }
 
@@ -1663,9 +1670,7 @@ impl std::fmt::Debug for ParagraphRenderCache {
 /// frame and are layered on afterwards; reference links are resolved
 /// afterwards too, since a definition can arrive later in the document.
 struct ParagraphRender {
-    style: Arc<TextViewStyle>,
-    mono_font: SharedString,
-    background: Hsla,
+    style: RenderStyle,
     text: SharedString,
     highlights: Vec<(Range<usize>, InlineHighlight)>,
     /// Links as written, before reference resolution.
@@ -1684,6 +1689,76 @@ impl ParagraphRender {
             .zip(&self.replaced)
             .filter_map(|((range, _), link)| Some((range.clone(), link.clone()?)))
             .collect()
+    }
+}
+
+/// The runs of text a paragraph with inline code, objects or images renders
+/// with, the inline-flow counterpart of [`ParagraphRender`].
+///
+/// Every frame rebuilt them as well, and on a long paragraph that rebuild
+/// was ~15% of a frame that changed nothing. Only the text is kept: objects
+/// and images are built every frame, since a paragraph has few of them and
+/// they are drawn through the view's image resolver and Markdown extensions,
+/// which cannot be compared. Fades, range backgrounds, the reveal and host
+/// foregrounds are layered on every frame, as on the plain path.
+struct FlowRender {
+    style: RenderStyle,
+    /// The paragraph's text, split at each object and image, in order.
+    texts: Vec<FlowText>,
+    /// Each text link as written, with what the view's link hook made of
+    /// it; see [`ParagraphRender::replaced`].
+    links: Vec<(LinkMark, Option<LinkMark>)>,
+}
+
+impl FlowRender {
+    fn is_current(&self, node_cx: &NodeContext, cx: &App) -> bool {
+        self.style.is_current(node_cx, cx)
+            && self
+                .links
+                .iter()
+                .all(|(link, replaced)| node_cx.link(link, cx) == *replaced)
+    }
+}
+
+/// The text before an object or image, or after the last one.
+#[derive(Default)]
+struct FlowText {
+    /// The child this text ends at, an object or image; `None` for the text
+    /// after the last one. The ending child's state holds the text; the
+    /// paragraph's state holds the last.
+    end: Option<usize>,
+    text: SharedString,
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    /// The links drawn as links, resolved and replaced.
+    links: Vec<(Range<usize>, LinkMark)>,
+}
+
+/// What a paragraph's render depends on besides its children and links: the
+/// view's style, and the theme's monospace font and background, which a code
+/// span's font and a mark's text color come from.
+struct RenderStyle {
+    style: Arc<TextViewStyle>,
+    mono_font: SharedString,
+    background: Hsla,
+}
+
+impl RenderStyle {
+    fn new(node_cx: &NodeContext, cx: &App) -> Self {
+        let theme = cx.theme();
+        Self {
+            style: node_cx.style.clone(),
+            mono_font: theme.tokens.typography.mono,
+            background: theme.tokens.colors.background,
+        }
+    }
+
+    /// Whether what was rendered under this style can be drawn under
+    /// `node_cx` as it is.
+    fn is_current(&self, node_cx: &NodeContext, cx: &App) -> bool {
+        let theme = cx.theme();
+        (Arc::ptr_eq(&self.style, &node_cx.style) || *self.style == *node_cx.style)
+            && self.mono_font == theme.tokens.typography.mono
+            && self.background == theme.tokens.colors.background
     }
 }
 
@@ -1717,13 +1792,9 @@ impl Paragraph {
         Vec<(Range<usize>, InlineHighlight)>,
         Vec<(Range<usize>, LinkMark)>,
     ) {
-        let mono_font = cx.theme().tokens.typography.mono;
-        let background = cx.theme().tokens.colors.background;
-        if let Ok(cache) = self.render_cache.0.lock()
+        if let Ok(cache) = self.render_cache.plain.lock()
             && let Some(cached) = cache.as_ref()
-            && (Arc::ptr_eq(&cached.style, &node_cx.style) || *cached.style == *node_cx.style)
-            && cached.mono_font == mono_font
-            && cached.background == background
+            && cached.style.is_current(node_cx, cx)
             && cached
                 .links
                 .iter()
@@ -1770,16 +1841,14 @@ impl Paragraph {
         }
         let text = SharedString::from(text);
         let render = Arc::new(ParagraphRender {
-            style: node_cx.style.clone(),
-            mono_font,
-            background,
+            style: RenderStyle::new(node_cx, cx),
             text: text.clone(),
             highlights: highlights.clone(),
             links,
             replaced,
         });
         let links = render.drawn_links();
-        if let Ok(mut cache) = self.render_cache.0.lock() {
+        if let Ok(mut cache) = self.render_cache.plain.lock() {
             *cache = Some(render);
         }
         let highlights =
@@ -3106,32 +3175,7 @@ impl Paragraph {
                         .max_w(relative(1.))
                         .when_some(image.width, |this, width| this.w(width))
                         .when_some(image_link, |this, link| {
-                            let link_click_handler = link_click_handler.clone();
-                            let aux_link = link.clone();
-                            let aux_link_click_handler = link_click_handler.clone();
-                            this.cursor_pointer()
-                                .on_click(move |event, window, cx| {
-                                    crate::TextSelection::end(window, cx);
-                                    cx.stop_propagation();
-                                    handle_link_click(
-                                        &link_click_handler,
-                                        link.url.clone(),
-                                        event.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                })
-                                .on_aux_click(move |event, window, cx| {
-                                    crate::TextSelection::end(window, cx);
-                                    cx.stop_propagation();
-                                    handle_link_click(
-                                        &aux_link_click_handler,
-                                        aux_link.url.clone(),
-                                        event.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                })
+                            linked_image(this, link.url, link_click_handler.clone())
                         })
                         .into_any_element(),
                 );
@@ -3244,6 +3288,9 @@ impl Paragraph {
                 .any(|child| child.marks.iter().any(|(_, mark)| mark.code))
     }
 
+    /// The items an inline flow lays out for this paragraph. The text comes
+    /// from [`FlowRender`]; objects, images and what changes every frame are
+    /// added to it here.
     fn inline_flow_items(
         &self,
         leaf_key: Option<TextLeafKey>,
@@ -3252,38 +3299,45 @@ impl Paragraph {
         node_cx: &NodeContext,
         cx: &mut App,
     ) -> Vec<InlineFlowItem> {
+        let render = self.flow_render(node_cx, cx);
         let mut items = Vec::new();
-        let mut text = String::new();
-        let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
-        let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
-        let mut offset = 0;
-        // Where `text` starts in the paragraph's whole rendered text, which
-        // is the byte space the fade and background ranges use.
+        // Where the next text starts in the paragraph's whole rendered text,
+        // which is the byte space the fade and background ranges use.
         let mut consumed = 0;
 
-        for inline_node in &self.children {
-            if let Some(node) = &inline_node.custom {
-                if let Ok(mut state) = inline_node.state.lock() {
-                    state.set_text(text.clone().into());
-                }
-                if !text.is_empty() {
-                    let item_fades = slice_fades(fades, consumed, consumed + text.len());
-                    let item_backgrounds =
-                        slice_backgrounds(backgrounds, consumed, consumed + text.len());
-                    let item_reveal = node_cx.reveal_at(leaf_key, consumed, consumed + text.len());
-                    consumed += text.len();
-                    items.push(InlineFlowItem::Text {
-                        state: inline_node.state.clone(),
-                        text: std::mem::take(&mut text).into(),
-                        links: std::mem::take(&mut links),
-                        highlights: fade_highlights(std::mem::take(&mut highlights), &item_fades),
-                        backgrounds: item_backgrounds,
-                        reveal: item_reveal,
-                    });
-                }
+        for flow_text in &render.texts {
+            let ending = flow_text.end.map(|ix| &self.children[ix]);
+            let state = ending.map_or(&self.state, |child| &child.state);
+            // An object's state is given the text before it even when there
+            // is none.
+            if (!flow_text.text.is_empty() || ending.is_some_and(|child| child.custom.is_some()))
+                && let Ok(mut state) = state.lock()
+            {
+                state.set_text(flow_text.text.clone());
+            }
+            if !flow_text.text.is_empty() {
+                let text_end = consumed + flow_text.text.len();
+                items.push(InlineFlowItem::Text {
+                    state: state.clone(),
+                    text: flow_text.text.clone(),
+                    links: flow_text.links.clone(),
+                    highlights: fade_highlights(
+                        flow_text.highlights.clone(),
+                        &slice_fades(fades, consumed, text_end),
+                    ),
+                    backgrounds: slice_backgrounds(backgrounds, consumed, text_end),
+                    reveal: node_cx.reveal_at(leaf_key, consumed, text_end),
+                });
+                consumed = text_end;
+            }
+
+            let Some(child) = ending else {
+                continue;
+            };
+            if let Some(node) = &child.custom {
                 let mut object_style = HighlightStyle::default();
                 let mut object_link = None;
-                for (_, mark) in &inline_node.marks {
+                for (_, mark) in &child.marks {
                     object_style = object_style.highlight(mark_highlight(mark, node_cx, cx).style);
                     if let Some(link) = mark.link.as_ref().and_then(|link| node_cx.link(link, cx)) {
                         object_link = Some(link);
@@ -3300,39 +3354,12 @@ impl Paragraph {
                     renderer: Arc::new(move |context, window, cx| {
                         extensions.render_inline(&rendered_node, context, window, cx)
                     }),
-                    selected: inline_node.custom_selection.clone(),
+                    selected: child.custom_selection.clone(),
                     style: object_style,
                     link: object_link,
                 });
-                consumed += inline_node.text.len();
-                offset = 0;
-                continue;
-            }
-            let text_len = inline_node.text.len();
-            text.push_str(&inline_node.text);
-
-            if let Some(image) = &inline_node.image {
-                if !text.is_empty() {
-                    if let Ok(mut state) = inline_node.state.lock() {
-                        state.set_text(text.clone().into());
-                    }
-                    items.push(InlineFlowItem::Text {
-                        state: inline_node.state.clone(),
-                        text: text.clone().into(),
-                        links: links.clone(),
-                        highlights: fade_highlights(
-                            highlights.clone(),
-                            &slice_fades(fades, consumed, consumed + text.len()),
-                        ),
-                        backgrounds: slice_backgrounds(
-                            backgrounds,
-                            consumed,
-                            consumed + text.len(),
-                        ),
-                        reveal: node_cx.reveal_at(leaf_key, consumed, consumed + text.len()),
-                    });
-                }
-
+                consumed += child.text.len();
+            } else if let Some(image) = &child.image {
                 items.push(InlineFlowItem::Image {
                     source: node_cx.image_source(image),
                     link: image.link.as_ref().and_then(|link| node_cx.link(link, cx)),
@@ -3340,52 +3367,7 @@ impl Paragraph {
                     width: image.width,
                     height: image.height,
                 });
-
-                consumed += text.len();
-                text.clear();
-                links.clear();
-                highlights.clear();
-                offset = 0;
-            } else {
-                let mut node_highlights = vec![];
-                for (range, style) in &inline_node.marks {
-                    let inner_range = (offset + range.start)..(offset + range.end);
-                    let mut highlight = mark_highlight(style, node_cx, cx);
-
-                    if let Some(link_mark) = style.link.as_ref()
-                        && let Some(link) = node_cx.link(link_mark, cx)
-                    {
-                        highlight.style.color = Some(node_cx.style.link());
-                        highlight.style.underline = Some(link_underline(&node_cx.style));
-                        links.push((inner_range.clone(), link));
-                    }
-
-                    node_highlights.push((inner_range, highlight));
-                }
-
-                append_node_highlights(&mut highlights, node_highlights);
-                offset += text_len;
             }
-        }
-
-        if !text.is_empty() {
-            if let Ok(mut state) = self.state.lock() {
-                state.set_text(text.clone().into());
-            }
-            let highlights = fade_highlights(
-                highlights,
-                &slice_fades(fades, consumed, consumed + text.len()),
-            );
-            let backgrounds = slice_backgrounds(backgrounds, consumed, consumed + text.len());
-            let reveal = node_cx.reveal_at(leaf_key, consumed, consumed + text.len());
-            items.push(InlineFlowItem::Text {
-                state: self.state.clone(),
-                text: text.into(),
-                links,
-                highlights,
-                backgrounds,
-                reveal,
-            });
         }
 
         let foregrounds = node_cx.foregrounds(self.leaf_key());
@@ -3420,6 +3402,95 @@ impl Paragraph {
             }
         }
         items
+    }
+
+    /// The text of this paragraph's inline flow, from the cache while what it
+    /// was built under still holds.
+    fn flow_render(&self, node_cx: &NodeContext, cx: &App) -> Arc<FlowRender> {
+        let cached = self
+            .render_cache
+            .flow
+            .lock()
+            .ok()
+            .and_then(|cache| cache.clone());
+        if let Some(cached) = cached
+            && cached.is_current(node_cx, cx)
+        {
+            return cached;
+        }
+
+        let mut texts = Vec::new();
+        let mut written = Vec::new();
+        let mut text = String::new();
+        let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
+        let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
+        let mut offset = 0;
+        for (ix, inline_node) in self.children.iter().enumerate() {
+            if inline_node.custom.is_some() {
+                // An object with no text before it leaves the marks so far
+                // to the text after it.
+                texts.push(if text.is_empty() {
+                    FlowText {
+                        end: Some(ix),
+                        ..Default::default()
+                    }
+                } else {
+                    FlowText {
+                        end: Some(ix),
+                        text: std::mem::take(&mut text).into(),
+                        highlights: std::mem::take(&mut highlights),
+                        links: std::mem::take(&mut links),
+                    }
+                });
+                offset = 0;
+                continue;
+            }
+            text.push_str(&inline_node.text);
+            if inline_node.image.is_some() {
+                texts.push(FlowText {
+                    end: Some(ix),
+                    text: std::mem::take(&mut text).into(),
+                    highlights: std::mem::take(&mut highlights),
+                    links: std::mem::take(&mut links),
+                });
+                offset = 0;
+                continue;
+            }
+
+            let mut node_highlights = vec![];
+            for (range, style) in &inline_node.marks {
+                let inner_range = (offset + range.start)..(offset + range.end);
+                let mut highlight = mark_highlight(style, node_cx, cx);
+                if let Some(link_mark) = &style.link {
+                    let link = node_cx.link(link_mark, cx);
+                    if let Some(link) = &link {
+                        highlight.style.color = Some(node_cx.style.link());
+                        highlight.style.underline = Some(link_underline(&node_cx.style));
+                        links.push((inner_range.clone(), link.clone()));
+                    }
+                    written.push((link_mark.clone(), link));
+                }
+                node_highlights.push((inner_range, highlight));
+            }
+            append_node_highlights(&mut highlights, node_highlights);
+            offset += inline_node.text.len();
+        }
+        texts.push(FlowText {
+            end: None,
+            text: text.into(),
+            highlights,
+            links,
+        });
+
+        let render = Arc::new(FlowRender {
+            style: RenderStyle::new(node_cx, cx),
+            texts,
+            links: written,
+        });
+        if let Ok(mut cache) = self.render_cache.flow.lock() {
+            *cache = Some(render.clone());
+        }
+        render
     }
 }
 
@@ -4929,7 +5000,13 @@ mod tests {
             let original = paragraph.clone();
             let base = NodeContext::default();
             let (_, inherited, _) = paragraph.plain_render(&base, cx);
-            let cached = paragraph.render_cache.0.lock().unwrap().clone().unwrap();
+            let cached = paragraph
+                .render_cache
+                .plain
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap();
             for color in [gpui::red(), gpui::blue()] {
                 let context = NodeContext {
                     foregrounds: Some(Arc::new(HashMap::from([(7, vec![(0..12, color)])]))),
@@ -4953,7 +5030,13 @@ mod tests {
                 );
                 assert!(Arc::ptr_eq(
                     &cached,
-                    paragraph.render_cache.0.lock().unwrap().as_ref().unwrap()
+                    paragraph
+                        .render_cache
+                        .plain
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
                 ));
             }
             // Clearing a context's ranges restores inherited mark/link colors,
@@ -5420,6 +5503,174 @@ mod tests {
                 })
                 .collect();
             assert_eq!(objects, [None, Some("https://moved.example".to_string())]);
+        });
+    }
+
+    /// The text, highlights and links of each text item of an inline flow.
+    fn flow_texts(
+        items: &[InlineFlowItem],
+    ) -> Vec<(
+        SharedString,
+        Vec<(Range<usize>, InlineHighlight)>,
+        Vec<(Range<usize>, LinkMark)>,
+    )> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                InlineFlowItem::Text {
+                    text,
+                    highlights,
+                    links,
+                    ..
+                } => Some((text.clone(), highlights.clone(), links.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn inline_flow_text_is_kept_between_frames_and_layered_per_frame() {
+        use super::super::inline::COMBINED_HIGHLIGHT_INPUTS;
+
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let context = NodeContext::default();
+            let inputs = || COMBINED_HIGHLIGHT_INPUTS.with(|inputs| inputs.get());
+            let cached =
+                |paragraph: &Paragraph| paragraph.render_cache.flow.lock().unwrap().clone();
+            let mut paragraph = Paragraph::default();
+            paragraph
+                .push(InlineNode::new("call ").marks(vec![(0..5, TextMark::default().bold())]));
+            paragraph
+                .push(InlineNode::new("run()").marks(vec![(0..5, TextMark::default().code())]));
+            paragraph.push(InlineNode::image(ImageNode::default()));
+            paragraph.push(InlineNode::new("after"));
+
+            let first = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            assert_eq!(first.len(), 3);
+            let built = cached(&paragraph).expect("the first frame fills the cache");
+
+            // A frame that changes nothing merges no marks and keeps the cache.
+            let before = inputs();
+            let again = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            assert_eq!(inputs(), before);
+            assert!(Arc::ptr_eq(&built, &cached(&paragraph).unwrap()));
+            assert_eq!(flow_texts(&again), flow_texts(&first));
+            assert!(matches!(again[1], InlineFlowItem::Image { .. }));
+
+            // A fade is layered over the cached text and does not stay in it.
+            let faded = paragraph.inline_flow_items(None, &[(0..10, 0.5)], &[], &context, cx);
+            let (_, highlights, _) = &flow_texts(&faded)[0];
+            assert!(
+                highlights
+                    .iter()
+                    .all(|(_, highlight)| highlight.style.fade_out == Some(0.5))
+            );
+            assert!(Arc::ptr_eq(&built, &cached(&paragraph).unwrap()));
+            let settled = paragraph.inline_flow_items(None, &[], &[], &context, cx);
+            assert_eq!(flow_texts(&settled), flow_texts(&first));
+
+            // A clone carries the cache; a change to its children drops it.
+            let mut clone = paragraph.clone();
+            assert!(Arc::ptr_eq(&built, &cached(&clone).unwrap()));
+            clone.push(InlineNode::new(" more"));
+            assert!(cached(&clone).is_none());
+            let items = clone.inline_flow_items(None, &[], &[], &context, cx);
+            assert_eq!(flow_texts(&items)[1].0.as_ref(), "after more");
+            assert!(Arc::ptr_eq(&built, &cached(&paragraph).unwrap()));
+        });
+    }
+
+    #[test]
+    fn inline_flow_cache_follows_style_theme_and_links() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let link = |url: &str| {
+                TextMark::default().link(LinkMark {
+                    url: url.to_string().into(),
+                    ..Default::default()
+                })
+            };
+            let mut by_reference = TextMark::default();
+            by_reference.link = Some(LinkMark {
+                identifier: Some("ref".into()),
+                ..Default::default()
+            });
+            // "code live dead cited mark", with inline code to make it a flow.
+            let mut paragraph = Paragraph::default();
+            paragraph.push(InlineNode::new("code").marks(vec![(0..4, TextMark::default().code())]));
+            paragraph.push(InlineNode::new(" live dead cited mark").marks(vec![
+                (1..5, link("https://live.example")),
+                (6..10, link("app://dead")),
+                (11..16, by_reference),
+                (
+                    17..21,
+                    TextMark::default().highlight(gpui::rgba(0x00000033).into()),
+                ),
+            ]));
+            let render = |node_cx: &NodeContext, cx: &mut App| {
+                let items = paragraph.inline_flow_items(None, &[], &[], node_cx, cx);
+                let [(_, highlights, links)] = flow_texts(&items).try_into().unwrap();
+                let urls: Vec<_> = links
+                    .iter()
+                    .map(|(range, link)| (range.clone(), link.url.to_string()))
+                    .collect();
+                (highlights, urls)
+            };
+            let at = |highlights: &[(Range<usize>, InlineHighlight)], ix: usize| {
+                highlights
+                    .iter()
+                    .find(|(range, _)| range.contains(&ix))
+                    .map(|(_, highlight)| highlight.style)
+                    .unwrap_or_default()
+            };
+
+            crate::Theme::global_mut(cx).tokens.colors.background = gpui::white();
+            let mut node_cx = NodeContext::default();
+            let (highlights, urls) = render(&node_cx, cx);
+            assert_eq!(urls[2], (15..20, String::new()), "no definition yet");
+            assert_eq!(at(&highlights, 21).color, Some(gpui::black()));
+
+            // A definition arriving later in the document resolves the link.
+            node_cx.link_refs.insert(
+                "ref".into(),
+                LinkMark {
+                    url: "https://cited.example".into(),
+                    ..Default::default()
+                },
+            );
+            let (_, urls) = render(&node_cx, cx);
+            assert_eq!(urls[2], (15..20, "https://cited.example".to_string()));
+
+            // A mark's text color follows the theme background.
+            crate::Theme::global_mut(cx).tokens.colors.background = gpui::black();
+            let (highlights, _) = render(&node_cx, cx);
+            assert_eq!(at(&highlights, 21).color, Some(gpui::white()));
+
+            // Link colors follow the style.
+            node_cx.style = Arc::new(TextViewStyle::default().with_link(gpui::red()));
+            let (highlights, _) = render(&node_cx, cx);
+            assert_eq!(at(&highlights, 5).color, Some(gpui::red()));
+
+            // A link hook that drops a link draws it as plain text.
+            node_cx.link_hook = Some(Arc::new(|link: &Link, _: &App| {
+                (!link.url.starts_with("app://")).then(|| link.clone())
+            }));
+            let (highlights, urls) = render(&node_cx, cx);
+            assert_eq!(
+                urls,
+                [
+                    (5..9, "https://live.example".to_string()),
+                    (15..20, "https://cited.example".to_string()),
+                ]
+            );
+            assert!(at(&highlights, 10).underline.is_none());
+            assert!(at(&highlights, 5).underline.is_some());
         });
     }
 

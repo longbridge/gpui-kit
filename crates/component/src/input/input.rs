@@ -9,6 +9,7 @@ use gpui::{
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
 use crate::input::clear_button;
+use crate::list::{ListDelegate, ListState};
 use crate::native_menu::NativeMenu;
 use crate::spinner::Spinner;
 use crate::touch_selection::{EditMenuItem, TouchSelectionOverlay};
@@ -17,11 +18,12 @@ use crate::{IconName, Size};
 use crate::{RoleOverride, Selectable, StyledExt, h_flex};
 use crate::{Sizable, StyleSized};
 use gpui_base::InputBase as BaseInput;
+use gpui_base::input::Editor as BaseEditor;
 use gpui_base::{LayoutDirection, LogicalStyledExt as _};
 use rust_i18n::t;
 
 use super::state::{TextInputState, sync_focused_input_registry};
-use super::{InputContentType, InputState, sync_native_content_type};
+use super::{GutterStyle, InputContentType, InputState, sync_native_content_type};
 use crate::ThemeStyled as _;
 
 /// Set when the platform draws the touch selection UI of a focused input.
@@ -131,6 +133,7 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
+    gutter_style: GutterStyle,
     token_renderer: Option<gpui_base::input::InlineTokenRenderer>,
     token_click_listener: Option<gpui_base::input::InlineTokenClickListener>,
     token_hover_listener: Option<gpui_base::input::InlineTokenHoverListener>,
@@ -163,6 +166,9 @@ pub struct Input {
     /// An optional paste handler. If set, it is invoked with the clipboard item
     /// before the default text insertion. Return `true` if handled.
     paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
+
+    /// The list offered under the field while typing; see [`Input::list`].
+    list: Option<Rc<dyn super::list_popup::InputList>>,
 }
 
 impl Sizable for Input {
@@ -246,6 +252,7 @@ impl Input {
 
     fn with_state(state: TextInputState) -> Self {
         Self {
+            gutter_style: GutterStyle::default(),
             id: None,
             state,
             size: Size::default(),
@@ -271,7 +278,13 @@ impl Input {
             token_renderer: None,
             token_click_listener: None,
             token_hover_listener: None,
+            list: None,
         }
+    }
+
+    pub(crate) fn gutter_style(mut self, style: GutterStyle) -> Self {
+        self.gutter_style = style;
+        self
     }
 
     /// Set the developer-assigned identifier exposed to accessibility clients.
@@ -283,6 +296,29 @@ impl Input {
 
     pub(crate) fn is_disabled(&self) -> bool {
         self.disabled
+    }
+
+    /// Offer a [`List`](crate::list::List) under the field while the user
+    /// types, as an HTML `<input list>` does. The input still accepts any
+    /// text: the list only helps type it.
+    ///
+    /// The list searches with the field's text through
+    /// [`ListDelegate::perform_search`], so the delegate decides what matches,
+    /// how long to wait and how rows look. Nothing is highlighted until the
+    /// user presses Down, so Enter on the typed text emits
+    /// [`InputEvent::PressEnter`](super::InputEvent::PressEnter). Write the
+    /// accepted value in [`ListDelegate::confirm`], for example with
+    /// [`InputState::replace_all`]. The popup shows while there are rows or
+    /// [`ListDelegate::loading`] is true, and only while the input has focus.
+    /// A disabled or read-only input offers none.
+    ///
+    /// ```ignore
+    /// let hosts = cx.new(|cx| ListState::new(HostDelegate::new(&input), window, cx));
+    /// Input::new(&input).list(&hosts)
+    /// ```
+    pub fn list<D: ListDelegate>(mut self, list: &Entity<ListState<D>>) -> Self {
+        self.list = Some(Rc::new(list.clone()));
+        self
     }
 
     pub fn accessibility_id(mut self, id: impl Into<SharedString>) -> Self {
@@ -520,14 +556,17 @@ impl Input {
     /// This method must after the refine_style.
     fn render_editor(
         input_state: TextInputState,
+        gutter_style: GutterStyle,
         search_panel: Option<AnyElement>,
         _: &Window,
     ) -> impl IntoElement {
         v_flex().size_full().children(search_panel).child(
-            div()
-                .relative()
-                .flex_1()
-                .child(input_state.into_any_element()),
+            div().relative().flex_1().child(match input_state {
+                TextInputState::Editor(state) => BaseEditor::new(&state)
+                    .with_line_number_renderer(gutter_style)
+                    .into_any_element(),
+                state => state.into_any_element(),
+            }),
         )
     }
 }
@@ -548,7 +587,7 @@ fn start_text_align(cx: &App) -> TextAlign {
 }
 
 impl RenderOnce for Input {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         const LINE_HEIGHT: Rems = Rems(1.25);
         // Unless the caller aligns the text, it starts on the start edge.
         let text_align = self
@@ -695,6 +734,18 @@ impl RenderOnce for Input {
         let presentation = state.presentation(cx);
         let content_type = self.content_type;
         let disabled = self.disabled;
+        // A list belongs to a single-line input, like an HTML `<input list>`.
+        let list_popup = match (&state, self.list.take()) {
+            (TextInputState::Input(input), Some(list)) => Some(super::list_popup::ListPopup::new(
+                input,
+                list,
+                !self.disabled && !self.readonly,
+                self.size,
+                window,
+                cx,
+            )),
+            _ => None,
+        };
         let is_multi_line = presentation.is_multi_line();
         // Without a content type, a masked input is a password field to screen
         // readers, so they announce it as one.
@@ -819,6 +870,9 @@ impl RenderOnce for Input {
             })
             .items_center()
             .gap(gap_x)
+            // The text element paints in the color it inherits, and a host
+            // other than `Root` may hand down none.
+            .text_color(cx.theme().foreground)
             .refine_style(&self.style)
             .when(
                 focused && self.appearance && self.bordered && self.focus_bordered,
@@ -830,7 +884,12 @@ impl RenderOnce for Input {
                     .child(p)
             }))
             .when(presentation.is_multi_line(), |this| {
-                this.child(Self::render_editor(state.clone(), overlays.search, window))
+                this.child(Self::render_editor(
+                    state.clone(),
+                    self.gutter_style,
+                    overlays.search,
+                    window,
+                ))
             })
             .when(!presentation.is_multi_line(), |this| {
                 this.child(state.clone().into_any_element())
@@ -864,6 +923,7 @@ impl RenderOnce for Input {
             })
             .relative()
             .children(overlays.floating)
+            .when_some(list_popup, |this, popup| popup.attach(this, cx))
             .when_some(paste_handler, |this, handler| {
                 this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
                     if let Some(clipboard) = cx.read_from_clipboard() {
@@ -1427,5 +1487,58 @@ mod tests {
 
         cx.update(|_, cx| set_native_touch_selection(false, cx));
         assert!(overlay(cx) > 0);
+    }
+
+    /// Records the text color the input frame hands down to its addons.
+    #[derive(IntoElement)]
+    struct InheritedColor(Rc<std::cell::Cell<Option<Hsla>>>);
+
+    impl RenderOnce for InheritedColor {
+        fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+            self.0.set(Some(window.text_style().color));
+            div().w(px(8.)).h(px(8.))
+        }
+    }
+
+    /// An input placed straight in a window, with no `Root` to set the text
+    /// color, as a host that embeds it in its own element tree places it.
+    struct BareInput {
+        state: Entity<InputState>,
+        color: Rc<std::cell::Cell<Option<Hsla>>>,
+        text_color: Option<Hsla>,
+    }
+
+    impl gpui::Render for BareInput {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            Input::new(&self.state)
+                .prefix(InheritedColor(self.color.clone()))
+                .when_some(self.text_color, |this, color| this.text_color(color))
+        }
+    }
+
+    #[gpui::test]
+    fn input_text_takes_the_theme_foreground_without_root(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+
+        let foreground = cx.update(|cx| {
+            crate::init(cx);
+            let theme = crate::Theme::global_mut(cx);
+            theme.foreground = gpui::white();
+            theme.foreground
+        });
+        for (text_color, expected) in [(None, foreground), (Some(gpui::red()), gpui::red())] {
+            let color = Rc::new(std::cell::Cell::new(None));
+            let (_, cx) = cx.add_window_view({
+                let color = color.clone();
+                move |window, cx| BareInput {
+                    state: cx.new(|cx| InputState::new(window, cx)),
+                    color,
+                    text_color,
+                }
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(color.get(), Some(expected));
+        }
     }
 }

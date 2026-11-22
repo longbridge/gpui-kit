@@ -6,7 +6,7 @@ publish = false
 edition.workspace = true
 
 [dependencies]
-gpui-kit = { path = "../../crates/kit", default-features = false }
+gpui-kit = { path = "../../crates/kit", default-features = false, features = ["x11"] }
 gpui-fps.workspace = true
 
 [lints]
