@@ -1168,7 +1168,14 @@ fn layout_measured_flow(
                         line_ascent = line_ascent.max(baseline - body_overflow_above);
                         line_descent =
                             line_descent.max(glyph_size.height - baseline - body_overflow_below);
-                        line_width += width;
+                        let trailing = subtext.len() - subtext.trim_end_matches(' ').len();
+                        line_width += if trailing > 0 && item_start + end == line_range.end {
+                            shaped_line.x_for_index(subtext.len() - trailing)
+                                + insets.left
+                                + insets.right
+                        } else {
+                            width
+                        };
                         line_fragments.push(LineFragmentLayout {
                             item_ix,
                             kind: LineFragmentKind::Text {
@@ -1643,6 +1650,9 @@ fn hanging_len(flow: &FlowItems, ix: usize, end: usize) -> usize {
     let Some((_, MeasureItem::Text { text, .. }, item)) = flow.over(&(ix..end)).next() else {
         return 0;
     };
+    if ix == item.start {
+        return 0;
+    }
     let rest = &text[ix - item.start..end.min(item.end) - item.start];
     let marks: usize = rest
         .chars()
@@ -1656,7 +1666,7 @@ fn hanging_len(flow: &FlowItems, ix: usize, end: usize) -> usize {
         .map(char::len_utf8)
         .sum();
     let after = &rest[marks..];
-    if marks == 0 || after.starts_with(|c: char| !c.is_whitespace()) {
+    if after.starts_with(|c: char| !c.is_whitespace()) {
         return 0;
     }
     marks + after.len() - after.trim_start_matches(' ').len()
@@ -2642,7 +2652,7 @@ mod tests {
         );
     }
     #[test]
-    fn a_period_after_inline_code_as_wide_as_the_line_hangs() {
+    fn a_period_or_space_after_inline_code_as_wide_as_the_line_stays_on_it() {
         use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
         use gpui::{AbsoluteLength, Empty, HighlightStyle, TestApp};
 
@@ -2680,14 +2690,22 @@ mod tests {
                     }
                 }
             }
-            lines.into_iter().map(|(_, line)| line).collect::<Vec<_>>()
+            let lines = lines.into_iter().map(|(_, line)| line).collect::<Vec<_>>();
+            (lines, layout.size.width <= wrap_width)
         };
 
         assert_eq!(
-            lines("It's transform_columns. Next.", "transform_columns"),
+            lines("It's transform_columns. Next.", "transform_columns").0,
             ["It's ", "transform_columns. ", "Next."]
         );
-        let wrapped = lines("Use transform_columns:a now", "transform_columns:a");
+        assert_eq!(
+            lines("It's transform_columns. Next.", "transform_columns."),
+            (
+                vec!["It's ".into(), "transform_columns. ".into(), "Next.".into()],
+                true
+            )
+        );
+        let (wrapped, _) = lines("Use transform_columns:a now", "transform_columns:a");
         let wrapped: Vec<_> = wrapped.iter().map(|line| line.trim()).collect();
         assert_eq!(wrapped, ["Use", "transform_columns:a", "now"]);
     }
