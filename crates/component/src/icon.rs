@@ -105,6 +105,33 @@ pub fn resolve_icon_path(path: SharedString, cx: &App) -> SharedString {
     }
 }
 
+/// Warn once per path when the application's asset source cannot load an icon.
+///
+/// GPUI draws nothing for an SVG path its asset source does not resolve, and does
+/// not log it, so a missing `.with_assets(gpui_kit::assets::Assets)` or an
+/// incomplete custom source otherwise shows up as blank space. The check runs only
+/// for icons that are actually drawn, so applications that draw no icons never pay
+/// for it or see it, and only in debug builds, so release rendering is unchanged.
+#[cfg(debug_assertions)]
+fn warn_missing_icon(path: &SharedString, cx: &App) {
+    use std::{cell::RefCell, collections::HashSet};
+
+    thread_local! {
+        static CHECKED: RefCell<HashSet<SharedString>> = RefCell::default();
+    }
+
+    if path.is_empty() || !CHECKED.with(|checked| checked.borrow_mut().insert(path.clone())) {
+        return;
+    }
+    if let Ok(None) = cx.asset_source().load(path) {
+        tracing::warn!(
+            "icon `{path}` renders blank: the asset source does not load it. \
+             Add `.with_assets(gpui_kit::assets::Assets)` to `gpui_kit::application()`, \
+             or make your own `AssetSource` serve this path."
+        );
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum IconSource {
     Path(SharedString),
@@ -205,7 +232,10 @@ impl Icon {
 
     fn resolved(mut self, cx: &App) -> Self {
         if let IconSource::Path(path) = self.source {
-            self.source = IconSource::Path(resolve_icon_path(path, cx));
+            let path = resolve_icon_path(path, cx);
+            #[cfg(debug_assertions)]
+            warn_missing_icon(&path, cx);
+            self.source = IconSource::Path(path);
         }
         self
     }
