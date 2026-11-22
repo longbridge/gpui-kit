@@ -4842,6 +4842,19 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         })
     }
 
+    /// The whole document's length in UTF-16 units.
+    ///
+    /// Platforms use this to learn that the handler has a document at all:
+    /// the iOS backend only makes the view first responder, and so only shows
+    /// the on-screen keyboard, when it can tell the document's range.
+    fn text_length_utf16(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        Some(self.offset_to_utf16(self.text.len()))
+    }
+
     /// Select the given range, as the platform's own text UI asks when it
     /// drives the selection: a native selection handle, or the macOS IME.
     ///
@@ -6594,6 +6607,23 @@ mod tests {
                     assert_eq!(state.token_spans()[0].range(), 5..7);
                     let (_, exit) = state.token_hover(5, bounds, false, None).unwrap();
                     assert_eq!(exit.range_utf16(), (3, 5));
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn test_text_length_utf16(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler as _;
+        cx.update(crate::init);
+        // "🙂" is 2 UTF-16 units and 4 bytes; "й" is 1 UTF-16 unit and 2 bytes.
+        let view = InputView::build(cx, |state| state.default_value("🙂 й"));
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    assert_eq!(state.text_length_utf16(window, cx), Some(4));
+                    state.replace_text_in_range(None, "ab", window, cx);
+                    assert_eq!(state.text_length_utf16(window, cx), Some(6));
                 });
             })
             .unwrap();
