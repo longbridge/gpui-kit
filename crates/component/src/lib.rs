@@ -149,6 +149,46 @@ pub fn init(cx: &mut App) {
     menu::init(cx);
     table::init(cx);
     tooltip::init(cx);
+
+    warn_if_component_icons_missing(cx);
+}
+
+/// The icon used as a canary for "is an asset source that carries the component
+/// icons installed at all". `icons/check.svg` is part of the default
+/// [`assets::Assets`](gpui_kit_assets) bundle and is drawn by `Checkbox`, menus
+/// and more, so if it does not resolve, neither will the other component icons.
+fn canary_icon_path() -> gpui::SharedString {
+    use gpui_kit_assets::IconNamed as _;
+    crate::IconName::Check.path()
+}
+
+/// Whether `source` can supply gpui-kit's component icons.
+fn asset_source_has_component_icons(source: &dyn gpui::AssetSource) -> bool {
+    matches!(source.load(&canary_icon_path()), Ok(Some(_)))
+}
+
+/// Warn, at most once per process, when no asset source that can supply the
+/// component icons is installed.
+///
+/// The usual cause is a missing `.with_assets(gpui_kit::assets::Assets)` on the
+/// application (see the `Icons` section of the crate README). Without it every
+/// icon component renders as blank space and nothing is logged, which is one of
+/// the hardest mistakes to diagnose; this surfaces it. It also catches an asset
+/// source that embeds a subset not covering the component icons.
+fn warn_if_component_icons_missing(cx: &App) {
+    if asset_source_has_component_icons(cx.asset_source().as_ref()) {
+        return;
+    }
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        tracing::warn!(
+            "gpui-kit: no asset source resolves `{}`, so icon components will render \
+             blank. Pass one with \
+             `gpui_kit::application().with_assets(gpui_kit::assets::Assets)`, or ship your \
+             own icons named per `IconName`.",
+            canary_icon_path()
+        );
+    });
 }
 
 #[inline]
@@ -178,4 +218,31 @@ pub(crate) fn measure_enable() -> bool {
 pub(crate) fn test_redraw(window: &mut gpui::Window, cx: &mut gpui::App) {
     window.refresh();
     window.draw(cx).clear(cx);
+}
+
+#[cfg(test)]
+mod icon_asset_warning_tests {
+    use super::{asset_source_has_component_icons, canary_icon_path};
+    use std::borrow::Cow;
+
+    #[test]
+    fn the_default_unit_asset_source_is_detected_as_missing_icons() {
+        // `()` is GPUI's asset source when `.with_assets` is never called; it
+        // resolves nothing, so icon components would render blank.
+        assert!(!asset_source_has_component_icons(&()));
+    }
+
+    #[test]
+    fn a_source_serving_the_canary_icon_is_detected_as_present() {
+        struct Stub;
+        impl gpui::AssetSource for Stub {
+            fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+                Ok((path == canary_icon_path().as_ref()).then(|| Cow::Borrowed(&b"<svg/>"[..])))
+            }
+            fn list(&self, _path: &str) -> gpui::Result<Vec<gpui::SharedString>> {
+                Ok(Vec::new())
+            }
+        }
+        assert!(asset_source_has_component_icons(&Stub));
+    }
 }
