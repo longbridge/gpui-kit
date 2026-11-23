@@ -3021,13 +3021,6 @@ mod tests {
             scrollbar: Scrollbar,
             painted: Rc<Cell<Bounds<Pixels>>>,
         }
-        #[cfg(not(feature = "gpui-fast"))]
-        impl gpui::IntoElement for Probe {
-            type Element = Self;
-            fn into_element(self) -> Self {
-                self
-            }
-        }
         impl Element for Probe {
             type RequestLayoutState = ();
             type PrepaintState = PrepaintState;
