@@ -72,6 +72,17 @@ pub(crate) fn render_resize_handle(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    render_resize_handle_with(handle, true, window, cx)
+}
+
+/// [`render_resize_handle`], optionally without the resting hairline: the
+/// line keeps its size so the pill is placed the same, it is just unpainted.
+pub(crate) fn render_resize_handle_with(
+    handle: &ResizeHandleContext,
+    line: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let axis = handle.axis();
     let (target_length, target_opacity) = indicator(handle.state());
     let motion = cx.theme().motion_tokens();
@@ -105,7 +116,7 @@ pub(crate) fn render_resize_handle(
         // nothing to give: shrinking it collapses the divider.
         .flex_none()
         .flex()
-        .bg(cx.theme().border)
+        .when(line, |this| this.bg(cx.theme().border))
         // Along the hairline the pill is far shorter than the line, so centring
         // it there is safe. Across the hairline it is thicker than the line and
         // has to overhang, and neither flex alignment can be trusted to centre
