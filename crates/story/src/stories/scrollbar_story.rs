@@ -1,6 +1,11 @@
 use std::rc::Rc;
 
-use gpui_kit::component::{ActiveTheme as _, button::Button, scroll::ScrollableElement, v_flex};
+use gpui_kit::component::{
+    ActiveTheme as _,
+    button::Button,
+    scroll::{Scrollbar, ScrollbarPlacement},
+    v_flex,
+};
 use gpui_kit::*;
 use serde::Deserialize;
 
@@ -10,16 +15,27 @@ use crate::story_toolbar_group;
 #[action(namespace = scrollbar_story, no_json)]
 struct ChangeDataset(pub usize);
 
+#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = scrollbar_story, no_json)]
+struct ChangePlacement(pub usize);
+
 pub struct ScrollbarStory {
     focus_handle: FocusHandle,
     items: Rc<Vec<String>>,
     item_sizes: Rc<Vec<Size<Pixels>>>,
     test_width: Pixels,
     size_mode: usize,
+    placement: ScrollbarPlacement,
     scroll_handle: UniformListScrollHandle,
 }
 
 const ITEM_HEIGHT: Pixels = px(50.);
+const PLACEMENTS: [ScrollbarPlacement; 4] = [
+    ScrollbarPlacement::TopLeft,
+    ScrollbarPlacement::TopRight,
+    ScrollbarPlacement::BottomLeft,
+    ScrollbarPlacement::BottomRight,
+];
 
 impl ScrollbarStory {
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -36,6 +52,7 @@ impl ScrollbarStory {
             item_sizes: Rc::new(item_sizes),
             test_width,
             size_mode: 0,
+            placement: ScrollbarPlacement::default(),
             scroll_handle: UniformListScrollHandle::new(),
         }
     }
@@ -102,24 +119,45 @@ impl Render for ScrollbarStory {
             .on_action(cx.listener(|this, action: &ChangeDataset, _, cx| {
                 this.change_test_cases(action.0, cx);
             }))
+            .on_action(cx.listener(|this, action: &ChangePlacement, _, cx| {
+                this.placement = PLACEMENTS[action.0];
+                cx.notify();
+            }))
             .child(story_toolbar_group().dropdown_child(
-                Button::new("scrollbar-dataset").label(format!(
-                    "Dataset: {}",
-                    ["Standard", "Wide", "Stress", "Short"][self.size_mode]
-                )),
+                Button::new("scrollbar-options").label("Options"),
                 {
-                    let selected = self.size_mode;
-                    move |menu, _, _| {
-                        ["Standard", "Wide", "Stress", "Short"]
-                            .into_iter()
-                            .enumerate()
-                            .fold(menu, |menu, (index, label)| {
-                                menu.menu_with_check(
-                                    label,
-                                    selected == index,
-                                    Box::new(ChangeDataset(index)),
+                    let dataset = self.size_mode;
+                    let placement = self.placement;
+                    move |menu, window, cx| {
+                        menu.submenu("Dataset", window, cx, move |menu, _, _| {
+                            ["Standard", "Wide", "Stress", "Short"]
+                                .into_iter()
+                                .enumerate()
+                                .fold(menu, |menu, (ix, label)| {
+                                    menu.menu_with_check(
+                                        label,
+                                        dataset == ix,
+                                        Box::new(ChangeDataset(ix)),
+                                    )
+                                })
+                        })
+                        .submenu(
+                            "Placement",
+                            window,
+                            cx,
+                            move |menu, _, _| {
+                                PLACEMENTS.into_iter().enumerate().fold(
+                                    menu,
+                                    |menu, (ix, value)| {
+                                        menu.menu_with_check(
+                                            format!("{:?}", value),
+                                            placement == value,
+                                            Box::new(ChangePlacement(ix)),
+                                        )
+                                    },
                                 )
-                            })
+                            },
+                        )
                     }
                 },
             ))
@@ -132,12 +170,14 @@ impl Render for ScrollbarStory {
                     .child(
                         uniform_list("list", self.items.len(), {
                             let items = self.items.clone();
+                            let width = self.test_width;
                             move |visible_range, _, cx| {
                                 let mut elements = Vec::with_capacity(visible_range.len());
                                 for ix in visible_range {
                                     let item = &items[ix];
                                     elements.push(
                                         div()
+                                            .w(width)
                                             .h(ITEM_HEIGHT)
                                             .pt_1()
                                             .items_center()
@@ -154,12 +194,15 @@ impl Render for ScrollbarStory {
                                 elements
                             }
                         })
+                        .with_horizontal_sizing_behavior(
+                            ListHorizontalSizingBehavior::Unconstrained,
+                        )
                         .py_1()
                         .px_3()
                         .size_full()
                         .track_scroll(&self.scroll_handle),
                     )
-                    .vertical_scrollbar(&self.scroll_handle)
+                    .child(Scrollbar::new(&self.scroll_handle).placement(self.placement))
             })
     }
 }

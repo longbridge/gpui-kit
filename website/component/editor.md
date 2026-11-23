@@ -147,6 +147,16 @@ active-line background and the caret's fold control only while the editor or
 its context menu has focus, so that of several editors on screen only the
 focused one shows an active line.
 
+The scrollbars sit on the right and bottom edges by default. Use
+`scrollbar_placement` to move them; a vertical scrollbar on the left sits on
+the editor's left edge, over the line numbers. Like the bottom scrollbar over
+the last line, a top scrollbar overlays the first line rather than reserving
+space for itself. `set_scrollbar_placement` replaces the placement at runtime.
+
+```rust
+EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
+```
+
 ## Manual completions
 
 `ShowCompletions` requests suggestions without editing text. It has **no default
@@ -426,6 +436,8 @@ let ruler = editor.update(cx, |state, cx| {
   in the document, and each mark is at least 6 px tall. Touching marks with the same color in the same lane merge.
 - The marks draw under the scrollbar, whether it is Base's scrollbar or one supplied
   with `set_scrollbar_renderer`. They remain visible while the thumb fades.
+  With `scrollbar_placement` on the left, the track and its marks move to the left
+  edge; a supplied scrollbar reads the placement from `EditorScrollbarContext::placement`.
 - Without `with_color`, both collections use the editor foreground color. For
   version-control colors, read the highlight theme's Zed status keys `created`,
   `modified`, and `deleted` with `status.created(cx)`, `status.modified(cx)`, and
