@@ -1,0 +1,17 @@
+{
+  "name": "gpui-kit",
+  "owner": {
+    "name": "Longbridge",
+    "url": "https://github.com/longbridge"
+  },
+  "metadata": {
+    "description": "Official GPUI Kit plugins for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "gpui-kit",
+      "source": "./",
+      "description": "GPUI Kit coding and design skills for Claude Code."
+    }
+  ]
+}
