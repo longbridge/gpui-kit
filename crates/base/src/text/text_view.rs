@@ -3801,10 +3801,14 @@ mod tests {
 
             let (quad, scale) = window.update(|_, window, _| {
                 let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                // GPUI paints a rounded quad as a square interior plus edge
+                // strips; only the strips carry the corner radii.
                 let quad = window
                     .painted_quads()
                     .into_iter()
-                    .find(|quad| quad.background == head)
+                    .find(|quad| {
+                        quad.background == head && quad.corner_radii != Default::default()
+                    })
                     .unwrap_or_else(|| panic!("{mode}: the header background quad is painted"));
                 (quad, window.scale_factor())
             });
