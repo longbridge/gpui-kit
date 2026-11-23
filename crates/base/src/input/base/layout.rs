@@ -23,6 +23,8 @@ pub(super) struct LastLayout {
     pub(super) wrap_width: Option<Pixels>,
     pub(super) wrapping_indent: WrappingIndent,
     pub(super) line_number_width: Pixels,
+    /// The buffer row that inline completion ghost lines follow, and their height.
+    pub(super) ghost_lines: Option<(usize, Pixels)>,
     /// Width of one space in the editor font.
     ///
     /// Past the end of a line there are no glyphs to hit-test against, so this is the
@@ -37,6 +39,28 @@ impl LastLayout {
     pub(crate) fn line(&self, row: usize) -> Option<&LineLayout> {
         let pos = self.visible_buffer_lines.binary_search(&row).ok()?;
         self.lines.get(pos)
+    }
+
+    /// The top and height of each laid-out row, in `visible_buffer_lines` order.
+    ///
+    /// Tops are relative to the content origin and, as painted, rows after the
+    /// ghost lines are shifted down by their height.
+    pub(super) fn row_extents(&self) -> impl Iterator<Item = (Pixels, Pixels)> + '_ {
+        let mut top = self.visible_top;
+        self.lines
+            .iter()
+            .zip(&self.visible_buffer_lines)
+            .map(move |(line, &row)| {
+                let height = line.size(self.line_height).height;
+                let extent = (top, height);
+                top += height;
+                if let Some((ghost_row, ghost_height)) = self.ghost_lines
+                    && ghost_row == row
+                {
+                    top += ghost_height;
+                }
+                extent
+            })
     }
 
     pub(super) fn local_row_y(&self, row_offset: isize) -> Pixels {

@@ -53,6 +53,8 @@ mod language;
 pub mod language_config;
 #[path = "base/layout.rs"]
 mod layout;
+#[path = "editor/line_decorations.rs"]
+mod line_decorations;
 #[path = "editor/lsp/mod.rs"]
 mod lsp;
 #[path = "base/mask_pattern.rs"]
@@ -115,6 +117,7 @@ pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};
 pub(crate) use language_config::LanguageConfig;
 pub use language_config::{AutoClosingPair, BracketPair, IndentationRules};
+pub use line_decorations::{LineDecoration, LineDecorationCollection, LineDecorationProvider};
 pub use lsp::{
     CodeActionItem, CodeActionMenuState, CodeActionProvider, CompletionHighlighter,
     CompletionMenuOptions, CompletionMenuState, CompletionProvider, DefinitionProvider,
