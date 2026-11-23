@@ -133,7 +133,7 @@ fn main() {
             .and_then(|w| w.parse().ok())
             .unwrap_or(900.);
         let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(width), px(700.)), cx)),
+            window_bounds: Some(WindowBounds::centered(None, size(px(width), px(700.)), cx)),
             ..Default::default()
         };
 

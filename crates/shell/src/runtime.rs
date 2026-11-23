@@ -1022,15 +1022,6 @@ impl FailureDetailText {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for FailureDetailText {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for FailureDetailText {
     type RequestLayoutState = ();
     type PrepaintState = Hitbox;

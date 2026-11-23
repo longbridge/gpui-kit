@@ -360,15 +360,6 @@ impl InlineFlow {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for InlineFlow {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for InlineFlow {
     type RequestLayoutState = InlineFlowLayoutState;
     type PrepaintState = Vec<FlowPaintItem>;

@@ -44,15 +44,6 @@ impl CarouselScrollMask {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl gpui::IntoElement for CarouselScrollMask {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for CarouselScrollMask {
     type RequestLayoutState = ();
     type PrepaintState = Hitbox;

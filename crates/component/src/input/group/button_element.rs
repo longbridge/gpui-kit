@@ -39,15 +39,6 @@ pub(super) fn unwrapped_element(mut element: &mut AnyElement) -> &mut AnyElement
     element
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl gpui::IntoElement for InputGroupButtonElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for InputGroupButtonElement {
     type RequestLayoutState = AnyElement;
     type PrepaintState = ();

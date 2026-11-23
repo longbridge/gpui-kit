@@ -46,15 +46,6 @@ impl<P: Plot + 'static> PlotElement<P> {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<P: Plot + 'static> gpui::IntoElement for PlotElement<P> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl<P: Plot + 'static> Element for PlotElement<P> {
     type RequestLayoutState = ();
     // The occlusion-aware hitbox, the plot's prepainted children and the

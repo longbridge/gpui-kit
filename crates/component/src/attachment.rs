@@ -548,7 +548,7 @@ fn upload_bar(percent: f32, radius: Pixels, color: Hsla) -> impl IntoElement {
 /// rectangle: both ends are sampled along the corner arcs. An absolutely
 /// positioned child is laid out in the card's padding box, so `bounds` already
 /// sits inside the border; only the corner radius shrinks by the border width.
-fn upload_bar_path(bounds: Bounds<Pixels>, percent: f32, radius: Pixels) -> Option<Path<Pixels>> {
+fn upload_bar_path(bounds: Bounds<Pixels>, percent: f32, radius: Pixels) -> Option<Path> {
     const STEPS: usize = 6;
     let width = bounds.size.width.as_f32();
     let height = bounds.size.height.as_f32();

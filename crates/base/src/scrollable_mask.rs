@@ -169,15 +169,6 @@ impl RoundedFrameCover {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for RoundedFrameCover {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for RoundedFrameCover {
     type RequestLayoutState = ();
     type PrepaintState = Bounds<Pixels>;
@@ -298,7 +289,7 @@ fn corner_notch_path(
     x_dir: f32,
     y_dir: f32,
     radius: Pixels,
-) -> Option<gpui::Path<Pixels>> {
+) -> Option<gpui::Path> {
     let mut builder = gpui::PathBuilder::fill();
     builder.move_to(corner);
     builder.line_to(Point {
@@ -401,15 +392,6 @@ impl<H: ScrollbarHandle + Clone> ScrollableMask<H> {
     #[allow(dead_code)]
     pub fn debug(mut self) -> Self {
         self.debug = Some(gpui::yellow());
-        self
-    }
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl<H: ScrollbarHandle + Clone> IntoElement for ScrollableMask<H> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
         self
     }
 }

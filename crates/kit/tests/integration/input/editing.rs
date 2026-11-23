@@ -512,10 +512,7 @@ fn clipboard_normalization_strips_tabs_and_preserves_unicode_graphemes(cx: &mut 
         window.press("shift-left", cx);
         assert_eq!(input.read(cx).selected_value(), "👩‍💻");
         window.input("X", cx);
-        assert_eq!(
-            window.find("editing-first").value(),
-            Some("[e\u{301}X中]")
-        );
+        assert_eq!(window.find("editing-first").value(), Some("[e\u{301}X中]"));
         window.press("home", cx);
         window.press("right", cx);
         // The base letter and combining accent are one grapheme step.

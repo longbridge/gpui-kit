@@ -480,15 +480,6 @@ impl Element for Positioner {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl gpui::IntoElement for Positioner {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -87,7 +87,7 @@ impl Arc {
         point(r * a.cos(), r * a.sin())
     }
 
-    fn path<T>(&self, arc: &ArcData<T>, bounds: &Bounds<Pixels>) -> Option<Path<Pixels>> {
+    fn path<T>(&self, arc: &ArcData<T>, bounds: &Bounds<Pixels>) -> Option<Path> {
         let start_angle = arc.start_angle - HALF_PI;
         let end_angle = arc.end_angle - HALF_PI;
         let da = end_angle - start_angle;
@@ -232,8 +232,7 @@ impl Arc {
         .f32(self.inner_radius)
         .f32(self.outer_radius)
         .finish();
-        let local = Bounds::new(Point::default(), bounds.size);
-        let path = cache.get(key, bounds.origin, || self.path(arc, &local));
+        let path = cache.get(key, bounds.origin, || self.path(arc, bounds));
         if let Some(path) = path {
             window.paint_path(path, fill);
         }

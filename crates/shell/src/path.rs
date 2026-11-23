@@ -90,7 +90,7 @@ impl NativePath {
         self.background.resolve().ok()
     }
 
-    fn build(&self, bounds: Bounds<Pixels>) -> Option<gpui::Path<Pixels>> {
+    fn build(&self, bounds: Bounds<Pixels>) -> Option<gpui::Path> {
         let mut builder = if self.fill {
             gpui::PathBuilder::fill()
         } else {
@@ -132,18 +132,9 @@ impl NativePath {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl gpui::IntoElement for NativePath {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for NativePath {
     type RequestLayoutState = ();
-    type PrepaintState = Option<gpui::Path<Pixels>>;
+    type PrepaintState = Option<gpui::Path>;
 
     fn id(&self) -> Option<ElementId> {
         None
