@@ -8,7 +8,6 @@ edition.workspace = true
 [dependencies]
 gpui-kit.workspace = true
 reqwest_client.workspace = true
-anyhow.workspace = true
 
 [lints]
 workspace = true

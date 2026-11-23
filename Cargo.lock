@@ -2408,7 +2408,6 @@ checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
 name = "dialog_overlay"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -3135,7 +3134,6 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 name = "focus_trap"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -5203,7 +5201,6 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "hello_world"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -5711,7 +5708,6 @@ dependencies = [
 name = "input"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -9891,7 +9887,6 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 name = "sidebar"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -10099,7 +10094,6 @@ dependencies = [
 name = "speech"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "cpal",
  "gpui-kit",
  "libc",
@@ -10433,7 +10427,6 @@ dependencies = [
 name = "system_monitor"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "battery",
  "core-foundation 0.10.1",
  "gpui-kit",
@@ -10554,7 +10547,6 @@ dependencies = [
 name = "text_max_lines"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
  "gpui-pre-reqwest-client",
 ]
@@ -10563,7 +10555,6 @@ dependencies = [
 name = "text_selection"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -10911,7 +10902,6 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 name = "tooltip_top_edge"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -10919,7 +10909,6 @@ dependencies = [
 name = "touch_selection"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
@@ -12112,7 +12101,6 @@ dependencies = [
 name = "webview"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
  "gpui-webview",
  "lb-wry",
@@ -12387,7 +12375,6 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 name = "window_title"
 version = "0.10.0"
 dependencies = [
- "anyhow",
  "gpui-kit",
 ]
 
