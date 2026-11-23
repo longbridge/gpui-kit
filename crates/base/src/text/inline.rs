@@ -182,12 +182,18 @@ pub(super) fn combine_highlights(
 /// Layers host foregrounds after mark/link styling, independent of where a
 /// mark starts. `combine_highlights` folds active spans in start order, so a
 /// mark beginning inside an already active foreground must not win its color.
-pub(super) fn foreground_highlights(
-    highlights: Vec<(Range<usize>, InlineHighlight)>,
+///
+/// `highlights` come back as they are when no foreground reaches `text`, so
+/// shared highlights stay shared.
+pub(super) fn foreground_highlights<H>(
+    highlights: H,
     text: &str,
     offset: usize,
     foregrounds: &[(Range<usize>, Hsla)],
-) -> Vec<(Range<usize>, InlineHighlight)> {
+) -> H
+where
+    H: AsRef<[(Range<usize>, InlineHighlight)]> + From<Vec<(Range<usize>, InlineHighlight)>>,
+{
     let ranges: Vec<_> = foregrounds
         .iter()
         .filter_map(|(range, color)| {
@@ -201,7 +207,7 @@ pub(super) fn foreground_highlights(
         return highlights;
     }
     let mut highlights = combine_highlights(
-        highlights,
+        highlights.as_ref().iter().cloned(),
         ranges.iter().map(|(range, color)| {
             (
                 range.clone(),
@@ -218,17 +224,20 @@ pub(super) fn foreground_highlights(
             highlight.style.color = Some(*color);
         }
     }
-    highlights
+    highlights.into()
 }
 
 /// Layers a streamed fade-in over `highlights`: text inside each fade range
 /// loses that share of its color, and a highlight background or decoration
 /// color fades with it so an inline code chip or a link underline does not
 /// appear before its text.
-pub(super) fn fade_highlights(
-    highlights: Vec<(Range<usize>, InlineHighlight)>,
-    fades: &[(Range<usize>, f32)],
-) -> Vec<(Range<usize>, InlineHighlight)> {
+///
+/// `highlights` come back as they are when nothing fades, so shared
+/// highlights stay shared.
+pub(super) fn fade_highlights<H>(highlights: H, fades: &[(Range<usize>, f32)]) -> H
+where
+    H: AsRef<[(Range<usize>, InlineHighlight)]> + From<Vec<(Range<usize>, InlineHighlight)>>,
+{
     if fades.is_empty() {
         return highlights;
     }
@@ -241,7 +250,7 @@ pub(super) fn fade_highlights(
             }),
         )
     });
-    let mut combined = combine_highlights(highlights, fade_highlights);
+    let mut combined = combine_highlights(highlights.as_ref().iter().cloned(), fade_highlights);
     // GPUI fades only the glyph color, so explicit decoration colors fade
     // here too, or a link underline would show before its text does.
     for (_, highlight) in &mut combined {
@@ -268,7 +277,7 @@ pub(super) fn fade_highlights(
             color.fade_out(fade_out);
         }
     }
-    combined
+    combined.into()
 }
 
 /// Builds the [`TextRun`]s for `text_len` bytes of inline text: each
