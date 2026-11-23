@@ -102,12 +102,19 @@ fn painted_background_bounds(color: u32, cx: &mut VisualTestContext) -> Vec<Boun
     cx.update(|window, _| {
         let background: gpui_kit::Background = gpui_kit::rgb(color).into();
         let scale_factor = window.scale_factor();
-        window
-            .painted_quads()
-            .into_iter()
-            .filter(|quad| quad.background == background)
-            .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
-            .collect()
+        // GPUI paints a rounded or bordered quad as an interior plus edge
+        // strips, all with the quad's bounds, so count each fill once.
+        let mut bounds = Vec::new();
+        for quad in window.painted_quads() {
+            if quad.background != background {
+                continue;
+            }
+            let quad_bounds = quad.bounds.map(|value| px(value.0 / scale_factor));
+            if !bounds.contains(&quad_bounds) {
+                bounds.push(quad_bounds);
+            }
+        }
+        bounds
     })
 }
 

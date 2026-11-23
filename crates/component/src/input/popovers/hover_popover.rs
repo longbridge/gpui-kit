@@ -107,15 +107,6 @@ impl Popover {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for Popover {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 pub(crate) struct PopoverLayoutState {
     bounds: Bounds<Pixels>,
     element: Option<AnyElement>,

@@ -110,15 +110,6 @@ impl<E: ParentElement + Styled> Styled for ContextMenu<E> {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<E: ParentElement + Styled + IntoElement + 'static> IntoElement for ContextMenu<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 struct ContextMenuSharedState {
     menu_view: Option<Entity<PopupMenu>>,
     /// Kept while open so replacing the menu preserves its input's selection
@@ -198,15 +189,6 @@ impl DeferredMenu {
         )
         .with_priority(gpui_base::POPUP_PRIORITY)
         .into_any()
-    }
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for DeferredMenu {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 

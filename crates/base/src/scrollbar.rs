@@ -1216,15 +1216,6 @@ impl Scrollbar {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl gpui::IntoElement for Scrollbar {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 #[doc(hidden)]
 pub struct PrepaintState {
     hitbox: Hitbox,
@@ -1696,7 +1687,7 @@ impl Element for Scrollbar {
 
                     window.set_cursor_style(CursorStyle::default(), &state.bar_hitbox);
 
-                    window.paint_layer(hitbox_bounds, |cx| {
+                    let paint = |cx: &mut Window| {
                         cx.paint_quad(fill(painted_bounds, painted_track_bg));
 
                         cx.paint_quad(PaintQuad {
@@ -1725,7 +1716,12 @@ impl Element for Scrollbar {
                         cx.paint_quad(
                             fill(painted_thumb_bounds, painted_thumb_bg).corner_radii(radius),
                         );
-                    });
+                    };
+                    // GPUI Fast keeps the layer bounds to record scroll layers.
+                    #[cfg(feature = "gpui-fast")]
+                    window.paint_layer(hitbox_bounds, paint);
+                    #[cfg(not(feature = "gpui-fast"))]
+                    window.paint_layer(paint);
 
                     window.on_mouse_event({
                         let state = scrollbar_state.clone();
@@ -3024,13 +3020,6 @@ mod tests {
         struct Probe {
             scrollbar: Scrollbar,
             painted: Rc<Cell<Bounds<Pixels>>>,
-        }
-        #[cfg(not(feature = "gpui-fast"))]
-        impl gpui::IntoElement for Probe {
-            type Element = Self;
-            fn into_element(self) -> Self {
-                self
-            }
         }
         impl Element for Probe {
             type RequestLayoutState = ();

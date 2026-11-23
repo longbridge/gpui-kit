@@ -43,15 +43,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "gpui-fast"))]
-    impl IntoElement for PlainSelectableText {
-        type Element = Self;
-
-        fn into_element(self) -> Self::Element {
-            self
-        }
-    }
-
     impl Element for PlainSelectableText {
         type RequestLayoutState = ();
         type PrepaintState = Hitbox;
@@ -1463,15 +1454,6 @@ mod tests {
     /// painted without the highlight.
     struct SelectionPaintProbe {
         samples: Rc<RefCell<Vec<bool>>>,
-    }
-
-    #[cfg(not(feature = "gpui-fast"))]
-    impl IntoElement for SelectionPaintProbe {
-        type Element = Self;
-
-        fn into_element(self) -> Self::Element {
-            self
-        }
     }
 
     impl Element for SelectionPaintProbe {

@@ -134,15 +134,6 @@ impl PlotAppearScope {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for PlotAppearScope {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for PlotAppearScope {
     type RequestLayoutState = (Option<AnyElement>, Appeared);
     type PrepaintState = ();

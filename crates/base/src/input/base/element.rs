@@ -327,15 +327,6 @@ impl<M: InputModeKind> EditorScrollbar<M> {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<M: InputModeKind> IntoElement for EditorScrollbar<M> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl<M: InputModeKind> Element for EditorScrollbar<M> {
     type RequestLayoutState = ();
     type PrepaintState = (Vec<PaintQuad>, Option<AnyElement>);
@@ -1328,7 +1319,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         range: Range<usize>,
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         let corners = Self::layout_range_corners(&range, last_layout)?;
         let points = frame_outline_points(&corners);
         let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
@@ -1401,7 +1392,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         window: &Window,
         content_mask: Bounds<Pixels>,
         cx: &App,
-    ) -> (Vec<(Path<Pixels>, Hsla)>, Vec<(Path<Pixels>, Hsla)>) {
+    ) -> (Vec<(Path, Hsla)>, Vec<(Path, Hsla)>) {
         let state = self.state.read(cx);
         let mut fills = Vec::new();
         let mut frames = Vec::new();
@@ -1470,7 +1461,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         cx: &mut App,
-    ) -> Vec<(Path<Pixels>, bool)> {
+    ) -> Vec<(Path, bool)> {
         let state = self.state.read(cx);
         if !state.search_session.is_active() {
             return vec![];
@@ -1502,7 +1493,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         cx: &mut App,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         let state = self.state.read(cx);
         let Some(symbol_range) = state.extras.hover_symbol_range() else {
             return None;
@@ -1517,7 +1508,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         _cx: &mut App,
-    ) -> Vec<(Path<Pixels>, Hsla)> {
+    ) -> Vec<(Path, Hsla)> {
         let mut paths = vec![];
         for (range, color) in document_colors.iter() {
             if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
@@ -1534,7 +1525,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         bounds: &mut Bounds<Pixels>,
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<Path<Pixels>> {
+    ) -> Vec<Path> {
         let state = self.state.read(cx);
         if !state.has_selection_focus(window, cx) {
             return vec![];
@@ -3160,15 +3151,15 @@ pub(super) struct PrepaintState {
     /// row index (zero based), no wrap, same line as the cursor.
     current_row: Option<usize>,
     active_row: Option<usize>,
-    selection_paths: Vec<Path<Pixels>>,
-    hover_highlight_path: Option<Path<Pixels>>,
-    search_match_paths: Vec<(Path<Pixels>, bool)>,
-    document_color_paths: Vec<(Path<Pixels>, Hsla)>,
-    range_decoration_fills: Vec<(Path<Pixels>, Hsla)>,
-    range_decoration_frames: Vec<(Path<Pixels>, Hsla)>,
+    selection_paths: Vec<Path>,
+    hover_highlight_path: Option<Path>,
+    search_match_paths: Vec<(Path, bool)>,
+    document_color_paths: Vec<(Path, Hsla)>,
+    range_decoration_fills: Vec<(Path, Hsla)>,
+    range_decoration_frames: Vec<(Path, Hsla)>,
     gutter_decorations: Vec<PaintQuad>,
     hover_definition_hitbox: Option<Hitbox>,
-    indent_guides_path: Option<Path<Pixels>>,
+    indent_guides_path: Option<Path>,
     /// The whole input, for deciding whether a long press started in it.
     hitbox: Hitbox,
     bounds: Bounds<Pixels>,
@@ -3199,15 +3190,6 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     let x = (bounds.origin.x * scale_factor).round() / scale_factor;
     let width = (bounds.size.width * scale_factor).round().max(px(1.)) / scale_factor;
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl<M: InputModeKind, R: EditorLineNumberRenderer> IntoElement for TextElement<M, R> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 /// A debug function to print points as SVG path.

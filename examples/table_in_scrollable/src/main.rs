@@ -111,7 +111,7 @@ fn main() {
         gpui_kit::init(cx);
 
         let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(700.), px(700.)), cx)),
+            window_bounds: Some(WindowBounds::centered(None, size(px(700.), px(700.)), cx)),
             ..Default::default()
         };
 

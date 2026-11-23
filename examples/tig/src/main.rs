@@ -90,7 +90,7 @@ fn main() {
             gpui_kit::init(cx);
             app::init(cx);
             let options = WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(1400.), px(860.)), cx)),
+                window_bounds: Some(WindowBounds::centered(None, size(px(1400.), px(860.)), cx)),
                 window_min_size: Some(size(px(1100.), px(640.))),
                 app_id: Some("gpui-kit-tig".into()),
                 ..TitleBar::window_options()

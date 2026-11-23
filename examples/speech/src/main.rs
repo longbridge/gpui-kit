@@ -852,7 +852,7 @@ fn main() {
         cx.activate(true);
 
         let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(980.), px(680.)), cx)),
+            window_bounds: Some(WindowBounds::centered(None, size(px(980.), px(680.)), cx)),
             window_min_size: Some(size(px(760.), px(520.))),
             ..TitleBar::window_options()
         };

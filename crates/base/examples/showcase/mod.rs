@@ -735,7 +735,7 @@ pub fn run(app: Application, component: impl Into<String>) {
             .expect("failed to load gpui-base example font");
         let options = WindowOptions {
             #[cfg(not(target_family = "wasm"))]
-            window_bounds: Some(WindowBounds::centered(size(px(840.), px(640.)), cx)),
+            window_bounds: Some(WindowBounds::centered(None, size(px(840.), px(640.)), cx)),
             ..WindowOptions::default()
         };
         cx.open_window(options, move |window, cx| {
