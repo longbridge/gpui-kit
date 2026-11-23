@@ -179,6 +179,17 @@ npx skills add longbridge/gpui-kit
 | `gpui-kit`               | 初始化、组件目录、常用使用模式、GPUI 机制（Element、Entity、异步、Focus、Action、测试），以及 Coding Guides。 |
 | `gpui-kit-design-guides` | Design Guides：布局、间距、层级、交互状态、浮层与界面文案的规范。                                             |
 
+### Claude Code 插件
+
+Claude Code 用户也可以把两个 skill 作为一个插件安装：
+
+```text
+/plugin marketplace add longbridge/gpui-kit
+/plugin install gpui-kit@gpui-kit
+```
+
+安装后可用 `/gpui-kit:gpui-kit` 和 `/gpui-kit:gpui-kit-design-guides` 调用。插件直接使用 `main` 分支的 `skills/` 目录，跟随最新的 GPUI Kit API；运行 `/plugin marketplace update gpui-kit` 更新，`/plugin uninstall gpui-kit@gpui-kit` 卸载。
+
 ## Development
 
 ### 桌面 Gallery（Story）

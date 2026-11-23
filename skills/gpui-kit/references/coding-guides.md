@@ -8,7 +8,7 @@ order: -13
 
 This guide describes the application architecture and code patterns that have
 proved durable in GPUI Kit. It is written for both engineers and coding
-agents. Read [Design Guides](./design-guides.md) first: code structure should
+agents. Read [Design Guides](https://gpui-kit.com/docs/design-guides) first: code structure should
 preserve product intent, not replace it.
 
 This is a normative guide. **Must** marks lifecycle, correctness, or ecosystem
@@ -802,7 +802,7 @@ must use current, compilable APIs and show stable IDs. Document defaults,
 platform limitations, focus behavior, callback ordering, and any requirement
 to call `notify`, `emit`, or a theme synchronization method.
 
-Follow the [interface-language rules](./design-guides.md#interface-language) for
+Follow the [interface-language rules](https://gpui-kit.com/docs/design-guides#interface-language) for
 labels, commands, confirmation dialogs, capitalization, and ellipses. Keep one
 canonical term for each domain object, command, and state.
 
@@ -907,5 +907,5 @@ Before opening a change for review, confirm that:
 - tests prove behavior at the appropriate layer;
 - formatting, Clippy, targeted tests, and relevant examples pass.
 
-See [Getting Started](./getting-started.md) for application setup and the
+See [Getting Started](https://gpui-kit.com/docs/getting-started) for application setup and the
 component pages for current API details.

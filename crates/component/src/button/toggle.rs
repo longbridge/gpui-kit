@@ -721,6 +721,9 @@ mod tests {
             }
         });
         let draw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+        // The pointer starts at the window origin, over the first item; GPUI
+        // Fast notes that hover when it paints, so rest it below the group.
+        cx.simulate_mouse_move(point(px(30.), px(100.)), None, Modifiers::default());
         draw(cx);
         assert_eq!(color.get(), Some(foreground));
 

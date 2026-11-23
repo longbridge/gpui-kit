@@ -17,7 +17,10 @@ use gpui_base::input::{
 use ropey::Rope;
 use tree_sitter::{InputEdit, ParseOptions, Point};
 
-use super::{LanguageRegistry, SyntaxHighlighter, highlighter::parse_input_bytes};
+use super::{
+    LanguageRegistry, SyntaxHighlighter,
+    highlighter::{INJECTION_PARSE_TIMEOUT, parse_input_bytes},
+};
 
 pub(crate) fn input_highlighter_factory() -> InputHighlighterFactory {
     Rc::new(|language| {
@@ -101,8 +104,15 @@ impl TreeSitterInputHighlighter {
                     if parse_cancel.load(Ordering::Relaxed) {
                         return None;
                     }
+                    // `cancel` only reaches the host parse, so each injection layer
+                    // keeps its fixed budget here, as before.
                     let injections = injection_data.map_or_else(Default::default, |data| {
-                        SyntaxHighlighter::compute_injection_layers(data, &tree, &text)
+                        SyntaxHighlighter::compute_injection_layers(
+                            data,
+                            &tree,
+                            &text,
+                            Some(INJECTION_PARSE_TIMEOUT),
+                        )
                     });
                     let folds = if folding {
                         extract_fold_ranges(&tree)

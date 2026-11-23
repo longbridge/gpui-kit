@@ -40,7 +40,7 @@ fn main() {
             gpui_kit::init(cx);
             let options = WindowOptions {
                 app_id: Some("gpui-link-tooltip-example".into()),
-                window_bounds: Some(WindowBounds::centered(size(px(720.), px(360.)), cx)),
+                window_bounds: Some(WindowBounds::centered(None, size(px(720.), px(360.)), cx)),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Link previews".into()),
                     ..Default::default()

@@ -1,0 +1,10 @@
+{
+  "name": "gpui-kit",
+  "description": "GPUI Kit coding and design skills: setup, component catalog, GPUI mechanics, Coding Guides and Design Guides.",
+  "author": { "name": "Longbridge", "url": "https://github.com/longbridge" },
+  "homepage": "https://github.com/longbridge/gpui-kit",
+  "repository": "https://github.com/longbridge/gpui-kit",
+  "license": "Apache-2.0",
+  "keywords": ["gpui", "gpui-kit", "rust", "ui", "desktop"],
+  "skills": "./skills/"
+}

@@ -22,7 +22,7 @@ use crate::{
         DockSkin, SkinShared, invalid_panel::InvalidPanel, panel_handle, report_user_toggle,
         tab_panel::TabGroupSkin,
     },
-    resizable::render_resize_handle,
+    resizable::render_resize_handle_with,
     resize_handle,
 };
 
@@ -64,7 +64,8 @@ impl DockAreaRenderer for DockSkin {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
-        Some(render_resize_handle(handle, window, cx))
+        let line = self.shared().split_divider_line_visible.get();
+        Some(render_resize_handle_with(handle, line, window, cx))
     }
 
     fn split_frame(&self, node: NodeId, _: Axis, _: &mut Window, cx: &mut App) -> Stateful<Div> {
@@ -172,15 +173,6 @@ impl DockSkin {
 struct DockResizeTracker {
     dock: DockContext,
     shared: Rc<SkinShared>,
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for DockResizeTracker {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 impl Element for DockResizeTracker {

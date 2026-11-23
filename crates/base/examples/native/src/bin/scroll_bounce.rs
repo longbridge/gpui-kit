@@ -152,7 +152,7 @@ fn main() {
         .detach();
         cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(900.), px(650.)), cx)),
+                window_bounds: Some(WindowBounds::centered(None, size(px(900.), px(650.)), cx)),
                 ..Default::default()
             },
             |_, cx| {

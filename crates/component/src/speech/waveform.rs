@@ -323,7 +323,7 @@ fn ribbon(points: &[Point<Pixels>], width: Pixels) -> (Vec<Point<Pixels>>, Vec<P
 }
 
 /// A capsule filling `rect`: round caps on its short ends, a dot when square.
-pub(super) fn capsule(rect: Bounds<Pixels>) -> Option<Path<Pixels>> {
+pub(super) fn capsule(rect: Bounds<Pixels>) -> Option<Path> {
     let radius = rect.size.width.min(rect.size.height) / 2.;
     let radii = point(radius, radius);
     let (left, right) = (rect.left(), rect.right());

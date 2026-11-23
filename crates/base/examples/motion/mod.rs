@@ -696,7 +696,11 @@ pub fn run() {
         .detach();
         cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::centered(gpui::size(px(820.), px(620.)), cx)),
+                window_bounds: Some(WindowBounds::centered(
+                    None,
+                    gpui::size(px(820.), px(620.)),
+                    cx,
+                )),
                 ..Default::default()
             },
             |_, cx| cx.new(|_| MotionExample::new()),

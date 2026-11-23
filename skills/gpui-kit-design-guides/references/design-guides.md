@@ -965,5 +965,5 @@ the right decisions. Ask, in order:
 8. **Has it been tested in a real window?** Complete the task with real
    components, copy, and representative content—not only an ideal screenshot.
 
-Continue with [Coding Guides](./coding-guides.md) to translate these design
+Continue with [Coding Guides](https://gpui-kit.com/docs/coding-guides) to translate these design
 decisions into GPUI architecture and code.

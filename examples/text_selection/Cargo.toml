@@ -1,13 +1,12 @@
 [package]
 name = "text_selection"
 description = "Window-level text selection across multiple TextView bubbles."
-version = "0.10.0"
+version = "0.11.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
 gpui-kit.workspace = true
-anyhow.workspace = true
 
 [lints]
 workspace = true

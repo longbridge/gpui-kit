@@ -908,7 +908,7 @@ pub fn sankey_link_path(
     link: &SankeyLinkLayout,
     min_width: f32,
     origin: Point<Pixels>,
-) -> Option<Path<Pixels>> {
+) -> Option<Path> {
     let source_half = link.source_width.max(min_width) / 2.;
     let target_half = link.target_width.max(min_width) / 2.;
     let sx = source.x1;

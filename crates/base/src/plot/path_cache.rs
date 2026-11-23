@@ -16,40 +16,37 @@ use gpui::{App, ElementId, Entity, Path, Pixels, Point, Window};
 pub struct PathCache {
     key: Option<u64>,
     /// Built relative to a zero origin.
-    path: Option<Path<Pixels>>,
+    path: Option<Path>,
 }
 
 impl PathCache {
-    /// The path for `key`, moved to `origin`. `build` runs only when the key
-    /// differs from the last call's; it must build relative to a zero origin.
+    /// The path for `key` at `origin`. `build` runs only when the key or the
+    /// origin differs from the last call's; it must build at `origin`.
+    ///
+    /// A finished [`Path`] can no longer be moved, so a path is reused only
+    /// while the shape stays at the same origin.
     pub fn get(
         &mut self,
         key: u64,
         origin: Point<Pixels>,
-        build: impl FnOnce() -> Option<Path<Pixels>>,
-    ) -> Option<Path<Pixels>> {
+        build: impl FnOnce() -> Option<Path>,
+    ) -> Option<Path> {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        origin.x.as_f32().to_bits().hash(&mut hasher);
+        origin.y.as_f32().to_bits().hash(&mut hasher);
+        let key = hasher.finish();
         if self.key != Some(key) {
             self.path = build();
             self.key = Some(key);
         }
-        self.path.as_ref().map(|path| translated(path, origin))
+        self.path.clone()
     }
 
     /// Whether the last [`Self::get`] reused the path built by an earlier one.
     pub fn is_warm(&self) -> bool {
         self.key.is_some()
     }
-}
-
-/// `path` moved by `offset`. A finished path is only its bounds and vertices;
-/// the builder cursor it keeps is not read again.
-fn translated(path: &Path<Pixels>, offset: Point<Pixels>) -> Path<Pixels> {
-    let mut path = path.clone();
-    path.bounds.origin = path.bounds.origin + offset;
-    for vertex in &mut path.vertices {
-        vertex.xy_position = vertex.xy_position + offset;
-    }
-    path
 }
 
 /// The [`PathCache`]s of a plot that is rebuilt on every render, kept in the
@@ -136,7 +133,7 @@ mod tests {
     use super::*;
     use gpui::{PathBuilder, point, px};
 
-    fn diagonal() -> Option<Path<Pixels>> {
+    fn diagonal() -> Option<Path> {
         let mut builder = PathBuilder::stroke(px(2.));
         builder.move_to(point(px(0.), px(0.)));
         builder.line_to(point(px(10.), px(10.)));
@@ -144,36 +141,35 @@ mod tests {
     }
 
     #[test]
-    fn builds_once_per_key_and_moves_to_each_origin() {
+    fn builds_once_per_key_and_origin() {
         let mut cache = PathCache::default();
         let mut builds = 0;
-        let first = cache
-            .get(1, point(px(100.), px(50.)), || {
-                builds += 1;
-                diagonal()
-            })
-            .unwrap();
-        let second = cache
-            .get(1, point(px(200.), px(50.)), || {
-                builds += 1;
-                diagonal()
-            })
-            .unwrap();
+        let origin = point(px(100.), px(50.));
+        cache.get(1, origin, || {
+            builds += 1;
+            diagonal()
+        });
+        assert!(
+            cache
+                .get(1, origin, || {
+                    builds += 1;
+                    diagonal()
+                })
+                .is_some()
+        );
         assert_eq!(builds, 1);
-        assert_eq!(first.vertices.len(), second.vertices.len());
-        for (a, b) in first.vertices.iter().zip(&second.vertices) {
-            assert_eq!(b.xy_position.x - a.xy_position.x, px(100.));
-            assert_eq!(b.xy_position.y, a.xy_position.y);
-            assert_eq!(a.st_position, b.st_position);
-        }
-        assert_eq!(second.bounds.origin.x - first.bounds.origin.x, px(100.));
-        assert_eq!(first.bounds.size, second.bounds.size);
 
-        cache.get(2, point(px(0.), px(0.)), || {
+        cache.get(1, point(px(200.), px(50.)), || {
             builds += 1;
             diagonal()
         });
         assert_eq!(builds, 2);
+
+        cache.get(2, point(px(200.), px(50.)), || {
+            builds += 1;
+            diagonal()
+        });
+        assert_eq!(builds, 3);
     }
 
     #[test]

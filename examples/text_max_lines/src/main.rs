@@ -246,7 +246,7 @@ fn main() {
         cx.set_http_client(std::sync::Arc::new(http_client));
 
         let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(720.), px(680.)), cx)),
+            window_bounds: Some(WindowBounds::centered(None, size(px(720.), px(680.)), cx)),
             ..Default::default()
         };
 

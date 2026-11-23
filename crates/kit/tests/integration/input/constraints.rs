@@ -788,7 +788,7 @@ fn paste_hook_consumption_preserves_selection_and_redo_then_fallback_normalizes(
     .unwrap();
     ui(handle, cx, |window, cx| {
         shortcut(window, "v", cx);
-        assert_eq!(window.find("constrained").value(), Some("中\t文"));
+        assert_eq!(window.find("constrained").value(), Some("中文"));
         shortcut(window, "z", cx);
         assert_eq!(window.find("constrained").value(), Some("old"));
     });

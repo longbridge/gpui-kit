@@ -20,12 +20,18 @@ use unicode_segmentation::UnicodeSegmentation as _;
 impl<M: InputModeKind> InputBaseState<M> {
     /// The runs for this frame, or None where the field gives no text: no accessibility
     /// client, or a masked or unexposed value.
-    pub(super) fn accessibility_text_runs(&self, window: &Window) -> Option<A11yTextRuns> {
+    /// `text` is the field's text already copied for its value, so a large document is
+    /// copied once per frame, not once for the value and again for the runs.
+    pub(super) fn accessibility_text_runs(
+        &self,
+        text: Option<&str>,
+        window: &Window,
+    ) -> Option<A11yTextRuns> {
         let accessibility = self.accessibility.as_ref()?;
         if !window.is_a11y_active() || !accessibility.value_exposed() || self.masked {
             return None;
         }
-        let text = self.text.to_string();
+        let text = text?;
         let range = self.selected_range();
         let selection = if self.is_selection_reversed() {
             (range.end, range.start)
@@ -40,7 +46,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     && layout.visible_line_byte_offsets.first() == Some(&0)
                     && layout.lines[0].len() == text.len()
             });
-        A11yTextRuns::capture(&text, Some(selection), window.scale_factor(), |bytes| {
+        A11yTextRuns::capture(text, Some(selection), window.scale_factor(), |bytes| {
             has_layout.then(|| self.range_to_bounds(&bytes)).flatten()
         })
     }
@@ -87,29 +93,48 @@ impl A11yTextRuns {
         scale: f32,
         bounds_of: impl Fn(std::ops::Range<usize>) -> Option<Bounds<Pixels>>,
     ) -> Option<Self> {
-        let graphemes = graphemes(text, &bounds_of);
-        // A grapheme longer than a u8 of bytes cannot be described; expose nothing rather
-        // than a run whose lengths do not add up to its text.
-        if graphemes
-            .iter()
-            .any(|g| g.text.len() > usize::from(u8::MAX))
-        {
-            return None;
-        }
-        let has_geometry = graphemes.iter().all(|g| g.bounds.is_some());
+        // Stream the text one line at a time: only the current line's graphemes are held, so
+        // a large document costs its runs, not a record per grapheme of the whole text.
         let mut runs: Vec<Run> = Vec::new();
         let mut start = 0;
-        for line in lines(&graphemes) {
-            let chunks: Vec<_> = line.chunks(RUN_CHARACTERS).collect();
-            let last = chunks.len() - 1;
-            for (index, chunk) in chunks.into_iter().enumerate() {
+        let mut line: Vec<Grapheme<'_>> = Vec::new();
+        let mut was_space = true;
+        let flush = |line: &mut Vec<Grapheme<'_>>, runs: &mut Vec<Run>, start: &mut usize| {
+            if line.is_empty() {
+                return;
+            }
+            let has_geometry = line.iter().all(|g| g.bounds.is_some());
+            let count = line.len().div_ceil(RUN_CHARACTERS);
+            for (index, chunk) in line.chunks(RUN_CHARACTERS).enumerate() {
                 let mut run = Run::new(chunk, has_geometry, scale);
-                run.start = start;
-                run.continues = index < last;
-                start += chunk.len();
+                run.start = *start;
+                run.continues = index + 1 < count;
+                *start += chunk.len();
                 runs.push(run);
             }
+            line.clear();
+        };
+        for (offset, grapheme) in text.grapheme_indices(true) {
+            // A grapheme longer than a u8 of bytes cannot be described; expose nothing rather
+            // than a run whose lengths do not add up to its text.
+            if grapheme.len() > usize::from(u8::MAX) {
+                return None;
+            }
+            // A word starts at the first character after whitespace, so trailing whitespace
+            // stays with the word before it (AccessKit's `word_starts` convention).
+            let is_space = grapheme.chars().all(char::is_whitespace);
+            let is_word_start = was_space && !is_space && offset != 0;
+            was_space = is_space;
+            line.push(Grapheme {
+                text: grapheme,
+                is_word_start,
+                bounds: bounds_of(offset..offset + grapheme.len()),
+            });
+            if is_line_break(grapheme) {
+                flush(&mut line, &mut runs, &mut start);
+            }
         }
+        flush(&mut line, &mut runs, &mut start);
         if runs.last().is_none_or(Run::ends_line) {
             // An empty field, or a text ending in a line break, still has a caret after its
             // last character, and a caret needs a run to sit in.
@@ -221,45 +246,8 @@ impl Run {
     }
 }
 
-/// The graphemes split into lines, each line keeping its line break.
-fn lines<'a, 'b>(graphemes: &'b [Grapheme<'a>]) -> Vec<&'b [Grapheme<'a>]> {
-    let mut lines = Vec::new();
-    let mut start = 0;
-    for (index, g) in graphemes.iter().enumerate() {
-        if is_line_break(g.text) {
-            lines.push(&graphemes[start..=index]);
-            start = index + 1;
-        }
-    }
-    if start < graphemes.len() {
-        lines.push(&graphemes[start..]);
-    }
-    lines
-}
-
 fn is_line_break(grapheme: &str) -> bool {
     matches!(grapheme, "\n" | "\r\n" | "\r")
-}
-
-fn graphemes<'a>(
-    text: &'a str,
-    bounds_of: &impl Fn(std::ops::Range<usize>) -> Option<Bounds<Pixels>>,
-) -> Vec<Grapheme<'a>> {
-    // A word starts at the first character after whitespace, so trailing whitespace stays
-    // with the word before it (AccessKit's `word_starts` convention).
-    let mut was_space = true;
-    text.grapheme_indices(true)
-        .map(|(start, grapheme)| {
-            let is_space = grapheme.chars().all(char::is_whitespace);
-            let is_word_start = was_space && !is_space && start != 0;
-            was_space = is_space;
-            Grapheme {
-                text: grapheme,
-                is_word_start,
-                bounds: bounds_of(start..start + grapheme.len()),
-            }
-        })
-        .collect()
 }
 
 /// The grapheme index at byte `offset`, counting a grapheme the offset falls inside as before it.
@@ -397,5 +385,23 @@ mod tests {
         let runs = capture("a🎉\nğ", (0, 0));
         assert_eq!(runs.runs[0].character_lengths, [1, 4, 1]);
         assert_eq!(runs.runs[1].character_lengths, [2]);
+    }
+
+    #[test]
+    fn a_large_document_is_navigable_from_start_to_end() {
+        let lines = 20_000;
+        let text: String = (0..lines).map(|i| format!("line {i}\n")).collect();
+        let middle = text.find("line 10000\n").unwrap();
+        let runs = capture(&text, (middle, middle));
+        // One run per line plus the empty last line after the trailing break.
+        assert_eq!(runs.runs.len(), lines + 1);
+        assert_eq!(runs.runs[0].text, "line 0\n");
+        assert_eq!(runs.runs[10_000].text, "line 10000\n");
+        assert_eq!(runs.runs[lines - 1].text, format!("line {}\n", lines - 1));
+        assert_eq!(at(&runs, 0), (0, 0));
+        assert_eq!(at(&runs, focus(&runs)), (10_000, 0));
+        assert_eq!(at(&runs, text.len()), (lines, 0));
+        // Words keep starting after whitespace across run boundaries.
+        assert_eq!(runs.runs[1].word_starts, [0, 5]);
     }
 }

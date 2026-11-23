@@ -5,7 +5,7 @@ use crate::input::{
 use gpui::Corners;
 use gpui::Half;
 use gpui::{
-    AnyElement, App, Bounds, Edges, Element, ElementId, ElementInputHandler, Entity,
+    AnyElement, App, Bounds, ContentMask, Edges, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId,
 };
 use gpui::{
@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 use std::{collections::BTreeSet, ops::Range, rc::Rc};
 
 use crate::{
-    Scrollbar,
+    Scrollbar, ScrollbarPlacement,
     input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
 };
 
@@ -229,6 +229,7 @@ pub(super) struct EditorScrollbarSnapshot {
     line_height: Pixels,
     padding_top: Pixels,
     wrap_width: Option<Pixels>,
+    placement: ScrollbarPlacement,
 }
 
 impl EditorScrollbarSnapshot {
@@ -247,6 +248,7 @@ impl EditorScrollbarSnapshot {
                 last_layout.line_number_width,
                 scroll_size,
                 state.editor_paddings,
+                state.scrollbar_placement,
             ),
             cursor_scroll_offset,
             scroll_height_f64,
@@ -255,6 +257,7 @@ impl EditorScrollbarSnapshot {
             line_height: last_layout.line_height,
             padding_top: state.editor_paddings.top,
             wrap_width: last_layout.wrap_width,
+            placement: state.scrollbar_placement,
         }
     }
     fn with_gutter_gap(mut self, gap: Pixels) -> Self {
@@ -281,8 +284,11 @@ impl EditorScrollbarLayout {
         line_number_width: Pixels,
         scroll_size: Size<Pixels>,
         paddings: Edges<Pixels>,
+        placement: ScrollbarPlacement,
     ) -> Self {
-        let left = if line_number_width == px(0.) {
+        let left = if placement.is_left() {
+            -paddings.left
+        } else if line_number_width == px(0.) {
             px(0.)
         } else {
             paddings.left + line_number_width - LINE_NUMBER_RIGHT_MARGIN
@@ -318,15 +324,6 @@ pub(super) struct EditorScrollbar<M: InputModeKind> {
 impl<M: InputModeKind> EditorScrollbar<M> {
     pub(super) fn new(state: Entity<InputBaseState<M>>) -> Self {
         Self { state }
-    }
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl<M: InputModeKind> IntoElement for EditorScrollbar<M> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
     }
 }
 
@@ -395,6 +392,7 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
                 } else {
                     crate::ScrollbarAxis::Both
                 },
+                placement: snapshot.placement,
             };
             renderer(presentation, window, cx)
         } else {
@@ -403,6 +401,7 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
             } else {
                 Scrollbar::vertical(&scroll_handle)
             }
+            .placement(snapshot.placement)
             .viewport_bounds(snapshot.layout.bounds)
             .scroll_viewport_size(snapshot.layout.scroll_viewport_size)
             .scroll_size(snapshot.layout.scroll_size)
@@ -492,6 +491,11 @@ fn editor_gutter_bounds(
             input_bounds.size.height + ghost_lines_height + paddings.top + paddings.bottom,
         ),
     }
+}
+
+fn editor_text_bounds(bounds: Bounds<Pixels>, gutter_bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    let left = gutter_bounds.right().max(bounds.left()).min(bounds.right());
+    Bounds::from_corners(point(left, bounds.top()), bounds.bottom_right())
 }
 
 /// Where a gutter or overview ruler decoration sits, in display rows.
@@ -654,8 +658,13 @@ fn layout_overview_ruler<M: InputModeKind>(
         return Vec::new();
     }
 
+    let track_left = if snapshot.placement.is_left() {
+        layout.bounds.left()
+    } else {
+        layout.bounds.right() - track_width
+    };
     let track = Bounds::new(
-        point(layout.bounds.right() - track_width, layout.bounds.top()),
+        point(track_left, layout.bounds.top()),
         size(track_width, layout.bounds.size.height),
     );
     let track_height_f64 = f64::from(f32::from(track.size.height));
@@ -1310,7 +1319,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         range: Range<usize>,
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         let corners = Self::layout_range_corners(&range, last_layout)?;
         let points = frame_outline_points(&corners);
         let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
@@ -1383,7 +1392,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         window: &Window,
         content_mask: Bounds<Pixels>,
         cx: &App,
-    ) -> (Vec<(Path<Pixels>, Hsla)>, Vec<(Path<Pixels>, Hsla)>) {
+    ) -> (Vec<(Path, Hsla)>, Vec<(Path, Hsla)>) {
         let state = self.state.read(cx);
         let mut fills = Vec::new();
         let mut frames = Vec::new();
@@ -1452,7 +1461,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         cx: &mut App,
-    ) -> Vec<(Path<Pixels>, bool)> {
+    ) -> Vec<(Path, bool)> {
         let state = self.state.read(cx);
         if !state.search_session.is_active() {
             return vec![];
@@ -1484,7 +1493,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         cx: &mut App,
-    ) -> Option<Path<Pixels>> {
+    ) -> Option<Path> {
         let state = self.state.read(cx);
         let Some(symbol_range) = state.extras.hover_symbol_range() else {
             return None;
@@ -1499,7 +1508,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         last_layout: &LastLayout,
         bounds: &Bounds<Pixels>,
         _cx: &mut App,
-    ) -> Vec<(Path<Pixels>, Hsla)> {
+    ) -> Vec<(Path, Hsla)> {
         let mut paths = vec![];
         for (range, color) in document_colors.iter() {
             if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
@@ -1516,7 +1525,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         bounds: &mut Bounds<Pixels>,
         window: &mut Window,
         cx: &mut App,
-    ) -> Vec<Path<Pixels>> {
+    ) -> Vec<Path> {
         let state = self.state.read(cx);
         if !state.has_selection_focus(window, cx) {
             return vec![];
@@ -3142,15 +3151,15 @@ pub(super) struct PrepaintState {
     /// row index (zero based), no wrap, same line as the cursor.
     current_row: Option<usize>,
     active_row: Option<usize>,
-    selection_paths: Vec<Path<Pixels>>,
-    hover_highlight_path: Option<Path<Pixels>>,
-    search_match_paths: Vec<(Path<Pixels>, bool)>,
-    document_color_paths: Vec<(Path<Pixels>, Hsla)>,
-    range_decoration_fills: Vec<(Path<Pixels>, Hsla)>,
-    range_decoration_frames: Vec<(Path<Pixels>, Hsla)>,
+    selection_paths: Vec<Path>,
+    hover_highlight_path: Option<Path>,
+    search_match_paths: Vec<(Path, bool)>,
+    document_color_paths: Vec<(Path, Hsla)>,
+    range_decoration_fills: Vec<(Path, Hsla)>,
+    range_decoration_frames: Vec<(Path, Hsla)>,
     gutter_decorations: Vec<PaintQuad>,
     hover_definition_hitbox: Option<Hitbox>,
-    indent_guides_path: Option<Path<Pixels>>,
+    indent_guides_path: Option<Path>,
     /// The whole input, for deciding whether a long press started in it.
     hitbox: Hitbox,
     bounds: Bounds<Pixels>,
@@ -3181,15 +3190,6 @@ fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bou
     let x = (bounds.origin.x * scale_factor).round() / scale_factor;
     let width = (bounds.size.width * scale_factor).round().max(px(1.)) / scale_factor;
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))
-}
-
-#[cfg(not(feature = "gpui-fast"))]
-impl<M: InputModeKind, R: EditorLineNumberRenderer> IntoElement for TextElement<M, R> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
 }
 
 /// A debug function to print points as SVG path.
@@ -4151,168 +4151,183 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             px(0.)
         };
 
-        // Paint glyph backgrounds
-        //
-        // gpui's `paint` only draws glyphs, underlines, and strikethroughs, so decoration
-        // backgrounds need their own pass. It runs ahead of the indent guides, selections,
-        // and text so a highlighted range sits under them instead of covering them.
-        let mut row_offset: isize = 0;
-        let mut ghost_offset = px(0.);
-        for (line, &buffer_line) in prepaint
-            .last_layout
-            .lines
-            .iter()
-            .zip(prepaint.last_layout.visible_buffer_lines.iter())
-        {
-            let p = point(
-                origin.x + prepaint.last_layout.line_number_width + scroll_offset,
-                origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
-            );
+        let gutter_bounds = editor_gutter_bounds(
+            input_bounds,
+            prepaint.last_layout.line_number_width,
+            prepaint.ghost_lines_height,
+            editor_paddings,
+        );
+        let text_mask = (prepaint.last_layout.line_number_width > px(0.)).then(|| ContentMask {
+            bounds: editor_text_bounds(window.content_mask().bounds, gutter_bounds),
+        });
 
-            line.paint_background(
-                p,
-                line_height,
-                prepaint.last_layout.content_width,
-                window,
-                cx,
-            );
+        let cursor_row_y = window.with_content_mask(text_mask, |window| {
+            // Paint glyph backgrounds
+            //
+            // gpui's `paint` only draws glyphs, underlines, and strikethroughs, so decoration
+            // backgrounds need their own pass. It runs ahead of the indent guides, selections,
+            // and text so a highlighted range sits under them instead of covering them.
+            let mut row_offset: isize = 0;
+            let mut ghost_offset = px(0.);
+            for (line, &buffer_line) in prepaint
+                .last_layout
+                .lines
+                .iter()
+                .zip(prepaint.last_layout.visible_buffer_lines.iter())
+            {
+                let p = point(
+                    origin.x + prepaint.last_layout.line_number_width + scroll_offset,
+                    origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
+                );
 
-            row_offset += line.wrapped_lines.len() as isize;
+                line.paint_background(
+                    p,
+                    line_height,
+                    prepaint.last_layout.content_width,
+                    window,
+                    cx,
+                );
 
-            // Ghost lines shift every later line down.
-            if Some(buffer_line) == prepaint.current_row {
-                ghost_offset += prepaint.ghost_lines_height;
-            }
-        }
+                row_offset += line.wrapped_lines.len() as isize;
 
-        // Paint indent guides
-        if let Some(path) = prepaint.indent_guides_path.take() {
-            window.paint_path(path, editor_style.border.opacity(0.85));
-        }
-
-        // Application decorations sit below the user's selection.
-        for (path, color) in &prepaint.range_decoration_fills {
-            window.paint_path(path.clone(), *color);
-        }
-        for (path, color) in &prepaint.range_decoration_frames {
-            window.paint_path(path.clone(), *color);
-        }
-
-        // Paint selections
-        if window.is_window_active() {
-            let secondary_selection = Hsla {
-                s: 0.1,
-                ..editor_style.selection
-            };
-            for (path, is_active) in prepaint.search_match_paths.iter() {
-                window.paint_path(path.clone(), secondary_selection);
-
-                if *is_active {
-                    window.paint_path(path.clone(), editor_style.selection);
+                // Ghost lines shift every later line down.
+                if Some(buffer_line) == prepaint.current_row {
+                    ghost_offset += prepaint.ghost_lines_height;
                 }
             }
 
-            for path in prepaint.selection_paths.drain(..) {
-                window.paint_path(path, editor_style.selection);
+            // Paint indent guides
+            if let Some(path) = prepaint.indent_guides_path.take() {
+                window.paint_path(path, editor_style.border.opacity(0.85));
             }
 
-            // Paint hover highlight
-            if let Some(path) = prepaint.hover_highlight_path.take() {
-                window.paint_path(path, secondary_selection);
+            // Application decorations sit below the user's selection.
+            for (path, color) in &prepaint.range_decoration_fills {
+                window.paint_path(path.clone(), *color);
             }
-        }
-
-        // Paint document colors
-        for (path, color) in prepaint.document_color_paths.iter() {
-            let color = if disabled { color.opacity(0.5) } else { *color };
-            window.paint_path(path.clone(), color);
-        }
-
-        // Paint text with inline completion ghost line support
-        let mut row_offset: isize = 0;
-        let mut ghost_offset = px(0.);
-        let ghost_lines = &prepaint.ghost_lines;
-        let has_ghost_lines = !ghost_lines.is_empty();
-
-        // Track the y-position of the cursor row for positioning the first line suffix
-        let mut cursor_row_y = None;
-
-        for (line, &buffer_line) in prepaint
-            .last_layout
-            .lines
-            .iter()
-            .zip(prepaint.last_layout.visible_buffer_lines.iter())
-        {
-            let row = buffer_line;
-            let line_y = origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
-            let p = point(
-                origin.x + prepaint.last_layout.line_number_width + (scroll_offset),
-                line_y,
-            );
-
-            // Paint the actual line
-            line.paint(
-                p,
-                line_height,
-                prepaint.last_layout.content_width,
-                window,
-                cx,
-            );
-            row_offset += line.wrapped_lines.len() as isize;
-
-            if Some(row) == prepaint.current_row {
-                cursor_row_y = Some(line_y);
+            for (path, color) in &prepaint.range_decoration_frames {
+                window.paint_path(path.clone(), *color);
             }
 
-            // After the cursor row, paint ghost lines (which shifts subsequent content down)
-            if has_ghost_lines && Some(row) == prepaint.current_row {
-                let ghost_x = origin.x + prepaint.last_layout.line_number_width;
-                let ghost_base_y =
-                    origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
+            // Paint selections
+            if window.is_window_active() {
+                let secondary_selection = Hsla {
+                    s: 0.1,
+                    ..editor_style.selection
+                };
+                for (path, is_active) in prepaint.search_match_paths.iter() {
+                    window.paint_path(path.clone(), secondary_selection);
 
-                for (ghost_ix, ghost_line) in ghost_lines.iter().enumerate() {
-                    let ghost_p = point(ghost_x, ghost_base_y + line_height * (ghost_ix as f32));
+                    if *is_active {
+                        window.paint_path(path.clone(), editor_style.selection);
+                    }
+                }
 
-                    // Paint semi-transparent background for ghost line
-                    let ghost_bounds = Bounds::new(
-                        ghost_p,
-                        size(
-                            bounds.size.width - prepaint.last_layout.line_number_width,
+                for path in prepaint.selection_paths.drain(..) {
+                    window.paint_path(path, editor_style.selection);
+                }
+
+                // Paint hover highlight
+                if let Some(path) = prepaint.hover_highlight_path.take() {
+                    window.paint_path(path, secondary_selection);
+                }
+            }
+
+            // Paint document colors
+            for (path, color) in prepaint.document_color_paths.iter() {
+                let color = if disabled { color.opacity(0.5) } else { *color };
+                window.paint_path(path.clone(), color);
+            }
+
+            // Paint text with inline completion ghost line support
+            let mut row_offset: isize = 0;
+            let mut ghost_offset = px(0.);
+            let ghost_lines = &prepaint.ghost_lines;
+            let has_ghost_lines = !ghost_lines.is_empty();
+
+            // Track the y-position of the cursor row for positioning the first line suffix
+            let mut cursor_row_y = None;
+
+            for (line, &buffer_line) in prepaint
+                .last_layout
+                .lines
+                .iter()
+                .zip(prepaint.last_layout.visible_buffer_lines.iter())
+            {
+                let row = buffer_line;
+                let line_y = origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
+                let p = point(
+                    origin.x + prepaint.last_layout.line_number_width + (scroll_offset),
+                    line_y,
+                );
+
+                // Paint the actual line
+                line.paint(
+                    p,
+                    line_height,
+                    prepaint.last_layout.content_width,
+                    window,
+                    cx,
+                );
+                row_offset += line.wrapped_lines.len() as isize;
+
+                if Some(row) == prepaint.current_row {
+                    cursor_row_y = Some(line_y);
+                }
+
+                // After the cursor row, paint ghost lines (which shifts subsequent content down)
+                if has_ghost_lines && Some(row) == prepaint.current_row {
+                    let ghost_x = origin.x + prepaint.last_layout.line_number_width;
+                    let ghost_base_y =
+                        origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
+
+                    for (ghost_ix, ghost_line) in ghost_lines.iter().enumerate() {
+                        let ghost_p =
+                            point(ghost_x, ghost_base_y + line_height * (ghost_ix as f32));
+
+                        // Paint semi-transparent background for ghost line
+                        let ghost_bounds = Bounds::new(
+                            ghost_p,
+                            size(
+                                bounds.size.width - prepaint.last_layout.line_number_width,
+                                line_height,
+                            ),
+                        );
+                        window.paint_quad(fill(ghost_bounds, editor_background));
+
+                        // Paint ghost line text
+                        _ = ghost_line.paint(
+                            ghost_p,
                             line_height,
-                        ),
-                    );
-                    window.paint_quad(fill(ghost_bounds, editor_background));
-
-                    // Paint ghost line text
-                    _ = ghost_line.paint(
-                        ghost_p,
-                        line_height,
-                        text_align,
-                        Some(prepaint.last_layout.content_width),
-                        window,
-                        cx,
-                    );
+                            text_align,
+                            Some(prepaint.last_layout.content_width),
+                            window,
+                            cx,
+                        );
+                    }
+                    ghost_offset += line_height * (ghost_lines.len() as f32);
                 }
-                ghost_offset += line_height * (ghost_lines.len() as f32);
             }
-        }
 
-        for element in &mut prepaint.token_elements {
-            element.paint(window, cx);
-        }
-        for placeholder in &mut prepaint.folded_lines.placeholders {
-            placeholder.paint(window, cx);
-        }
-
-        // Paint blinking cursors (shared blink state for all carets)
-        if focused && show_cursor {
-            for cursor_info in prepaint.cursor_infos_with_scroll() {
-                window.paint_quad(fill(
-                    snap_caret_to_device_pixels(cursor_info.bounds, window.scale_factor()),
-                    editor_style.caret,
-                ));
+            for element in &mut prepaint.token_elements {
+                element.paint(window, cx);
             }
-        }
+            for placeholder in &mut prepaint.folded_lines.placeholders {
+                placeholder.paint(window, cx);
+            }
+
+            // Paint blinking cursors (shared blink state for all carets)
+            if focused && show_cursor {
+                for cursor_info in prepaint.cursor_infos_with_scroll() {
+                    window.paint_quad(fill(
+                        snap_caret_to_device_pixels(cursor_info.bounds, window.scale_factor()),
+                        editor_style.caret,
+                    ));
+                }
+            }
+
+            cursor_row_y
+        });
 
         // Paint line numbers
         if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
@@ -4326,12 +4341,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             let gutter_bg = editor_style
                 .editor_gutter_background
                 .unwrap_or(editor_background);
-            let gutter_bounds = editor_gutter_bounds(
-                input_bounds,
-                prepaint.last_layout.line_number_width,
-                prepaint.ghost_lines_height,
-                editor_paddings,
-            );
             window.paint_quad(fill(gutter_bounds, gutter_bg));
 
             // Each item is the normal lines.
@@ -4399,26 +4408,29 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         }
 
         // Paint inline completion first line suffix (after cursor on same line)
-        if focused {
-            if let Some(first_line) = &prepaint.ghost_first_line {
-                let active_cursor = prepaint
-                    .cursor_infos_with_scroll()
-                    .into_iter()
-                    .find(|info| info.is_active);
-                if let (Some(cursor_info), Some(cursor_row_y)) = (active_cursor, cursor_row_y) {
-                    let cursor_bounds = cursor_info.bounds;
-                    let first_line_x = cursor_bounds.origin.x + cursor_bounds.size.width;
-                    let p = point(first_line_x, cursor_row_y);
+        window.with_content_mask(text_mask, |window| {
+            if focused {
+                if let Some(first_line) = &prepaint.ghost_first_line {
+                    let active_cursor = prepaint
+                        .cursor_infos_with_scroll()
+                        .into_iter()
+                        .find(|info| info.is_active);
+                    if let (Some(cursor_info), Some(cursor_row_y)) = (active_cursor, cursor_row_y) {
+                        let cursor_bounds = cursor_info.bounds;
+                        let first_line_x = cursor_bounds.origin.x + cursor_bounds.size.width;
+                        let p = point(first_line_x, cursor_row_y);
 
-                    // Paint background to cover any existing text
-                    let bg_bounds = Bounds::new(p, size(first_line.width + px(4.), line_height));
-                    window.paint_quad(fill(bg_bounds, editor_background));
+                        // Paint background to cover any existing text
+                        let bg_bounds =
+                            Bounds::new(p, size(first_line.width + px(4.), line_height));
+                        window.paint_quad(fill(bg_bounds, editor_background));
 
-                    // Paint first line completion text
-                    _ = first_line.paint(p, line_height, text_align, None, window, cx);
+                        // Paint first line completion text
+                        _ = first_line.paint(p, line_height, text_align, None, window, cx);
+                    }
                 }
             }
-        }
+        });
 
         self.paint_mouse_listeners(&prepaint.hitbox, window, cx);
     }
@@ -4703,7 +4715,7 @@ mod tests {
     use crate::input::{
         Editor, EditorMode, EditorState, FoldPlaceholderRenderer, FoldRange, GutterDecoration,
         GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
-        Position, RangeDecoration, Redo, Undo,
+        Position, RangeDecoration, Redo, TextDecoration, Undo,
     };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -4899,6 +4911,77 @@ mod tests {
             DecorationHarness(state, None)
         });
         (editor.unwrap(), window)
+    }
+
+    #[gpui::test]
+    fn the_text_is_clipped_to_its_side_of_the_gutter(cx: &mut TestAppContext) {
+        let text = format!("{}\n", "word ".repeat(40)).repeat(3);
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.create_decorations_collection(
+                    vec![TextDecoration::new(
+                        0..text.len(),
+                        HighlightStyle {
+                            background_color: Some(gpui::red()),
+                            underline: Some(UnderlineStyle {
+                                color: Some(gpui::red()),
+                                thickness: px(1.),
+                                wavy: false,
+                            }),
+                            ..Default::default()
+                        },
+                    )],
+                    cx,
+                );
+            });
+
+            for line_number in [true, false] {
+                editor.update(cx, |state, cx| {
+                    state.set_line_number(line_number, window, cx);
+                    state.set_scroll_offset(point(px(-100.), px(0.)), cx);
+                });
+                window.draw(cx).clear(cx);
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let gutter = editor_gutter_bounds(
+                    state.input_bounds,
+                    layout.line_number_width,
+                    px(0.),
+                    state.editor_paddings,
+                )
+                .scale(window.scale_factor());
+
+                let red = gpui::Background::from(gpui::red());
+                let backgrounds = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == red)
+                    .map(|quad| (quad.bounds, quad.content_mask.bounds))
+                    .collect::<Vec<_>>();
+                let underlines = window
+                    .painted_underlines()
+                    .into_iter()
+                    .filter(|underline| underline.color == gpui::red())
+                    .map(|underline| (underline.bounds, underline.content_mask.bounds))
+                    .collect::<Vec<_>>();
+                for painted in [backgrounds, underlines] {
+                    assert!(
+                        painted.iter().any(|(bounds, _)| bounds.intersects(&gutter)),
+                        "line numbers {line_number}: the text runs under the gutter"
+                    );
+                    for (bounds, mask) in painted {
+                        let shown = bounds.intersect(&mask).intersect(&gutter);
+                        assert!(
+                            shown.size.width < gpui::ScaledPixels::from(1.),
+                            "line numbers {line_number}: {bounds:?} under {mask:?} shows through the gutter {gutter:?}"
+                        );
+                    }
+                }
+            }
+        });
     }
 
     #[gpui::test]
@@ -6645,6 +6728,44 @@ mod tests {
     }
 
     #[gpui::test]
+    fn overview_ruler_marks_follow_a_left_scrollbar(cx: &mut TestAppContext) {
+        let text = "x\n".repeat(99) + "x";
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let presented = Rc::new(std::cell::Cell::new(None));
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.create_overview_ruler_decorations_collection(
+                    vec![
+                        OverviewRulerDecoration::new(0..10)
+                            .with_lane(OverviewRulerLane::Left)
+                            .with_color(gpui::green()),
+                    ],
+                    cx,
+                );
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let snapshot = state.editor_scrollbar_snapshot.get().unwrap();
+            let marks = layout_overview_ruler(state, &snapshot, Scrollbar::width());
+            assert_eq!(marks.len(), 1);
+            assert_eq!(marks[0].bounds.left(), snapshot.layout.bounds.left());
+            assert_eq!(marks[0].bounds.size.width, Scrollbar::width() / 3.);
+
+            editor.update(cx, |state, _| {
+                let presented = presented.clone();
+                state.set_scrollbar_renderer(Some(Rc::new(move |context, _, _| {
+                    presented.set(Some(context.placement()));
+                    Scrollbar::vertical(&context).into_any_element()
+                })));
+            });
+            window.draw(cx).clear(cx);
+        });
+        assert_eq!(presented.get(), Some(ScrollbarPlacement::BottomLeft));
+    }
+
+    #[gpui::test]
     fn overview_ruler_marks_follow_edits_folds_and_new_decorations(cx: &mut TestAppContext) {
         let text = "x\n".repeat(99) + "x";
         let (editor, window) = decoration_editor(cx, &text, false);
@@ -7048,8 +7169,13 @@ mod tests {
             left: px(7.),
         };
 
-        let layout =
-            EditorScrollbarLayout::new(input_bounds, px(40.), size(px(1000.), px(200.)), paddings);
+        let layout = EditorScrollbarLayout::new(
+            input_bounds,
+            px(40.),
+            size(px(1000.), px(200.)),
+            paddings,
+            ScrollbarPlacement::BottomRight,
+        );
 
         assert_eq!(
             layout.bounds,
@@ -7058,8 +7184,13 @@ mod tests {
         assert_eq!(layout.scroll_size, size(px(972.), px(200.)));
         assert_eq!(layout.scroll_viewport_size, size(px(262.), px(80.)));
 
-        let layout_without_gutter =
-            EditorScrollbarLayout::new(input_bounds, px(0.), size(px(500.), px(120.)), paddings);
+        let layout_without_gutter = EditorScrollbarLayout::new(
+            input_bounds,
+            px(0.),
+            size(px(500.), px(120.)),
+            paddings,
+            ScrollbarPlacement::BottomRight,
+        );
 
         assert_eq!(
             layout_without_gutter.bounds,
@@ -7069,6 +7200,41 @@ mod tests {
         assert_eq!(
             layout_without_gutter.scroll_viewport_size,
             size(px(303.), px(80.))
+        );
+    }
+
+    #[test]
+    fn test_editor_scrollbar_layout_on_the_left_covers_the_gutter() {
+        let input_bounds = Bounds::new(point(px(10.), px(20.)), size(px(300.), px(80.)));
+        let paddings = Edges {
+            top: px(2.),
+            right: px(3.),
+            bottom: px(5.),
+            left: px(7.),
+        };
+
+        let layout = EditorScrollbarLayout::new(
+            input_bounds,
+            px(40.),
+            size(px(1000.), px(200.)),
+            paddings,
+            ScrollbarPlacement::BottomLeft,
+        );
+
+        assert_eq!(
+            layout.bounds,
+            Bounds::new(point(px(3.), px(18.)), size(px(310.), px(87.)))
+        );
+        assert_eq!(layout.scroll_size, size(px(1020.), px(200.)));
+        assert_eq!(
+            EditorScrollbarLayout::new(
+                input_bounds,
+                px(40.),
+                size(px(1000.), px(200.)),
+                paddings,
+                ScrollbarPlacement::TopLeft,
+            ),
+            layout
         );
     }
 

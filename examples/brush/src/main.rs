@@ -283,7 +283,7 @@ impl BrushStory {
         )
     }
 
-    fn build_stroke_path(stroke: &Stroke, bounds: &Bounds<Pixels>) -> Option<Path<Pixels>> {
+    fn build_stroke_path(stroke: &Stroke, bounds: &Bounds<Pixels>) -> Option<Path> {
         if stroke.points.len() < 2 {
             return None;
         }

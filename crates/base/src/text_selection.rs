@@ -3067,15 +3067,6 @@ struct KeepTextSelection {
     id: ElementId,
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for KeepTextSelection {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl Element for KeepTextSelection {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -3151,15 +3142,6 @@ struct TextSelectionScopeMarker<E> {
     element: E,
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl<E: Element> IntoElement for TextSelectionScopeMarker<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
 impl<E: Element> Element for TextSelectionScopeMarker<E> {
     type RequestLayoutState = E::RequestLayoutState;
     type PrepaintState = E::PrepaintState;
@@ -3228,15 +3210,6 @@ impl<E: Element> Element for TextSelectionScopeMarker<E> {
 
 #[doc(hidden)]
 pub struct TextSelectionLayerPrepaintState(Entity<WindowSelectionState>);
-
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for TextSelectionLayer {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for TextSelectionLayer {
     type RequestLayoutState = ();

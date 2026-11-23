@@ -175,8 +175,16 @@ impl Doc<'_> {
                     )
                 })
                 .collect();
-            quads.sort_by_key(|quad| quad.top());
-            quads
+            // GPUI paints a rounded or bordered quad as an interior plus edge
+            // strips that all share the quad's bounds, so count each fill once.
+            let mut unique = Vec::with_capacity(quads.len());
+            for quad in quads.drain(..) {
+                if !unique.contains(&quad) {
+                    unique.push(quad);
+                }
+            }
+            unique.sort_by_key(|quad| quad.top());
+            unique
         })
     }
 

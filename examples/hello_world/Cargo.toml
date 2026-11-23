@@ -1,12 +1,11 @@
 [package]
 name = "hello_world"
 description = "A minimal example of application development with GPUI Component."
-version = "0.10.0"
+version = "0.11.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
-anyhow.workspace = true
 gpui-kit.workspace = true
 
 [lints]

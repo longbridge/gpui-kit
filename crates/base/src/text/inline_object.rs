@@ -237,14 +237,6 @@ impl InlineObject {
     }
 }
 
-#[cfg(not(feature = "gpui-fast"))]
-impl IntoElement for InlineObject {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for InlineObject {
     type RequestLayoutState = ();
     type PrepaintState = Hitbox;

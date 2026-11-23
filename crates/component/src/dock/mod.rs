@@ -136,6 +136,7 @@ pub(crate) struct SkinShared {
     toggle_button_visible: Cell<bool>,
     close_button_visible: Cell<bool>,
     collapsed_tab_bar_visible: Cell<bool>,
+    split_divider_line_visible: Cell<bool>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
     /// Whether that dock was open when the drag began, so the release can
@@ -220,6 +221,7 @@ impl DockSkin {
                 toggle_button_visible: Cell::new(true),
                 close_button_visible: Cell::new(false),
                 collapsed_tab_bar_visible: Cell::new(true),
+                split_divider_line_visible: Cell::new(true),
                 resizing_dock: Cell::new(None),
                 resize_started_open: Cell::new(false),
             }),
@@ -267,6 +269,19 @@ impl DockSkin {
 
     pub fn set_collapsed_tab_bar_visible(&self, visible: bool, cx: &mut App) {
         self.shared.collapsed_tab_bar_visible.set(visible);
+        self.shared.notify(cx);
+    }
+
+    /// Whether the divider between two split slots rests as a one-pixel line.
+    /// Shown by default. Hide it when the panels already sit apart; the
+    /// indicator still appears on hover and while dragging, and the hit area
+    /// is unchanged.
+    pub fn is_split_divider_line_visible(&self) -> bool {
+        self.shared.split_divider_line_visible.get()
+    }
+
+    pub fn set_split_divider_line_visible(&self, visible: bool, cx: &mut App) {
+        self.shared.split_divider_line_visible.set(visible);
         self.shared.notify(cx);
     }
 }
