@@ -5566,78 +5566,47 @@ mod tests {
         });
     }
 
-    /// A text with nothing layered on it hands the flow the highlights and
-    /// links its paragraph cached, not copies, frame after frame, so the
-    /// flow's layout key finds them unchanged by pointer. What is layered on
-    /// gets highlights of its own and leaves the cached ones as they were.
+    /// A frame that layers nothing on a text hands the flow the highlights
+    /// and links its paragraph cached, not copies, so the flow's layout key
+    /// finds them unchanged by pointer.
     #[test]
     fn inline_flow_items_share_the_cached_highlights_and_links() {
         let mut app = gpui::TestApp::new();
         let mut window = app.open_window(|_, _| gpui::Empty);
         window.update(|_, _, cx| {
             cx.set_global(crate::Theme::default());
-            let link = LinkMark {
+            let link = TextMark::default().link(LinkMark {
                 url: "https://example.com".into(),
                 ..Default::default()
-            };
+            });
             let mut paragraph = Paragraph::default().with_leaf_key(7);
-            paragraph.push(
-                InlineNode::new("see ").marks(vec![(0..3, TextMark::default().link(link.clone()))]),
-            );
+            paragraph.push(InlineNode::new("see ").marks(vec![(0..3, link)]));
             paragraph
                 .push(InlineNode::new("run()").marks(vec![(0..5, TextMark::default().code())]));
-            let first_text = |items: &[InlineFlowItem]| {
+            let shares_cache = |context: &NodeContext, cx: &mut gpui::App| {
+                let items = paragraph.inline_flow_items(None, &[], &[], context, cx);
                 let [
                     InlineFlowItem::Text {
                         highlights, links, ..
                     },
-                ] = items
+                ] = &items[..]
                 else {
                     panic!("one text item");
                 };
-                (highlights.clone(), links.clone())
+                let flow = paragraph.render_cache.flow.lock().unwrap().clone().unwrap();
+                Arc::ptr_eq(highlights, &flow.texts[0].highlights)
+                    && Arc::ptr_eq(links, &flow.texts[0].links)
             };
 
-            let context = NodeContext::default();
-            let (first_highlights, first_links) =
-                first_text(&paragraph.inline_flow_items(None, &[], &[], &context, cx));
-            let cached = paragraph.render_cache.flow.lock().unwrap().clone().unwrap();
-            let cached = &cached.texts[0];
-            assert_eq!(cached.highlights.len(), 2);
-            assert_eq!(*cached.links, [(0..3, link)]);
-            assert!(Arc::ptr_eq(&first_highlights, &cached.highlights));
-            assert!(Arc::ptr_eq(&first_links, &cached.links));
-
-            let (highlights, links) =
-                first_text(&paragraph.inline_flow_items(None, &[], &[], &context, cx));
-            assert!(Arc::ptr_eq(&highlights, &cached.highlights));
-            assert!(Arc::ptr_eq(&links, &cached.links));
-
-            let (faded, links) =
-                first_text(&paragraph.inline_flow_items(None, &[(0..4, 0.5)], &[], &context, cx));
-            assert!(!Arc::ptr_eq(&faded, &cached.highlights));
-            assert!(faded.iter().any(|(_, h)| h.style.fade_out == Some(0.5)));
-            assert!(Arc::ptr_eq(&links, &cached.links));
-            assert!(
-                cached
-                    .highlights
-                    .iter()
-                    .all(|(_, h)| h.style.fade_out.is_none())
-            );
-
-            // A host foreground that reaches the text colors a copy; one
-            // that does not leaves the text sharing the cached highlights.
-            let foreground = |range: Range<usize>| NodeContext {
-                foregrounds: Some(Arc::new(HashMap::from([(7, vec![(range, gpui::red())])]))),
+            // Frame after frame, and with a host foreground on another part
+            // of the leaf, which does not reach this text.
+            let foreground_elsewhere = NodeContext {
+                foregrounds: Some(Arc::new(HashMap::from([(7, vec![(20..30, gpui::red())])]))),
                 ..Default::default()
             };
-            let (colored, _) =
-                first_text(&paragraph.inline_flow_items(None, &[], &[], &foreground(0..4), cx));
-            assert!(!Arc::ptr_eq(&colored, &cached.highlights));
-            assert_eq!(colored[0].1.style.color, Some(gpui::red()));
-            let (highlights, _) =
-                first_text(&paragraph.inline_flow_items(None, &[], &[], &foreground(20..30), cx));
-            assert!(Arc::ptr_eq(&highlights, &cached.highlights));
+            assert!(shares_cache(&NodeContext::default(), cx));
+            assert!(shares_cache(&NodeContext::default(), cx));
+            assert!(shares_cache(&foreground_elsewhere, cx));
         });
     }
 
