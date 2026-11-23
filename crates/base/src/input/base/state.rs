@@ -5444,7 +5444,16 @@ impl<M: InputModeKind> InputBaseState<M> {
             .projected_editor_style
             .resolved(&crate::Theme::global(cx).tokens);
         let entity = cx.entity();
-        let text_runs = self.accessibility_text_runs(window);
+        let exposed_text = self
+            .accessibility
+            .as_ref()
+            .is_some_and(|accessibility| {
+                accessibility.value_exposed
+                    && !self.masked
+                    && (window.is_a11y_active() || cfg!(feature = "test-support"))
+            })
+            .then(|| self.text.to_string());
+        let text_runs = self.accessibility_text_runs(exposed_text.as_deref(), window);
         if self._pending_update {
             self.mode.update_highlighter::<M>(
                 super::mode::HighlighterUpdate {
@@ -5478,12 +5487,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     .when_some(accessibility.accessibility_id.clone(), |this, id| {
                         this.accessibility_id(id)
                     })
-                    .when(
-                        accessibility.value_exposed
-                            && !self.masked
-                            && (window.is_a11y_active() || cfg!(feature = "test-support")),
-                        |this| this.aria_value(self.text.to_string()),
-                    )
+                    .when_some(exposed_text, |this, text| this.aria_value(text))
                     .when_some(text_runs, |this, runs| {
                         this.a11y_synthetic_children(move |builder| runs.push(builder))
                     })
