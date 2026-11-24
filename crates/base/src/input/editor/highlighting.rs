@@ -67,6 +67,10 @@ pub trait InputHighlighter {
 
     fn fold_ranges(&self, text: &Rope) -> Vec<FoldRange>;
 
+    /// Return the fold ranges that touch the lines of `range`, a byte range
+    /// of `text` just edited. The editor drops every candidate on those lines
+    /// before merging these in, so a range ending on them belongs here even
+    /// when its bytes lie outside `range`.
     fn fold_ranges_for_edit(&self, range: Range<usize>, text: &Rope) -> Vec<FoldRange> {
         let _ = range;
         self.fold_ranges(text)

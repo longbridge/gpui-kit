@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    ops::Range,
+    ops::{Range, RangeInclusive},
     rc::Rc,
     sync::{
         Arc,
@@ -12,7 +12,7 @@ use std::{
 use gpui::{HighlightStyle, SharedString, Task};
 use gpui_base::input::{
     EditorState, FoldRange, HighlightStyleResolver, InputEdit as BaseInputEdit, InputHighlighter,
-    InputHighlighterFactory,
+    InputHighlighterFactory, RopeExt as _,
 };
 use ropey::{LineType, Rope};
 use tree_sitter::{InputEdit, ParseOptions, Point};
@@ -217,10 +217,14 @@ impl InputHighlighter for TreeSitterInputHighlighter {
     }
 
     fn fold_ranges_for_edit(&self, range: Range<usize>, text: &Rope) -> Vec<FoldRange> {
+        // `adjust_folds_for_edit` drops every candidate whose lines touch the
+        // edit, so the re-extraction covers those lines, not just its bytes.
+        let start_row = text.offset_to_point(range.start).row;
+        let end_row = text.offset_to_point(range.end.min(text.len())).row;
         self.inner
             .borrow()
             .tree()
-            .map(|tree| extract_fold_ranges_in_range(tree, text, range))
+            .map(|tree| extract_fold_ranges_in_rows(tree, text, start_row..=end_row))
             .unwrap_or_default()
     }
 }
@@ -237,25 +241,26 @@ fn to_tree_sitter_edit(edit: BaseInputEdit) -> InputEdit {
 }
 
 fn extract_fold_ranges(tree: &tree_sitter::Tree, text: &Rope) -> Vec<FoldRange> {
-    extract_fold_ranges_in_range(tree, text, 0..usize::MAX)
+    extract_fold_ranges_in_rows(tree, text, 0..=usize::MAX)
 }
 
-fn extract_fold_ranges_in_range(
+/// Fold ranges of the nodes whose lines intersect `rows`. A fold can end on the row after
+/// its node (see [`fold_range_for_node`]), so that row counts as one of the node's lines.
+fn extract_fold_ranges_in_rows(
     tree: &tree_sitter::Tree,
     text: &Rope,
-    byte_range: Range<usize>,
+    rows: RangeInclusive<usize>,
 ) -> Vec<FoldRange> {
     fn collect(
         node: tree_sitter::Node,
         text: &Rope,
-        bytes: &Range<usize>,
+        rows: &RangeInclusive<usize>,
         ranges: &mut Vec<FoldRange>,
     ) {
-        if node.end_byte() <= bytes.start || node.start_byte() >= bytes.end {
-            return;
-        }
+        let start = node.start_position().row;
+        let end = node.end_position().row;
         // A node on one row has no child that spans two rows.
-        if node.end_position().row == node.start_position().row {
+        if end == start || end + 1 < *rows.start() || start > *rows.end() {
             return;
         }
         if let Some(range) = fold_range_for_node(node, text) {
@@ -263,7 +268,7 @@ fn extract_fold_ranges_in_range(
         }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            collect(child, text, bytes, ranges);
+            collect(child, text, rows, ranges);
         }
     }
 
@@ -271,7 +276,7 @@ fn extract_fold_ranges_in_range(
     let mut ranges = Vec::new();
     let mut cursor = root.walk();
     for child in root.named_children(&mut cursor) {
-        collect(child, text, &byte_range, &mut ranges);
+        collect(child, text, &rows, &mut ranges);
     }
     ranges.sort_by_key(|range| range.start_line);
     ranges.dedup_by_key(|range| range.start_line);
