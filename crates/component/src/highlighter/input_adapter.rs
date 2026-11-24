@@ -244,8 +244,8 @@ fn extract_fold_ranges(tree: &tree_sitter::Tree, text: &Rope) -> Vec<FoldRange> 
     extract_fold_ranges_in_rows(tree, text, 0..=usize::MAX)
 }
 
-/// Fold ranges of the nodes whose lines intersect `rows`. A fold can end on the row after
-/// its node (see [`fold_range_for_node`]), so that row counts as one of the node's lines.
+/// Fold ranges of the nodes whose rows intersect `rows`. A fold can end on the row after
+/// its node (see [`fold_range_for_node`]), so that row counts as one of the node's.
 fn extract_fold_ranges_in_rows(
     tree: &tree_sitter::Tree,
     text: &Rope,
