@@ -302,12 +302,14 @@ impl SidebarItem for SidebarMenuItem {
                 h_flex()
                     .flex_row_dir(cx)
                     .size_full()
-                    .id("item")
+                    .id("sidebar-item")
                     .test_support()
                     .role(Role::TreeItem)
                     .aria_label(accessibility_label.unwrap_or_else(|| label_text.clone()))
                     .aria_selected(is_active)
-                    .when(is_submenu, |this| this.aria_expanded(is_open))
+                    .when(is_submenu && !is_collapsed, |this| {
+                        this.aria_expanded(is_open)
+                    })
                     .overflow_x_hidden()
                     .flex_shrink_0()
                     .p_2()
@@ -443,7 +445,7 @@ impl SidebarItem for SidebarMenuItem {
             .when(is_open, |this| {
                 this.child(
                     v_flex()
-                        .id("submenu")
+                        .id("sidebar-submenu")
                         .test_support()
                         .role(Role::Group)
                         .border_s(gpui::px(1.), cx)
@@ -521,11 +523,14 @@ mod tests {
         use gpui::{Context, Render};
         use gpui_base::test_support::{find, find_all};
 
-        struct MenuHarness;
+        struct MenuHarness {
+            collapsed: bool,
+        }
 
         impl Render for MenuHarness {
             fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
                 SidebarMenu::new()
+                    .collapsed(self.collapsed)
                     .child(
                         SidebarMenuItem::new("Projects")
                             .default_open(true)
@@ -538,17 +543,18 @@ mod tests {
         }
 
         cx.update(crate::init);
-        let (_, cx) = cx.add_window_view(|_, _| MenuHarness);
+        let (harness, cx) = cx.add_window_view(|_, _| MenuHarness { collapsed: false });
         cx.update(|window, cx| window.draw(cx).clear(cx));
 
         cx.update(|window, _| {
             let menu = find(window, &[], &"menu".into()).expect("menu is drawn");
             assert_eq!(menu.role(), Some(Role::Tree));
 
-            let submenu = find(window, &[], &"submenu".into()).expect("open submenu is drawn");
+            let submenu =
+                find(window, &[], &"sidebar-submenu".into()).expect("open submenu is drawn");
             assert_eq!(submenu.role(), Some(Role::Group));
 
-            let items = find_all(window, &[], &"item".into());
+            let items = find_all(window, &[], &"sidebar-item".into());
             let expanded = |label: &str| {
                 let item = items
                     .iter()
@@ -561,6 +567,31 @@ mod tests {
             assert_eq!(expanded("Archive"), Some(false));
             assert_eq!(expanded("Overview"), None);
             assert_eq!(expanded("Inbox"), None);
+
+            let carets = find_all(window, &[], &"caret".into());
+            let caret_expanded = |label: &str| {
+                carets
+                    .iter()
+                    .find(|caret| caret.label() == Some(label))
+                    .unwrap_or_else(|| panic!("missing caret {label}"))
+                    .expanded()
+            };
+            assert_eq!(caret_expanded("Toggle Projects submenu"), Some(true));
+            assert_eq!(caret_expanded("Toggle Archive submenu"), Some(false));
+        });
+
+        // Collapsed to icons, a submenu cannot be opened, so no row reports it.
+        cx.update(|window, cx| {
+            harness.update(cx, |harness, _| harness.collapsed = true);
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|window, _| {
+            assert!(find(window, &[], &"sidebar-submenu".into()).is_none());
+            let items = find_all(window, &[], &"sidebar-item".into());
+            assert!(!items.is_empty());
+            for item in items {
+                assert_eq!(item.expanded(), None, "{:?}", item.label());
+            }
         });
     }
 }
