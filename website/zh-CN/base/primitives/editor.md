@@ -77,6 +77,14 @@ Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边�
 `create_line_decorations_collection` 挂载一个 `LineDecorationProvider`，编辑器每一帧都会向它
 询问整行背景。背景由 Base 直接绘制。参见[行装饰](../../component/editor.md#行装饰)。
 
+## 显示映射
+
+`EditorState::display_map()` 返回只读的 `&DisplayMap`，供应用查询整个已准备缓冲区的坐标映射。
+编辑器负责更新；使用 `DisplayMap::version()` 判断编辑、重新换行或折叠变化后是否需要重新查询。
+从 `gpui_kit::base::input` 导入 `DisplayMap`、`BufferPoint` 和 `DisplayPoint`。
+查询示例、布局时机，以及文本映射与包含内联补全额外行的实际绘制坐标之间的区别，参见
+[Editor](../../component/editor.md#行装饰)。
+
 ## 高亮与语言功能
 
 `InputHighlighterFactory`、`InputHighlighter`、诊断类型和 LSP provider trait 是提供给设计系统作者的底层扩展点，作用于共享的 `InputBaseState`。样式组件的应用通常应通过编辑器集成配置它们，而不是普通文本框。
