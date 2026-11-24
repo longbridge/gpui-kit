@@ -14,29 +14,53 @@
 //! editor gets one run per line (a line keeps its line break), without character positions:
 //! its layout covers only the visible, possibly wrapped, lines.
 use super::{InputBaseState, kind::InputModeKind};
+use crate::input::{Rope, RopeExt as _};
 use gpui::{Bounds, Pixels, Window, accesskit};
+use sum_tree::Bias;
 use unicode_segmentation::UnicodeSegmentation as _;
 
+/// Multi-line editors above this many UTF-8 bytes expose only an excerpt around
+/// the caret, without the full value or whole-document SetValue, so assistive
+/// technology does not copy multi-megabyte documents every frame (#4086).
+pub(super) const FULL_ACCESSIBILITY_TEXT_LIMIT: usize = 1024 * 1024;
+
+// Keep the number of possible text nodes bounded even for mostly empty lines.
+const MAX_ACCESSIBILITY_EXCERPT_BYTES: usize = 4 * 1024;
+
 impl<M: InputModeKind> InputBaseState<M> {
+    fn accessibility_text_limit(&self) -> Option<usize> {
+        self.is_multi_line()
+            .then_some(FULL_ACCESSIBILITY_TEXT_LIMIT)
+    }
+
+    pub(super) fn exposes_full_accessibility_text(&self) -> bool {
+        self.accessibility_text_limit()
+            .is_none_or(|limit| self.text.len() <= limit)
+    }
+
     /// The runs for this frame, or None where the field gives no text: no accessibility
     /// client, or a masked or unexposed value.
-    /// `text` is the field's text already copied for its value, so a large document is
-    /// copied once per frame, not once for the value and again for the runs.
+    /// `full_text` shares the copy made for the accessible value. Large bounded
+    /// fields copy only their excerpt and leave the full value absent.
     pub(super) fn accessibility_text_runs(
         &self,
-        text: Option<&str>,
+        full_text: Option<&str>,
         window: &Window,
     ) -> Option<A11yTextRuns> {
         let accessibility = self.accessibility.as_ref()?;
         if !window.is_a11y_active() || !accessibility.value_exposed() || self.masked {
             return None;
         }
-        let text = text?;
         let range = self.selected_range();
         let selection = if self.is_selection_reversed() {
             (range.end, range.start)
         } else {
             (range.start, range.end)
+        };
+        let scale = window.scale_factor();
+        let Some(text) = full_text else {
+            let limit = self.accessibility_text_limit()?;
+            return capture_excerpt(&self.text, selection, limit, scale);
         };
         // The previous frame's layout describes this text only while its one line has
         // exactly this text's length.
@@ -46,10 +70,26 @@ impl<M: InputModeKind> InputBaseState<M> {
                     && layout.visible_line_byte_offsets.first() == Some(&0)
                     && layout.lines[0].len() == text.len()
             });
-        A11yTextRuns::capture(text, Some(selection), window.scale_factor(), |bytes| {
+        A11yTextRuns::capture(text, Some(selection), scale, |bytes| {
             has_layout.then(|| self.range_to_bounds(&bytes)).flatten()
         })
     }
+}
+
+fn capture_excerpt(
+    text: &Rope,
+    (anchor, focus): (usize, usize),
+    limit: usize,
+    scale: f32,
+) -> Option<A11yTextRuns> {
+    let budget = limit.min(MAX_ACCESSIBILITY_EXCERPT_BYTES);
+    let before = budget / 2;
+    let focus = text.clip_offset(focus, Bias::Left);
+    let start = text.clip_offset(focus.saturating_sub(before), Bias::Right);
+    let end = text.clip_offset(focus.saturating_add(budget - before), Bias::Left);
+    let selection = (anchor.clamp(start, end) - start, focus - start);
+    let excerpt = text.slice(start..end).to_string();
+    A11yTextRuns::capture(&excerpt, Some(selection), scale, |_| None)
 }
 
 /// AccessKit's per-run lists hold `u8`s, so a run holds at most this many characters.
@@ -403,5 +443,19 @@ mod tests {
         assert_eq!(at(&runs, text.len()), (lines, 0));
         // Words keep starting after whitespace across run boundaries.
         assert_eq!(runs.runs[1].word_starts, [0, 5]);
+    }
+
+    #[test]
+    fn bounded_excerpt_preserves_unicode_and_clips_reversed_selection() {
+        let prefix = "界".repeat(3000);
+        let focus = prefix.len();
+        let text = Rope::from(format!("{prefix}here{}", "🦀".repeat(3000)));
+        let runs = capture_excerpt(&text, (text.len(), focus), 16 * 1024, 1.).unwrap();
+        let excerpt = runs.text();
+        assert!(excerpt.len() <= MAX_ACCESSIBILITY_EXCERPT_BYTES);
+        assert!(excerpt.ends_with('🦀'));
+        let (anchor, focus) = runs.selection().unwrap();
+        assert_eq!(anchor, excerpt.graphemes(true).count());
+        assert_eq!(excerpt.graphemes(true).nth(focus), Some("h"));
     }
 }

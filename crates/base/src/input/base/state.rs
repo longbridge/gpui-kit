@@ -1206,8 +1206,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(gpui::accesskit::ActionData::Value(value)) = data else {
             return;
         };
-        // The action may have been queued before editability changed.
-        if self.is_editable() {
+        // The action may have been queued before editability or text size changed.
+        if self.is_editable() && self.exposes_full_accessibility_text() {
             self.replace_all(value.to_string(), window, cx);
         }
     }
@@ -5461,11 +5461,13 @@ impl<M: InputModeKind> InputBaseState<M> {
             .projected_editor_style
             .resolved(&crate::Theme::global(cx).tokens);
         let entity = cx.entity();
+        let expose_full_text = self.exposes_full_accessibility_text();
         let exposed_text = self
             .accessibility
             .as_ref()
             .is_some_and(|accessibility| {
-                accessibility.value_exposed
+                expose_full_text
+                    && accessibility.value_exposed
                     && !self.masked
                     && (window.is_a11y_active() || cfg!(feature = "test-support"))
             })
@@ -5516,7 +5518,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                             });
                         }
                     })
-                    .when(self.is_editable(), |this| {
+                    .when(self.is_editable() && expose_full_text, |this| {
                         this.on_a11y_action(gpui::AccessibleAction::SetValue, {
                             let entity = entity.clone();
                             move |data, window, cx| {
@@ -5773,6 +5775,23 @@ mod tests {
             });
         });
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+    }
+
+    #[gpui::test]
+    fn accessibility_set_value_cannot_replace_a_bounded_document(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            crate::input::EditorState::new(window, cx).default_value(
+                "x".repeat(super::super::a11y_text::FULL_ACCESSIBILITY_TEXT_LIMIT + 1),
+            )
+        });
+        let action = gpui::accesskit::ActionData::Value("replacement".into());
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.handle_accessibility_set_value(Some(&action), window, cx)
+            });
+        });
+        assert!(editor.read_with(cx, |editor, _| editor.value().starts_with('x')));
     }
 
     #[gpui::test]
