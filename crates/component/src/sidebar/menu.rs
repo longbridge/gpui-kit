@@ -582,7 +582,10 @@ mod tests {
 
         // Collapsed to icons, a submenu cannot be opened, so no row reports it.
         cx.update(|window, cx| {
-            harness.update(cx, |harness, _| harness.collapsed = true);
+            harness.update(cx, |harness, cx| {
+                harness.collapsed = true;
+                cx.notify();
+            });
             window.draw(cx).clear(cx);
         });
         cx.update(|window, _| {
