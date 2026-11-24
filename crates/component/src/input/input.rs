@@ -1116,6 +1116,7 @@ mod tests {
     }
 
     /// An editor for `language`, rendered in a window so it parses and folds.
+    #[cfg(any(feature = "tree-sitter-sql", feature = "tree-sitter-rust"))]
     fn fold_test_editor(
         language: &str,
         cx: &mut gpui::TestAppContext,
@@ -1154,6 +1155,7 @@ mod tests {
     }
 
     /// The candidates as edited, and those of the same text set at once.
+    #[cfg(any(feature = "tree-sitter-sql", feature = "tree-sitter-rust"))]
     fn edited_and_reference_fold_candidates(
         editor: &gpui::Entity<crate::input::EditorState>,
         cx: &mut gpui::VisualTestContext,
@@ -1180,6 +1182,7 @@ mod tests {
         (edited, reference)
     }
 
+    #[cfg(feature = "tree-sitter-sql")]
     #[gpui::test]
     fn test_sql_fold_candidates_survive_typing(cx: &mut gpui::TestAppContext) {
         const SQL: &str = "SELECT id, name\nFROM (\n  SELECT 1\n) t\nWHERE id > 0;\n";
@@ -1199,6 +1202,7 @@ mod tests {
 
     /// A fold without a closing bracket hides its node's last row, so it ends on
     /// the row after the node; typing on that row keeps the fold.
+    #[cfg(feature = "tree-sitter-sql")]
     #[gpui::test]
     fn test_fold_candidates_survive_typing_after_a_fold(cx: &mut gpui::TestAppContext) {
         const SQL: &str = "SELECT id\nFROM t\nWHERE id = 1;\nSELECT 2;\n";
@@ -1223,6 +1227,7 @@ mod tests {
 
     /// Edits whose bytes lie outside a node on the lines it spans still keep
     /// that node's fold candidate.
+    #[cfg(feature = "tree-sitter-rust")]
     #[gpui::test]
     fn test_fold_candidates_survive_edits_beside_a_node(cx: &mut gpui::TestAppContext) {
         use gpui::EntityInputHandler as _;
