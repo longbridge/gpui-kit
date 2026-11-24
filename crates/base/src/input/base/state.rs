@@ -569,6 +569,7 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) fold_placeholder_renderer: Option<FoldPlaceholderRenderer>,
     pub(super) fold_background: Option<Hsla>,
     pub(super) accessibility: Option<InputAccessibility>,
+    pub(super) accessibility_text_limit: Option<usize>,
     /// What paints in place of Base's editor scrollbar, when a consumer
     /// supplies its own.
     pub(super) scrollbar_renderer: Option<crate::input::EditorScrollbarRenderer>,
@@ -1071,6 +1072,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             fold_placeholder_renderer: None,
             fold_background: None,
             accessibility: None,
+            accessibility_text_limit: None,
             scrollbar_renderer: None,
             diagnostic_popover: None,
             context_menu_handler: None,
@@ -1191,6 +1193,16 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.accessibility = Some(accessibility);
     }
 
+    /// Limit the number of UTF-8 bytes eligible for full accessibility export.
+    ///
+    /// Above this limit, assistive technology receives a short excerpt around the
+    /// active caret. The full value and whole-document SetValue action are omitted.
+    /// Inputs expose their full text by default.
+    pub fn with_accessibility_text_limit(mut self, max_bytes: usize) -> Self {
+        self.accessibility_text_limit = Some(max_bytes);
+        self
+    }
+
     fn handle_accessibility_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.disabled {
             self.focus(window, cx);
@@ -1206,8 +1218,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(gpui::accesskit::ActionData::Value(value)) = data else {
             return;
         };
-        // The action may have been queued before editability changed.
-        if self.is_editable() {
+        // The action may have been queued before editability or text size changed.
+        if self.is_editable() && self.exposes_full_accessibility_text() {
             self.replace_all(value.to_string(), window, cx);
         }
     }
@@ -5461,11 +5473,13 @@ impl<M: InputModeKind> InputBaseState<M> {
             .projected_editor_style
             .resolved(&crate::Theme::global(cx).tokens);
         let entity = cx.entity();
+        let expose_full_text = self.exposes_full_accessibility_text();
         let exposed_text = self
             .accessibility
             .as_ref()
             .is_some_and(|accessibility| {
-                accessibility.value_exposed
+                expose_full_text
+                    && accessibility.value_exposed
                     && !self.masked
                     && (window.is_a11y_active() || cfg!(feature = "test-support"))
             })
@@ -5516,7 +5530,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                             });
                         }
                     })
-                    .when(self.is_editable(), |this| {
+                    .when(self.is_editable() && expose_full_text, |this| {
                         this.on_a11y_action(gpui::AccessibleAction::SetValue, {
                             let entity = entity.clone();
                             move |data, window, cx| {
@@ -5773,6 +5787,26 @@ mod tests {
             });
         });
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+    }
+
+    #[gpui::test]
+    fn accessibility_set_value_cannot_replace_a_bounded_document(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            crate::input::EditorState::new(window, cx)
+                .with_accessibility_text_limit(4)
+                .default_value("original document")
+        });
+        let action = gpui::accesskit::ActionData::Value("replacement".into());
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.handle_accessibility_set_value(Some(&action), window, cx)
+            });
+        });
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.value()),
+            "original document"
+        );
     }
 
     #[gpui::test]
