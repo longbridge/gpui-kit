@@ -143,7 +143,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                         px(0.)
                     };
 
-                    let pos = point(x + last_layout.line_number_width, offset_y);
+                    let pos = point(x + last_layout.text_origin_x, offset_y);
 
                     builder.move_to(pos);
                     builder.line_to(point(pos.x, pos.y + line_height));

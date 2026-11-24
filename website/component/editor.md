@@ -149,13 +149,34 @@ focused one shows an active line.
 
 The scrollbars sit on the right and bottom edges by default. Use
 `scrollbar_placement` to move them; a vertical scrollbar on the left sits on
-the editor's left edge, over the line numbers. Like the bottom scrollbar over
-the last line, a top scrollbar overlays the first line rather than reserving
-space for itself. `set_scrollbar_placement` replaces the placement at runtime.
+the editor's left edge, over the line numbers, or clear of the text when the
+gutter is on the right. Like the bottom scrollbar over the last line, a top
+scrollbar overlays the first line rather than reserving space for itself.
+`set_scrollbar_placement` replaces the placement at runtime.
+
+In a mirrored pane with a right gutter and left scrollbar, the horizontal track stops before the gutter while the vertical track stays at the outer edge.
 
 ```rust
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
+
+The gutter with the line numbers and fold icons sits on the left by default.
+In a side-by-side diff, both gutters can face the center, so the line numbers
+of corresponding lines sit next to each other across the divider. The left pane
+puts its gutter on its right with `gutter_side` — mirrored, the fold icons next
+to the text — and its scrollbar on its outer edge:
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+On either side, the fold icons sit next to the text, then the line numbers,
+then the strip of the [gutter decorations](#gutter-and-overview-ruler-decorations).
+`set_gutter_side` changes the side at runtime.
+
+The Editor Diff story shows both layouts, with the two panes scrolling together.
 
 ## Manual completions
 
@@ -377,7 +398,8 @@ The Editor showcase's **Decorations** tab demonstrates both collection types.
 
 Use these collections to mark whole lines outside the text, such as lines that a
 version-control diff added, modified, or deleted. A `GutterDecorationCollection`
-draws in a strip before the line numbers. An `OverviewRulerDecorationCollection`
+draws in a strip at the outer edge of the gutter, before the line numbers. An
+`OverviewRulerDecorationCollection`
 draws on the vertical scrollbar track. Monaco calls this track the overview ruler.
 Create one collection for each surface you want to use.
 

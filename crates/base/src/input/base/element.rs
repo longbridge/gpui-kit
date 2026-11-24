@@ -4,6 +4,7 @@ use crate::input::{
 };
 use gpui::Corners;
 use gpui::Half;
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Bounds, ContentMask, Edges, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId,
@@ -20,13 +21,13 @@ use smallvec::SmallVec;
 use std::{collections::BTreeSet, ops::Range, rc::Rc};
 
 use crate::{
-    Scrollbar, ScrollbarPlacement,
+    Scrollbar, ScrollbarPlacement, Side,
     input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
 };
 
 use super::{
     InputBaseState, PrepaintCaretGeometry, RangeDecorationStyle, TextDecoration,
-    layout::{LastLayout, WhitespaceIndicators},
+    layout::{GutterColumn, LastLayout, WhitespaceIndicators},
     mode::LayoutMode,
     tab_stops::{expand_tabs, expanded_width, tab_stop_width},
 };
@@ -230,6 +231,7 @@ pub(super) struct EditorScrollbarSnapshot {
     padding_top: Pixels,
     wrap_width: Option<Pixels>,
     placement: ScrollbarPlacement,
+    horizontal_bounds: Option<Bounds<Pixels>>,
 }
 
 impl EditorScrollbarSnapshot {
@@ -242,14 +244,37 @@ impl EditorScrollbarSnapshot {
         scroll_y_f64: f64,
         state: &InputBaseState<M>,
     ) -> Self {
+        let mut layout = EditorScrollbarLayout::new(
+            input_bounds,
+            last_layout.text_origin_x,
+            scroll_size,
+            state.editor_paddings,
+            state.scrollbar_placement,
+        );
+        if state.gutter_side.is_left()
+            && !state.scrollbar_placement.is_left()
+            && last_layout.line_number_width > px(0.)
+        {
+            layout.set_gutter_gap(last_layout.gutter_gap);
+        }
+        let horizontal_bounds = (state.gutter_side.is_right()
+            && state.scrollbar_placement.is_left()
+            && last_layout.line_number_width > px(0.))
+        .then(|| {
+            let inset = (state.editor_paddings.right * 2. + last_layout.line_number_width
+                - last_layout.gutter_gap)
+                .max(px(0.));
+            Bounds::new(
+                layout.bounds.origin,
+                size(
+                    (layout.bounds.size.width - inset).max(px(0.)),
+                    layout.bounds.size.height,
+                ),
+            )
+        });
         Self {
-            layout: EditorScrollbarLayout::new(
-                input_bounds,
-                last_layout.line_number_width,
-                scroll_size,
-                state.editor_paddings,
-                state.scrollbar_placement,
-            ),
+            layout,
+            horizontal_bounds,
             cursor_scroll_offset,
             scroll_height_f64,
             scroll_y_f64,
@@ -259,10 +284,6 @@ impl EditorScrollbarSnapshot {
             wrap_width: last_layout.wrap_width,
             placement: state.scrollbar_placement,
         }
-    }
-    fn with_gutter_gap(mut self, gap: Pixels) -> Self {
-        self.layout.set_gutter_gap(gap);
-        self
     }
 }
 
@@ -281,17 +302,17 @@ impl EditorScrollbarLayout {
 
     fn new(
         input_bounds: Bounds<Pixels>,
-        line_number_width: Pixels,
+        text_origin_x: Pixels,
         scroll_size: Size<Pixels>,
         paddings: Edges<Pixels>,
         placement: ScrollbarPlacement,
     ) -> Self {
         let left = if placement.is_left() {
             -paddings.left
-        } else if line_number_width == px(0.) {
+        } else if text_origin_x == px(0.) {
             px(0.)
         } else {
-            paddings.left + line_number_width - LINE_NUMBER_RIGHT_MARGIN
+            paddings.left + text_origin_x - LINE_NUMBER_RIGHT_MARGIN
         };
 
         let bounds = Bounds::new(
@@ -403,6 +424,9 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
             }
             .placement(snapshot.placement)
             .viewport_bounds(snapshot.layout.bounds)
+            .when_some(snapshot.horizontal_bounds, |this, bounds| {
+                this.horizontal_viewport_bounds(bounds)
+            })
             .scroll_viewport_size(snapshot.layout.scroll_viewport_size)
             .scroll_size(snapshot.layout.scroll_size)
             .into_any_element()
@@ -480,22 +504,37 @@ fn editor_gutter_bounds(
     line_number_width: Pixels,
     ghost_lines_height: Pixels,
     paddings: Edges<Pixels>,
+    side: Side,
 ) -> Bounds<Pixels> {
+    let (x, outer_padding) = if side.is_left() {
+        (input_bounds.origin.x - paddings.left, paddings.left)
+    } else {
+        (input_bounds.right() - line_number_width, paddings.right)
+    };
     Bounds {
-        origin: point(
-            input_bounds.origin.x - paddings.left,
-            input_bounds.origin.y - paddings.top,
-        ),
+        origin: point(x, input_bounds.origin.y - paddings.top),
         size: size(
-            line_number_width + paddings.left,
+            line_number_width + outer_padding,
             input_bounds.size.height + ghost_lines_height + paddings.top + paddings.bottom,
         ),
     }
 }
 
-fn editor_text_bounds(bounds: Bounds<Pixels>, gutter_bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-    let left = gutter_bounds.right().max(bounds.left()).min(bounds.right());
-    Bounds::from_corners(point(left, bounds.top()), bounds.bottom_right())
+/// Return the part of `bounds` on the text's side of the gutter.
+fn editor_text_bounds(
+    bounds: Bounds<Pixels>,
+    gutter_bounds: Bounds<Pixels>,
+    side: Side,
+) -> Bounds<Pixels> {
+    let (left, right) = if side.is_left() {
+        (gutter_bounds.right().max(bounds.left()), bounds.right())
+    } else {
+        (bounds.left(), gutter_bounds.left().min(bounds.right()))
+    };
+    Bounds::from_corners(
+        point(left.min(right), bounds.top()),
+        point(right, bounds.bottom()),
+    )
 }
 
 /// Where a gutter or overview ruler decoration sits, in display rows.
@@ -708,6 +747,78 @@ fn layout_overview_ruler<M: InputModeKind>(
             )
         })
         .collect()
+}
+
+/// Return the x and the width of a gutter column, relative to the input bounds.
+///
+/// From the text outward, a gutter holds a margin, then its columns. A gutter
+/// on the right is the mirror of one on the left.
+fn gutter_column(
+    last_layout: &LastLayout,
+    folding: bool,
+    column: GutterColumn,
+) -> (Pixels, Pixels) {
+    let width = |column| match column {
+        GutterColumn::FoldIcons => fold_column_width(folding),
+        GutterColumn::LineNumbers => line_number_column_width(last_layout, folding),
+        GutterColumn::Decorations => last_layout.gutter_decorations_width,
+    };
+    let inset = GutterColumn::ORDER
+        .iter()
+        .take_while(|&&other| other != column)
+        .fold(last_layout.gutter_gap, |inset, &other| inset + width(other));
+    (
+        gutter_column_x(last_layout, inset, width(column)),
+        width(column),
+    )
+}
+
+fn fold_column_width(folding: bool) -> Pixels {
+    if folding {
+        FOLD_ICON_HITBOX_WIDTH
+    } else {
+        px(0.)
+    }
+}
+
+fn line_number_column_width(last_layout: &LastLayout, folding: bool) -> Pixels {
+    last_layout.line_number_width
+        - last_layout.gutter_decorations_width
+        - last_layout.gutter_gap
+        - fold_column_width(folding)
+}
+
+/// Return the x of a gutter column `inset` from the text, relative to the input bounds.
+fn gutter_column_x(last_layout: &LastLayout, inset: Pixels, width: Pixels) -> Pixels {
+    if last_layout.gutter_side.is_left() {
+        last_layout.gutter_origin_x + last_layout.line_number_width - inset - width
+    } else {
+        last_layout.gutter_origin_x + inset
+    }
+}
+
+/// Return the x of a line number `width` wide, aligned toward the text,
+/// relative to the input bounds.
+fn line_number_x(last_layout: &LastLayout, folding: bool, width: Pixels) -> Pixels {
+    let (numbers_x, numbers_width) = gutter_column(last_layout, folding, GutterColumn::LineNumbers);
+    if last_layout.gutter_side.is_left() {
+        numbers_x + numbers_width - width
+    } else {
+        numbers_x
+    }
+}
+
+/// Return the x of the gutter decoration strip, `width` wide, relative to the
+/// input bounds.
+///
+/// The rest of its column is the gap toward the line numbers.
+fn gutter_decorations_x(last_layout: &LastLayout, folding: bool, width: Pixels) -> Pixels {
+    let (column_x, column_width) = gutter_column(last_layout, folding, GutterColumn::Decorations);
+    if last_layout.gutter_side.is_left() {
+        column_x
+    } else {
+        column_x + column_width - width
+    }
 }
 
 use super::MASK_CHAR;
@@ -1167,7 +1278,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         let line_height = last_layout.line_height;
         let visible_range = &last_layout.visible_range;
         let lines = &last_layout.lines;
-        let line_number_width = last_layout.line_number_width;
 
         let active_id = state.active_selection().id;
         let mut scroll_offset = state.scroll_handle.offset();
@@ -1253,9 +1363,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                             TextAlign::Center => CURSOR_WIDTH,
                         };
                         scroll_offset.x = if scroll_offset.x + cursor_pos.x
-                            > (bounds.size.width - line_number_width - safety_margin)
+                            > (last_layout.text_width - safety_margin)
                         {
-                            bounds.size.width - line_number_width - safety_margin - cursor_pos.x
+                            last_layout.text_width - safety_margin - cursor_pos.x
                         } else if scroll_offset.x + cursor_pos.x < px(0.) {
                             -cursor_pos.x
                         } else {
@@ -1282,7 +1392,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
 
             // Apply the final horizontal offset to every caret after cursor-follow and
             // deferred scrolling have been resolved, regardless of selection order.
-            let cursor_x = bounds.left() + cursor_pos.x + line_number_width;
+            let cursor_x = bounds.left() + cursor_pos.x + last_layout.text_origin_x;
             cursor_infos.push(CursorRenderInfo {
                 bounds: Bounds::new(
                     point(
@@ -1329,7 +1439,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
     ) -> Option<Path> {
         let corners = Self::layout_range_corners(&range, last_layout)?;
         let points = frame_outline_points(&corners);
-        let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
+        let origin = bounds.origin + point(last_layout.text_origin_x, px(0.));
         let mut builder = gpui::PathBuilder::fill();
         builder.move_to(origin + *points.first()?);
         for point in points.iter().skip(1) {
@@ -1436,7 +1546,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                     else {
                         continue;
                     };
-                    let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
+                    let origin = bounds.origin + point(last_layout.text_origin_x, px(0.));
                     let corners = pad_frame_corners(&corners, px(1.));
                     let points = frame_outline_points(&corners)
                         .into_iter()
@@ -1710,11 +1820,19 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             line_number_width += FOLD_ICON_HITBOX_WIDTH
         }
 
-        if let Some(width) = state.extras.gutter_decorations_width() {
-            line_number_width += width + GUTTER_DECORATION_GAP;
-        }
+        (
+            line_number_width + Self::gutter_decorations_width(state),
+            gap,
+        )
+    }
 
-        (line_number_width, gap)
+    /// Return the width reserved for the gutter decoration strip's column: the
+    /// strip and its gap, while a gutter decoration collection exists.
+    fn gutter_decorations_width(state: &InputBaseState<M>) -> Pixels {
+        state
+            .extras
+            .gutter_decorations_width()
+            .map_or(px(0.), |width| width + GUTTER_DECORATION_GAP)
     }
 
     /// Layout shaped lines for whitespace indicators (space and tab).
@@ -1860,7 +1978,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
     /// Return (line_number_width, line_number_len)
     /// Layout fold icon hitboxes during prepaint phase.
     ///
-    /// This creates hitboxes for the fold icon area, positioned to the right of line numbers.
+    /// This creates hitboxes for the fold icon area, positioned between the line numbers and the text.
     /// Icons are created and prepainted here to avoid panics.
     /// Bars and boundary pills for gutter decorations, in the strip at `origin_x`
     /// before the line numbers. Rows below `ghost_rows.0` move down by the
@@ -1947,7 +2065,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         origin_x: Pixels,
         bounds: &Bounds<Pixels>,
         last_layout: &LastLayout,
-        line_number_right_edge_offset: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) -> FoldIconLayout {
@@ -1961,7 +2078,10 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
 
         let line_number_hitbox = window.insert_hitbox(
             Bounds::new(
-                point(origin_x, bounds.origin.y + last_layout.visible_top),
+                point(
+                    origin_x + last_layout.gutter_origin_x,
+                    bounds.origin.y + last_layout.visible_top,
+                ),
                 size(last_layout.line_number_width, bounds.size.height),
             ),
             HitboxBehavior::Normal,
@@ -2004,17 +2124,18 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
 
         // Second pass: create and prepaint icons
         let line_height = last_layout.line_height;
+        let (fold_icon_x, _) = gutter_column(last_layout, true, GutterColumn::FoldIcons);
         let icon_relative_pos = point(
             (FOLD_ICON_HITBOX_WIDTH - FOLD_ICON_WIDTH).half(),
             (line_height - FOLD_ICON_WIDTH).half(),
         );
 
         for (ix, info) in fold_infos.iter().enumerate() {
-            // Position fold icon to the right of line numbers.
+            // Position fold icon between the line numbers and the text.
             // Use origin_x (unscrolled) so icons stay fixed in the gutter during horizontal scroll.
             let fold_icon_bounds = Bounds::new(
                 point(
-                    origin_x + icon_relative_pos.x + line_number_right_edge_offset,
+                    origin_x + icon_relative_pos.x + fold_icon_x,
                     bounds.origin.y + icon_relative_pos.y + info.offset_y,
                 ),
                 size(FOLD_ICON_HITBOX_WIDTH, line_height),
@@ -2139,7 +2260,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             )
         };
 
-        let origin = bounds.origin + point(last_layout.line_number_width, px(0.));
+        let origin = bounds.origin + point(last_layout.text_origin_x, px(0.));
         for (buffer_line, top, rows, end) in folded {
             if let Some(color) = background {
                 let bounds = Bounds::new(
@@ -2825,7 +2946,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                 {
                     placements.push((
                         state.token_context(span, layout.line_height, width),
-                        bounds.origin + position + point(layout.line_number_width, y),
+                        bounds.origin + position + point(layout.text_origin_x, y),
                     ));
                 }
             }
@@ -3184,7 +3305,6 @@ pub(super) struct PrepaintState {
     ///
     /// Each is the shaped number and the count of soft wrapped rows it spans.
     line_numbers: Option<Vec<(ShapedLine, usize)>>,
-    line_number_right_edge_offset: Pixels,
     line_number_baseline_offset: Pixels,
     /// Size of the scrollable area by entire lines.
     scroll_size: Size<Pixels>,
@@ -3478,17 +3598,28 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         } else {
             px(0.)
         };
-        let line_number_right_edge_offset = line_number_width
-            - gutter_gap
-            - if state.mode.is_folding() {
-                FOLD_ICON_HITBOX_WIDTH
-            } else {
-                px(0.)
-            };
+
+        let gutter_side = state.gutter_side;
+        let (mut text_origin_x, gutter_origin_x) = if gutter_side.is_left() {
+            (line_number_width, px(0.))
+        } else {
+            (px(0.), bounds.size.width - line_number_width)
+        };
+        let mut reserved_width = line_number_width;
+        if state.scrollbar_placement.is_left() {
+            let clearance = (Scrollbar::vertical(&state.scroll_handle).full_width(cx)
+                - state.editor_paddings.left)
+                .max(RIGHT_MARGIN);
+            if text_origin_x < clearance {
+                reserved_width += clearance - text_origin_x;
+                text_origin_x = clearance;
+            }
+        }
+        let text_width = bounds.size.width - reserved_width;
 
         let mut bounds = bounds;
         let wrap_width = if multi_line && state.soft_wrap {
-            Some(bounds.size.width - line_number_width - RIGHT_MARGIN)
+            Some(text_width - RIGHT_MARGIN)
         } else {
             None
         };
@@ -3515,7 +3646,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
 
         let line_height = window.line_height();
         let token_elements = self.measure_tokens(
-            (bounds.size.width - line_number_width - RIGHT_MARGIN).max(px(1.)),
+            (text_width - RIGHT_MARGIN).max(px(1.)),
             line_height,
             bounds.size.height,
             window,
@@ -3584,7 +3715,13 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             wrap_width,
             wrapping_indent,
             line_number_width,
+            gutter_gap,
+            gutter_decorations_width: Self::gutter_decorations_width(state),
             ghost_lines: None,
+            gutter_side,
+            text_origin_x,
+            gutter_origin_x,
+            text_width,
             space_width,
             lines: Rc::new(vec![]),
             cursor_bounds: None,
@@ -3790,8 +3927,8 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             )
         };
         let mut scroll_size = size(
-            if longest_line_width + line_number_width + RIGHT_MARGIN > bounds.size.width {
-                longest_line_width + line_number_width + RIGHT_MARGIN
+            if longest_line_width + reserved_width + RIGHT_MARGIN > bounds.size.width {
+                longest_line_width + reserved_width + RIGHT_MARGIN
             } else {
                 longest_line_width
             },
@@ -3801,7 +3938,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         // TODO: should be add some gap to right, to convenient to focus on boundary position
         if last_layout.text_align == TextAlign::Right || last_layout.text_align == TextAlign::Center
         {
-            scroll_size.width = longest_line_width + line_number_width;
+            scroll_size.width = longest_line_width + reserved_width;
         }
 
         // `position_for_index` for example
@@ -3950,8 +4087,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         let hover_definition_hitbox = M::hover_definition_hitbox(state, window, cx);
         let indent_guides_path =
             self.layout_indent_guides(state, &bounds, &last_layout, &text_style, window);
-        state.editor_scrollbar_snapshot.set(Some(
-            EditorScrollbarSnapshot::new(
+        state
+            .editor_scrollbar_snapshot
+            .set(Some(EditorScrollbarSnapshot::new(
                 input_bounds,
                 &last_layout,
                 scroll_size,
@@ -3959,17 +4097,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 cursor_scroll_offset,
                 final_scroll_y_f64,
                 state,
-            )
-            .with_gutter_gap(gutter_gap),
-        ));
-        let fold_icon_layout = self.layout_fold_icons(
-            original_x,
-            &bounds,
-            &last_layout,
-            line_number_right_edge_offset,
-            window,
-            cx,
-        );
+            )));
+        let fold_icon_layout =
+            self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
         let folded_lines = self.layout_folded_lines(
             original_x,
             &bounds,
@@ -3985,8 +4115,16 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 .unwrap_or_default();
             (rows.end.saturating_sub(1), ghost_lines_height)
         });
+        let gutter_decorations_x = {
+            let state = self.state.read(cx);
+            gutter_decorations_x(
+                &last_layout,
+                state.mode.is_folding(),
+                state.extras.gutter_decorations_width().unwrap_or_default(),
+            )
+        };
         let gutter_decorations = self.layout_gutter_decorations(
-            original_x,
+            original_x + gutter_decorations_x,
             &bounds,
             &input_bounds,
             &last_layout,
@@ -4080,7 +4218,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             last_layout,
             scroll_size,
             line_numbers,
-            line_number_right_edge_offset,
             line_number_baseline_offset,
             cursor_infos,
             cursor_scroll_offset,
@@ -4230,9 +4367,14 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             prepaint.last_layout.line_number_width,
             prepaint.ghost_lines_height,
             editor_paddings,
+            prepaint.last_layout.gutter_side,
         );
         let text_mask = (prepaint.last_layout.line_number_width > px(0.)).then(|| ContentMask {
-            bounds: editor_text_bounds(window.content_mask().bounds, gutter_bounds),
+            bounds: editor_text_bounds(
+                window.content_mask().bounds,
+                gutter_bounds,
+                prepaint.last_layout.gutter_side,
+            ),
         });
 
         let cursor_row_y = window.with_content_mask(text_mask, |window| {
@@ -4250,7 +4392,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 .zip(prepaint.last_layout.visible_buffer_lines.iter())
             {
                 let p = point(
-                    origin.x + prepaint.last_layout.line_number_width + scroll_offset,
+                    origin.x + prepaint.last_layout.text_origin_x + scroll_offset,
                     origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
                 );
 
@@ -4331,7 +4473,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 let row = buffer_line;
                 let line_y = origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
                 let p = point(
-                    origin.x + prepaint.last_layout.line_number_width + (scroll_offset),
+                    origin.x + prepaint.last_layout.text_origin_x + (scroll_offset),
                     line_y,
                 );
 
@@ -4351,7 +4493,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
 
                 // After the cursor row, paint ghost lines (which shifts subsequent content down)
                 if has_ghost_lines && Some(row) == prepaint.current_row {
-                    let ghost_x = origin.x + prepaint.last_layout.line_number_width;
+                    let ghost_x = origin.x + prepaint.last_layout.text_origin_x;
                     let ghost_base_y =
                         origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
 
@@ -4362,10 +4504,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                         // Paint semi-transparent background for ghost line
                         let ghost_bounds = Bounds::new(
                             ghost_p,
-                            size(
-                                bounds.size.width - prepaint.last_layout.line_number_width,
-                                line_height,
-                            ),
+                            size(prepaint.last_layout.text_width, line_height),
                         );
                         window.paint_quad(fill(ghost_bounds, editor_background));
 
@@ -4425,6 +4564,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     color,
                 ));
             }
+            let folding = self.state.read(cx).mode.is_folding();
 
             // Each item is the normal lines.
             for ((line_no, rows), &buffer_line) in line_numbers
@@ -4451,8 +4591,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     }
                 }
 
+                let x = line_number_x(&prepaint.last_layout, folding, line_no.width);
                 let number_origin = point(
-                    p.x + prepaint.line_number_right_edge_offset - line_no.width,
+                    input_bounds.origin.x + x,
                     p.y + prepaint.line_number_baseline_offset,
                 );
                 _ = line_no.paint(
@@ -4800,9 +4941,10 @@ mod tests {
         GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
         Position, RangeDecoration, Redo, TextDecoration, Undo,
     };
+    use crate::{ScrollbarMode, ScrollbarStyles, ScrollbarTheme, Theme};
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
-        Render, TestAppContext, VisualTestContext, div, list, prelude::FluentBuilder as _,
+        Render, TestAppContext, VisualTestContext, div, list,
     };
 
     #[test]
@@ -5197,9 +5339,18 @@ mod tests {
                 );
             });
 
-            for line_number in [true, false] {
+            for (line_number, side, placement) in [
+                (true, Side::Left, ScrollbarPlacement::BottomRight),
+                (true, Side::Right, ScrollbarPlacement::BottomRight),
+                (true, Side::Left, ScrollbarPlacement::BottomLeft),
+                (true, Side::Right, ScrollbarPlacement::BottomLeft),
+                (false, Side::Left, ScrollbarPlacement::BottomRight),
+                (false, Side::Right, ScrollbarPlacement::BottomRight),
+            ] {
                 editor.update(cx, |state, cx| {
                     state.set_line_number(line_number, window, cx);
+                    state.set_gutter_side(side, cx);
+                    state.set_scrollbar_placement(placement, cx);
                     state.set_scroll_offset(point(px(-100.), px(0.)), cx);
                 });
                 window.draw(cx).clear(cx);
@@ -5211,6 +5362,7 @@ mod tests {
                     layout.line_number_width,
                     px(0.),
                     state.editor_paddings,
+                    side,
                 )
                 .scale(window.scale_factor());
 
@@ -5230,17 +5382,483 @@ mod tests {
                 for painted in [backgrounds, underlines] {
                     assert!(
                         painted.iter().any(|(bounds, _)| bounds.intersects(&gutter)),
-                        "line numbers {line_number}: the text runs under the gutter"
+                        "{side:?} gutter, line numbers {line_number}, {placement:?}: the text runs under the gutter"
                     );
                     for (bounds, mask) in painted {
                         let shown = bounds.intersect(&mask).intersect(&gutter);
                         assert!(
                             shown.size.width < gpui::ScaledPixels::from(1.),
-                            "line numbers {line_number}: {bounds:?} under {mask:?} shows through the gutter {gutter:?}"
+                            "{side:?} gutter, line numbers {line_number}, {placement:?}: {bounds:?} under {mask:?} shows through the gutter {gutter:?}"
                         );
                     }
                 }
             }
+        });
+    }
+
+    #[gpui::test]
+    fn a_gutter_on_the_right_leaves_the_text_at_the_left_edge(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"word ".repeat(40), true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let left = editor.read(cx).last_layout.clone().unwrap();
+            editor.update(cx, |state, cx| state.set_gutter_side(Side::Right, cx));
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let right = state.last_layout.clone().unwrap();
+            let width = state.input_bounds.size.width;
+
+            assert!(left.line_number_width > px(0.));
+            assert_eq!(right.line_number_width, left.line_number_width);
+            assert_eq!(left.text_origin_x, left.line_number_width);
+            assert_eq!(left.gutter_origin_x, px(0.));
+            assert_eq!(right.text_origin_x, px(0.));
+            assert_eq!(right.gutter_origin_x, width - right.line_number_width);
+            assert!(right.wrap_width.is_some());
+            assert_eq!(right.wrap_width, left.wrap_width);
+            assert!(right.lines[0].wrapped_lines.len() > 1);
+            assert_eq!(
+                right.lines[0].wrapped_lines.len(),
+                left.lines[0].wrapped_lines.len()
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn the_gutter_decoration_strip_is_a_gutter_column(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let _strip = editor.update(cx, |state, cx| {
+                state.create_gutter_decorations_collection(vec![GutterDecoration::new(0..3)], cx)
+            });
+            let strip = px(3.);
+            for side in [Side::Left, Side::Right] {
+                editor.update(cx, |state, cx| state.set_gutter_side(side, cx));
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                assert_eq!(
+                    layout.gutter_decorations_width,
+                    strip + GUTTER_DECORATION_GAP
+                );
+                let x = gutter_decorations_x(layout, true, strip);
+                let gutter =
+                    layout.gutter_origin_x..layout.gutter_origin_x + layout.line_number_width;
+                let from_text = if side.is_left() {
+                    gutter.end - (x + strip)
+                } else {
+                    x - gutter.start
+                };
+                assert_eq!(from_text, layout.line_number_width - strip, "{side:?}");
+            }
+        });
+    }
+
+    fn record_fold_icons(
+        editor: &Entity<EditorState>,
+        cx: &mut App,
+    ) -> Rc<std::cell::RefCell<Vec<Bounds<Pixels>>>> {
+        let icons = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = icons.clone();
+        editor.update(cx, |state, _| {
+            let mut style = state.editor_style.clone();
+            style.fold_icon_renderer = Some(Rc::new(move |_, _| {
+                let record = record.clone();
+                gpui::canvas(
+                    move |bounds, _, _| record.borrow_mut().push(bounds),
+                    |_, _, _, _| {},
+                )
+                .size_full()
+                .into_any_element()
+            }));
+            state.set_editor_style(style);
+        });
+        icons
+    }
+
+    #[gpui::test]
+    fn a_right_gutter_is_mirrored(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "a\n  b\nc\n".repeat(40).as_str(), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let icons = record_fold_icons(&editor, cx);
+            let paddings = Edges {
+                top: px(2.),
+                right: px(7.),
+                bottom: px(5.),
+                left: px(7.),
+            };
+            editor.update(cx, |state, cx| {
+                state.set_editor_paddings(paddings);
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+            });
+
+            let measure = |side: Side, folding: bool, window: &mut Window, cx: &mut App| {
+                editor.update(cx, |state, cx| {
+                    state.set_gutter_side(side, cx);
+                    state.set_folding(folding, window, cx);
+                    state.set_selected_range(0..0, cx);
+                });
+                icons.borrow_mut().clear();
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.clone().unwrap();
+                let input_bounds = state.input_bounds;
+                let from_outer = |x: Pixels, width: Pixels| {
+                    if side.is_left() {
+                        x - (input_bounds.left() - paddings.left)
+                    } else {
+                        input_bounds.right() + paddings.right - (x + width)
+                    }
+                };
+                let at = |x: Pixels, width: Pixels| from_outer(input_bounds.left() + x, width);
+
+                let gutter = editor_gutter_bounds(
+                    input_bounds,
+                    layout.line_number_width,
+                    px(0.),
+                    paddings,
+                    side,
+                );
+                let (numbers_x, numbers_width) =
+                    gutter_column(&layout, folding, GutterColumn::LineNumbers);
+                let (fold_x, _) = gutter_column(&layout, folding, GutterColumn::FoldIcons);
+                let mut spans = vec![
+                    from_outer(gutter.left(), gutter.size.width),
+                    gutter.size.width,
+                    at(numbers_x, numbers_width),
+                    numbers_width,
+                ];
+                for width in [px(5.5), px(11.), numbers_width] {
+                    spans.push(at(line_number_x(&layout, folding, width), width));
+                }
+                if folding {
+                    spans.push(at(fold_x, FOLD_ICON_HITBOX_WIDTH));
+                    let icon = *icons.borrow().first().expect("a fold icon is laid out");
+                    spans.push(from_outer(icon.left(), icon.size.width));
+                }
+                let text_gap = if side.is_left() {
+                    layout.text_origin_x - (layout.gutter_origin_x + layout.line_number_width)
+                } else {
+                    layout.gutter_origin_x - (layout.text_origin_x + layout.text_width)
+                };
+                (spans, text_gap, layout.text_width)
+            };
+
+            for folding in [true, false] {
+                let (left, left_gap, left_width) = measure(Side::Left, folding, window, cx);
+                let (right, right_gap, right_width) = measure(Side::Right, folding, window, cx);
+                assert_eq!(left.len(), right.len());
+                for (ix, (left, right)) in left.iter().zip(&right).enumerate() {
+                    assert!(
+                        (*left - *right).abs() < px(0.01),
+                        "span {ix} with folding {folding}: {left:?} on the left, {right:?} on the right"
+                    );
+                }
+                assert_eq!(left_gap, px(0.));
+                assert_eq!(right_gap, px(0.));
+                assert_eq!(left_width, right_width);
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn a_click_lands_on_the_fold_icon_or_the_line_number_in_every_gutter(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "abc\n  b\nc", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        for side in [Side::Left, Side::Right] {
+            let (on_number, on_icon) = cx.update(|window, cx| {
+                editor.update(cx, |state, cx| {
+                    state.display_map.clear_folds();
+                    state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                    state.set_gutter_side(side, cx);
+                    state.set_selected_range(2..2, cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let input_bounds = state.input_bounds;
+                let numbers_width = line_number_column_width(layout, true);
+                let fold_inset = layout.gutter_gap;
+                let numbers_inset = fold_inset + FOLD_ICON_HITBOX_WIDTH;
+                let center = |inset: Pixels, width: Pixels| {
+                    let inset = inset + width.half();
+                    if side.is_left() {
+                        input_bounds.left() + layout.text_origin_x - inset
+                    } else {
+                        input_bounds.left() + layout.text_origin_x + layout.text_width + inset
+                    }
+                };
+                let y = input_bounds.top() + layout.line_height.half();
+                (
+                    point(center(numbers_inset, numbers_width), y),
+                    point(center(fold_inset, FOLD_ICON_HITBOX_WIDTH), y),
+                )
+            });
+
+            cx.simulate_click(on_number, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                let at = if side.is_left() { 0 } else { 3 };
+                assert_eq!(state.selected_range(), at..at, "{side:?} gutter");
+                assert!(!state.display_map.is_folded_at(0), "{side:?} gutter");
+            });
+
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_click(on_icon, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert!(state.display_map.is_folded_at(0), "{side:?} gutter");
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn horizontal_scrollbar_does_not_claim_clicks_in_the_right_gutter(cx: &mut TestAppContext) {
+        let text = format!("{}\n", "long line ".repeat(30)).repeat(40);
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let click = cx.update(|window, cx| {
+            Theme::global_mut(cx).scrollbar =
+                ScrollbarTheme::new().with_mode(ScrollbarMode::Always);
+            editor.update(cx, |state, cx| {
+                state.set_gutter_side(Side::Right, cx);
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let (numbers_x, numbers_width) = gutter_column(layout, true, GutterColumn::LineNumbers);
+            point(
+                state.input_bounds.left() + numbers_x + numbers_width.half(),
+                state.input_bounds.bottom() - px(2.),
+            )
+        });
+        cx.simulate_click(click, gpui::Modifiers::default());
+        editor.read_with(&cx, |state, _| {
+            assert_ne!(
+                state.selected_range(),
+                0..0,
+                "the click must reach the editor"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn a_scrollbar_beside_the_gutter_stays_at_the_outer_edge(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"x\n".repeat(50), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let paddings = Edges {
+                top: px(2.),
+                right: px(3.),
+                bottom: px(5.),
+                left: px(7.),
+            };
+            editor.update(cx, |state, _| state.set_editor_paddings(paddings));
+            for (gutter, scrollbar) in [
+                (Side::Left, ScrollbarPlacement::BottomLeft),
+                (Side::Right, ScrollbarPlacement::BottomLeft),
+                (Side::Right, ScrollbarPlacement::BottomRight),
+            ] {
+                editor.update(cx, |state, cx| {
+                    state.set_gutter_side(gutter, cx);
+                    state.set_scrollbar_placement(scrollbar, cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let input_bounds = state.input_bounds;
+                let viewport = state.editor_scrollbar_snapshot.get().unwrap().layout.bounds;
+                assert_eq!(
+                    viewport.right(),
+                    input_bounds.right() + paddings.right,
+                    "{gutter:?} gutter, {scrollbar:?} scrollbar"
+                );
+                let left = if scrollbar.is_left() {
+                    input_bounds.left() - paddings.left
+                } else {
+                    input_bounds.left()
+                };
+                assert_eq!(
+                    viewport.left(),
+                    left,
+                    "{gutter:?} gutter, {scrollbar:?} scrollbar"
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn the_text_keeps_clear_of_a_scrollbar_on_the_left(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"word ".repeat(40), true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_editor_paddings(Edges {
+                    top: px(4.),
+                    right: px(10.),
+                    bottom: px(4.),
+                    left: px(6.),
+                });
+                state.set_gutter_side(Side::Right, cx);
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let input_bounds = state.input_bounds;
+            let scrollbar = state.editor_scrollbar_snapshot.get().unwrap().layout.bounds;
+
+            assert!(
+                input_bounds.left() + layout.text_origin_x >= scrollbar.left() + Scrollbar::width(),
+                "the text starts under the scrollbar"
+            );
+            assert_eq!(
+                layout.gutter_origin_x,
+                input_bounds.size.width - layout.line_number_width
+            );
+            assert_eq!(
+                layout.text_origin_x + layout.text_width,
+                layout.gutter_origin_x
+            );
+            assert_eq!(layout.wrap_width, Some(layout.text_width - RIGHT_MARGIN));
+        });
+    }
+
+    #[gpui::test]
+    fn the_text_keeps_clear_of_the_whole_track_of_a_scrollbar_on_the_left(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"word\n".repeat(40), true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        for track_width in [None, Some(px(24.))] {
+            let in_text = cx.update(|window, cx| {
+                Theme::global_mut(cx).scrollbar = ScrollbarTheme::new()
+                    .with_mode(ScrollbarMode::Always)
+                    .with_styles(
+                        ScrollbarStyles::default().when_some(track_width, |styles, width| {
+                            styles.track(|track| track.width(width))
+                        }),
+                    );
+                editor.update(cx, |state, cx| {
+                    state.set_gutter_side(Side::Right, cx);
+                    state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+                    state.set_selected_range(4..4, cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let input_bounds = state.input_bounds;
+                let scrollbar = state.editor_scrollbar_snapshot.get().unwrap().layout.bounds;
+
+                assert_eq!(scrollbar.left(), input_bounds.left());
+                assert!(
+                    layout.text_origin_x >= track_width.unwrap_or(Scrollbar::width()),
+                    "{track_width:?} track: the text starts under the scrollbar"
+                );
+                input_bounds.origin + point(layout.text_origin_x + px(1.), layout.line_height * 0.5)
+            });
+
+            cx.simulate_click(in_text, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert_eq!(state.selected_range(), 0..0, "{track_width:?} track");
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn a_click_lands_in_the_text_beside_a_gutter_on_either_side(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "abcdef\nab", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        for (side, gutter_click) in [(Side::Left, 7), (Side::Right, 9)] {
+            let (in_text, in_gutter) = cx.update(|window, cx| {
+                editor.update(cx, |state, cx| {
+                    state.set_gutter_side(side, cx);
+                    state.set_selected_range(0..0, cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let input_bounds = state.input_bounds;
+                let x = layout.lines[0]
+                    .position_for_index(3, layout, false)
+                    .unwrap()
+                    .x;
+                (
+                    input_bounds.origin + point(layout.text_origin_x + x, layout.line_height * 0.5),
+                    input_bounds.origin
+                        + point(
+                            layout.gutter_origin_x + layout.line_number_width.half(),
+                            layout.line_height * 1.5,
+                        ),
+                )
+            });
+
+            cx.simulate_click(in_text, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert_eq!(state.selected_range(), 3..3, "{side:?} gutter");
+            });
+
+            cx.simulate_click(in_gutter, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert_eq!(
+                    state.selected_range(),
+                    gutter_click..gutter_click,
+                    "{side:?} gutter"
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn the_caret_and_the_ime_bounds_follow_the_text_beside_a_right_gutter(cx: &mut TestAppContext) {
+        let text = "wide ".repeat(80);
+        let (editor, window) = decoration_editor(cx, &format!("abcdef\n{text}"), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_gutter_side(Side::Right, cx);
+                state.focus(window, cx);
+                state.set_selected_range(3..3, cx);
+            });
+            window.draw(cx).clear(cx);
+            let (layout, bounds, input_bounds) = {
+                let state = editor.read(cx);
+                (
+                    state.last_layout.clone().unwrap(),
+                    state.last_bounds.unwrap(),
+                    state.input_bounds,
+                )
+            };
+            let x = layout.lines[0]
+                .position_for_index(3, &layout, false)
+                .unwrap()
+                .x;
+            assert_eq!(
+                layout.cursor_bounds.unwrap().left(),
+                input_bounds.left() + x
+            );
+            let ime = editor
+                .update(cx, |state, cx| {
+                    state.bounds_for_range(3..4, bounds, window, cx)
+                })
+                .unwrap();
+            assert_eq!(ime.left(), input_bounds.left() + x);
+            let range = editor.read(cx).range_to_bounds(&(3..4)).unwrap();
+            assert_eq!(range.left(), input_bounds.left() + x);
+
+            editor.update(cx, |state, cx| {
+                let end = state.text.len();
+                state.set_selected_range(end..end, cx);
+            });
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let caret = layout.cursor_bounds.unwrap();
+            assert!(state.scroll_handle.offset().x < px(0.));
+            assert!(caret.right() <= input_bounds.left() + layout.gutter_origin_x);
+            assert!(
+                caret.left() > input_bounds.left() + layout.gutter_origin_x - RIGHT_MARGIN * 2.
+            );
         });
     }
 
@@ -7572,8 +8190,24 @@ mod tests {
                     bottom: px(5.),
                     left: px(7.),
                 },
+                Side::Left,
             ),
             Bounds::new(point(px(3.), px(18.)), size(px(55.), px(103.)))
+        );
+        assert_eq!(
+            editor_gutter_bounds(
+                input_bounds,
+                px(48.),
+                px(16.),
+                Edges {
+                    top: px(2.),
+                    right: px(3.),
+                    bottom: px(5.),
+                    left: px(7.),
+                },
+                Side::Right,
+            ),
+            Bounds::new(point(px(262.), px(18.)), size(px(51.), px(103.)))
         );
     }
 
@@ -8058,7 +8692,13 @@ mod tests {
                     wrap_width: None,
                     wrapping_indent: crate::input::WrappingIndent::None,
                     line_number_width: px(60.),
+                    gutter_gap: LINE_NUMBER_RIGHT_MARGIN,
+                    gutter_decorations_width: px(0.),
                     ghost_lines: None,
+                    gutter_side: crate::Side::Left,
+                    text_origin_x: px(60.),
+                    gutter_origin_x: px(0.),
+                    text_width: px(800.),
                     space_width: px(8.),
                     cursor_bounds: None,
                     text_align: gpui::TextAlign::Left,
