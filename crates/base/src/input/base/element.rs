@@ -883,6 +883,13 @@ struct FoldIconLayout {
     icons: Vec<(usize, bool, gpui::AnyElement)>,
 }
 
+/// Layout information for line decorations.
+#[derive(Default)]
+struct LineDecorationLayout {
+    /// List of (top, height, color) background bands, top relative to the content origin
+    backgrounds: Vec<(Pixels, Pixels, Hsla)>,
+}
+
 pub(super) struct TextElement<M: InputModeKind, R = ()> {
     pub(crate) state: Entity<InputBaseState<M>>,
     placeholder: SharedString,
@@ -2177,6 +2184,43 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         folded_lines
     }
 
+    /// Layout line decoration backgrounds for the visible rows.
+    fn layout_line_decorations(&self, last_layout: &LastLayout, cx: &App) -> LineDecorationLayout {
+        let (Some(&first), Some(&last)) = (
+            last_layout.visible_buffer_lines.first(),
+            last_layout.visible_buffer_lines.last(),
+        ) else {
+            return LineDecorationLayout::default();
+        };
+        let decorations = self
+            .state
+            .read(cx)
+            .extras
+            .line_decorations(first..last + 1, cx);
+        if decorations.is_empty() {
+            return LineDecorationLayout::default();
+        }
+
+        let rows: Vec<_> = last_layout.row_extents().collect();
+
+        let mut layout = LineDecorationLayout::default();
+        for decoration in &decorations {
+            let Ok(ix) = last_layout
+                .visible_buffer_lines
+                .binary_search(&decoration.row())
+            else {
+                continue;
+            };
+            let Some(&(top, height)) = rows.get(ix) else {
+                continue;
+            };
+            if let Some(color) = decoration.background() {
+                layout.backgrounds.push((top, height, color));
+            }
+        }
+        layout
+    }
+
     /// Paint fold icons using prepaint hitboxes.
     ///
     /// This handles:
@@ -3166,6 +3210,8 @@ pub(super) struct PrepaintState {
     /// Fold icon layout data
     fold_icon_layout: FoldIconLayout,
     folded_lines: FoldedLines,
+    /// Line decoration layout data
+    line_decoration_layout: LineDecorationLayout,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
     ghost_lines: Vec<ShapedLine>,
@@ -3538,6 +3584,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             wrap_width,
             wrapping_indent,
             line_number_width,
+            ghost_lines: None,
             space_width,
             lines: Rc::new(vec![]),
             cursor_bounds: None,
@@ -3814,6 +3861,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 cx,
             );
         cursor_scroll_offset.y = px(final_scroll_y_f64 as f32);
+        last_layout.ghost_lines = current_row
+            .filter(|_| ghost_line_count > 0)
+            .map(|row| (row, ghost_lines_height));
         let active_row = {
             let state = self.state.read(cx);
             current_row.filter(|_| {
@@ -3943,6 +3993,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             ghost_rows,
             cx,
         );
+        let line_decoration_layout = self.layout_line_decorations(&last_layout, cx);
         let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
         self.request_reveal(
             input_bounds,
@@ -4046,6 +4097,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             indent_guides_path,
             fold_icon_layout,
             folded_lines,
+            line_decoration_layout,
             ghost_first_line,
             ghost_lines,
             ghost_lines_height,
@@ -4107,6 +4159,28 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         } else {
             editor_style.background
         };
+        let line_backgrounds = prepaint
+            .line_decoration_layout
+            .backgrounds
+            .iter()
+            .map(|&(top, height, color)| {
+                (
+                    origin.y + top,
+                    height,
+                    if disabled { color.opacity(0.5) } else { color },
+                )
+            })
+            .collect::<Vec<_>>();
+
+        for &(y, height, color) in &line_backgrounds {
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(input_bounds.origin.x, y),
+                    size(bounds.size.width, height),
+                ),
+                color,
+            ));
+        }
 
         for background in std::mem::take(&mut prepaint.folded_lines.backgrounds) {
             window.paint_quad(background);
@@ -4342,6 +4416,15 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 .editor_gutter_background
                 .unwrap_or(editor_background);
             window.paint_quad(fill(gutter_bounds, gutter_bg));
+            for &(y, height, color) in &line_backgrounds {
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(gutter_bounds.origin.x, y),
+                        size(gutter_bounds.size.width, height),
+                    ),
+                    color,
+                ));
+            }
 
             // Each item is the normal lines.
             for ((line_no, rows), &buffer_line) in line_numbers
@@ -4911,6 +4994,183 @@ mod tests {
             DecorationHarness(state, None)
         });
         (editor.unwrap(), window)
+    }
+
+    struct Bands {
+        asked: std::cell::RefCell<Vec<Range<usize>>>,
+    }
+
+    impl Bands {
+        fn new() -> Rc<Self> {
+            Rc::new(Self {
+                asked: Default::default(),
+            })
+        }
+    }
+
+    impl crate::input::LineDecorationProvider for Bands {
+        fn line_decorations(
+            &self,
+            rows: Range<usize>,
+            _: &App,
+        ) -> Vec<crate::input::LineDecoration> {
+            self.asked.borrow_mut().push(rows.clone());
+            rows.map(|row| crate::input::LineDecoration::new(row).with_background(gpui::red()))
+                .collect()
+        }
+    }
+
+    #[gpui::test]
+    fn line_decorations_are_asked_for_the_visible_rows_on_every_frame(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"x\n".repeat(100), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let bands = Bands::new();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(bands.clone(), cx);
+            });
+            window.draw(cx).clear(cx);
+            let visible = editor.read(cx).visible_row_range().unwrap();
+            assert_eq!(visible.start, 0);
+            assert!(visible.end < 100);
+            assert_eq!(*bands.asked.borrow(), vec![visible]);
+
+            editor.update(cx, |state, cx| {
+                let height = state.last_layout.as_ref().unwrap().line_height;
+                state.set_scroll_offset(point(px(0.), -height * 40.), cx);
+            });
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            let scrolled = editor.read(cx).visible_row_range().unwrap();
+            assert!(scrolled.start >= 39, "{scrolled:?}");
+            assert_eq!(bands.asked.borrow().len(), 3);
+            assert_eq!(bands.asked.borrow().last(), Some(&scrolled));
+        });
+    }
+
+    #[gpui::test]
+    fn line_backgrounds_cover_the_bounds_of_their_rows(cx: &mut TestAppContext) {
+        let text = format!("{}\nshort\ntop\nhidden\nend\nlast", "word ".repeat(8));
+        let (editor, window) = decoration_editor(cx, &text, true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
+                state.display_map.set_folded(2, true);
+                state.create_line_decorations_collection(Bands::new(), cx);
+            });
+            window.draw(cx).clear(cx);
+
+            let (layout, bounds, input_bounds) = {
+                let state = editor.read(cx);
+                (
+                    state.last_layout.clone().unwrap(),
+                    state.last_bounds.unwrap(),
+                    state.input_bounds,
+                )
+            };
+            assert!(layout.visible_buffer_lines.starts_with(&[0, 1, 2, 4]));
+            let decorations = TextElement::new(editor.clone()).layout_line_decorations(&layout, cx);
+            assert_eq!(
+                decorations.backgrounds.len(),
+                layout.visible_buffer_lines.len()
+            );
+
+            let state = editor.read(cx);
+            for (&(top, height, _), &row) in decorations
+                .backgrounds
+                .iter()
+                .zip(&layout.visible_buffer_lines)
+            {
+                let row_bounds = state.row_bounds(row).unwrap();
+                assert_eq!(
+                    row_bounds.origin,
+                    point(input_bounds.origin.x, bounds.origin.y + top)
+                );
+                assert_eq!(row_bounds.size, size(input_bounds.size.width, height));
+            }
+            assert!(decorations.backgrounds[0].1 > layout.line_height, "wrapped");
+        });
+    }
+
+    #[gpui::test]
+    fn line_backgrounds_are_painted_across_their_rows(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(), cx);
+            });
+            window.draw(cx).clear(cx);
+
+            let red = gpui::Background::from(gpui::red());
+            let painted = window
+                .painted_quads()
+                .into_iter()
+                .filter(|quad| quad.background == red)
+                .map(|quad| quad.bounds)
+                .collect::<Vec<_>>();
+            let state = editor.read(cx);
+            for row in 0..3 {
+                let band = state.row_bounds(row).unwrap().scale(window.scale_factor());
+                assert!(
+                    painted.iter().any(|bounds| bounds.intersect(&band) == band),
+                    "row {row}: no red background over {band:?} in {painted:?}"
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn rows_below_a_multiline_inline_completion_are_bounded_where_painted(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree\nfour", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(), cx);
+                state.set_cursor_position(lsp_types::Position::new(0, 3), window, cx);
+            });
+            window.draw(cx).clear(cx);
+            let before: Vec<_> = (0..4)
+                .map(|row| editor.read(cx).row_bounds(row).unwrap())
+                .collect();
+
+            editor.update(cx, |state, cx| {
+                state.extras.inline_completion.item = Some(lsp_types::InlineCompletionItem {
+                    insert_text: "\nghost\nghost".into(),
+                    filter_text: None,
+                    range: None,
+                    command: None,
+                    insert_text_format: None,
+                });
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+
+            let (layout, bounds) = {
+                let state = editor.read(cx);
+                (
+                    state.last_layout.clone().unwrap(),
+                    state.last_bounds.unwrap(),
+                )
+            };
+            let ghost = layout.line_height * 2.;
+            assert_eq!(editor.read(cx).row_bounds(0), Some(before[0]));
+            for row in 1..4 {
+                let bounds = editor.read(cx).row_bounds(row).unwrap();
+                assert_eq!(bounds.origin.y, before[row].origin.y + ghost, "row {row}");
+                assert_eq!(bounds.size, before[row].size);
+            }
+
+            let decorations = TextElement::new(editor.clone()).layout_line_decorations(&layout, cx);
+            for (&(top, height, _), row) in decorations.backgrounds.iter().zip(0..4) {
+                let row_bounds = editor.read(cx).row_bounds(row).unwrap();
+                assert_eq!(row_bounds.origin.y, bounds.origin.y + top);
+                assert_eq!(row_bounds.size.height, height);
+            }
+        });
     }
 
     #[gpui::test]
@@ -6171,6 +6431,65 @@ mod tests {
                     .line_number_width,
                 px(12.)
             );
+        });
+    }
+
+    #[gpui::test]
+    fn row_bounds_cover_soft_wrapped_rows_that_are_laid_out(cx: &mut TestAppContext) {
+        let text = format!(
+            "{}\nshort\ntop\nhidden\nend\n{}",
+            "word ".repeat(8),
+            "x\n".repeat(60)
+        );
+        let (editor, window) = decoration_editor(cx, &text, true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let unpainted = cx.new(|cx| EditorState::new(window, cx).default_value("a"));
+            assert!(
+                unpainted.read(cx).row_bounds(0).is_none(),
+                "nothing laid out"
+            );
+
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
+                state.display_map.set_folded(2, true);
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            {
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let wrapped = state.row_bounds(0).unwrap();
+                assert_eq!(
+                    wrapped.origin,
+                    point(
+                        state.input_bounds.origin.x,
+                        state.last_bounds.unwrap().origin.y + layout.visible_top
+                    )
+                );
+                assert_eq!(wrapped.size.width, state.input_bounds.size.width);
+                assert!(wrapped.size.height > layout.line_height, "{wrapped:?}");
+
+                let next = state.row_bounds(1).unwrap();
+                assert_eq!(next.origin.y, wrapped.bottom());
+                assert_eq!(next.size.height, layout.line_height);
+                assert!(state.row_bounds(3).is_none(), "folded away");
+                assert_eq!(
+                    state.row_bounds(4).unwrap().origin.y,
+                    state.row_bounds(2).unwrap().bottom()
+                );
+            }
+
+            editor.update(cx, |state, cx| {
+                let height = state.last_layout.as_ref().unwrap().line_height;
+                state.set_scroll_offset(point(px(0.), -height * 30.), cx);
+            });
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let visible = state.visible_row_range().unwrap();
+            assert!(state.row_bounds(0).is_none(), "scrolled out of view");
+            assert!(state.row_bounds(visible.start + 1).is_some());
         });
     }
 
@@ -7739,6 +8058,7 @@ mod tests {
                     wrap_width: None,
                     wrapping_indent: crate::input::WrappingIndent::None,
                     line_number_width: px(60.),
+                    ghost_lines: None,
                     space_width: px(8.),
                     cursor_bounds: None,
                     text_align: gpui::TextAlign::Left,

@@ -107,6 +107,10 @@ on the vertical scrollbar track. Monaco calls this track the overview ruler. The
 collections keep empty ranges, which mark line boundaries. See
 [Gutter and overview ruler decorations](../../component/editor.md#gutter-and-overview-ruler-decorations).
 
+`create_line_decorations_collection` attaches a `LineDecorationProvider`, which is
+asked for whole-row backgrounds on every frame. Base paints the backgrounds itself.
+See [Line decorations](../../component/editor.md#line-decorations).
+
 ## Highlighting and language features
 
 `InputHighlighterFactory`, `InputHighlighter`, diagnostic types, and the LSP

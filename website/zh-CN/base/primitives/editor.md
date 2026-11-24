@@ -74,6 +74,9 @@ gutter 设置或字体后需重新渲染；不要为尚未布局的编辑器代�
 Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边界的空范围。
 参见[行号槽与概览标尺装饰](../../component/editor.md#行号槽与概览标尺装饰)。
 
+`create_line_decorations_collection` 挂载一个 `LineDecorationProvider`，编辑器每一帧都会向它
+询问整行背景。背景由 Base 直接绘制。参见[行装饰](../../component/editor.md#行装饰)。
+
 ## 高亮与语言功能
 
 `InputHighlighterFactory`、`InputHighlighter`、诊断类型和 LSP provider trait 是提供给设计系统作者的底层扩展点，作用于共享的 `InputBaseState`。样式组件的应用通常应通过编辑器集成配置它们，而不是普通文本框。
