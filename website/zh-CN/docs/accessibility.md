@@ -301,6 +301,21 @@ fn main() {
 
 若 Tab 跳过控件，同时检查保留句柄上的 `.tab_stop(true)` 和当前渲染节点上的 `.track_focus(...)`。若 role 或名称缺失，检查同一节点是否设置稳定 ID、role 与 label。若一次激活增加两次，寻找是否有第二个 Click 或按键 handler 重复调用同一命令。此练习展示一个类似按钮的控件；真实应用命令优先使用标准 Button，它还处理组件的其他状态与样式。
 
+## 播报状态变化
+
+`Role::Status` 只描述节点，并不会让平台在内容变化时朗读它。若用户需要在不移动焦点的情况下听到结果，例如保存完成或搜索结果数量，可在可见文字旁加入 `LiveRegion`：
+
+```rust
+use gpui_kit::component::live_region::LiveRegion;
+
+div()
+    .relative()
+    .child(status.clone())
+    .child(LiveRegion::new("save-status", status))
+```
+
+`LiveRegion` 写入 GPUI 元素无法自行设置的 AccessKit `live` 属性，并为各平台适配器提供文字：macOS 播报 value，Windows 和 Linux 播报名称。它不绘制任何内容，只在父元素左上角占据 1px，因为没有面积的节点可能不会进入平台无障碍树。保持 ID 稳定：新的 ID 是新节点，而不是一次变化。默认以 polite 方式等待当前朗读结束；`.assertive()` 会打断朗读，只用于阻碍当前任务的错误。
+
 ## 自定义 `Element`
 
 如果无法通过组合 `div()` 完成，底层 `Element` 提供明确的 hook。接着做 [Element 章的 EventSurface 练习](./element)：它已经在 `examples/hello_world/src/main.rs` 中实现了 `IntoElement`、布局、prepaint 和 paint。对这个现成示例做三处修改：
