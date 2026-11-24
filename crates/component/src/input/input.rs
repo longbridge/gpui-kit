@@ -1206,13 +1206,13 @@ mod tests {
     #[gpui::test]
     fn test_fold_candidates_survive_typing_after_a_fold(cx: &mut gpui::TestAppContext) {
         const SQL: &str = "SELECT id\nFROM t\nWHERE id = 1;\nSELECT 2;\n";
-        let next_row = SQL.find("SELECT 2").unwrap();
+        let next_statement = SQL.find("SELECT 2").unwrap();
 
         let (editor, mut cx) = fold_test_editor("sql", cx);
         cx.update(|window, cx| {
             editor.update(cx, |state, cx| {
                 state.set_value(SQL, window, cx);
-                state.set_selected_range(next_row..next_row, cx);
+                state.set_selected_range(next_statement..next_statement, cx);
             });
             let _ = window.draw(cx);
         });
