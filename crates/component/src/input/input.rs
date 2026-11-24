@@ -1115,6 +1115,172 @@ mod tests {
         });
     }
 
+    /// An editor for `language`, rendered in a window so it parses and folds.
+    #[cfg(any(feature = "tree-sitter-sql", feature = "tree-sitter-rust"))]
+    fn fold_test_editor(
+        language: &str,
+        cx: &mut gpui::TestAppContext,
+    ) -> (
+        gpui::Entity<crate::input::EditorState>,
+        gpui::VisualTestContext,
+    ) {
+        use gpui::{AppContext as _, Render};
+
+        struct Probe {
+            editor: gpui::Entity<crate::input::EditorState>,
+        }
+        impl Render for Probe {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                crate::input::Editor::new(&self.editor)
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let state =
+                    cx.new(|cx| crate::input::EditorState::new(window, cx).language(language));
+                editor = Some(state.clone());
+                let probe = cx.new(|_| Probe { editor: state });
+                cx.new(|cx| crate::Root::new(probe, window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = gpui::VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        (editor.unwrap(), cx)
+    }
+
+    /// The candidates as edited, and those of the same text set at once.
+    #[cfg(any(feature = "tree-sitter-sql", feature = "tree-sitter-rust"))]
+    fn edited_and_reference_fold_candidates(
+        editor: &gpui::Entity<crate::input::EditorState>,
+        cx: &mut gpui::VisualTestContext,
+    ) -> (
+        Vec<gpui_base::input::FoldRange>,
+        Vec<gpui_base::input::FoldRange>,
+    ) {
+        // A parse over its synchronous budget finishes in the background after a
+        // debounce, so a loaded machine still compares settled candidates.
+        let settle = |cx: &mut gpui::VisualTestContext| {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_secs(1));
+            cx.run_until_parked();
+        };
+        settle(cx);
+        let edited = cx.update(|_, cx| editor.read(cx).fold_candidates().to_vec());
+        cx.update(|window, cx| {
+            let text = editor.read(cx).value();
+            editor.update(cx, |state, cx| state.set_value(text, window, cx));
+            let _ = window.draw(cx);
+        });
+        settle(cx);
+        let reference = cx.update(|_, cx| editor.read(cx).fold_candidates().to_vec());
+        (edited, reference)
+    }
+
+    #[cfg(feature = "tree-sitter-sql")]
+    #[gpui::test]
+    fn test_sql_fold_candidates_survive_typing(cx: &mut gpui::TestAppContext) {
+        const SQL: &str = "SELECT id, name\nFROM (\n  SELECT 1\n) t\nWHERE id > 0;\n";
+
+        let (editor, mut cx) = fold_test_editor("sql", cx);
+        // Type the text one character at a time, drawing after each key.
+        for ch in SQL.chars() {
+            cx.update(|window, cx| {
+                editor.update(cx, |state, cx| state.insert(ch.to_string(), window, cx));
+                let _ = window.draw(cx);
+            });
+        }
+        let (typed, reference) = edited_and_reference_fold_candidates(&editor, &mut cx);
+        assert!(!reference.is_empty());
+        assert_eq!(typed, reference);
+    }
+
+    /// A fold without a closing bracket hides its node's last row, so it ends on
+    /// the row after the node; typing on that row keeps the fold.
+    #[cfg(feature = "tree-sitter-sql")]
+    #[gpui::test]
+    fn test_fold_candidates_survive_typing_after_a_fold(cx: &mut gpui::TestAppContext) {
+        const SQL: &str = "SELECT id\nFROM t\nWHERE id = 1;\nSELECT 2;\n";
+        let next_row = SQL.find("SELECT 2").unwrap();
+
+        let (editor, mut cx) = fold_test_editor("sql", cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_value(SQL, window, cx);
+                state.set_selected_range(next_row..next_row, cx);
+            });
+            let _ = window.draw(cx);
+        });
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| state.insert(" ", window, cx));
+            let _ = window.draw(cx);
+        });
+        let (typed, reference) = edited_and_reference_fold_candidates(&editor, &mut cx);
+        assert!(!reference.is_empty());
+        assert_eq!(typed, reference);
+    }
+
+    /// Edits whose bytes lie outside a node on the lines it spans still keep
+    /// that node's fold candidate.
+    #[cfg(feature = "tree-sitter-rust")]
+    #[gpui::test]
+    fn test_fold_candidates_survive_edits_beside_a_node(cx: &mut gpui::TestAppContext) {
+        use gpui::EntityInputHandler as _;
+
+        const RUST: &str = "fn a() {\n    1;\n}\n\n\nfn b() {\n    2;\n}\n";
+        let fn_b = RUST.find("fn b").unwrap();
+        let after_a = RUST.find('}').unwrap() + 1;
+        let after_b = RUST.rfind('}').unwrap() + 1;
+
+        let (editor, mut cx) = fold_test_editor("rust", cx);
+        let set_text = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                editor.update(cx, |state, cx| state.set_value(RUST, window, cx));
+                let _ = window.draw(cx);
+            });
+        };
+        let edit = |cx: &mut gpui::VisualTestContext,
+                    selections: &[std::ops::Range<usize>],
+                    text: &str| {
+            cx.update(|window, cx| {
+                editor.update(cx, |state, cx| {
+                    state.set_selected_range(selections[0].clone(), cx);
+                    for range in &selections[1..] {
+                        state.add_selection(range.clone(), cx);
+                    }
+                    state.replace_text_in_range(None, text, window, cx);
+                });
+                let _ = window.draw(cx);
+            });
+        };
+
+        // A line inserted right before `fn b`.
+        set_text(&mut cx);
+        edit(&mut cx, &[fn_b..fn_b], "// b\n");
+        let (edited, reference) = edited_and_reference_fold_candidates(&editor, &mut cx);
+        assert_eq!(reference.len(), 2);
+        assert_eq!(edited, reference, "insert before a node");
+
+        // The blank lines right after `fn a` deleted.
+        set_text(&mut cx);
+        edit(&mut cx, &[after_a..fn_b - 1], "");
+        let (edited, reference) = edited_and_reference_fold_candidates(&editor, &mut cx);
+        assert_eq!(reference.len(), 2);
+        assert_eq!(edited, reference, "multi-line delete after a node");
+
+        // A space typed after each closing brace by two cursors at once.
+        set_text(&mut cx);
+        edit(&mut cx, &[after_a..after_a, after_b..after_b], " ");
+        let (edited, reference) = edited_and_reference_fold_candidates(&editor, &mut cx);
+        assert_eq!(reference.len(), 2);
+        assert_eq!(edited, reference, "multi-cursor typing after nodes");
+    }
+
     #[gpui::test]
     fn test_on_token_hover_builder(cx: &mut gpui::TestAppContext) {
         use gpui::{AppContext as _, Render};

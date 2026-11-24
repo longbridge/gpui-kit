@@ -177,22 +177,26 @@ impl FoldMap {
     /// Merge new candidates extracted from an edited region into existing candidates.
     ///
     /// Replaces candidates within [edit_start_line, edit_end_line] with `new_candidates`,
-    /// keeping candidates outside the edit range intact.
+    /// keeping candidates outside the edit range intact. A new candidate replaces an
+    /// old one with the same start line, so a range that grew past the edit keeps
+    /// its new end.
     pub(super) fn merge_candidates_for_edit(
         &mut self,
         edit_start_line: usize,
         edit_end_line: usize,
-        new_candidates: Vec<FoldRange>,
+        mut new_candidates: Vec<FoldRange>,
     ) {
         // Remove old candidates within the edit range (already done by adjust_folds_for_edit)
         // But do it again in case adjust wasn't called or range differs
-        self.candidates
-            .retain(|c| c.start_line < edit_start_line || c.start_line > edit_end_line);
-
-        // Add new candidates
-        self.candidates.extend(new_candidates);
-        self.candidates.sort_by_key(|r| r.start_line);
-        self.candidates.dedup_by_key(|r| r.start_line);
+        new_candidates.extend(
+            self.candidates
+                .drain(..)
+                .filter(|c| c.start_line < edit_start_line || c.start_line > edit_end_line),
+        );
+        // The sort is stable, so the new candidate leads its start line and survives dedup.
+        new_candidates.sort_by_key(|r| r.start_line);
+        new_candidates.dedup_by_key(|r| r.start_line);
+        self.candidates = new_candidates;
     }
 
     /// Set a fold at the given start_line (must be in candidates)
@@ -442,5 +446,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn merged_candidate_replaces_the_old_one_on_its_start_line() {
+        let mut fold_map = FoldMap::new();
+        fold_map.set_candidates(vec![
+            FoldRange::new(0, 9),
+            FoldRange::new(1, 3),
+            FoldRange::new(6, 8),
+        ]);
+        // An edit on line 4 extended the range starting on line 1; the one on
+        // line 0 encloses it and is extracted again unchanged.
+        fold_map.merge_candidates_for_edit(4, 4, vec![FoldRange::new(0, 9), FoldRange::new(1, 4)]);
+        assert_eq!(
+            fold_map.fold_candidates(),
+            &[
+                FoldRange::new(0, 9),
+                FoldRange::new(1, 4),
+                FoldRange::new(6, 8),
+            ]
+        );
     }
 }

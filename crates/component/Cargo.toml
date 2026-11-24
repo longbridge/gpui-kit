@@ -246,7 +246,7 @@ objc2-speech = { version = "0.3", default-features = false, features = [
 [target.'cfg(target_os = "windows")'.dependencies]
 # Native menu (NativeMenu) — drives Win32 popup menus.
 raw-window-handle = { workspace = true }
-resvg = "0.45.1"
+resvg = "0.46.0"
 windows = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
