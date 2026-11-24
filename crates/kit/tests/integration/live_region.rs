@@ -12,7 +12,6 @@ impl Render for SaveStatus {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .relative()
             .child(self.status.clone())
             .child(LiveRegion::new("save-status", self.status.clone()))
     }

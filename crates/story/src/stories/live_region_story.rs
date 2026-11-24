@@ -67,7 +67,6 @@ impl Render for LiveRegionStory {
                     )
                     .child(
                         h_flex()
-                            .relative()
                             .gap_3()
                             .items_center()
                             .child(Button::new("live-region-save").label("Save").on_click(
@@ -88,7 +87,6 @@ impl Render for LiveRegionStory {
                     )
                     .child(
                         h_flex()
-                            .relative()
                             .gap_3()
                             .items_center()
                             .child(Button::new("live-region-fail").label("Fail Save").on_click(

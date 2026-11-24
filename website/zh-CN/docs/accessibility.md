@@ -309,12 +309,11 @@ fn main() {
 use gpui_kit::component::live_region::LiveRegion;
 
 div()
-    .relative()
     .child(status.clone())
     .child(LiveRegion::new("save-status", status))
 ```
 
-`LiveRegion` 写入 GPUI 元素无法自行设置的 AccessKit `live` 属性，并为各平台适配器提供文字：macOS 播报 value，Windows 和 Linux 播报名称。它不绘制任何内容，只在父元素左上角占据 1px，因为没有面积的节点可能不会进入平台无障碍树。保持 ID 稳定：新的 ID 是新节点，而不是一次变化。默认以 polite 方式等待当前朗读结束；`.assertive()` 会打断朗读，只用于阻碍当前任务的错误。
+`LiveRegion` 写入 GPUI 元素无法自行设置的 AccessKit `live` 属性，并为各平台适配器提供文字：macOS 播报 value，Windows 和 Linux 播报名称。它不绘制任何内容，也不占据布局空间。文字变化时，以及区域带着文字首次出现时都会播报；空文字不播报，再次设置相同文字也不会播报。保持 ID 稳定：新的 ID 是新节点，会再次播报。默认以 polite 方式等待当前朗读结束；`.assertive()` 会打断朗读，只用于阻碍当前任务的错误。
 
 ## 自定义 `Element`
 

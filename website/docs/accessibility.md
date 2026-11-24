@@ -309,12 +309,11 @@ If Tab skips the control, check both `.tab_stop(true)` on the retained handle an
 use gpui_kit::component::live_region::LiveRegion;
 
 div()
-    .relative()
     .child(status.clone())
     .child(LiveRegion::new("save-status", status))
 ```
 
-`LiveRegion` writes AccessKit's `live` property, which GPUI elements cannot set themselves, and names its text for every adapter: macOS announces the value, Windows and Linux the name. It draws nothing and occupies a 1px box in its parent's top-left corner, since a node without area may be left out of the platform tree. Keep its ID stable: a new ID is a new node, not a change. Announcements are polite and wait for current speech; `.assertive()` interrupts it and is for errors that block the current task.
+`LiveRegion` writes AccessKit's `live` property, which GPUI elements cannot set themselves, and names its text for every adapter: macOS announces the value, Windows and Linux the name. It draws nothing and takes no space. A region is announced when its text changes and when it first appears with text; empty text says nothing, and setting the same text again is silent. Keep its ID stable, since a new ID is a new node and is announced again. Announcements are polite and wait for current speech; `.assertive()` interrupts it and is for errors that block the current task.
 
 ## Custom `Element` implementations
 

@@ -1,6 +1,6 @@
 use gpui::{
-    App, Bounds, Edges, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels,
-    Position, Role, SharedString, Style, Window, accesskit, px, size,
+    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels,
+    Position, Role, SharedString, Style, Window, accesskit,
 };
 
 /// Text that assistive technology announces whenever it changes, without
@@ -18,10 +18,12 @@ use gpui::{
 /// both. Announcements are polite by default, waiting for the current speech
 /// to finish; [`LiveRegion::assertive`] interrupts it.
 ///
-/// The region draws nothing. It is laid out as a 1px absolutely positioned box
-/// in its parent's top-left corner, because a node without area may be left out
-/// of the platform tree. Keep its ID stable across frames: a new ID is a new
-/// node, which platforms do not announce as a change.
+/// A region is also announced when it first appears with text, and empty text
+/// announces nothing. Platforms announce a change, so setting the same text
+/// again is silent. Keep the ID stable across frames: a new ID is a new node,
+/// announced again.
+///
+/// The region draws nothing and takes no space in its parent's layout.
 ///
 /// ```
 /// # mod gpui_kit { pub extern crate gpui_component as component; }
@@ -30,7 +32,6 @@ use gpui::{
 ///
 /// let saved = 3;
 /// div()
-///     .relative()
 ///     .child(format!("Saved {saved} files"))
 ///     .child(LiveRegion::new("save-status", format!("Saved {saved} files")));
 /// ```
@@ -79,12 +80,6 @@ impl Element for LiveRegion {
     ) -> (LayoutId, ()) {
         let style = Style {
             position: Position::Absolute,
-            inset: Edges {
-                top: px(0.).into(),
-                left: px(0.).into(),
-                ..Default::default()
-            },
-            size: size(px(1.).into(), px(1.).into()),
             ..Default::default()
         };
         (window.request_layout(style, [], cx), ())
@@ -118,9 +113,11 @@ impl Element for LiveRegion {
     }
 
     fn write_a11y_info(&self, node: &mut accesskit::Node) {
-        node.set_label(self.text.to_string());
-        node.set_value(self.text.to_string());
         node.set_live(self.live);
+        if !self.text.is_empty() {
+            node.set_label(self.text.to_string());
+            node.set_value(self.text.to_string());
+        }
     }
 }
 
@@ -143,6 +140,14 @@ mod tests {
         assert_eq!(node.live(), Some(accesskit::Live::Polite));
         assert_eq!(node.label(), Some("Saved 3 files"));
         assert_eq!(node.value(), Some("Saved 3 files"));
+    }
+
+    #[test]
+    fn empty_text_announces_nothing() {
+        let node = node(&LiveRegion::new("status", ""));
+
+        assert_eq!(node.label(), None);
+        assert_eq!(node.value(), None);
     }
 
     #[test]
