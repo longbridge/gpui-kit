@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gpui_component::{kbd::Kbd, label::Label, link::Link};
+use gpui_component::{kbd::Kbd, label::Label, link::Link, live_region::LiveRegion};
 use gpui_shell::{
     ArgumentDescriptor, ArgumentSchema, ComponentArgument, ComponentDescriptor,
     ComponentMaterializer, ComponentPayload, ComponentRegistry, ConstructorDescriptor,
@@ -21,6 +21,17 @@ enum LabelOp {
 #[derive(Clone)]
 enum LinkOp {
     Href(String),
+}
+
+#[derive(Clone)]
+struct LiveRegionPayload {
+    id: String,
+    text: String,
+}
+
+#[derive(Clone)]
+enum LiveRegionOp {
+    Assertive,
 }
 
 #[derive(Clone)]
@@ -157,6 +168,34 @@ impl ComponentMaterializer for KbdMaterializer {
     }
 }
 
+struct LiveRegionMaterializer;
+
+impl ComponentMaterializer for LiveRegionMaterializer {
+    fn materialize(&self, mut request: MaterializeRequest<'_>) -> anyhow::Result<gpui::AnyElement> {
+        anyhow::ensure!(
+            request.children_len() == 0,
+            "LiveRegion does not accept children; pass its text to the constructor"
+        );
+        let payload = request
+            .payload()
+            .downcast_ref::<LiveRegionPayload>()
+            .ok_or_else(|| anyhow::anyhow!("LiveRegion received an incompatible payload"))?
+            .clone();
+        let assertive = request.methods().any(|method| {
+            matches!(
+                method.payload().downcast_ref::<LiveRegionOp>(),
+                Some(LiveRegionOp::Assertive)
+            )
+        });
+        let mut region = LiveRegion::new(payload.id, payload.text);
+        if assertive {
+            region = region.assertive();
+        }
+        region.style().refine(&request.take_style());
+        Ok(region.into_any_element())
+    }
+}
+
 pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
     registry.register(
         ComponentDescriptor::new("Label", Arc::new(LabelMaterializer))
@@ -239,6 +278,38 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                 .with_documentation("Uses the outlined keycap presentation."),
             ])
             .with_documentation("A platform-formatted keyboard shortcut keycap."),
+    )?;
+    registry.register(
+        ComponentDescriptor::new("LiveRegion", Arc::new(LiveRegionMaterializer))
+            .with_constructors(vec![ConstructorDescriptor::new(
+                "LiveRegion",
+                vec![
+                    ArgumentDescriptor::new("id", ArgumentSchema::String),
+                    ArgumentDescriptor::new("text", ArgumentSchema::String),
+                ],
+                |arguments| match arguments {
+                    [ComponentArgument::String(id), _] if id.is_empty() => {
+                        Err("LiveRegion id must not be empty".into())
+                    }
+                    [
+                        ComponentArgument::String(id),
+                        ComponentArgument::String(text),
+                    ] => Ok(ComponentPayload::new(LiveRegionPayload {
+                        id: id.to_owned(),
+                        text: text.to_owned(),
+                    })),
+                    _ => Err("LiveRegion expects a string id and a string text".into()),
+                },
+            )])
+            .with_methods(vec![
+                MethodDescriptor::new("assertive", Vec::new(), |_| {
+                    Ok(ComponentPayload::new(LiveRegionOp::Assertive))
+                })
+                .with_documentation("Interrupts current speech instead of waiting for it."),
+            ])
+            .with_documentation(
+                "Text that screen readers announce whenever it changes. Keep the id stable.",
+            ),
     )?;
     Ok(())
 }

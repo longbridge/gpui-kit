@@ -80,6 +80,7 @@ import {
   LineChart,
   Link,
   List,
+  LiveRegion,
   Menu,
   MenuBar,
   MenuItem,
@@ -1623,6 +1624,21 @@ export function registeredExamples(surface, cx) {
             .items_center()
             .child(asElement(new Kbd("cmd-s")))
             .child(asElement(new Kbd("cmd-shift-p").outline())),
+        },
+      ];
+    case "LiveRegion":
+      return [
+        {
+          label: "Polite, and assertive",
+          element: v_flex()
+            .gap(8)
+            .child(asElement(new LiveRegion("save-status", "Saved 3 files")))
+            .child(
+              asElement(
+                new LiveRegion("save-error", "Could not save: disk full")
+                  .assertive(),
+              ),
+            ),
         },
       ];
     case "Separator":
