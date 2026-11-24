@@ -1161,14 +1161,23 @@ mod tests {
         Vec<gpui_base::input::FoldRange>,
         Vec<gpui_base::input::FoldRange>,
     ) {
-        cx.run_until_parked();
+        // A parse over its synchronous budget finishes in the background after a
+        // debounce, so a loaded machine still compares settled candidates.
+        let settle = |cx: &mut gpui::VisualTestContext| {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_secs(1));
+            cx.run_until_parked();
+        };
+        settle(cx);
+        let edited = cx.update(|_, cx| editor.read(cx).fold_candidates().to_vec());
         cx.update(|window, cx| {
-            let edited = editor.read(cx).fold_candidates().to_vec();
             let text = editor.read(cx).value();
             editor.update(cx, |state, cx| state.set_value(text, window, cx));
             let _ = window.draw(cx);
-            (edited, editor.read(cx).fold_candidates().to_vec())
-        })
+        });
+        settle(cx);
+        let reference = cx.update(|_, cx| editor.read(cx).fold_candidates().to_vec());
+        (edited, reference)
     }
 
     #[gpui::test]
