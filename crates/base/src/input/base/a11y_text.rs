@@ -19,12 +19,22 @@ use gpui::{Bounds, Pixels, Window, accesskit};
 use sum_tree::Bias;
 use unicode_segmentation::UnicodeSegmentation as _;
 
+/// Multi-line editors above this many UTF-8 bytes expose only an excerpt around
+/// the caret, without the full value or whole-document SetValue, so assistive
+/// technology does not copy multi-megabyte documents every frame (#4086).
+pub(super) const FULL_ACCESSIBILITY_TEXT_LIMIT: usize = 1024 * 1024;
+
 // Keep the number of possible text nodes bounded even for mostly empty lines.
 const MAX_ACCESSIBILITY_EXCERPT_BYTES: usize = 4 * 1024;
 
 impl<M: InputModeKind> InputBaseState<M> {
+    fn accessibility_text_limit(&self) -> Option<usize> {
+        self.is_multi_line()
+            .then_some(FULL_ACCESSIBILITY_TEXT_LIMIT)
+    }
+
     pub(super) fn exposes_full_accessibility_text(&self) -> bool {
-        self.accessibility_text_limit
+        self.accessibility_text_limit()
             .is_none_or(|limit| self.text.len() <= limit)
     }
 
@@ -49,7 +59,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
         let scale = window.scale_factor();
         let Some(text) = full_text else {
-            let limit = self.accessibility_text_limit?;
+            let limit = self.accessibility_text_limit()?;
             return capture_excerpt(&self.text, selection, limit, scale);
         };
         // The previous frame's layout describes this text only while its one line has

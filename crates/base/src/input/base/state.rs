@@ -569,7 +569,6 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) fold_placeholder_renderer: Option<FoldPlaceholderRenderer>,
     pub(super) fold_background: Option<Hsla>,
     pub(super) accessibility: Option<InputAccessibility>,
-    pub(super) accessibility_text_limit: Option<usize>,
     /// What paints in place of Base's editor scrollbar, when a consumer
     /// supplies its own.
     pub(super) scrollbar_renderer: Option<crate::input::EditorScrollbarRenderer>,
@@ -1072,7 +1071,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             fold_placeholder_renderer: None,
             fold_background: None,
             accessibility: None,
-            accessibility_text_limit: None,
             scrollbar_renderer: None,
             diagnostic_popover: None,
             context_menu_handler: None,
@@ -1191,16 +1189,6 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Project semantics onto the editor, never onto a second focus owner.
     pub fn set_accessibility(&mut self, accessibility: InputAccessibility) {
         self.accessibility = Some(accessibility);
-    }
-
-    /// Limit the number of UTF-8 bytes eligible for full accessibility export.
-    ///
-    /// Above this limit, assistive technology receives a short excerpt around the
-    /// active caret. The full value and whole-document SetValue action are omitted.
-    /// Inputs expose their full text by default.
-    pub fn with_accessibility_text_limit(mut self, max_bytes: usize) -> Self {
-        self.accessibility_text_limit = Some(max_bytes);
-        self
     }
 
     fn handle_accessibility_focus(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5793,9 +5781,9 @@ mod tests {
     fn accessibility_set_value_cannot_replace_a_bounded_document(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (editor, cx) = cx.add_window_view(|window, cx| {
-            crate::input::EditorState::new(window, cx)
-                .with_accessibility_text_limit(4)
-                .default_value("original document")
+            crate::input::EditorState::new(window, cx).default_value(
+                "x".repeat(super::super::a11y_text::FULL_ACCESSIBILITY_TEXT_LIMIT + 1),
+            )
         });
         let action = gpui::accesskit::ActionData::Value("replacement".into());
         cx.update(|window, cx| {
@@ -5803,10 +5791,7 @@ mod tests {
                 editor.handle_accessibility_set_value(Some(&action), window, cx)
             });
         });
-        assert_eq!(
-            editor.read_with(cx, |editor, _| editor.value()),
-            "original document"
-        );
+        assert!(editor.read_with(cx, |editor, _| editor.value().starts_with('x')));
     }
 
     #[gpui::test]
