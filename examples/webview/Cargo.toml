@@ -14,7 +14,7 @@ gpui-kit = { workspace = true, features = ["gpui-fast"] }
 
 # WebView dependencies
 gpui-webview = { path = "../../crates/webview", features = ["gpui-fast"] }
-wry = { version = "0.53.3", package = "lb-wry" }
+wry = "0.57.3"
 
 [lints]
 workspace = true

@@ -26,7 +26,7 @@ From the repository root:
 cargo run -p webview
 ```
 
-The [complete example](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs) is the runnable starting point. It creates the child view inside the `open_window` callback, wraps it in an `Entity<WebView>`, and renders that Entity below an address input. Enter in the input calls `load_url`; the example also contains a back handler. Run it from the repository root with the command above. For another application, match the dependency versions in [the example manifest](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml): `gpui-kit`, `gpui-webview`, and `wry` (package `lb-wry`) are direct dependencies of this integration.
+The [complete example](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs) is the runnable starting point. It creates the child view inside the `open_window` callback, wraps it in an `Entity<WebView>`, and renders that Entity below an address input. Enter in the input calls `load_url`; the example also contains a back handler. Run it from the repository root with the command above. For another application, match the dependency versions in [the example manifest](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml): `gpui-kit`, `gpui-webview`, and `wry` are direct dependencies of this integration.
 
 ```rust
 use gpui_kit::*;
@@ -100,14 +100,14 @@ Call wrapper methods through `webview.update(cx, |view, _| ...)` on the GPUI UI 
 
 ## Loading, navigation, and page messages
 
-Configure page policy and callbacks on `wry::WebViewBuilder` **before** `build_as_child`; these are Wry facilities, not `gpui-webview` events. The pinned `lb-wry` version provides:
+Configure page policy and callbacks on `wry::WebViewBuilder` **before** `build_as_child`; these are Wry facilities, not `gpui-webview` events. The Wry version `gpui-webview` depends on provides:
 
 | Need | Wry API | Meaning |
 | --- | --- | --- |
 | Initial content | `with_url(...)` or `with_html(...)` | Select content before building; the repository example instead calls wrapper `load_url` after creation. |
 | Loading status | `with_on_page_load_handler(|event, url| ...)` | Observe `Started` and `Finished`; `Finished` is not a success or HTTP-status report. Treat this separately from whether `load_url` accepted a request. |
 | Navigation policy | `with_navigation_handler(|url| -> bool { ... })` | Return `true` to allow or `false` to cancel an incoming navigation. Decide policy for redirects and links as well as the initial URL. |
-| New windows | `with_new_window_req_handler(...)` | Decide what happens to `window.open` requests; its callback has a platform-specific thread contract. |
+| New windows | `with_new_window_req_handler(...)` | Decide what happens to `window.open` requests; the callback runs on the main thread. |
 | Rust to page | `evaluate_script(...)` on the raw Wry view | Submits JavaScript and returns a Wry `Result`; use `evaluate_script_with_callback` when a serialized result is needed. |
 | Page to Rust | `with_ipc_handler(|request| ...)` | Receives strings posted by `window.ipc.postMessage(...)`. Parse and validate the request before acting on it. |
 
@@ -127,11 +127,11 @@ let builder = wry::WebViewBuilder::new()
     });
 ```
 
-This exact-match check is only an illustration of the callback shape; use parsed URL origin and an explicit scheme/host policy for a real allowlist. Keep callback work short. Pass status or IPC messages into application-owned state through a safe scheduling/channel path, then update the `Entity` on GPUI's context and call `cx.notify()` if the UI changes. Wry callbacks are not GPUI entity events, and the Windows new-window callback runs on a separate thread. Plan for callbacks arriving after a page has navigated or its owning window has closed.
+This exact-match check is only an illustration of the callback shape; use parsed URL origin and an explicit scheme/host policy for a real allowlist. Keep callback work short. Pass status or IPC messages into application-owned state through a safe scheduling/channel path, then update the `Entity` on GPUI's context and call `cx.notify()` if the UI changes. Wry callbacks are not GPUI entity events. Plan for callbacks arriving after a page has navigated or its owning window has closed.
 
 ## Security and failure boundaries
 
-Treat page content as untrusted, including content served from a URL you control. IPC is an application capability: allow only expected message types and payload sizes, check the sender origin where the platform supplies it, and require application authorization before file, network, or account actions. Wry's IPC request URL is the main-frame URL for iframes on Linux/Android, so do not use it alone as iframe identity. Initialization scripts can run on each new page; the pinned Wry documentation says Windows also injects them into subframes, even when main-frame-only is requested. Avoid placing secrets in scripts or page globals.
+Treat page content as untrusted, including content served from a URL you control. IPC is an application capability: allow only expected message types and payload sizes, check the sender origin where the platform supplies it, and require application authorization before file, network, or account actions. Wry's IPC request URL is the main-frame URL for iframes on Linux/Android, so do not use it alone as iframe identity. Initialization scripts can run on each new page; Wry's documentation says Windows also injects them into subframes, even when main-frame-only is requested. Avoid placing secrets in scripts or page globals.
 
 Decide how downloads, external links, and `window.open` requests are handled before displaying remote content. Wry's default download-start handler allows downloads, so add a download policy if that is inappropriate for the application. Keep user-visible loading and error state in the owning GPUI view: `gpui-webview::WebView::load_url` ignores immediate errors, and a successful request can still lead to a failed page load. Use raw Wry results and page-load callbacks as separate signals; neither `PageLoadEvent::Finished` nor `load_url` alone proves successful content loading. Show a retry path for failures your application detects.
 

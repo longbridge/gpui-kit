@@ -26,7 +26,7 @@ maturity: [experimental, platform-dependent]
 cargo run -p webview
 ```
 
-[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖 `gpui-kit`、`gpui-webview` 和 `wry`（package 名为 `lb-wry`）。
+[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖 `gpui-kit`、`gpui-webview` 和 `wry`。
 
 ```rust
 use gpui_kit::*;
@@ -100,14 +100,14 @@ fn main() {
 
 ## 加载、导航与页面消息
 
-页面策略与回调应在 `build_as_child` **之前**配置到 `wry::WebViewBuilder` 上。它们属于 Wry，不是 `gpui-webview` 事件。仓库固定的 `lb-wry` 版本提供：
+页面策略与回调应在 `build_as_child` **之前**配置到 `wry::WebViewBuilder` 上。它们属于 Wry，不是 `gpui-webview` 事件。`gpui-webview` 所依赖的 Wry 版本提供：
 
 | 需求 | Wry API | 含义 |
 | --- | --- | --- |
 | 初始内容 | `with_url(...)` 或 `with_html(...)` | 构建前选择内容；仓库示例则在创建后调用包装层的 `load_url`。 |
 | 加载状态 | `with_on_page_load_handler(|event, url| ...)` | 观察 `Started` 和 `Finished`；`Finished` 不表示加载成功，也不提供 HTTP 状态。这与 `load_url` 是否接受请求是两件事。 |
 | 导航策略 | `with_navigation_handler(|url| -> bool { ... })` | 返回 `true` 允许导航，返回 `false` 取消。初始 URL 之外还要考虑链接和重定向。 |
-| 新窗口请求 | `with_new_window_req_handler(...)` | 决定如何处理 `window.open`；其回调有平台相关的线程约束。 |
+| 新窗口请求 | `with_new_window_req_handler(...)` | 决定如何处理 `window.open`；回调在主线程运行。 |
 | Rust 向页面发送 | 在原始 Wry 视图上调用 `evaluate_script(...)` | 提交 JavaScript 并返回 Wry `Result`；需要序列化返回值时使用 `evaluate_script_with_callback`。 |
 | 页面向 Rust 发送 | `with_ipc_handler(|request| ...)` | 接收 `window.ipc.postMessage(...)` 发送的字符串。执行操作前解析、验证消息。 |
 
@@ -127,11 +127,11 @@ let builder = wry::WebViewBuilder::new()
     });
 ```
 
-此精确匹配仅用于展示回调形式；实际白名单应解析 URL，并明确校验 scheme 与 host。回调中的工作应保持简短。通过安全的调度或 channel 把状态和 IPC 消息送到应用持有的状态，再在 GPUI context 中更新 Entity；界面变化时调用 `cx.notify()`。Wry 回调不是 GPUI Entity 事件；Windows 的新窗口回调还会在另一线程运行。应处理回调到达时页面已导航或所属窗口已关闭的情况。
+此精确匹配仅用于展示回调形式；实际白名单应解析 URL，并明确校验 scheme 与 host。回调中的工作应保持简短。通过安全的调度或 channel 把状态和 IPC 消息送到应用持有的状态，再在 GPUI context 中更新 Entity；界面变化时调用 `cx.notify()`。Wry 回调不是 GPUI Entity 事件。应处理回调到达时页面已导航或所属窗口已关闭的情况。
 
 ## 安全与失败边界
 
-把页面内容视为不可信输入，包括来自自己控制的 URL 的内容。IPC 是应用能力入口：仅接受预期的消息类型与长度；平台提供发送方 origin 时应检查；执行文件、网络或账户操作前还要检查应用层授权。Wry 在 Linux/Android 上对 iframe 的 IPC request URL 使用主 frame URL，因此不能仅凭它确认 iframe 身份。初始化脚本会在新页面执行；固定版本的 Wry 文档指出，即使请求只注入主 frame，Windows 仍会注入子 frame。不要把秘密放进脚本或页面全局变量。
+把页面内容视为不可信输入，包括来自自己控制的 URL 的内容。IPC 是应用能力入口：仅接受预期的消息类型与长度；平台提供发送方 origin 时应检查；执行文件、网络或账户操作前还要检查应用层授权。Wry 在 Linux/Android 上对 iframe 的 IPC request URL 使用主 frame URL，因此不能仅凭它确认 iframe 身份。初始化脚本会在新页面执行；Wry 文档指出，即使请求只注入主 frame，Windows 仍会注入子 frame。不要把秘密放进脚本或页面全局变量。
 
 展示远程内容前，应决定下载、外部链接和 `window.open` 的处理策略。Wry 默认的下载开始回调允许下载；如果这不符合应用要求，应配置下载策略。在所属 GPUI View 中维护用户可见的加载和错误状态：`gpui-webview::WebView::load_url` 忽略即时错误，而成功提交请求也可能最终加载失败。分别使用原始 Wry 返回值与页面加载回调作为信号；单靠 `PageLoadEvent::Finished` 或 `load_url` 都不能证明内容成功加载。应为应用能够检测到的失败提供重试入口。
 
