@@ -303,17 +303,15 @@ fn main() {
 
 ## 播报状态变化
 
-`Role::Status` 只描述节点，并不会让平台在内容变化时朗读它。若用户需要在不移动焦点的情况下听到结果，例如保存完成或搜索结果数量，可在可见文字旁加入 `LiveRegion`：
+`Role::Status` 只描述节点，并不会让平台在内容变化时朗读它。若用户需要在不移动焦点的情况下听到结果，例如保存完成或搜索结果数量，可用 `LiveRegion` 显示它：
 
 ```rust
 use gpui_kit::component::live_region::LiveRegion;
 
-div()
-    .child(status.clone())
-    .child(LiveRegion::new("save-status", status))
+LiveRegion::new("save-status", status).text_sm()
 ```
 
-`LiveRegion` 写入 GPUI 元素无法自行设置的 AccessKit `live` 属性，并为各平台适配器提供文字：macOS 播报 value，Windows 和 Linux 播报名称。它不绘制任何内容，也不占据布局空间。文字变化时，以及区域带着文字首次出现时都会播报；空文字不播报，再次设置相同文字也不会播报。保持 ID 稳定：新的 ID 是新节点，会再次播报。默认以 polite 方式等待当前朗读结束；`.assertive()` 会打断朗读，只用于阻碍当前任务的错误。
+`LiveRegion` 写入 GPUI 元素无法自行设置的 AccessKit `live` 属性，并为各平台适配器提供文字：macOS 播报 value，Windows 和 Linux 播报名称。它绘制自身文字，并且是这段文字唯一的无障碍节点，因此用户浏览界面时只会听到一次；可以像 `div` 一样设置样式，若只需播报而不显示，可设为无尺寸（`.absolute().size_0().overflow_hidden()`）。文字变化时，以及区域带着文字首次出现时都会播报；空文字不播报，再次设置相同文字也不会播报。保持 ID 稳定：新的 ID 是新节点，会再次播报。默认以 polite 方式等待当前朗读结束；`.assertive()` 会打断朗读，只用于阻碍当前任务的错误。
 
 ## 自定义 `Element`
 

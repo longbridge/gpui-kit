@@ -12,13 +12,14 @@ impl Render for SaveStatus {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .child(self.status.clone())
             .child(LiveRegion::new("save-status", self.status.clone()))
     }
 }
 
 /// Platforms announce a live node when its text changes, so the region must
-/// stay one node with one identity from frame to frame. Its `live` property is
+/// stay one node with one identity from frame to frame. It also draws the text,
+/// which must not reach the tree a second time: a reader browsing the view
+/// would hear it twice. Its `live` property is
 /// not in the debug tree; `gpui-component`'s unit tests check it.
 #[gpui_kit::test]
 fn live_region_stays_one_node_as_its_text_changes(cx: &mut TestAppContext) {
@@ -57,6 +58,11 @@ fn live_region_stays_one_node_as_its_text_changes(cx: &mut TestAppContext) {
     let id = region_node(&first);
     assert!(first.contains("\"label\": \"Not saved\""), "{first}");
     assert!(first.contains("\"value\": \"Not saved\""), "{first}");
+    assert_eq!(
+        first.matches("Not saved").count(),
+        2,
+        "only the region's label and value: {first}"
+    );
 
     view.update(cx, |view, cx| {
         view.status = "Saved".into();
@@ -71,6 +77,7 @@ fn live_region_stays_one_node_as_its_text_changes(cx: &mut TestAppContext) {
     assert!(saved.contains("\"label\": \"Saved\""), "{saved}");
     assert!(saved.contains("\"value\": \"Saved\""), "{saved}");
     assert!(!saved.contains("Not saved"), "{saved}");
+    assert_eq!(saved.matches("\"Saved\"").count(), 2, "{saved}");
 }
 
 /// The AccessKit ID of the one Status node rendered for the region.

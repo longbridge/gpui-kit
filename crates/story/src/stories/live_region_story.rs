@@ -76,7 +76,6 @@ impl Render for LiveRegionStory {
                                     cx.notify();
                                 }),
                             ))
-                            .child(status.clone())
                             .child(LiveRegion::new("live-region-status", status)),
                     ),
             )
@@ -95,7 +94,6 @@ impl Render for LiveRegionStory {
                                     cx.notify();
                                 }),
                             ))
-                            .child(error.clone())
                             .child(LiveRegion::new("live-region-error", error).assertive()),
                     ),
             )

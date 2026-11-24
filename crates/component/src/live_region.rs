@@ -1,10 +1,11 @@
 use gpui::{
-    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, LayoutId, Pixels,
-    Position, Role, SharedString, Style, Window, accesskit,
+    AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId, InspectorElementId,
+    IntoElement as _, LayoutId, ParentElement as _, Pixels, Role, SharedString, StyleRefinement,
+    Styled, Window, accesskit, div,
 };
 
-/// Text that assistive technology announces whenever it changes, without
-/// moving focus or the reader's place.
+/// Text that is shown and that assistive technology announces whenever it
+/// changes, without moving focus or the reader's place.
 ///
 /// Use it for status the user should hear as it happens: a save finishing, a
 /// search's result count, a move played in a game. The owner keeps the text in
@@ -23,22 +24,24 @@ use gpui::{
 /// again is silent. Keep the ID stable across frames: a new ID is a new node,
 /// announced again.
 ///
-/// The region draws nothing and takes no space in its parent's layout.
+/// The region draws its text and is the one accessibility node for it, so a
+/// reader browsing the view meets the text once. Style it like a `div`. To
+/// announce without showing anything, give it no size: `.absolute().size_0()`
+/// `.overflow_hidden()`.
 ///
 /// ```
 /// # mod gpui_kit { pub extern crate gpui_component as component; }
-/// use gpui::{div, prelude::*};
+/// use gpui::prelude::*;
 /// use gpui_kit::component::live_region::LiveRegion;
 ///
 /// let saved = 3;
-/// div()
-///     .child(format!("Saved {saved} files"))
-///     .child(LiveRegion::new("save-status", format!("Saved {saved} files")));
+/// LiveRegion::new("save-status", format!("Saved {saved} files")).text_sm();
 /// ```
 pub struct LiveRegion {
     id: ElementId,
     text: SharedString,
     live: accesskit::Live,
+    base: Div,
 }
 
 impl LiveRegion {
@@ -48,6 +51,7 @@ impl LiveRegion {
             id: id.into(),
             text: text.into(),
             live: accesskit::Live::Polite,
+            base: div(),
         }
     }
 
@@ -59,8 +63,14 @@ impl LiveRegion {
     }
 }
 
+impl Styled for LiveRegion {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.base.style()
+    }
+}
+
 impl Element for LiveRegion {
-    type RequestLayoutState = ();
+    type RequestLayoutState = AnyElement;
     type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
@@ -77,12 +87,12 @@ impl Element for LiveRegion {
         _: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
-    ) -> (LayoutId, ()) {
-        let style = Style {
-            position: Position::Absolute,
-            ..Default::default()
-        };
-        (window.request_layout(style, [], cx), ())
+    ) -> (LayoutId, AnyElement) {
+        // The text is a bare string child, which GPUI keeps out of the
+        // accessibility tree; this element's node is the only one carrying it.
+        let base = std::mem::replace(&mut self.base, div());
+        let mut content = base.child(self.text.clone()).into_any_element();
+        (content.request_layout(window, cx), content)
     }
 
     fn prepaint(
@@ -90,10 +100,11 @@ impl Element for LiveRegion {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
-        _: &mut (),
-        _: &mut Window,
-        _: &mut App,
+        content: &mut AnyElement,
+        window: &mut Window,
+        cx: &mut App,
     ) {
+        content.prepaint(window, cx);
     }
 
     fn paint(
@@ -101,11 +112,12 @@ impl Element for LiveRegion {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
+        content: &mut AnyElement,
         _: &mut (),
-        _: &mut (),
-        _: &mut Window,
-        _: &mut App,
+        window: &mut Window,
+        cx: &mut App,
     ) {
+        content.paint(window, cx);
     }
 
     fn a11y_role(&self) -> Option<Role> {

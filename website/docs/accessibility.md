@@ -303,17 +303,15 @@ If Tab skips the control, check both `.tab_stop(true)` on the retained handle an
 
 ## Announce status changes
 
-`Role::Status` describes a node; it does not make platforms speak it when it changes. For a result the user should hear without moving focus, such as a save finishing or a search's result count, add a `LiveRegion` beside the visible text:
+`Role::Status` describes a node; it does not make platforms speak it when it changes. For a result the user should hear without moving focus, such as a save finishing or a search's result count, show it with a `LiveRegion`:
 
 ```rust
 use gpui_kit::component::live_region::LiveRegion;
 
-div()
-    .child(status.clone())
-    .child(LiveRegion::new("save-status", status))
+LiveRegion::new("save-status", status).text_sm()
 ```
 
-`LiveRegion` writes AccessKit's `live` property, which GPUI elements cannot set themselves, and names its text for every adapter: macOS announces the value, Windows and Linux the name. It draws nothing and takes no space. A region is announced when its text changes and when it first appears with text; empty text says nothing, and setting the same text again is silent. Keep its ID stable, since a new ID is a new node and is announced again. Announcements are polite and wait for current speech; `.assertive()` interrupts it and is for errors that block the current task.
+`LiveRegion` writes AccessKit's `live` property, which GPUI elements cannot set themselves, and names its text for every adapter: macOS announces the value, Windows and Linux the name. It draws its text and is the one node for it, so a reader browsing the view hears it once; style it like a `div`, or give it no size (`.absolute().size_0().overflow_hidden()`) to announce without showing anything. A region is announced when its text changes and when it first appears with text; empty text says nothing, and setting the same text again is silent. Keep its ID stable, since a new ID is a new node and is announced again. Announcements are polite and wait for current speech; `.assertive()` interrupts it and is for errors that block the current task.
 
 ## Custom `Element` implementations
 
