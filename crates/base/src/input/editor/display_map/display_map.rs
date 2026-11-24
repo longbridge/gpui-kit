@@ -211,7 +211,7 @@ impl DisplayMap {
 
     /// Incrementally update fold candidates after a text edit.
     ///
-    /// Extracts new fold candidates only within the edited byte range
+    /// Extracts new fold candidates on the lines of the edited byte range
     /// and merges them with existing (already adjusted) candidates.
     pub fn update_fold_candidates_for_edit(
         &mut self,
