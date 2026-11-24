@@ -37,7 +37,9 @@ data-url = "0.3"
 futures = "0.3"
 gpui.workspace = true
 gpui-fast = { workspace = true, optional = true }
-image = { version = "0.25", optional = true }
+# test_support uses only image buffers (RgbaImage, Frame), which need no codec. The
+# default formats would add an AV1 encoder (rav1e) to every test-support build.
+image = { version = "0.25", default-features = false, optional = true }
 gpui_macros.workspace = true
 instant.workspace = true
 itertools = "0.13.0"
