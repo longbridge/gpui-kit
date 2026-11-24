@@ -14,7 +14,7 @@ use gpui_base::input::{
     EditorState, FoldRange, HighlightStyleResolver, InputEdit as BaseInputEdit, InputHighlighter,
     InputHighlighterFactory,
 };
-use ropey::Rope;
+use ropey::{LineType, Rope};
 use tree_sitter::{InputEdit, ParseOptions, Point};
 
 use super::{
@@ -115,7 +115,7 @@ impl TreeSitterInputHighlighter {
                         )
                     });
                     let folds = if folding {
-                        extract_fold_ranges(&tree)
+                        extract_fold_ranges(&tree, &text)
                     } else {
                         Vec::new()
                     };
@@ -208,19 +208,19 @@ impl InputHighlighter for TreeSitterInputHighlighter {
     ) -> Vec<(Range<usize>, HighlightStyle)> {
         self.inner.borrow().styles(range, resolver)
     }
-    fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {
+    fn fold_ranges(&self, text: &Rope) -> Vec<FoldRange> {
         self.inner
             .borrow()
             .tree()
-            .map(extract_fold_ranges)
+            .map(|tree| extract_fold_ranges(tree, text))
             .unwrap_or_default()
     }
 
-    fn fold_ranges_for_edit(&self, range: Range<usize>, _: &Rope) -> Vec<FoldRange> {
+    fn fold_ranges_for_edit(&self, range: Range<usize>, text: &Rope) -> Vec<FoldRange> {
         self.inner
             .borrow()
             .tree()
-            .map(|tree| extract_fold_ranges_in_range(tree, range))
+            .map(|tree| extract_fold_ranges_in_range(tree, text, range))
             .unwrap_or_default()
     }
 }
@@ -236,27 +236,34 @@ fn to_tree_sitter_edit(edit: BaseInputEdit) -> InputEdit {
     }
 }
 
-fn extract_fold_ranges(tree: &tree_sitter::Tree) -> Vec<FoldRange> {
-    extract_fold_ranges_in_range(tree, 0..usize::MAX)
+fn extract_fold_ranges(tree: &tree_sitter::Tree, text: &Rope) -> Vec<FoldRange> {
+    extract_fold_ranges_in_range(tree, text, 0..usize::MAX)
 }
 
 fn extract_fold_ranges_in_range(
     tree: &tree_sitter::Tree,
+    text: &Rope,
     byte_range: Range<usize>,
 ) -> Vec<FoldRange> {
-    fn collect(node: tree_sitter::Node, bytes: &Range<usize>, ranges: &mut Vec<FoldRange>) {
+    fn collect(
+        node: tree_sitter::Node,
+        text: &Rope,
+        bytes: &Range<usize>,
+        ranges: &mut Vec<FoldRange>,
+    ) {
         if node.end_byte() <= bytes.start || node.start_byte() >= bytes.end {
             return;
         }
-        let start = node.start_position().row;
-        let end = node.end_position().row;
-        if end.saturating_sub(start) < 2 {
+        // A node on one row has no child that spans two rows.
+        if node.end_position().row == node.start_position().row {
             return;
         }
-        ranges.push(FoldRange::new(start, end));
+        if let Some(range) = fold_range_for_node(node, text) {
+            ranges.push(range);
+        }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            collect(child, bytes, ranges);
+            collect(child, text, bytes, ranges);
         }
     }
 
@@ -264,9 +271,122 @@ fn extract_fold_ranges_in_range(
     let mut ranges = Vec::new();
     let mut cursor = root.walk();
     for child in root.named_children(&mut cursor) {
-        collect(child, &byte_range, &mut ranges);
+        collect(child, text, &byte_range, &mut ranges);
     }
     ranges.sort_by_key(|range| range.start_line);
     ranges.dedup_by_key(|range| range.start_line);
     ranges
+}
+
+/// The fold of a multi-row node. The node's last row goes with the fold (hidden), unless it
+/// closes a bracket that the first row opens (`FROM (` … `) t;`: the closer stays visible, as
+/// VS Code and Zed do) or more code follows the node on that row (`) t; SELECT 1`).
+fn fold_range_for_node(node: tree_sitter::Node, text: &Rope) -> Option<FoldRange> {
+    let start = node.start_position().row;
+    let end = node.end_position().row;
+    let start_line = text.get_line(start, LineType::LF)?.to_string();
+    let end_line = text.get_line(end, LineType::LF)?.to_string();
+    let line_start = text.line_to_byte_idx(end, LineType::LF);
+    let rest = end_line.get(node.end_byte().checked_sub(line_start)?..)?;
+    if closes_opened_bracket(&start_line, &end_line) || has_code_after(rest) {
+        (end - start >= 2).then(|| FoldRange::new(start, end))
+    } else {
+        Some(FoldRange::new(start, end + 1))
+    }
+}
+
+/// The first row ends with an opening bracket and the last row starts with its closer.
+fn closes_opened_bracket(first_row: &str, last_row: &str) -> bool {
+    let Some(open) = first_row.trim_end().chars().last() else {
+        return false;
+    };
+    let close = match open {
+        '(' => ')',
+        '[' => ']',
+        '{' => '}',
+        _ => return false,
+    };
+    last_row.trim_start().starts_with(close)
+}
+
+/// Text after a node on its last row is code, not just separators or a trailing comment.
+fn has_code_after(rest: &str) -> bool {
+    let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == ';' || c == ',');
+    !(rest.is_empty() || rest.starts_with("--") || rest.starts_with("//") || rest.starts_with('#'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fold ranges of `source` parsed as `language`, as `(start_line, end_line)`.
+    fn fold_spans(language: &str, source: &str) -> Vec<(usize, usize)> {
+        let text = Rope::from(source);
+        let mut highlighter = SyntaxHighlighter::new(language);
+        highlighter.update(None, &text, None);
+        let tree = highlighter
+            .tree()
+            .expect("the highlighter parsed the source");
+        extract_fold_ranges(tree, &text)
+            .iter()
+            .map(|range| (range.start_line, range.end_line))
+            .collect()
+    }
+
+    #[test]
+    fn statement_without_brackets_hides_its_last_line() {
+        // `WHERE id = 1;` is the last row of the statement and of the WHERE clause,
+        // so both folds hide it.
+        assert_eq!(
+            fold_spans("sql", "SELECT id\nFROM users\nWHERE id = 1;\n"),
+            [(0, 3), (1, 3)]
+        );
+    }
+
+    #[test]
+    fn statement_ending_on_the_last_text_line_still_folds() {
+        assert_eq!(
+            fold_spans("sql", "SELECT 1\nFROM t\nWHERE a = 1"),
+            [(0, 3), (1, 3)]
+        );
+    }
+
+    #[test]
+    fn closing_bracket_line_stays_visible() {
+        assert_eq!(
+            fold_spans("json", "{\n  \"a\": 1,\n  \"b\": 2\n}"),
+            [(0, 3)]
+        );
+        assert_eq!(
+            fold_spans("rust", "fn main() {\n    let x = 1;\n}\n"),
+            [(0, 2)]
+        );
+    }
+
+    #[test]
+    fn code_after_the_node_on_its_last_line_stays_visible() {
+        // The statement ends with `;` on row 2, and `SELECT 3` follows it there.
+        assert_eq!(
+            fold_spans("sql", "SELECT 1\nFROM t\nWHERE a = 1; SELECT 3\n"),
+            [(0, 2)]
+        );
+    }
+
+    #[test]
+    fn separators_and_comments_after_the_node_do_not_count_as_code() {
+        assert_eq!(
+            fold_spans("sql", "SELECT id\nFROM users\nWHERE id = 1; -- done\n"),
+            [(0, 3), (1, 3)]
+        );
+    }
+
+    #[test]
+    fn two_line_node_folds_its_last_line() {
+        assert_eq!(fold_spans("sql", "SELECT id\nFROM users;\n"), [(0, 2)]);
+    }
+
+    #[test]
+    fn one_line_node_is_not_a_fold() {
+        assert!(fold_spans("sql", "SELECT 1;\n").is_empty());
+    }
 }
