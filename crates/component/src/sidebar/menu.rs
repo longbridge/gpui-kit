@@ -73,6 +73,9 @@ impl SidebarItem for SidebarMenu {
         let id = id.into();
 
         v_flex()
+            .id(id.clone())
+            .test_support()
+            .role(Role::Tree)
             .gap_2()
             .refine_style(&self.style)
             .children(self.items.into_iter().enumerate().map(|(ix, item)| {
@@ -299,10 +302,14 @@ impl SidebarItem for SidebarMenuItem {
                 h_flex()
                     .flex_row_dir(cx)
                     .size_full()
-                    .id("item")
+                    .id("sidebar-item")
+                    .test_support()
                     .role(Role::TreeItem)
                     .aria_label(accessibility_label.unwrap_or_else(|| label_text.clone()))
                     .aria_selected(is_active)
+                    .when(is_submenu && !is_collapsed, |this| {
+                        this.aria_expanded(is_open)
+                    })
                     .overflow_x_hidden()
                     .flex_shrink_0()
                     .p_2()
@@ -355,6 +362,7 @@ impl SidebarItem for SidebarMenuItem {
                                         .xsmall()
                                         .ghost()
                                         .accessibility_label(self.caret_accessibility_label())
+                                        .aria_expanded(is_open)
                                         .icon(
                                             // Points toward the end edge while
                                             // closed and turns down when open.
@@ -437,7 +445,9 @@ impl SidebarItem for SidebarMenuItem {
             .when(is_open, |this| {
                 this.child(
                     v_flex()
-                        .id("submenu")
+                        .id("sidebar-submenu")
+                        .test_support()
+                        .role(Role::Group)
                         .border_s(gpui::px(1.), cx)
                         .border_color(cx.theme().sidebar_border)
                         .gap_1()
@@ -487,5 +497,104 @@ mod tests {
             SidebarMenuItem::new("Projects").children(vec![SidebarMenuItem::new("Overview")]);
 
         assert_eq!(item.caret_accessibility_label(), "Toggle Projects submenu");
+    }
+
+    #[gpui::test]
+    fn menu_has_tree_role(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.draw(
+            gpui::point(gpui::px(0.), gpui::px(0.)),
+            gpui::size(gpui::px(240.), gpui::px(300.)),
+            |window, cx| {
+                let element = SidebarMenu::new()
+                    .child(SidebarMenuItem::new("Inbox"))
+                    .render("menu", window, cx)
+                    .into_element();
+                assert_eq!(gpui::Element::a11y_role(&element), Some(Role::Tree));
+                div()
+            },
+        );
+    }
+
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn open_submenu_is_a_group_and_its_item_is_expanded(cx: &mut gpui::TestAppContext) {
+        use gpui::{Context, Render};
+        use gpui_base::test_support::{find, find_all};
+
+        struct MenuHarness {
+            collapsed: bool,
+        }
+
+        impl Render for MenuHarness {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                SidebarMenu::new()
+                    .collapsed(self.collapsed)
+                    .child(
+                        SidebarMenuItem::new("Projects")
+                            .default_open(true)
+                            .children([SidebarMenuItem::new("Overview")]),
+                    )
+                    .child(SidebarMenuItem::new("Archive").children([SidebarMenuItem::new("2025")]))
+                    .child(SidebarMenuItem::new("Inbox"))
+                    .render("menu", window, cx)
+            }
+        }
+
+        cx.update(crate::init);
+        let (harness, cx) = cx.add_window_view(|_, _| MenuHarness { collapsed: false });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        cx.update(|window, _| {
+            let menu = find(window, &[], &"menu".into()).expect("menu is drawn");
+            assert_eq!(menu.role(), Some(Role::Tree));
+
+            let submenu =
+                find(window, &[], &"sidebar-submenu".into()).expect("open submenu is drawn");
+            assert_eq!(submenu.role(), Some(Role::Group));
+
+            let items = find_all(window, &[], &"sidebar-item".into());
+            let expanded = |label: &str| {
+                let item = items
+                    .iter()
+                    .find(|item| item.label() == Some(label))
+                    .unwrap_or_else(|| panic!("missing item {label}"));
+                assert_eq!(item.role(), Some(Role::TreeItem));
+                item.expanded()
+            };
+            assert_eq!(expanded("Projects"), Some(true));
+            assert_eq!(expanded("Archive"), Some(false));
+            assert_eq!(expanded("Overview"), None);
+            assert_eq!(expanded("Inbox"), None);
+
+            let carets = find_all(window, &[], &"caret".into());
+            let caret_expanded = |label: &str| {
+                carets
+                    .iter()
+                    .find(|caret| caret.label() == Some(label))
+                    .unwrap_or_else(|| panic!("missing caret {label}"))
+                    .expanded()
+            };
+            assert_eq!(caret_expanded("Toggle Projects submenu"), Some(true));
+            assert_eq!(caret_expanded("Toggle Archive submenu"), Some(false));
+        });
+
+        // Collapsed to icons, a submenu cannot be opened, so no row reports it.
+        cx.update(|window, cx| {
+            harness.update(cx, |harness, cx| {
+                harness.collapsed = true;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.update(|window, _| {
+            assert!(find(window, &[], &"sidebar-submenu".into()).is_none());
+            let items = find_all(window, &[], &"sidebar-item".into());
+            assert!(!items.is_empty());
+            for item in items {
+                assert_eq!(item.expanded(), None, "{:?}", item.label());
+            }
+        });
     }
 }
