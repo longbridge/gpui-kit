@@ -1,4 +1,4 @@
-use crate::input::{EditorMode, TextareaExtras, TextareaMode};
+use crate::input::{EditorMode, InputModeKind, TextareaExtras};
 use std::{collections::BTreeMap, ops::Range};
 
 use gpui::{App, Context, HighlightStyle, Hsla, Pixels, WeakEntity};
@@ -884,10 +884,12 @@ impl TextareaExtras {
     }
 }
 
-impl InputBaseState<TextareaMode> {
-    /// Replace the textarea's text decorations, as UTF-8 byte ranges into
+/// The one layer of decorations a textarea and a single-line input share.
+impl<M: InputModeKind<Extras = TextareaExtras>> InputBaseState<M> {
+    /// Replace the input's text decorations, as UTF-8 byte ranges into
     /// [`Self::value`]. Ranges follow later edits like an editor's decoration
-    /// collections, and one whose text is deleted is dropped.
+    /// collections, and one whose text is deleted is dropped. A masked input
+    /// draws none.
     pub fn set_decorations(&mut self, decorations: Vec<TextDecoration>, cx: &mut Context<Self>) {
         let decorations = normalize(&self.text, decorations);
         if self.extras.decorations != decorations {
@@ -895,7 +897,7 @@ impl InputBaseState<TextareaMode> {
             cx.notify();
         }
     }
-    /// The textarea's text decorations, as last set and moved by edits since.
+    /// The input's text decorations, as last set and moved by edits since.
     pub fn decorations(&self) -> &[TextDecoration] {
         &self.extras.decorations
     }
@@ -1066,6 +1068,72 @@ mod tests {
                     TextDecoration::new(2..4, bold),
                     TextDecoration::new(7..12, bold),
                     TextDecoration::new(100..200, bold),
+                ],
+                cx,
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(ranges(cx), vec![1..4, 7..12]);
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_selected_range(0..0, cx);
+                state.insert("ab", window, cx);
+                state.set_selected_range(5..5, cx);
+                state.insert("x", window, cx);
+                state.set_selected_range(9..14, cx);
+                state.replace("", window, cx);
+            })
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "abhéxllod");
+        assert_eq!(ranges(cx), vec![3..7, 9..10]);
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| state.set_value("", window, cx));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(ranges(cx).is_empty());
+        state.read_with(cx, |state, _| {
+            assert!(state.extras.decoration_layers().is_empty())
+        });
+    }
+
+    #[gpui::test]
+    fn input_decorations_follow_edits_and_render(cx: &mut gpui::TestAppContext) {
+        use crate::input::InputExtras as _;
+
+        cx.update(crate::init);
+        let (state, cx) = cx.add_window_view(|window, cx| {
+            crate::input::InputState::new(window, cx).default_value("héllo world")
+        });
+        let red = HighlightStyle {
+            color: Some(gpui::red()),
+            ..Default::default()
+        };
+        let wavy = HighlightStyle {
+            underline: Some(gpui::UnderlineStyle {
+                thickness: gpui::px(1.),
+                color: Some(gpui::red()),
+                wavy: true,
+            }),
+            ..Default::default()
+        };
+        let ranges = |cx: &mut gpui::VisualTestContext| {
+            state.read_with(cx, |state, _| {
+                state
+                    .decorations()
+                    .iter()
+                    .map(|decoration| decoration.range.clone())
+                    .collect::<Vec<_>>()
+            })
+        };
+        state.update(cx, |state, cx| {
+            state.set_decorations(
+                vec![
+                    TextDecoration::new(2..4, red),
+                    TextDecoration::new(7..12, wavy),
+                    TextDecoration::new(100..200, red),
                 ],
                 cx,
             );
