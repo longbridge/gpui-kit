@@ -8,7 +8,7 @@ use gpui::{
 use crate::{
     Selectable as _, StyledExt,
     list::ListItem,
-    menu::{ContextMenuExt as _, PopupMenu},
+    menu::{ContextMenuExt as _, KeyboardTrigger, PopupMenu, ShowContextMenu, open_from_keyboard},
     scroll::ScrollableElement,
 };
 
@@ -83,10 +83,24 @@ impl RenderOnce for Tree {
         let render_item = self.render_item;
         let context_menu_builder = self.context_menu_builder;
         let scroll_handle = self.state.read(cx).scroll_handle().clone();
+        // The selected row's menu, for Shift+F10 while the tree has focus:
+        // the rows are drawn inside the focused tree, not around it, so the
+        // tree opens it for them.
+        let selected_menu: Rc<std::cell::RefCell<Option<KeyboardTrigger>>> = Rc::default();
+        let row_menu = selected_menu.clone();
 
         div()
             .id(self.id)
             .size_full()
+            .on_action(move |_: &ShowContextMenu, window, cx| {
+                let opened = selected_menu
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|trigger| open_from_keyboard(trigger, window, cx));
+                if !opened {
+                    cx.propagate();
+                }
+            })
             .child(
                 gpui_base::Tree::new(&self.state)
                     .item(move |ix, entry, entry_state, window, cx| {
@@ -100,25 +114,26 @@ impl RenderOnce for Tree {
                             .selected(entry_state.is_selected())
                             .secondary_selected(entry_state.is_right_clicked());
 
-                        div()
-                            .child(item)
-                            .context_menu(move |menu, window, cx| {
-                                let Some(build) = context_menu_builder.as_ref() else {
+                        let row = div().child(item).context_menu(move |menu, window, cx| {
+                            let Some(build) = context_menu_builder.as_ref() else {
+                                return menu;
+                            };
+                            context_menu_state.update(cx, |state, cx| {
+                                let Some(entry) = state
+                                    .entry(ix)
+                                    .filter(|entry| entry.item().id == id)
+                                    .filter(|entry| !entry.is_disabled())
+                                    .cloned()
+                                else {
                                     return menu;
                                 };
-                                context_menu_state.update(cx, |state, cx| {
-                                    let Some(entry) = state
-                                        .entry(ix)
-                                        .filter(|entry| entry.item().id == id)
-                                        .filter(|entry| !entry.is_disabled())
-                                        .cloned()
-                                    else {
-                                        return menu;
-                                    };
-                                    build(ix, &entry, menu, window, cx)
-                                })
+                                build(ix, &entry, menu, window, cx)
                             })
-                            .into_any_element()
+                        });
+                        if entry_state.is_selected() {
+                            *row_menu.borrow_mut() = Some(row.keyboard_trigger());
+                        }
+                        row.into_any_element()
                     })
                     .list_style(StyleRefinement::default().flex_grow_1().size_full())
                     .relative()
@@ -136,6 +151,66 @@ impl RenderOnce for Tree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::menu::PopupMenuItem;
+    use gpui::{AppContext as _, Render, TestAppContext, px};
+    use std::cell::RefCell;
+
+    /// A tree with a menu on each row, noting each row whose menu ran.
+    struct TreeRoot {
+        tree: Entity<TreeState>,
+        ran: Rc<RefCell<Vec<gpui::SharedString>>>,
+    }
+
+    impl Render for TreeRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let ran = self.ran.clone();
+            div().size_full().child(
+                tree(&self.tree, |ix, entry, _, _, _| {
+                    ListItem::new(ix)
+                        .h(px(24.))
+                        .child(entry.item().label.clone())
+                })
+                .context_menu(move |_, entry, menu, _, _| {
+                    let (ran, id) = (ran.clone(), entry.item().id.clone());
+                    menu.item(
+                        PopupMenuItem::new("Open")
+                            .on_click(move |_, _, _| ran.borrow_mut().push(id.clone())),
+                    )
+                }),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn shift_f10_opens_the_selected_rows_menu(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let ran = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let ran = ran.clone();
+            move |window, cx| {
+                let items = vec![TreeItem::new("a", "a"), TreeItem::new("b", "b")];
+                let tree = cx.new(|cx| TreeState::new(cx).items(items));
+                tree.update(cx, |tree, cx| {
+                    tree.set_selected_index(Some(1), cx);
+                    tree.focus(window, cx);
+                });
+                TreeRoot { tree, ran }
+            }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        cx.simulate_keystrokes("shift-f10");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+
+        assert_eq!(ran.borrow().as_slice(), ["b"]);
+    }
 
     #[test]
     fn legacy_tree_types_are_base_types() {

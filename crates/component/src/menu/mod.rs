@@ -7,12 +7,14 @@ mod menu_item;
 mod popup_menu;
 
 pub use app_menu_bar::AppMenuBar;
-pub use context_menu::{ContextMenu, ContextMenuExt, ContextMenuState};
+pub use context_menu::{ContextMenu, ContextMenuExt, ContextMenuState, ShowContextMenu};
+pub(crate) use context_menu::{KeyboardTrigger, open_from_keyboard};
 pub use dropdown_menu::DropdownMenu;
 pub(crate) use menu_item::MenuItemElement;
 pub use popup_menu::{PopupMenu, PopupMenuItem};
 
 pub(crate) fn init(cx: &mut App) {
     app_menu_bar::init(cx);
+    context_menu::init(cx);
     popup_menu::init(cx);
 }
