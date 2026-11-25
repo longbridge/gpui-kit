@@ -173,7 +173,8 @@ EditorState::new(window, cx)
 ```
 
 On either side, the fold icons sit next to the text, then the line numbers,
-then the strip of the [gutter decorations](#gutter-and-overview-ruler-decorations).
+then the [gutter icons](#line-decorations), then the strip of the
+[gutter decorations](#gutter-and-overview-ruler-decorations).
 `set_gutter_side` changes the side at runtime. Use `gutter_order` to list the
 columns from the text outward; a column left out follows the listed ones, and a
 repeated one is ignored. In a diff, this puts the change strip between the text
@@ -478,16 +479,16 @@ let ruler = editor.update(cx, |state, cx| {
 
 ### Line decorations
 
-A `LineDecorationCollection` paints whole rows: a background band across each row it
-decorates. Its entries come from a `LineDecorationProvider`, which the editor asks
-about the visible buffer rows on every frame it paints.
+A `LineDecorationCollection` paints whole rows: a background band across a row, an
+icon in its gutter, or both. Its entries come from a `LineDecorationProvider`, which
+the editor asks about the visible buffer rows on every frame it paints.
 
 ```rust
 use std::{ops::Range, rc::Rc};
 
 use gpui_kit::App;
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, IconName, IconNamed as _,
     input::{LineDecoration, LineDecorationProvider},
 };
 
@@ -500,8 +501,16 @@ impl LineDecorationProvider for AddedRows {
         let end = self.0.partition_point(|&row| row < rows.end);
         self.0[start..end]
             .iter()
-            .map(|&row| LineDecoration::new(row).with_background(cx.theme().success.opacity(0.16)))
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_gutter_icon(IconName::Plus.path(), cx.theme().success)
+            })
             .collect()
+    }
+
+    fn has_gutter_icons(&self) -> bool {
+        true
     }
 }
 
@@ -522,8 +531,22 @@ Collections are independent, like the other decoration collections; later ones p
 over earlier ones.
 
 A background spans the whole row, gutter included, across all of its soft-wrapped
-lines, under the active line, indent guides, selection and text. It does not affect
-hit testing or focus, and has no pointer or keyboard action.
+lines, under the active line, indent guides, selection and text.
+
+A gutter icon is the SVG asset at the path given to `with_gutter_icon`, painted in
+the given color in a square of 60% of the line height, centred on its row, so icons
+follow both interface zoom and an editor-specific `.text_size(...)`. It stands in a
+column of its own, `GutterColumn::Icons`, shown only while line numbers are, with a
+gap of 20% of the line height toward them. In the default order the column is on
+the outer side of the line numbers; `gutter_order` can move it nearer the text, as
+IntelliJ IDEA places its markers. The column is reserved only for a provider that
+returns `true` from `has_gutter_icons`, and then on every row, so the gutter keeps
+its width as rows with an icon scroll in and out of view and an editor that uses
+only backgrounds lays out as one without line decorations. The gutter icons of
+other providers are not painted.
+
+Neither a background nor a gutter icon affects hit testing or focus, and neither
+has a pointer or keyboard action.
 
 `EditorState::row_bounds(row)` returns the band a row occupies in window coordinates,
 where it is painted: below a multi-line inline completion, rows move down with the

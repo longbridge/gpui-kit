@@ -127,6 +127,11 @@ pub trait InputExtras: Default + 'static {
         false
     }
 
+    /// Whether any line decoration collection's provider has gutter icons.
+    fn has_gutter_icons(&self) -> bool {
+        false
+    }
+
     /// The provider of the spacers, if one is set.
     fn spacer_provider(&self) -> Option<Rc<dyn SpacerProvider>> {
         None

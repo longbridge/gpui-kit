@@ -1,11 +1,12 @@
 use std::{ops::Range, rc::Rc};
 
 use gpui_kit::component::{
-    ActiveTheme, Side,
+    ActiveTheme, IconName, IconNamed as _, Side,
     button::Button,
     h_flex,
     input::{
-        Editor, EditorState, LineDecoration, LineDecorationCollection, LineDecorationProvider,
+        Editor, EditorState, GutterColumn, LineDecoration, LineDecorationCollection,
+        LineDecorationProvider,
     },
     menu::PopupMenuItem,
     scroll::ScrollbarPlacement,
@@ -27,17 +28,26 @@ struct ChangedLines {
 
 impl LineDecorationProvider for ChangedLines {
     fn line_decorations(&self, visible: Range<usize>, cx: &App) -> Vec<LineDecoration> {
-        let color = if self.removed {
-            cx.theme().danger
+        let (color, icon) = if self.removed {
+            (cx.theme().danger, IconName::Minus)
         } else {
-            cx.theme().success
+            (cx.theme().success, IconName::Plus)
         };
+        let icon = icon.path();
         self.rows
             .iter()
             .copied()
             .filter(|row| visible.contains(row))
-            .map(|row| LineDecoration::new(row).with_background(color.opacity(0.12)))
+            .map(|row| {
+                LineDecoration::new(row)
+                    .with_background(color.opacity(0.12))
+                    .with_gutter_icon(icon.clone(), color)
+            })
             .collect()
+    }
+
+    fn has_gutter_icons(&self) -> bool {
+        true
     }
 }
 
@@ -45,6 +55,7 @@ pub struct EditorDiffStory {
     original: Entity<EditorState>,
     modified: Entity<EditorState>,
     mirrored: bool,
+    icons_before_numbers: bool,
     scroll_y: [Pixels; 2],
     _decorations: [LineDecorationCollection; 2],
     _subscriptions: Vec<Subscription>,
@@ -113,6 +124,7 @@ impl EditorDiffStory {
             original,
             modified,
             mirrored: true,
+            icons_before_numbers: false,
             scroll_y: [px(0.); 2],
             _decorations: decorations,
             _subscriptions: subscriptions.into(),
@@ -168,6 +180,7 @@ impl EditorDiffStory {
     fn render_toolbar(&self, cx: &Context<Self>) -> impl IntoElement {
         let story = cx.entity();
         let mirrored = self.mirrored;
+        let icons_before_numbers = self.icons_before_numbers;
         story_toolbar_group().dropdown_child(
             Button::new("diff-options").label("Options"),
             move |menu, window, _| {
@@ -189,6 +202,33 @@ impl EditorDiffStory {
                             )),
                         )
                     })
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("Icons before line numbers")
+                            .checked(icons_before_numbers)
+                            .on_click(window.listener_for(&story, |this, _, _, cx| {
+                                this.icons_before_numbers = !this.icons_before_numbers;
+                                let columns = if this.icons_before_numbers {
+                                    [
+                                        GutterColumn::FoldIcons,
+                                        GutterColumn::Icons,
+                                        GutterColumn::LineNumbers,
+                                    ]
+                                } else {
+                                    [
+                                        GutterColumn::FoldIcons,
+                                        GutterColumn::LineNumbers,
+                                        GutterColumn::Icons,
+                                    ]
+                                };
+                                for editor in [&this.original, &this.modified] {
+                                    editor.update(cx, |state, cx| {
+                                        state.set_gutter_order(columns, cx)
+                                    });
+                                }
+                                cx.notify();
+                            })),
+                    )
             },
         )
     }

@@ -75,7 +75,9 @@ Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边�
 参见[行号槽与概览标尺装饰](../../component/editor.md#行号槽与概览标尺装饰)。
 
 `create_line_decorations_collection` 挂载一个 `LineDecorationProvider`，编辑器每一帧都会向它
-询问整行背景。背景由 Base 直接绘制。参见[行装饰](../../component/editor.md#行装饰)。
+询问整行背景和行号槽图标。两者都由 Base 直接绘制：行号槽图标是给定路径的 SVG 资源，以给定颜色绘制在
+按行高确定尺寸的正方形中。`has_gutter_icons` 返回 `true` 的 provider 会在显示行号时获得行号槽中的图标列
+`GutterColumn::Icons`。参见[行装饰](../../component/editor.md#行装饰)。
 
 `set_spacer_provider` 挂载一个 `SpacerProvider`，每当行发生移动时，编辑器都会向它询问需要放在各行上方或下方的空白行。
 这些行由 Base 负责布局，并绘制其可选的背景色。参见[填充行](../../component/editor.md#填充行)。
