@@ -26,8 +26,8 @@ use crate::{
 };
 
 use super::{
-    InputBaseState, PrepaintCaretGeometry, RangeDecorationStyle, TextDecoration,
-    layout::{GutterColumn, LastLayout, WhitespaceIndicators},
+    GutterColumn, InputBaseState, PrepaintCaretGeometry, RangeDecorationStyle, TextDecoration,
+    layout::{LastLayout, WhitespaceIndicators},
     mode::LayoutMode,
     tab_stops::{expand_tabs, expanded_width, tab_stop_width},
 };
@@ -751,8 +751,9 @@ fn layout_overview_ruler<M: InputModeKind>(
 
 /// Return the x and the width of a gutter column, relative to the input bounds.
 ///
-/// From the text outward, a gutter holds a margin, then its columns. A gutter
-/// on the right is the mirror of one on the left.
+/// From the text outward, a gutter holds a margin, then its columns in the
+/// order of `gutter_order`. A gutter on the right is the mirror of one on the
+/// left.
 fn gutter_column(
     last_layout: &LastLayout,
     folding: bool,
@@ -763,7 +764,8 @@ fn gutter_column(
         GutterColumn::LineNumbers => line_number_column_width(last_layout, folding),
         GutterColumn::Decorations => last_layout.gutter_decorations_width,
     };
-    let inset = GutterColumn::ORDER
+    let inset = last_layout
+        .gutter_order
         .iter()
         .take_while(|&&other| other != column)
         .fold(last_layout.gutter_gap, |inset, &other| inset + width(other));
@@ -814,10 +816,21 @@ fn line_number_x(last_layout: &LastLayout, folding: bool, width: Pixels) -> Pixe
 /// The rest of its column is the gap toward the line numbers.
 fn gutter_decorations_x(last_layout: &LastLayout, folding: bool, width: Pixels) -> Pixels {
     let (column_x, column_width) = gutter_column(last_layout, folding, GutterColumn::Decorations);
-    if last_layout.gutter_side.is_left() {
-        column_x
+    let position = |column| {
+        last_layout
+            .gutter_order
+            .iter()
+            .position(|&other| other == column)
+    };
+    let inset = if position(GutterColumn::LineNumbers) < position(GutterColumn::Decorations) {
+        column_width - width
     } else {
-        column_x + column_width - width
+        px(0.)
+    };
+    if last_layout.gutter_side.is_left() {
+        column_x + column_width - inset - width
+    } else {
+        column_x + inset
     }
 }
 
@@ -3719,6 +3732,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             gutter_decorations_width: Self::gutter_decorations_width(state),
             ghost_lines: None,
             gutter_side,
+            gutter_order: state.gutter_order,
             text_origin_x,
             gutter_origin_x,
             text_width,
@@ -5430,6 +5444,51 @@ mod tests {
         });
     }
 
+    const GUTTER_ORDERS: [[GutterColumn; 3]; 2] = {
+        use GutterColumn::*;
+        [
+            [FoldIcons, LineNumbers, Decorations],
+            [LineNumbers, FoldIcons, Decorations],
+        ]
+    };
+
+    fn inset_from_text(
+        order: &[GutterColumn],
+        column: GutterColumn,
+        width: impl Fn(GutterColumn) -> Pixels,
+    ) -> Pixels {
+        order
+            .iter()
+            .take_while(|&&other| other != column)
+            .fold(LINE_NUMBER_RIGHT_MARGIN, |inset, &other| {
+                inset + width(other)
+            })
+    }
+
+    #[test]
+    fn a_gutter_order_lists_every_column_once() {
+        use GutterColumn::*;
+        assert_eq!(
+            GutterColumn::order([]),
+            [FoldIcons, LineNumbers, Decorations]
+        );
+        assert_eq!(
+            GutterColumn::order([LineNumbers]),
+            [LineNumbers, FoldIcons, Decorations]
+        );
+        assert_eq!(
+            GutterColumn::order([LineNumbers, LineNumbers, Decorations, LineNumbers]),
+            [LineNumbers, Decorations, FoldIcons]
+        );
+        assert_eq!(
+            GutterColumn::order([Decorations, FoldIcons]),
+            [Decorations, FoldIcons, LineNumbers]
+        );
+        for order in GUTTER_ORDERS {
+            assert_eq!(GutterColumn::order(order), order);
+        }
+    }
+
     #[gpui::test]
     fn the_gutter_decoration_strip_is_a_gutter_column(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
@@ -5440,23 +5499,33 @@ mod tests {
             });
             let strip = px(3.);
             for side in [Side::Left, Side::Right] {
-                editor.update(cx, |state, cx| state.set_gutter_side(side, cx));
-                window.draw(cx).clear(cx);
-                let state = editor.read(cx);
-                let layout = state.last_layout.as_ref().unwrap();
-                assert_eq!(
-                    layout.gutter_decorations_width,
-                    strip + GUTTER_DECORATION_GAP
-                );
-                let x = gutter_decorations_x(layout, true, strip);
-                let gutter =
-                    layout.gutter_origin_x..layout.gutter_origin_x + layout.line_number_width;
-                let from_text = if side.is_left() {
-                    gutter.end - (x + strip)
-                } else {
-                    x - gutter.start
-                };
-                assert_eq!(from_text, layout.line_number_width - strip, "{side:?}");
+                for (order, outermost) in [(vec![], true), (vec![GutterColumn::Decorations], false)]
+                {
+                    editor.update(cx, |state, cx| {
+                        state.set_gutter_side(side, cx);
+                        state.set_gutter_order(order, cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.as_ref().unwrap();
+                    assert_eq!(
+                        layout.gutter_decorations_width,
+                        strip + GUTTER_DECORATION_GAP
+                    );
+                    let x = gutter_decorations_x(layout, true, strip);
+                    let gutter =
+                        layout.gutter_origin_x..layout.gutter_origin_x + layout.line_number_width;
+                    let from_text = if side.is_left() {
+                        gutter.end - (x + strip)
+                    } else {
+                        x - gutter.start
+                    };
+                    if outermost {
+                        assert_eq!(from_text, layout.line_number_width - strip, "{side:?}");
+                    } else {
+                        assert_eq!(from_text, LINE_NUMBER_RIGHT_MARGIN, "{side:?}");
+                    }
+                }
             }
         });
     }
@@ -5500,9 +5569,14 @@ mod tests {
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
             });
 
-            let measure = |side: Side, folding: bool, window: &mut Window, cx: &mut App| {
+            let measure = |side: Side,
+                           order: [GutterColumn; 3],
+                           folding: bool,
+                           window: &mut Window,
+                           cx: &mut App| {
                 editor.update(cx, |state, cx| {
                     state.set_gutter_side(side, cx);
+                    state.set_gutter_order(order, cx);
                     state.set_folding(folding, window, cx);
                     state.set_selected_range(0..0, cx);
                 });
@@ -5552,14 +5626,18 @@ mod tests {
                 (spans, text_gap, layout.text_width)
             };
 
-            for folding in [true, false] {
-                let (left, left_gap, left_width) = measure(Side::Left, folding, window, cx);
-                let (right, right_gap, right_width) = measure(Side::Right, folding, window, cx);
+            for (order, folding) in GUTTER_ORDERS
+                .into_iter()
+                .flat_map(|order| [(order, true), (order, false)])
+            {
+                let (left, left_gap, left_width) = measure(Side::Left, order, folding, window, cx);
+                let (right, right_gap, right_width) =
+                    measure(Side::Right, order, folding, window, cx);
                 assert_eq!(left.len(), right.len());
                 for (ix, (left, right)) in left.iter().zip(&right).enumerate() {
                     assert!(
                         (*left - *right).abs() < px(0.01),
-                        "span {ix} with folding {folding}: {left:?} on the left, {right:?} on the right"
+                        "span {ix}, {order:?} with folding {folding}: {left:?} on the left, {right:?} on the right"
                     );
                 }
                 assert_eq!(left_gap, px(0.));
@@ -5570,51 +5648,125 @@ mod tests {
     }
 
     #[gpui::test]
+    fn the_gutter_order_counts_from_the_text(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "a\n  b\nc", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let icons = record_fold_icons(&editor, cx);
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+            });
+            for side in [Side::Left, Side::Right] {
+                for order in GUTTER_ORDERS {
+                    editor.update(cx, |state, cx| {
+                        state.set_gutter_side(side, cx);
+                        state.set_gutter_order(order, cx);
+                        state.set_selected_range(0..0, cx);
+                    });
+                    icons.borrow_mut().clear();
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.clone().unwrap();
+                    let input_bounds = state.input_bounds;
+                    let from_text = |x: Pixels, width: Pixels| {
+                        if side.is_left() {
+                            input_bounds.left() + layout.text_origin_x - (x + width)
+                        } else {
+                            x - (input_bounds.left() + layout.text_origin_x + layout.text_width)
+                        }
+                    };
+                    let numbers_width = line_number_column_width(&layout, true);
+                    let digit = numbers_width / 3.;
+                    let number = from_text(
+                        input_bounds.left() + line_number_x(&layout, true, digit),
+                        digit,
+                    );
+                    let icon = *icons.borrow().first().expect("a fold icon is laid out");
+                    let icon = from_text(icon.left(), icon.size.width);
+                    let icon_inset = (FOLD_ICON_HITBOX_WIDTH - FOLD_ICON_WIDTH).half();
+
+                    let width = |column| match column {
+                        GutterColumn::FoldIcons => FOLD_ICON_HITBOX_WIDTH,
+                        GutterColumn::LineNumbers => numbers_width,
+                        GutterColumn::Decorations => px(0.),
+                    };
+                    let number_from_text =
+                        inset_from_text(&order, GutterColumn::LineNumbers, width);
+                    let icon_from_text =
+                        inset_from_text(&order, GutterColumn::FoldIcons, width) + icon_inset;
+                    assert!(
+                        (number - number_from_text).abs() < px(0.01),
+                        "{side:?} gutter, {order:?}: the line number is {number:?} from the text"
+                    );
+                    assert!(
+                        (icon - icon_from_text).abs() <= px(0.5),
+                        "{side:?} gutter, {order:?}: the fold icon is {icon:?} from the text"
+                    );
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
     fn a_click_lands_on_the_fold_icon_or_the_line_number_in_every_gutter(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, "abc\n  b\nc", false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         for side in [Side::Left, Side::Right] {
-            let (on_number, on_icon) = cx.update(|window, cx| {
-                editor.update(cx, |state, cx| {
-                    state.display_map.clear_folds();
-                    state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
-                    state.set_gutter_side(side, cx);
-                    state.set_selected_range(2..2, cx);
+            for order in GUTTER_ORDERS {
+                let (on_number, on_icon) = cx.update(|window, cx| {
+                    editor.update(cx, |state, cx| {
+                        state.display_map.clear_folds();
+                        state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                        state.set_gutter_side(side, cx);
+                        state.set_gutter_order(order, cx);
+                        state.set_selected_range(2..2, cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.as_ref().unwrap();
+                    let input_bounds = state.input_bounds;
+                    let numbers_width = line_number_column_width(layout, true);
+                    let width = |column| match column {
+                        GutterColumn::FoldIcons => FOLD_ICON_HITBOX_WIDTH,
+                        GutterColumn::LineNumbers => numbers_width,
+                        GutterColumn::Decorations => layout.gutter_decorations_width,
+                    };
+                    let numbers_inset = inset_from_text(&order, GutterColumn::LineNumbers, width);
+                    let fold_inset = inset_from_text(&order, GutterColumn::FoldIcons, width);
+                    let center = |inset: Pixels, width: Pixels| {
+                        let inset = inset + width.half();
+                        if side.is_left() {
+                            input_bounds.left() + layout.text_origin_x - inset
+                        } else {
+                            input_bounds.left() + layout.text_origin_x + layout.text_width + inset
+                        }
+                    };
+                    let y = input_bounds.top() + layout.line_height.half();
+                    (
+                        point(center(numbers_inset, numbers_width), y),
+                        point(center(fold_inset, FOLD_ICON_HITBOX_WIDTH), y),
+                    )
                 });
-                window.draw(cx).clear(cx);
-                let state = editor.read(cx);
-                let layout = state.last_layout.as_ref().unwrap();
-                let input_bounds = state.input_bounds;
-                let numbers_width = line_number_column_width(layout, true);
-                let fold_inset = layout.gutter_gap;
-                let numbers_inset = fold_inset + FOLD_ICON_HITBOX_WIDTH;
-                let center = |inset: Pixels, width: Pixels| {
-                    let inset = inset + width.half();
-                    if side.is_left() {
-                        input_bounds.left() + layout.text_origin_x - inset
-                    } else {
-                        input_bounds.left() + layout.text_origin_x + layout.text_width + inset
-                    }
-                };
-                let y = input_bounds.top() + layout.line_height.half();
-                (
-                    point(center(numbers_inset, numbers_width), y),
-                    point(center(fold_inset, FOLD_ICON_HITBOX_WIDTH), y),
-                )
-            });
 
-            cx.simulate_click(on_number, gpui::Modifiers::default());
-            editor.read_with(&cx, |state, _| {
-                let at = if side.is_left() { 0 } else { 3 };
-                assert_eq!(state.selected_range(), at..at, "{side:?} gutter");
-                assert!(!state.display_map.is_folded_at(0), "{side:?} gutter");
-            });
+                cx.simulate_click(on_number, gpui::Modifiers::default());
+                editor.read_with(&cx, |state, _| {
+                    let at = if side.is_left() { 0 } else { 3 };
+                    assert_eq!(state.selected_range(), at..at, "{side:?} gutter, {order:?}");
+                    assert!(
+                        !state.display_map.is_folded_at(0),
+                        "{side:?} gutter, {order:?}"
+                    );
+                });
 
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-            cx.simulate_click(on_icon, gpui::Modifiers::default());
-            editor.read_with(&cx, |state, _| {
-                assert!(state.display_map.is_folded_at(0), "{side:?} gutter");
-            });
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                cx.simulate_click(on_icon, gpui::Modifiers::default());
+                editor.read_with(&cx, |state, _| {
+                    assert!(
+                        state.display_map.is_folded_at(0),
+                        "{side:?} gutter, {order:?}"
+                    );
+                });
+            }
         }
     }
 
@@ -7290,6 +7442,56 @@ mod tests {
     }
 
     #[gpui::test]
+    fn custom_gutter_gaps_keep_reordered_columns_aligned(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "a\n  b\nc", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+            });
+        });
+        for gap in [px(0.), px(12.), px(24.)] {
+            window
+                .update(&mut cx, |view, _, cx| {
+                    view.1 = Some(gap);
+                    cx.notify();
+                })
+                .unwrap();
+            cx.update(|window, cx| {
+                for side in [Side::Left, Side::Right] {
+                    for order in GUTTER_ORDERS {
+                        editor.update(cx, |state, cx| {
+                            state.set_gutter_side(side, cx);
+                            state.set_gutter_order(order, cx);
+                        });
+                        window.draw(cx).clear(cx);
+                        let state = editor.read(cx);
+                        let layout = state.last_layout.as_ref().unwrap();
+                        assert_eq!(layout.gutter_gap, gap);
+                        let mut inset = gap;
+                        for column in order {
+                            let (x, width) = gutter_column(layout, true, column);
+                            if width == px(0.) {
+                                continue;
+                            }
+                            let from_text = if side.is_left() {
+                                layout.text_origin_x - (x + width)
+                            } else {
+                                x - layout.text_origin_x - layout.text_width
+                            };
+                            assert!(
+                                (from_text - inset).abs() < px(0.001),
+                                "{gap:?} {side:?} {column:?}"
+                            );
+                            inset += width;
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    #[gpui::test]
     fn editor_line_number_gutter_resizes_with_document_lines(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, &"x\n".repeat(8), false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
@@ -8874,6 +9076,7 @@ mod tests {
                     gutter_decorations_width: px(0.),
                     ghost_lines: None,
                     gutter_side: crate::Side::Left,
+                    gutter_order: crate::input::GutterColumn::DEFAULT_ORDER,
                     text_origin_x: px(60.),
                     gutter_origin_x: px(0.),
                     text_width: px(800.),

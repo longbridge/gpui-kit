@@ -22,7 +22,7 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, InputContextMenuCapabilities,
+    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, GutterColumn, InputContextMenuCapabilities,
     InputEditorStyle, InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep,
     WrappingIndent,
     blink_cursor::BlinkCursor,
@@ -555,6 +555,7 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
     pub(super) scrollbar_placement: ScrollbarPlacement,
     pub(super) gutter_side: Side,
+    pub(super) gutter_order: [GutterColumn; 3],
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -1077,6 +1078,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             overview_ruler_rows: Default::default(),
             scrollbar_placement: ScrollbarPlacement::default(),
             gutter_side: Side::Left,
+            gutter_order: GutterColumn::DEFAULT_ORDER,
             longest_line_width: Cell::new(None),
             editor_paddings: Edges::default(),
             deferred_scroll_offset: None,
@@ -13827,8 +13829,9 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
     /// [`Side::Right`] is for the left pane of a side-by-side diff, so that both
     /// gutters face the center and corresponding line numbers sit next to each
     /// other. On the right, the gutter is mirrored: its columns keep their order
-    /// from the text outward, and the line numbers are aligned toward the text.
-    /// A vertical scrollbar on the same side stays outermost.
+    /// from the text outward, see [`InputBaseState::gutter_order`], and the
+    /// line numbers are aligned toward the text. A vertical scrollbar on the
+    /// same side stays outermost.
     pub fn gutter_side(mut self, side: Side) -> Self {
         self.gutter_side = side;
         self
@@ -13837,6 +13840,27 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
     /// See [`InputBaseState::gutter_side`].
     pub fn set_gutter_side(&mut self, side: Side, cx: &mut Context<Self>) {
         self.gutter_side = side;
+        cx.notify();
+    }
+
+    /// The order of the gutter's columns from the text outward, default is
+    /// `[GutterColumn::FoldIcons, GutterColumn::LineNumbers,
+    /// GutterColumn::Decorations]`.
+    ///
+    /// A column left out follows the listed ones in its default order, and a
+    /// repeated one is ignored. The order holds on either side.
+    pub fn gutter_order(mut self, columns: impl IntoIterator<Item = GutterColumn>) -> Self {
+        self.gutter_order = GutterColumn::order(columns);
+        self
+    }
+
+    /// See [`InputBaseState::gutter_order`].
+    pub fn set_gutter_order(
+        &mut self,
+        columns: impl IntoIterator<Item = GutterColumn>,
+        cx: &mut Context<Self>,
+    ) {
+        self.gutter_order = GutterColumn::order(columns);
         cx.notify();
     }
 

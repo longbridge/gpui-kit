@@ -137,7 +137,13 @@ EditorState::new(window, cx)
     .gutter_side(Side::Right)
 ```
 
-无论 gutter 位于哪一侧，折叠图标都紧邻文本，向外依次是行号和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。运行时可用 `set_gutter_side` 切换位置。
+无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。运行时可用 `set_gutter_side` 切换位置。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后，重复列出的列会被忽略。在 diff 中，这样可以把变更竖条放在文本与行号之间：
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Decorations])
+```
+
+运行时可用 `set_gutter_order` 修改顺序。
 
 Editor Diff 示例展示了这两种布局，两个窗格同步滚动。
 
@@ -319,7 +325,8 @@ Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用�
 ### 行号槽与概览标尺装饰
 
 需要在文本之外标记整行（例如版本控制 diff 中新增、修改或删除的行）时，使用这两个集合。
-`GutterDecorationCollection` 在 gutter 外侧边缘、行号之前的窄带中绘制标记。
+`GutterDecorationCollection` 在 gutter 外侧边缘、行号之前的窄带中绘制标记；
+可用 `gutter_order` 通过 `GutterColumn::Decorations` 调整其位置。
 `OverviewRulerDecorationCollection` 在垂直滚动条轨道上绘制标记，Monaco 将这条轨道称为概览标尺。
 要同时在两处显示标记，请分别创建两个集合。
 
