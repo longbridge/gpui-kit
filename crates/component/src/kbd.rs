@@ -1,7 +1,7 @@
 use gpui::{
     Action, FocusHandle, Half, InteractiveElement as _, IntoElement, KeyBinding, KeyContext,
-    KeybindingKeystroke, Keystroke, ParentElement as _, RenderOnce, StyleRefinement, Styled,
-    Window, div, prelude::FluentBuilder as _, relative,
+    KeybindingKeystroke, Keystroke, ParentElement as _, RenderOnce, SharedString, StyleRefinement,
+    Styled, Window, div, prelude::FluentBuilder as _, relative,
 };
 
 use gpui_base::TestTextExt as _;
@@ -13,18 +13,14 @@ use crate::{ActiveTheme, StyledExt};
 pub struct Kbd {
     style: StyleRefinement,
     stroke: Keystroke,
+    label: Option<SharedString>,
     appearance: bool,
     outline: bool,
 }
 
 impl From<Keystroke> for Kbd {
     fn from(stroke: Keystroke) -> Self {
-        Self {
-            style: StyleRefinement::default(),
-            stroke,
-            appearance: true,
-            outline: false,
-        }
+        Self::new(stroke)
     }
 }
 
@@ -34,14 +30,33 @@ impl Kbd {
         Self {
             style: StyleRefinement::default(),
             stroke,
+            label: None,
             appearance: true,
             outline: false,
         }
     }
 
-    /// The keystroke this tag shows.
+    /// Create a new Kbd element that shows `label` as it is, for a hint that
+    /// is not one keystroke: `Esc`, `⌘1–9`, `↑↓`, `Enter / Tab`.
+    pub fn label(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: Some(label.into()),
+            ..Self::new(Keystroke::default())
+        }
+    }
+
+    /// The keystroke this tag shows; empty for a [`Kbd::label`].
     pub(crate) fn keystroke(&self) -> &Keystroke {
         &self.stroke
+    }
+
+    /// The text this tag shows: its label, or its keystroke formatted for the
+    /// platform.
+    fn text(&self) -> SharedString {
+        match &self.label {
+            Some(label) => label.clone(),
+            None => Self::format(&self.stroke).into(),
+        }
     }
 
     /// Set the appearance of the keybinding, default is `true`.
@@ -245,14 +260,18 @@ impl Styled for Kbd {
 
 impl RenderOnce for Kbd {
     fn render(self, _: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
+        let text = self.text();
         if !self.appearance {
-            return Self::format(&self.stroke).into_any_element();
+            return text.into_any_element();
         }
 
         div()
             // Lets a test ask whether a given shortcut hint was painted this
             // frame; a no-op outside test-support builds.
-            .debug_selector(|| format!("kbd:{}", self.stroke.unparse(cx.platform_info().os)))
+            .debug_selector(|| match &self.label {
+                Some(label) => format!("kbd:{label}"),
+                None => format!("kbd:{}", self.stroke.unparse(cx.platform_info().os)),
+            })
             .text_color(cx.theme().muted_foreground)
             .bg(cx.theme().tokens.muted)
             .when(self.outline, |this| {
@@ -270,8 +289,8 @@ impl RenderOnce for Kbd {
             .whitespace_normal()
             .flex_shrink_0()
             .refine_style(&self.style)
-            .child(Self::format(&self.stroke))
-            .test_text(Self::format(&self.stroke))
+            .child(text.clone())
+            .test_text(text)
             .into_any_element()
     }
 }
@@ -350,6 +369,20 @@ mod tests {
                 "Alt+Tab"
             );
         }
+    }
+
+    #[test]
+    fn label_shows_its_text_as_given() {
+        use super::Kbd;
+        use gpui::Keystroke;
+
+        for label in ["Esc", "⌘1–9", "↑↓", "Enter / Tab", "cmd-a"] {
+            assert_eq!(Kbd::label(label).text().as_ref(), label);
+        }
+        assert_eq!(
+            Kbd::new(Keystroke::parse("cmd-a").unwrap()).text().as_ref(),
+            Kbd::format(&Keystroke::parse("cmd-a").unwrap())
+        );
     }
 
     #[cfg(target_os = "windows")]

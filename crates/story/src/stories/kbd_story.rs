@@ -82,5 +82,21 @@ impl Render for KbdStory {
                             .child(Kbd::new(Keystroke::parse("enter").unwrap()).outline()),
                     ),
             )
+            .child(
+                section("Label")
+                    .description("Shows text that is not a single keystroke, such as a range or a choice of keys.")
+                    .w(px(560.))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_center()
+                            .gap_2()
+                            .flex_wrap()
+                            .child(Kbd::label("Esc"))
+                            .child(Kbd::label("⌘1–9"))
+                            .child(Kbd::label("↑↓"))
+                            .child(Kbd::label("Enter / Tab").outline()),
+                    ),
+            )
     }
 }
