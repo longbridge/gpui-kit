@@ -5,6 +5,7 @@ use gpui_kit::component::{
     IndexPath,
     button::Button,
     list::{List, ListDelegate, ListItem, ListState},
+    menu::{ContextMenuExt, PopupMenu},
     table::{Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableSelection, TableState},
     tree::{Tree, TreeItem, TreeState},
 };
@@ -582,8 +583,12 @@ impl Render for RecordsBelowLabel {
 /// Right clicks the first cell of `row`, past the row header; the cells
 /// themselves are not observed.
 fn right_click_row(window: &mut Window, row: usize, cx: &mut App) {
-    use gpui_kit::InputEvent as _;
     let position = window.find(("row", row)).bounds().origin + point(px(100.), px(5.));
+    right_click_at(window, position, cx);
+}
+
+fn right_click_at(window: &mut Window, position: gpui_kit::Point<gpui_kit::Pixels>, cx: &mut App) {
+    use gpui_kit::InputEvent as _;
     window.dispatch_event(
         gpui_kit::MouseMoveEvent {
             position,
@@ -1317,4 +1322,179 @@ fn table_sort_icon_is_a_labelled_button_that_cycles_the_sort(cx: &mut TestAppCon
         assert_eq!(table.read(cx).selected_col(), Some(0));
     })
     .unwrap();
+}
+
+gpui_kit::actions!(collections_test, [Refresh]);
+
+/// Three rows, with an optional menu of the table's own on each row.
+struct FewRows {
+    row_menu: bool,
+}
+impl TableDelegate for FewRows {
+    fn columns_count(&self, _: &App) -> usize {
+        2
+    }
+    fn rows_count(&self, _: &App) -> usize {
+        3
+    }
+    fn column(&self, ix: usize, _: &App) -> Column {
+        Column::new(format!("column-{ix}"), format!("Column {ix}")).width(px(180.))
+    }
+    fn render_td(
+        &mut self,
+        row: usize,
+        col: usize,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        div().child(format!("{row}:{col}"))
+    }
+    fn context_menu(
+        &mut self,
+        row_ix: usize,
+        menu: PopupMenu,
+        _: &mut Window,
+        _: &mut Context<TableState<Self>>,
+    ) -> PopupMenu {
+        if self.row_menu {
+            menu.menu(format!("Open row {row_ix}"), Box::new(Refresh))
+        } else {
+            menu
+        }
+    }
+}
+
+/// A table inside a container with a menu of its own.
+struct RecordsInMenu {
+    table: Entity<TableState<FewRows>>,
+}
+impl Render for RecordsInMenu {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("list")
+            .size_full()
+            .context_menu(|menu, _, _| menu.menu("Refresh", Box::new(Refresh)))
+            .child(DataTable::new(&self.table))
+    }
+}
+
+fn open_records_in_menu(row_menu: bool, cx: &mut TestAppContext) -> gpui_kit::AnyWindowHandle {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(320.))), move |window, cx| {
+        cx.new(|cx| RecordsInMenu {
+            table: cx.new(|cx| TableState::new(FewRows { row_menu }, window, cx)),
+        })
+    });
+    handle.into()
+}
+
+/// Right clicks at `position` and returns the labels of the menu that opens.
+fn menu_labels_at(
+    handle: gpui_kit::AnyWindowHandle,
+    position: impl Fn(&mut Window) -> gpui_kit::Point<gpui_kit::Pixels>,
+    cx: &mut TestAppContext,
+) -> Vec<String> {
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let position = position(window);
+        right_click_at(window, position, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let labels = cx
+        .update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            let labels = ["Refresh", "Open row 0", "Open row 1", "Open row 2"]
+                .into_iter()
+                .filter(|label| {
+                    window.try_find("popup-menu").is_some()
+                        && window
+                            .within("popup-menu")
+                            .try_find_by_label(label)
+                            .is_some()
+                })
+                .map(String::from)
+                .collect();
+            if window.try_find("popup-menu").is_some() {
+                window.within("popup-menu").press("escape", cx);
+            }
+            labels
+        })
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_none());
+    })
+    .unwrap();
+    labels
+}
+
+fn row_point(window: &mut Window) -> gpui_kit::Point<gpui_kit::Pixels> {
+    window.find(("row", 1usize)).bounds().origin + point(px(100.), px(5.))
+}
+fn header_point(window: &mut Window) -> gpui_kit::Point<gpui_kit::Pixels> {
+    window.find(("row", 0usize)).bounds().origin + point(px(100.), px(-10.))
+}
+fn below_rows_point(window: &mut Window) -> gpui_kit::Point<gpui_kit::Pixels> {
+    window.find(("row", 2usize)).bounds().bottom_left() + point(px(100.), px(60.))
+}
+
+/// A table without a menu of its own must not take the right-click from a
+/// menu around it: on a row, on the header, or below the last row.
+#[gpui_kit::test]
+fn a_table_without_a_menu_leaves_right_clicks_to_the_menu_around_it(cx: &mut TestAppContext) {
+    let handle = open_records_in_menu(false, cx);
+    assert_eq!(menu_labels_at(handle, row_point, cx), ["Refresh"]);
+    assert_eq!(menu_labels_at(handle, header_point, cx), ["Refresh"]);
+    assert_eq!(menu_labels_at(handle, below_rows_point, cx), ["Refresh"]);
+}
+
+/// A table with a row menu keeps it for rows, and the menu around the table
+/// still opens on the header and below the last row, even right after a row
+/// was right clicked.
+#[gpui_kit::test]
+fn a_table_row_menu_wins_on_rows_only(cx: &mut TestAppContext) {
+    let handle = open_records_in_menu(true, cx);
+    assert_eq!(menu_labels_at(handle, row_point, cx), ["Open row 1"]);
+    assert_eq!(menu_labels_at(handle, header_point, cx), ["Refresh"]);
+    assert_eq!(menu_labels_at(handle, row_point, cx), ["Open row 1"]);
+    assert_eq!(menu_labels_at(handle, below_rows_point, cx), ["Refresh"]);
+}
+
+/// A tree without a menu builder leaves right clicks to the menu around it.
+struct FilesInMenu {
+    tree: Entity<TreeState>,
+}
+impl Render for FilesInMenu {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("files")
+            .size_full()
+            .context_menu(|menu, _, _| menu.menu("Refresh", Box::new(Refresh)))
+            .child(Tree::new(&self.tree, |ix, entry, _, _, _| {
+                ListItem::new(("file", ix)).child(entry.item().label.clone())
+            }))
+    }
+}
+
+#[gpui_kit::test]
+fn a_tree_without_a_menu_leaves_right_clicks_to_the_menu_around_it(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(480.), px(320.))), |_, cx| {
+        cx.new(|cx| FilesInMenu {
+            tree: cx.new(|cx| {
+                TreeState::new(cx).items(vec![
+                    TreeItem::new("src", "src"),
+                    TreeItem::new("tests", "tests"),
+                ])
+            }),
+        })
+    });
+    let labels = menu_labels_at(
+        handle.into(),
+        |window| window.find(0usize).bounds().center(),
+        cx,
+    );
+    assert_eq!(labels, ["Refresh"]);
 }
