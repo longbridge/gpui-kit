@@ -3,13 +3,15 @@ use std::{ops::Range, rc::Rc};
 use gpui::{
     AnyElement, App, AppContext as _, AvailableSpace, Bounds, Element, ElementId, Entity,
     InteractiveElement, IntoElement, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels,
-    Render, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, deferred, div, point,
-    px,
+    Render, StyleRefinement, Styled, Window, deferred, div, point, px,
 };
 
+use gpui_base::TestSupportExt as _;
+
 use crate::{
-    StyledExt, ThemeStyled as _,
+    ActiveTheme as _, StyledExt, ThemeStyled as _,
     input::{EditorState, popovers::render_markdown},
+    scroll::ScrollableElement as _,
 };
 
 pub struct HoverPopover {
@@ -69,7 +71,6 @@ pub(crate) struct Popover {
     style: StyleRefinement,
     editor: Entity<EditorState>,
     range: Range<usize>,
-    width_limit: Range<Pixels>,
     content_builder: Box<dyn Fn(&mut Window, &mut App) -> AnyElement>,
 }
 
@@ -95,7 +96,6 @@ impl Popover {
             editor,
             range,
             style: StyleRefinement::default(),
-            width_limit: px(200.)..px(500.),
             content_builder: Box::new(move |window, cx| (f)(window, cx).into_any_element()),
         }
     }
@@ -144,46 +144,60 @@ impl Element for Popover {
             }
         };
 
-        let max_width = self
-            .width_limit
-            .end
-            .min(window.bounds().size.width - SNAP_TO_EDGE * 2)
-            .max(px(200.));
-        let max_height = (window.bounds().size.height - SNAP_TO_EDGE * 2).min(px(320.));
+        // Resolve both constraints against the window before measuring Markdown.
+        // A fixed readable width makes prose wrap, while the single scroll owner
+        // bounds long signatures and documentation without shrinking their rows.
+        let inset = window.rem_size() * 0.5;
+        let viewport = window.bounds().size;
+        let max_width = (window.rem_size() * 32.).min((viewport.width - inset * 2).max(px(0.)));
+        let top_space = (trigger_bounds.top() - inset).max(px(0.));
+        let bottom_space = (viewport.height - trigger_bounds.bottom() - inset).max(px(0.));
+        let max_height = (window.rem_size() * 20.).min(top_space.max(bottom_space));
 
         let mut popover = deferred(
             div()
                 .id("hover-popover-content")
+                .test_support()
                 .flex_none()
                 .occlude()
-                .p_1()
-                .text_xs()
+                .font_family(cx.theme().font_family.clone())
+                .text_sm()
                 .popover_style(cx)
                 .shadow_md()
-                .max_w(max_width)
+                .w(max_width)
                 .max_h(max_height)
-                .overflow_y_scroll()
                 .refine_style(&self.style)
-                .child((self.content_builder)(window, cx)),
+                .on_scroll(|_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .max_h(max_height)
+                        .child(
+                            div()
+                                .id("hover-popover-body")
+                                .test_support()
+                                .p_2()
+                                .child((self.content_builder)(window, cx)),
+                        )
+                        .overflow_y_scrollbar(),
+                ),
         )
         .with_priority(gpui_base::POPUP_PRIORITY)
         .into_any_element();
 
         let popover_size = popover.layout_as_root(AvailableSpace::min_size(), window, cx);
-        const SNAP_TO_EDGE: Pixels = px(8.);
-        let top_space = trigger_bounds.top() - SNAP_TO_EDGE;
-        let right_space = window.bounds().size.width - trigger_bounds.left() - SNAP_TO_EDGE;
-
-        let mut pos = point(
-            trigger_bounds.left(),
-            trigger_bounds.top() - popover_size.height,
+        let y = if popover_size.height <= top_space {
+            trigger_bounds.top() - popover_size.height
+        } else {
+            trigger_bounds.bottom()
+        };
+        let pos = point(
+            trigger_bounds
+                .left()
+                .min(viewport.width - inset - popover_size.width)
+                .max(inset),
+            y.min(viewport.height - inset - popover_size.height)
+                .max(inset),
         );
-        if popover_size.height > top_space {
-            pos.y = trigger_bounds.bottom();
-        }
-        if popover_size.width > right_space {
-            pos.x = trigger_bounds.right() - popover_size.width;
-        }
 
         let mut empty = div().into_any_element();
         let layout_id = empty.request_layout(window, cx);
