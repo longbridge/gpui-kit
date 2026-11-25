@@ -22,7 +22,7 @@ use std::path::Path;
 
 use crate::{Story, section};
 
-actions!(story, [Rename, OpenFile, Delete]);
+actions!(story, [Rename, OpenFile, Delete, CopyName, CopyPath]);
 
 const CONTEXT: &str = "TreeStory";
 pub(crate) fn init(cx: &mut App) {
@@ -168,6 +168,28 @@ impl TreeStory {
         }
     }
 
+    fn on_action_copy_name(
+        &mut self,
+        _: &CopyName,
+        _: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        if let Some(entry) = self.tree_state.read(cx).selected_entry() {
+            println!("Copying name: {}", entry.item().label);
+        }
+    }
+
+    fn on_action_copy_path(
+        &mut self,
+        _: &CopyPath,
+        _: &mut Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) {
+        if let Some(entry) = self.tree_state.read(cx).selected_entry() {
+            println!("Copying path: {}", entry.item().id);
+        }
+    }
+
     fn on_action_delete(&mut self, _: &Delete, _: &mut Window, cx: &mut gpui_kit::Context<Self>) {
         if let Some(entry) = self.tree_state.read(cx).selected_entry() {
             let item = entry.item();
@@ -205,6 +227,8 @@ impl Render for TreeStory {
             .on_action(cx.listener(Self::on_action_rename))
             .on_action(cx.listener(Self::on_action_open))
             .on_action(cx.listener(Self::on_action_delete))
+            .on_action(cx.listener(Self::on_action_copy_name))
+            .on_action(cx.listener(Self::on_action_copy_path))
             .child(
                 h_flex().gap_3().child(
                     Button::new("select-item")
@@ -264,10 +288,14 @@ impl Render for TreeStory {
                                         })
                                     },
                                 )
-                                .context_menu(|_ix, entry, menu, _window, _cx| {
+                                .context_menu(|_ix, entry, menu, window, cx| {
                                     let is_folder = entry.is_folder();
                                     menu.when(!is_folder, |m| m.menu("Open", Box::new(OpenFile)))
                                         .menu("Rename", Box::new(Rename))
+                                        .submenu("Copy", window, cx, |menu, _, _| {
+                                            menu.menu("Name", Box::new(CopyName))
+                                                .menu("Path", Box::new(CopyPath))
+                                        })
                                         .separator()
                                         .menu("Delete", Box::new(Delete))
                                 })
