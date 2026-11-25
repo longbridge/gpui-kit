@@ -1,14 +1,15 @@
 use std::{collections::BTreeMap, ops::Range, rc::Rc};
 
-use gpui::{App, Context, Hsla, WeakEntity};
+use gpui::{App, Context, Hsla, SharedString, WeakEntity};
 
 use super::{EditorMode, InputBaseState};
 
-/// A decoration of one whole buffer row: a background band across it.
+/// A decoration of one whole buffer row: a background band, a gutter icon, or both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineDecoration {
     row: usize,
     background: Option<Hsla>,
+    gutter_icon: Option<(SharedString, Hsla)>,
 }
 
 impl LineDecoration {
@@ -17,6 +18,7 @@ impl LineDecoration {
         Self {
             row,
             background: None,
+            gutter_icon: None,
         }
     }
 
@@ -30,9 +32,26 @@ impl LineDecoration {
         self.background
     }
 
+    /// The SVG asset path and color of the gutter icon, if any.
+    pub fn gutter_icon(&self) -> Option<(&SharedString, Hsla)> {
+        self.gutter_icon
+            .as_ref()
+            .map(|(icon, color)| (icon, *color))
+    }
+
     /// Paint a band of `color` across the whole row.
     pub fn with_background(mut self, color: Hsla) -> Self {
         self.background = Some(color);
+        self
+    }
+
+    /// Paint the SVG asset at `icon`, for example `icons/plus.svg`, in `color`
+    /// in the row's gutter.
+    ///
+    /// The icon is painted only if the provider returns `true` from
+    /// [`LineDecorationProvider::has_gutter_icons`].
+    pub fn with_gutter_icon(mut self, icon: impl Into<SharedString>, color: Hsla) -> Self {
+        self.gutter_icon = Some((icon.into(), color));
         self
     }
 }
@@ -45,6 +64,16 @@ impl LineDecoration {
 pub trait LineDecorationProvider {
     /// Return the decorations for rows within `rows`.
     fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration>;
+
+    /// Whether this provider's decorations have gutter icons. Default is false.
+    ///
+    /// While a provider says it has them and the line numbers are shown, the
+    /// gutter reserves the column of the gutter icons for every row, so the
+    /// gutter keeps its width as rows with an icon scroll in and out of view.
+    /// The gutter icons of other providers are not painted.
+    fn has_gutter_icons(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -139,19 +168,34 @@ impl LineDecorationProviders {
         self.entries.values().any(Option::is_some)
     }
 
+    pub(crate) fn has_gutter_icons(&self) -> bool {
+        self.entries
+            .values()
+            .flatten()
+            .any(|provider| provider.has_gutter_icons())
+    }
+
     /// Ask every provider about `rows`, in creation order, keeping only the
-    /// decorations that fall within `rows`.
+    /// decorations that fall within `rows`, and their gutter icons only from a
+    /// provider that has gutter icons.
     pub(crate) fn query(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
         if rows.is_empty() {
             return Vec::new();
         }
         let mut decorations = Vec::new();
         for provider in self.entries.values().flatten() {
+            let gutter_icons = provider.has_gutter_icons();
             decorations.extend(
                 provider
                     .line_decorations(rows.clone(), cx)
                     .into_iter()
-                    .filter(|decoration| rows.contains(&decoration.row)),
+                    .filter(|decoration| rows.contains(&decoration.row))
+                    .map(|mut decoration| {
+                        if !gutter_icons {
+                            decoration.gutter_icon = None;
+                        }
+                        decoration
+                    }),
             );
         }
         decorations
@@ -167,10 +211,15 @@ impl InputBaseState<EditorMode> {
     /// for the text as it is when asked.
     ///
     /// A background spans the whole row, gutter included, across its soft wraps,
-    /// under the active line, indent guides, selections and text. Later
-    /// collections paint over earlier ones. Backgrounds do not affect hit
-    /// testing or focus. Collections live until explicitly disposed or the
-    /// editor is dropped.
+    /// under the active line, indent guides, selections and text. A gutter icon
+    /// is painted in a column of its own, [`GutterColumn::Icons`](crate::input::GutterColumn::Icons),
+    /// only while the line numbers are shown and its provider says it has
+    /// gutter icons: square, sized from the line height and centred on its row.
+    /// In the default order the column sits between the line numbers and the
+    /// outer edge of the gutter; [`InputBaseState::gutter_order`] can move it
+    /// nearer the text. Later collections paint over earlier ones. Neither
+    /// affects hit testing or focus. Collections live until explicitly disposed
+    /// or the editor is dropped.
     pub fn create_line_decorations_collection(
         &mut self,
         provider: Rc<dyn LineDecorationProvider>,
@@ -240,9 +289,16 @@ mod tests {
         let decoration = LineDecoration::new(7);
         assert_eq!(decoration.row(), 7);
         assert_eq!(decoration.background(), None);
+        assert_eq!(decoration.gutter_icon(), None);
 
-        let decoration = decoration.with_background(color);
+        let decoration = decoration
+            .with_background(color)
+            .with_gutter_icon("icons/plus.svg", red());
         assert_eq!(decoration.background(), Some(color));
+        assert_eq!(
+            decoration.gutter_icon(),
+            Some((&SharedString::from("icons/plus.svg"), red()))
+        );
     }
 
     #[gpui::test]

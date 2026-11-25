@@ -742,6 +742,121 @@ mod tests {
     }
 
     #[gpui::test]
+    fn row_backgrounds_alone_keep_the_gutter_width(cx: &mut TestAppContext) {
+        use crate::input::{LineDecoration, LineDecorationProvider};
+        use std::ops::Range;
+
+        struct Backgrounds;
+
+        impl LineDecorationProvider for Backgrounds {
+            fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+                rows.map(|row| LineDecoration::new(row).with_background(cx.theme().success))
+                    .collect()
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx).default_value("first\nsecond"));
+            editor = Some(state.clone());
+            Harness {
+                state,
+                text_size: None,
+            }
+        });
+        let editor = editor.unwrap();
+        VisualTestContext::update(cx, |window, cx| {
+            window.draw(cx).clear(cx);
+            let text_x = |cx: &App| editor.read(cx).range_to_bounds(&(0..0)).unwrap().left();
+            let plain = text_x(cx);
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Rc::new(Backgrounds), cx);
+            });
+            window.draw(cx).clear(cx);
+            assert_eq!(text_x(cx), plain);
+        });
+    }
+
+    #[gpui::test]
+    fn gutter_icons_follow_editor_font_changes_without_changing_rem(cx: &mut TestAppContext) {
+        use crate::IconName;
+        use crate::input::{LineDecoration, LineDecorationProvider};
+        use gpui_kit_assets::IconNamed as _;
+        use std::ops::Range;
+
+        struct Icons;
+
+        impl LineDecorationProvider for Icons {
+            fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+                rows.map(|row| {
+                    LineDecoration::new(row)
+                        .with_gutter_icon(IconName::Plus.path(), cx.theme().success)
+                })
+                .collect()
+            }
+
+            fn has_gutter_icons(&self) -> bool {
+                true
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let mut harness = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx).default_value("first\nsecond"));
+            editor = Some(state.clone());
+            harness = Some(cx.entity());
+            Harness {
+                state,
+                text_size: None,
+            }
+        });
+        let editor = editor.unwrap();
+        let harness = harness.unwrap();
+        VisualTestContext::update(cx, |window, cx| {
+            let rem_size = window.rem_size();
+            let mut previous = None;
+            for font_size in [px(11.), px(20.)] {
+                harness.update(cx, |view, cx| {
+                    view.text_size = Some(font_size);
+                    cx.notify();
+                });
+                window.draw(cx).clear(cx);
+                let without = editor.read(cx).range_to_bounds(&(0..0)).unwrap().left();
+                let collection = editor.update(cx, |state, cx| {
+                    state.create_line_decorations_collection(Rc::new(Icons), cx)
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let column = state.range_to_bounds(&(0..0)).unwrap().left() - without;
+                let row_height = state.row_bounds(0).unwrap().size.height;
+                assert!(column > px(0.));
+                if let Some((previous_column, previous_height)) = previous {
+                    assert!(
+                        column > previous_column,
+                        "the icons' column did not follow the font"
+                    );
+                    let expected = previous_column * (row_height / previous_height);
+                    assert!(
+                        (column - expected).abs() < px(0.01),
+                        "icons and rows scaled apart: column {column:?}, previous column {previous_column:?}, row {row_height:?}, previous row {previous_height:?}"
+                    );
+                }
+                previous = Some((column, row_height));
+                assert_eq!(window.rem_size(), rem_size);
+                collection.clear(cx);
+                window.draw(cx).clear(cx);
+                assert_eq!(
+                    editor.read(cx).range_to_bounds(&(0..0)).unwrap().left(),
+                    without
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
     fn test_on_paste_builder(cx: &mut TestAppContext) {
         use gpui::{AppContext as _, Render};
 

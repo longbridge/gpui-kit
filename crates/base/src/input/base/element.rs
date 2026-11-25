@@ -57,6 +57,10 @@ pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(6.);
 const FOLD_ICON_WIDTH: Pixels = px(14.);
 const FOLD_ICON_HITBOX_WIDTH: Pixels = px(18.);
+/// The side of a line decoration's gutter icon, as a fraction of the line height.
+const GUTTER_ICON_SIZE: f32 = 0.6;
+/// Space between a gutter icon and the line numbers, as a fraction of the line height.
+const GUTTER_ICON_GAP: f32 = 0.2;
 /// Space between the gutter decoration strip and the line numbers.
 const GUTTER_DECORATION_GAP: Pixels = px(4.);
 /// Height of the pill an empty gutter decoration paints on a line boundary.
@@ -782,6 +786,7 @@ fn gutter_column(
     let width = |column| match column {
         GutterColumn::FoldIcons => fold_column_width(folding),
         GutterColumn::LineNumbers => line_number_column_width(last_layout, folding),
+        GutterColumn::Icons => last_layout.gutter_icon_width,
         GutterColumn::Decorations => last_layout.gutter_decorations_width,
     };
     let inset = last_layout
@@ -805,6 +810,7 @@ fn fold_column_width(folding: bool) -> Pixels {
 
 fn line_number_column_width(last_layout: &LastLayout, folding: bool) -> Pixels {
     last_layout.line_number_width
+        - last_layout.gutter_icon_width
         - last_layout.gutter_decorations_width
         - last_layout.gutter_gap
         - fold_column_width(folding)
@@ -827,6 +833,29 @@ fn line_number_x(last_layout: &LastLayout, folding: bool, width: Pixels) -> Pixe
         numbers_x + numbers_width - width
     } else {
         numbers_x
+    }
+}
+
+/// Return the x of a gutter icon `size` wide, relative to the input bounds.
+///
+/// The rest of the icons' column is the gap toward the line numbers.
+fn gutter_icon_x(last_layout: &LastLayout, folding: bool, size: Pixels) -> Pixels {
+    let (column_x, column_width) = gutter_column(last_layout, folding, GutterColumn::Icons);
+    let position = |column| {
+        last_layout
+            .gutter_order
+            .iter()
+            .position(|&other| other == column)
+    };
+    let inset = if position(GutterColumn::LineNumbers) < position(GutterColumn::Icons) {
+        column_width - size
+    } else {
+        px(0.)
+    };
+    if last_layout.gutter_side.is_left() {
+        column_x + column_width - inset - size
+    } else {
+        column_x + inset
     }
 }
 
@@ -1032,6 +1061,8 @@ struct FoldIconLayout {
 struct LineDecorationLayout {
     /// List of (top, height, color) background bands, top relative to the content origin
     backgrounds: Vec<(Pixels, Pixels, Hsla)>,
+    /// List of (bounds, SVG asset path, color) gutter icons
+    icons: Vec<(Bounds<Pixels>, SharedString, Hsla)>,
 }
 
 pub(super) struct TextElement<M: InputModeKind, R = ()> {
@@ -1849,7 +1880,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                 .measure_line_numbers(line_number_len, style, window);
 
         let mut line_number_width = if state.mode.line_number() {
-            number_width + gap
+            Self::gutter_icon_width(state, window.line_height()) + number_width + gap
         } else if state.is_code_editor() {
             gap
         } else {
@@ -1865,6 +1896,17 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             line_number_width + Self::gutter_decorations_width(state),
             gap,
         )
+    }
+
+    /// Return the width reserved for the gutter icons' column: an icon and its
+    /// gap, while line numbers are shown and a line decoration provider has
+    /// gutter icons.
+    fn gutter_icon_width(state: &InputBaseState<M>, line_height: Pixels) -> Pixels {
+        if state.mode.line_number() && state.extras.has_gutter_icons() {
+            line_height * (GUTTER_ICON_SIZE + GUTTER_ICON_GAP)
+        } else {
+            px(0.)
+        }
     }
 
     /// Return the width reserved for the gutter decoration strip's column: the
@@ -2378,24 +2420,32 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         });
     }
 
-    /// Layout line decoration backgrounds for the visible rows.
-    fn layout_line_decorations(&self, last_layout: &LastLayout, cx: &App) -> LineDecorationLayout {
+    /// Layout line decoration backgrounds and gutter icons for the visible rows.
+    ///
+    /// Gutter icons are only laid out while their column has a width.
+    fn layout_line_decorations(
+        &self,
+        origin_x: Pixels,
+        bounds: &Bounds<Pixels>,
+        last_layout: &LastLayout,
+        cx: &App,
+    ) -> LineDecorationLayout {
         let (Some(&first), Some(&last)) = (
             last_layout.visible_buffer_lines.first(),
             last_layout.visible_buffer_lines.last(),
         ) else {
             return LineDecorationLayout::default();
         };
-        let decorations = self
-            .state
-            .read(cx)
-            .extras
-            .line_decorations(first..last + 1, cx);
+        let state = self.state.read(cx);
+        let decorations = state.extras.line_decorations(first..last + 1, cx);
         if decorations.is_empty() {
             return LineDecorationLayout::default();
         }
 
+        let line_height = last_layout.line_height;
         let rows: Vec<_> = last_layout.row_extents().collect();
+        let icon_size = line_height * GUTTER_ICON_SIZE;
+        let icon_x = origin_x + gutter_icon_x(last_layout, state.mode.is_folding(), icon_size);
 
         let mut layout = LineDecorationLayout::default();
         for decoration in &decorations {
@@ -2410,6 +2460,16 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             };
             if let Some(color) = decoration.background() {
                 layout.backgrounds.push((top, height, color));
+            }
+            if let Some((icon, color)) = decoration.gutter_icon()
+                && last_layout.gutter_icon_width > px(0.)
+            {
+                let origin = point(
+                    icon_x,
+                    bounds.origin.y + top + (line_height - icon_size).half(),
+                );
+                let bounds = Bounds::new(origin, size(icon_size, icon_size));
+                layout.icons.push((bounds, icon.clone(), color));
             }
         }
         layout
@@ -3814,6 +3874,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             wrapping_indent,
             line_number_width,
             gutter_gap,
+            gutter_icon_width: Self::gutter_icon_width(state, line_height),
             gutter_decorations_width: Self::gutter_decorations_width(state),
             ghost_lines: None,
             spacer_rows,
@@ -4244,7 +4305,8 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             ghost_rows,
             cx,
         );
-        let line_decoration_layout = self.layout_line_decorations(&last_layout, cx);
+        let line_decoration_layout =
+            self.layout_line_decorations(original_x, &bounds, &last_layout, cx);
         let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
         self.request_reveal(
             input_bounds,
@@ -4707,6 +4769,16 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             cx,
         );
 
+        for (bounds, icon, color) in std::mem::take(&mut prepaint.line_decoration_layout.icons) {
+            let _ = window.paint_svg(
+                bounds,
+                icon,
+                None,
+                gpui::TransformationMatrix::default(),
+                color,
+                cx,
+            );
+        }
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref()
             && !window.modifiers().alt
         {
@@ -5191,12 +5263,15 @@ mod tests {
 
     impl Render for DecorationHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().child(match self.1 {
-                Some(gap) => Editor::new(&self.0)
-                    .with_line_number_renderer(MeasuredLineNumbers(gap))
-                    .into_any_element(),
-                None => Editor::new(&self.0).into_any_element(),
-            })
+            div()
+                .size_full()
+                .child(gutter_icon_in_the_atlas())
+                .child(match self.1 {
+                    Some(gap) => Editor::new(&self.0)
+                        .with_line_number_renderer(MeasuredLineNumbers(gap))
+                        .into_any_element(),
+                    None => Editor::new(&self.0).into_any_element(),
+                })
         }
     }
 
@@ -5220,13 +5295,65 @@ mod tests {
         (editor.unwrap(), window)
     }
 
+    const GUTTER_ICON_PATH: &str = "icons/gutter-icon.svg";
+
+    fn gutter_icon_color() -> Hsla {
+        gpui::green()
+    }
+
+    fn gutter_icon_in_the_atlas() -> impl IntoElement {
+        gpui::canvas(
+            |_, _, _| {},
+            |_, _, window, cx| {
+                for (width, height) in (1..=128).flat_map(|side| {
+                    [(side, side), (side, side + 1), (side + 1, side)]
+                }) {
+                    let side = |side: i32| px(side as f32 / window.scale_factor());
+                    let _ = window.paint_svg(
+                        Bounds::new(point(px(0.), px(0.)), size(side(width), side(height))),
+                        GUTTER_ICON_PATH.into(),
+                        Some(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16"/></svg>"#),
+                        gpui::TransformationMatrix::default(),
+                        gpui::transparent_black(),
+                        cx,
+                    );
+                }
+            },
+        )
+        .absolute()
+    }
+
+    fn painted_gutter_icons(window: &Window) -> Vec<Bounds<Pixels>> {
+        let scale = window.scale_factor();
+        window
+            .rendered_scene()
+            .monochrome_sprites
+            .iter()
+            .filter(|sprite| sprite.color == gutter_icon_color())
+            .map(|sprite| {
+                Bounds::new(
+                    point(
+                        px(sprite.bounds.origin.x.0 / scale),
+                        px(sprite.bounds.origin.y.0 / scale),
+                    ),
+                    size(
+                        px(sprite.bounds.size.width.0 / scale),
+                        px(sprite.bounds.size.height.0 / scale),
+                    ),
+                )
+            })
+            .collect()
+    }
+
     struct Bands {
+        icons: bool,
         asked: std::cell::RefCell<Vec<Range<usize>>>,
     }
 
     impl Bands {
-        fn new() -> Rc<Self> {
+        fn new(icons: bool) -> Rc<Self> {
             Rc::new(Self {
+                icons,
                 asked: Default::default(),
             })
         }
@@ -5239,8 +5366,16 @@ mod tests {
             _: &App,
         ) -> Vec<crate::input::LineDecoration> {
             self.asked.borrow_mut().push(rows.clone());
-            rows.map(|row| crate::input::LineDecoration::new(row).with_background(gpui::red()))
-                .collect()
+            rows.map(|row| {
+                crate::input::LineDecoration::new(row)
+                    .with_background(gpui::red())
+                    .with_gutter_icon(GUTTER_ICON_PATH, gutter_icon_color())
+            })
+            .collect()
+        }
+
+        fn has_gutter_icons(&self) -> bool {
+            self.icons
         }
     }
 
@@ -5248,7 +5383,7 @@ mod tests {
     fn line_decorations_are_asked_for_the_visible_rows_on_every_frame(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, &"x\n".repeat(100), false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
-        let bands = Bands::new();
+        let bands = Bands::new(false);
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
 
@@ -5275,6 +5410,47 @@ mod tests {
     }
 
     #[gpui::test]
+    fn gutter_icons_need_a_provider_that_has_them_and_the_line_numbers(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "a\nb\nc", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let icon_width = |cx: &App| {
+                editor
+                    .read(cx)
+                    .last_layout
+                    .as_ref()
+                    .unwrap()
+                    .gutter_icon_width
+            };
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(false), cx);
+            });
+            window.draw(cx).clear(cx);
+            assert!(painted_gutter_icons(window).is_empty());
+            assert_eq!(icon_width(cx), px(0.));
+
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(true), cx);
+            });
+            window.draw(cx).clear(cx);
+            assert_eq!(painted_gutter_icons(window).len(), 3);
+            let line_height = editor.read(cx).last_layout.as_ref().unwrap().line_height;
+            assert_eq!(
+                icon_width(cx),
+                line_height * (GUTTER_ICON_SIZE + GUTTER_ICON_GAP)
+            );
+
+            editor.update(cx, |state, cx| state.set_line_number(false, window, cx));
+            window.draw(cx).clear(cx);
+            assert!(
+                painted_gutter_icons(window).is_empty(),
+                "no gutter, no icons"
+            );
+            assert_eq!(icon_width(cx), px(0.));
+        });
+    }
+
+    #[gpui::test]
     fn line_backgrounds_cover_the_bounds_of_their_rows(cx: &mut TestAppContext) {
         let text = format!("{}\nshort\ntop\nhidden\nend\nlast", "word ".repeat(8));
         let (editor, window) = decoration_editor(cx, &text, true);
@@ -5283,7 +5459,7 @@ mod tests {
             editor.update(cx, |state, cx| {
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
                 state.display_map.set_folded(2, true);
-                state.create_line_decorations_collection(Bands::new(), cx);
+                state.create_line_decorations_collection(Bands::new(false), cx);
             });
             window.draw(cx).clear(cx);
 
@@ -5296,7 +5472,13 @@ mod tests {
                 )
             };
             assert!(layout.visible_buffer_lines.starts_with(&[0, 1, 2, 4]));
-            let decorations = TextElement::new(editor.clone()).layout_line_decorations(&layout, cx);
+            let decorations = TextElement::new(editor.clone()).layout_line_decorations(
+                input_bounds.origin.x,
+                &bounds,
+                &layout,
+                cx,
+            );
+            assert!(decorations.icons.is_empty(), "no provider has gutter icons");
             assert_eq!(
                 decorations.backgrounds.len(),
                 layout.visible_buffer_lines.len()
@@ -5325,7 +5507,7 @@ mod tests {
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|window, cx| {
             editor.update(cx, |state, cx| {
-                state.create_line_decorations_collection(Bands::new(), cx);
+                state.create_line_decorations_collection(Bands::new(false), cx);
             });
             window.draw(cx).clear(cx);
 
@@ -5348,12 +5530,144 @@ mod tests {
     }
 
     #[gpui::test]
+    fn gutter_icons_have_a_column_left_of_the_line_numbers(cx: &mut TestAppContext) {
+        for rem_size in [16., 24., 32.] {
+            for (lines, widest) in [(150, 99), (1_200, 999)] {
+                let text = format!("{}\n{}", "wide ".repeat(80), "x\n".repeat(lines));
+                let (editor, window) = decoration_editor(cx, &text, false);
+                let mut cx = VisualTestContext::from_window(window.into(), cx);
+                cx.update(|window, cx| {
+                    window.set_rem_size(px(rem_size));
+                    let padding = px(6.);
+                    editor.update(cx, |state, _| {
+                        state.set_editor_paddings(Edges {
+                            left: padding,
+                            ..Default::default()
+                        });
+                    });
+                    window.draw(cx).clear(cx);
+                    let line_number_width = |cx: &App| {
+                        editor
+                            .read(cx)
+                            .last_layout
+                            .as_ref()
+                            .unwrap()
+                            .line_number_width
+                    };
+                    let plain = line_number_width(cx);
+
+                    let collection = editor.update(cx, |state, cx| {
+                        let height = state.last_layout.as_ref().unwrap().line_height;
+                        state.set_scroll_offset(point(px(0.), -height * (lines - 4) as f32), cx);
+                        state.create_line_decorations_collection(Bands::new(true), cx)
+                    });
+                    window.draw(cx).clear(cx);
+                    window.draw(cx).clear(cx);
+                    assert!(editor.read(cx).visible_row_range().unwrap().start > widest);
+
+                    let slot = line_number_width(cx) - plain;
+                    let input_bounds = editor.read(cx).input_bounds;
+                    let state = editor.read(cx);
+                    let layout = state.last_layout.as_ref().unwrap();
+                    let row_centers = layout
+                        .visible_buffer_lines
+                        .iter()
+                        .map(|&row| {
+                            state.row_bounds(row).unwrap().top() + layout.line_height.half()
+                        })
+                        .collect::<Vec<_>>();
+                    let icon_size = layout.line_height * GUTTER_ICON_SIZE;
+                    let icons_x = |window: &Window| {
+                        let icons = painted_gutter_icons(window);
+                        assert!(!icons.is_empty());
+                        for icon in &icons {
+                            assert!(
+                                icon.left() >= input_bounds.left() - padding - px(1.)
+                                    && icon.right() <= input_bounds.left() + slot + px(1.),
+                                "{icon:?} is not in the column left of {lines} line numbers"
+                            );
+                            assert!(
+                                (icon.size.width - icon_size).abs() <= px(1.)
+                                    && icon.size.width == icon.size.height,
+                                "{icon:?} is not a square of {icon_size:?} at rem {rem_size}"
+                            );
+                            assert!(
+                                row_centers
+                                    .iter()
+                                    .any(|&center| (icon.center().y - center).abs() <= px(1.)),
+                                "{icon:?} is not centered on a row at rem {rem_size}"
+                            );
+                        }
+                        icons.iter().map(|icon| icon.left()).collect::<Vec<_>>()
+                    };
+                    let unscrolled = icons_x(window);
+
+                    editor.update(cx, |state, cx| {
+                        let offset = state.scroll_handle.offset();
+                        state.set_scroll_offset(point(px(-200.), offset.y), cx);
+                    });
+                    window.draw(cx).clear(cx);
+                    window.draw(cx).clear(cx);
+                    assert!(editor.read(cx).scroll_handle.offset().x < px(0.));
+                    assert_eq!(icons_x(window), unscrolled);
+
+                    collection.clear(cx);
+                    window.draw(cx).clear(cx);
+                    assert_eq!(line_number_width(cx), plain);
+                });
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn gutter_icons_keep_to_the_outer_edge_of_a_right_gutter(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"x\n".repeat(20), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.set_gutter_side(Side::Right, cx);
+                state.create_line_decorations_collection(Bands::new(true), cx);
+            });
+            window.draw(cx).clear(cx);
+
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let input_bounds = state.input_bounds;
+            let slot = layout.gutter_icon_width;
+            assert!(slot > px(0.));
+            let (numbers_x, _) = gutter_column(layout, true, GutterColumn::LineNumbers);
+            assert_eq!(
+                numbers_x,
+                layout.gutter_origin_x + LINE_NUMBER_RIGHT_MARGIN + FOLD_ICON_HITBOX_WIDTH
+            );
+            let icons = painted_gutter_icons(window);
+            assert!(!icons.is_empty());
+            for icon in &icons {
+                assert!(
+                    icon.left() >= input_bounds.right() - slot - px(1.),
+                    "{icon:?} is not in the column right of the line numbers"
+                );
+                assert!(
+                    (icon.right() - input_bounds.right()).abs() <= px(1.),
+                    "{icon:?} is not at the outer edge"
+                );
+            }
+
+            editor.update(cx, |state, cx| state.set_gutter_side(Side::Left, cx));
+            window.draw(cx).clear(cx);
+            let layout = editor.read(cx).last_layout.clone().unwrap();
+            let (numbers_x, _) = gutter_column(&layout, true, GutterColumn::LineNumbers);
+            assert!((numbers_x - layout.gutter_icon_width).abs() < px(0.01));
+        });
+    }
+
+    #[gpui::test]
     fn rows_below_a_multiline_inline_completion_are_bounded_where_painted(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, "one\ntwo\nthree\nfour", false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|window, cx| {
             editor.update(cx, |state, cx| {
-                state.create_line_decorations_collection(Bands::new(), cx);
+                state.create_line_decorations_collection(Bands::new(false), cx);
                 state.set_cursor_position(lsp_types::Position::new(0, 3), window, cx);
             });
             window.draw(cx).clear(cx);
@@ -5374,7 +5688,7 @@ mod tests {
             });
             window.draw(cx).clear(cx);
 
-            let (layout, bounds) = {
+            let (layout, bounds, input_bounds) = {
                 let state = editor.read(cx);
                 let map = state.display_map();
                 assert_eq!(map.version(), version);
@@ -5383,6 +5697,7 @@ mod tests {
                 (
                     state.last_layout.clone().unwrap(),
                     state.last_bounds.unwrap(),
+                    state.input_bounds,
                 )
             };
             let ghost = layout.line_height * 2.;
@@ -5393,7 +5708,12 @@ mod tests {
                 assert_eq!(bounds.size, before[row].size);
             }
 
-            let decorations = TextElement::new(editor.clone()).layout_line_decorations(&layout, cx);
+            let decorations = TextElement::new(editor.clone()).layout_line_decorations(
+                input_bounds.origin.x,
+                &bounds,
+                &layout,
+                cx,
+            );
             for (&(top, height, _), row) in decorations.backgrounds.iter().zip(0..4) {
                 let row_bounds = editor.read(cx).row_bounds(row).unwrap();
                 assert_eq!(row_bounds.origin.y, bounds.origin.y + top);
@@ -5512,11 +5832,15 @@ mod tests {
         });
     }
 
-    const GUTTER_ORDERS: [[GutterColumn; 3]; 2] = {
+    const GUTTER_ORDERS: [[GutterColumn; 4]; 6] = {
         use GutterColumn::*;
         [
-            [FoldIcons, LineNumbers, Decorations],
-            [LineNumbers, FoldIcons, Decorations],
+            [FoldIcons, LineNumbers, Icons, Decorations],
+            [FoldIcons, Icons, LineNumbers, Decorations],
+            [LineNumbers, FoldIcons, Icons, Decorations],
+            [LineNumbers, Icons, FoldIcons, Decorations],
+            [Icons, FoldIcons, LineNumbers, Decorations],
+            [Icons, LineNumbers, FoldIcons, Decorations],
         ]
     };
 
@@ -5538,19 +5862,19 @@ mod tests {
         use GutterColumn::*;
         assert_eq!(
             GutterColumn::order([]),
-            [FoldIcons, LineNumbers, Decorations]
+            [FoldIcons, LineNumbers, Icons, Decorations]
         );
         assert_eq!(
-            GutterColumn::order([LineNumbers]),
-            [LineNumbers, FoldIcons, Decorations]
+            GutterColumn::order([Icons]),
+            [Icons, FoldIcons, LineNumbers, Decorations]
         );
         assert_eq!(
-            GutterColumn::order([LineNumbers, LineNumbers, Decorations, LineNumbers]),
-            [LineNumbers, Decorations, FoldIcons]
+            GutterColumn::order([LineNumbers, LineNumbers, Icons, LineNumbers]),
+            [LineNumbers, Icons, FoldIcons, Decorations]
         );
         assert_eq!(
             GutterColumn::order([Decorations, FoldIcons]),
-            [Decorations, FoldIcons, LineNumbers]
+            [Decorations, FoldIcons, LineNumbers, Icons]
         );
         for order in GUTTER_ORDERS {
             assert_eq!(GutterColumn::order(order), order);
@@ -5635,10 +5959,11 @@ mod tests {
             editor.update(cx, |state, cx| {
                 state.set_editor_paddings(paddings);
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                state.create_line_decorations_collection(Bands::new(true), cx);
             });
 
             let measure = |side: Side,
-                           order: [GutterColumn; 3],
+                           order: [GutterColumn; 4],
                            folding: bool,
                            window: &mut Window,
                            cx: &mut App| {
@@ -5672,7 +5997,13 @@ mod tests {
                 let (numbers_x, numbers_width) =
                     gutter_column(&layout, folding, GutterColumn::LineNumbers);
                 let (fold_x, _) = gutter_column(&layout, folding, GutterColumn::FoldIcons);
+                assert!(layout.gutter_icon_width > px(0.));
+                let gutter_icon = *painted_gutter_icons(window)
+                    .first()
+                    .expect("a gutter icon is painted");
+                let gutter_icon = from_outer(gutter_icon.left(), gutter_icon.size.width);
                 let mut spans = vec![
+                    layout.gutter_icon_width,
                     from_outer(gutter.left(), gutter.size.width),
                     gutter.size.width,
                     at(numbers_x, numbers_width),
@@ -5691,16 +6022,21 @@ mod tests {
                 } else {
                     layout.gutter_origin_x - (layout.text_origin_x + layout.text_width)
                 };
-                (spans, text_gap, layout.text_width)
+                (spans, gutter_icon, text_gap, layout.text_width)
             };
 
             for (order, folding) in GUTTER_ORDERS
                 .into_iter()
                 .flat_map(|order| [(order, true), (order, false)])
             {
-                let (left, left_gap, left_width) = measure(Side::Left, order, folding, window, cx);
-                let (right, right_gap, right_width) =
+                let (left, left_icon, left_gap, left_width) =
+                    measure(Side::Left, order, folding, window, cx);
+                let (right, right_icon, right_gap, right_width) =
                     measure(Side::Right, order, folding, window, cx);
+                assert!(
+                    (left_icon - right_icon).abs() <= px(1.),
+                    "{order:?} with folding {folding}: the gutter icon is {left_icon:?} from the edge on the left, {right_icon:?} on the right"
+                );
                 assert_eq!(left.len(), right.len());
                 for (ix, (left, right)) in left.iter().zip(&right).enumerate() {
                     assert!(
@@ -5723,6 +6059,7 @@ mod tests {
             let icons = record_fold_icons(&editor, cx);
             editor.update(cx, |state, cx| {
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                state.create_line_decorations_collection(Bands::new(true), cx);
             });
             for side in [Side::Left, Side::Right] {
                 for order in GUTTER_ORDERS {
@@ -5753,15 +6090,36 @@ mod tests {
                     let icon = from_text(icon.left(), icon.size.width);
                     let icon_inset = (FOLD_ICON_HITBOX_WIDTH - FOLD_ICON_WIDTH).half();
 
+                    let gutter_icon = *painted_gutter_icons(window)
+                        .first()
+                        .expect("a gutter icon is painted");
+                    let gutter_icon_width = gutter_icon.size.width;
+                    let gutter_icon = from_text(gutter_icon.left(), gutter_icon_width);
+                    let slot = layout.gutter_icon_width;
+                    assert!(slot > gutter_icon_width);
+
                     let width = |column| match column {
                         GutterColumn::FoldIcons => FOLD_ICON_HITBOX_WIDTH,
                         GutterColumn::LineNumbers => numbers_width,
+                        GutterColumn::Icons => slot,
                         GutterColumn::Decorations => px(0.),
                     };
                     let number_from_text =
                         inset_from_text(&order, GutterColumn::LineNumbers, width);
                     let icon_from_text =
                         inset_from_text(&order, GutterColumn::FoldIcons, width) + icon_inset;
+                    let numbers_inside =
+                        number_from_text < inset_from_text(&order, GutterColumn::Icons, width);
+                    let gutter_icon_from_text = inset_from_text(&order, GutterColumn::Icons, width)
+                        + if numbers_inside {
+                            slot - gutter_icon_width
+                        } else {
+                            px(0.)
+                        };
+                    assert!(
+                        (gutter_icon - gutter_icon_from_text).abs() <= px(1.),
+                        "{side:?} gutter, {order:?}: the gutter icon is {gutter_icon:?} from the text"
+                    );
                     assert!(
                         (number - number_from_text).abs() < px(0.01),
                         "{side:?} gutter, {order:?}: the line number is {number:?} from the text"
@@ -5779,6 +6137,11 @@ mod tests {
     fn a_click_lands_on_the_fold_icon_or_the_line_number_in_every_gutter(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, "abc\n  b\nc", false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|_, cx| {
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(true), cx);
+            });
+        });
         for side in [Side::Left, Side::Right] {
             for order in GUTTER_ORDERS {
                 let (on_number, on_icon) = cx.update(|window, cx| {
@@ -5794,9 +6157,11 @@ mod tests {
                     let layout = state.last_layout.as_ref().unwrap();
                     let input_bounds = state.input_bounds;
                     let numbers_width = line_number_column_width(layout, true);
+                    assert!(layout.gutter_icon_width > px(0.));
                     let width = |column| match column {
                         GutterColumn::FoldIcons => FOLD_ICON_HITBOX_WIDTH,
                         GutterColumn::LineNumbers => numbers_width,
+                        GutterColumn::Icons => layout.gutter_icon_width,
                         GutterColumn::Decorations => layout.gutter_decorations_width,
                     };
                     let numbers_inset = inset_from_text(&order, GutterColumn::LineNumbers, width);
@@ -7775,7 +8140,7 @@ mod tests {
                 let icons = record_fold_icons(&editor, cx);
                 editor.update(cx, |state, cx| {
                     state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
-                    state.create_line_decorations_collection(Bands::new(), cx);
+                    state.create_line_decorations_collection(Bands::new(false), cx);
                 });
                 window.draw(cx).clear(cx);
                 let state = editor.read(cx);
@@ -7985,6 +8350,7 @@ mod tests {
         cx.update(|_, cx| {
             editor.update(cx, |state, cx| {
                 state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 1)], cx);
+                state.create_line_decorations_collection(Bands::new(true), cx);
             });
         });
         for gap in [px(0.), px(12.), px(24.)] {
@@ -8005,6 +8371,7 @@ mod tests {
                         let state = editor.read(cx);
                         let layout = state.last_layout.as_ref().unwrap();
                         assert_eq!(layout.gutter_gap, gap);
+                        assert!(layout.gutter_icon_width > px(0.));
                         let mut inset = gap;
                         for column in order {
                             let (x, width) = gutter_column(layout, true, column);
@@ -9610,6 +9977,7 @@ mod tests {
                     wrapping_indent: crate::input::WrappingIndent::None,
                     line_number_width: px(60.),
                     gutter_gap: LINE_NUMBER_RIGHT_MARGIN,
+                    gutter_icon_width: px(0.),
                     gutter_decorations_width: px(0.),
                     ghost_lines: None,
                     spacer_rows: Vec::new(),

@@ -406,6 +406,10 @@ impl crate::input::InputExtras for super::EditorExtras {
         self.line_decorations.has_any_provider()
     }
 
+    fn has_gutter_icons(&self) -> bool {
+        self.line_decorations.has_gutter_icons()
+    }
+
     fn spacer_provider(&self) -> Option<std::rc::Rc<dyn super::SpacerProvider>> {
         self.spacer_provider.clone()
     }

@@ -7,8 +7,8 @@ use gpui_kit::{
 };
 
 use gpui_kit::component::{
-    ActiveTheme, button::Button, h_flex, input::*, label::Label, menu::PopupMenuItem, tab::TabBar,
-    v_flex,
+    ActiveTheme, IconName, IconNamed as _, button::Button, h_flex, input::*, label::Label,
+    menu::PopupMenuItem, tab::TabBar, v_flex,
 };
 
 use crate::story_toolbar_group;
@@ -164,7 +164,7 @@ impl EditorStory {
             });
         }
 
-        let decoration_text = "Decoration styles\nColor highlights important text.\nItalic adds emphasis.\nUnderline marks review text.\n\nFill: marks a tracked range.\n\nFrame: outlines a tracked range.\n\nAdded: a line background.\nRemoved: asked again on every frame.";
+        let decoration_text = "Decoration styles\nColor highlights important text.\nItalic adds emphasis.\nUnderline marks review text.\n\nFill: marks a tracked range.\n\nFrame: outlines a tracked range.\n\nAdded: a line background and a gutter icon.\nRemoved: asked again on every frame.\nBookmark: a gutter icon alone.";
         let decorations_state = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("text")
@@ -280,10 +280,8 @@ impl EditorStory {
             )
         });
         let line_decorations = decorations_state.update(cx, |state, cx| {
-            state.create_line_decorations_collection(
-                Rc::new(LineBackgrounds(cx.entity().downgrade())),
-                cx,
-            )
+            state
+                .create_line_decorations_collection(Rc::new(LineIcons(cx.entity().downgrade())), cx)
         });
 
         let completion_highlight = Rc::new(Cell::new(StoryCompletionHighlight::Prefix));
@@ -314,11 +312,11 @@ impl EditorStory {
     }
 }
 
-/// Tints the rows of the Decorations tab that start with `Added:` or `Removed:`,
-/// reading the text as it is when the editor asks.
-struct LineBackgrounds(WeakEntity<EditorState>);
+/// Marks the rows of the Decorations tab that start with `Added:`, `Removed:`
+/// or `Bookmark:`, reading the text as it is when the editor asks.
+struct LineIcons(WeakEntity<EditorState>);
 
-impl LineDecorationProvider for LineBackgrounds {
+impl LineDecorationProvider for LineIcons {
     fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
         let Some(editor) = self.0.upgrade() else {
             return Vec::new();
@@ -329,14 +327,28 @@ impl LineDecorationProvider for LineBackgrounds {
             let line = text.slice_line(row).to_string();
             let decoration = LineDecoration::new(row);
             if line.starts_with("Added:") {
-                Some(decoration.with_background(theme.success.opacity(0.12)))
+                Some(
+                    decoration
+                        .with_background(theme.success.opacity(0.12))
+                        .with_gutter_icon(IconName::Plus.path(), theme.success),
+                )
             } else if line.starts_with("Removed:") {
-                Some(decoration.with_background(theme.danger.opacity(0.12)))
+                Some(
+                    decoration
+                        .with_background(theme.danger.opacity(0.12))
+                        .with_gutter_icon(IconName::Minus.path(), theme.danger),
+                )
+            } else if line.starts_with("Bookmark:") {
+                Some(decoration.with_gutter_icon(IconName::StarFill.path(), theme.info))
             } else {
                 None
             }
         })
         .collect()
+    }
+
+    fn has_gutter_icons(&self) -> bool {
+        true
     }
 }
 
