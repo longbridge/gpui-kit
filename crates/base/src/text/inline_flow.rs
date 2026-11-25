@@ -2766,7 +2766,8 @@ mod tests {
             ["aa ", "bb cc"],
             "just too narrow"
         );
-        assert_eq!(rows("aa bb cc", 0., 27.), ["aa ", "bb cc"], "no kerning");
+        // GPUI caches shaped lines by their text, so this one is new text.
+        assert_eq!(rows("dd ee ff", 0., 27.), ["dd ", "ee ff"], "no kerning");
         assert_eq!(rows("aa bb cc", 100., 20.), ["aa ", "bb ", "cc"]);
         // A word moved up keeps its closing mark: no break comes before it.
         // "aa bb. " is shaped at 28px; at 26px its space does not fit, which
