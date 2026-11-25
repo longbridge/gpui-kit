@@ -4,7 +4,7 @@ use gpui::{
 };
 use gpui_base::LogicalStyledExt as _;
 
-use crate::{ActiveTheme, Icon, Sizable, Size, StyledExt, ThemeStyled as _, h_flex, white};
+use crate::{ActiveTheme, Icon, Sizable, Size, StyledExt, ThemeStyled as _, h_flex};
 
 #[derive(Default, Clone)]
 enum BadgeVariant {
@@ -124,7 +124,7 @@ impl RenderOnce for Badge {
                         .items_center()
                         .rounded_full_style(cx)
                         .bg(self.color.unwrap_or(cx.theme().red))
-                        .text_color(white())
+                        .text_color(self.color.unwrap_or(cx.theme().primary_foreground))
                         .text_size(text_size)
                         .map(|this| match self.variant {
                             BadgeVariant::Dot => this.top_0().inset_e(px(0.), cx).size(px(6.)),
