@@ -261,7 +261,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
         let rows = self.display_map.wrap_row_count();
         self.display_map.set_font_spans(spans.into(), cx);
-        if self.display_map.wrap_row_count() != rows {
+        // This frame's height was set from the rows before; an auto-growing field takes the
+        // new count on the next.
+        if self.mode.is_auto_grow() && self.display_map.wrap_row_count() != rows {
             self.mode.update_auto_grow(&self.display_map);
             cx.notify();
         }

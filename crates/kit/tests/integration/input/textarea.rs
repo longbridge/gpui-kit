@@ -1,9 +1,12 @@
 //! Application-facing multiline editing and viewport regressions.
 use gpui_kit::{
-    App, AppContext, ClipboardItem, Context, ElementId, Entity, InputEvent as _, Modifiers,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
-    Subscription, TestAppContext, Window, WindowHandle,
-    component::input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    App, AppContext, ClipboardItem, Context, ElementId, Entity, FontStyle, FontWeight,
+    HighlightStyle, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, ScrollDelta, Subscription, TestAppContext, Window, WindowHandle,
+    base::input::DisplayPoint,
+    component::input::{
+        Input, InputEvent, InputState, TextDecoration, Textarea, TextareaState, WrappingIndent,
+    },
     div, point,
     prelude::*,
     px, size,
@@ -1882,23 +1885,30 @@ impl gpui_kit::PlatformTextSystem for WideStyles {
     }
 }
 
-/// The caret's left edge at each soft-wrapped row's last character, past which nothing is drawn
-/// but that row's trailing space.
+/// The caret's left edge at the last character of each soft-wrapped row that has one, past
+/// which nothing is drawn but the row's trailing space.
 fn row_ends(window: &mut Window, text: &Entity<TextareaState>, cx: &mut App) -> Vec<Pixels> {
-    let rows = text.read(cx).display_map().wrap_row_count();
-    let len = text.read(cx).value().len();
-    (0..rows)
-        .map(|row| {
-            let next = if row + 1 < rows {
-                let point = gpui_kit::base::input::DisplayPoint::new(row + 1, 0);
-                text.read(cx)
-                    .display_map()
-                    .display_pos_to_buffer_pos(point)
-                    .col
-            } else {
-                len
+    let value = text.read(cx).value().to_string();
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(value.match_indices('\n').map(|(ix, _)| ix + 1))
+        .collect();
+    let line_len = |line: usize| value[line_starts[line]..].split('\n').next().unwrap().len();
+    let map = text.read(cx).display_map();
+    let rows = map.wrap_row_count();
+    let ends: Vec<usize> = (0..rows)
+        .filter_map(|row| {
+            let start = map.display_pos_to_buffer_pos(DisplayPoint::new(row, 0));
+            let next = (row + 1 < rows)
+                .then(|| map.display_pos_to_buffer_pos(DisplayPoint::new(row + 1, 0)));
+            let end = match next {
+                Some(next) if next.line == start.line => next.col,
+                _ => line_len(start.line),
             };
-            let end = next - 1;
+            (end > start.col).then(|| line_starts[start.line] + end - 1)
+        })
+        .collect();
+    ends.into_iter()
+        .map(|end| {
             text.update(cx, |state, cx| state.set_selected_range(end..end, cx));
             window.render_frame(cx);
             text.read(cx)
@@ -1910,72 +1920,124 @@ fn row_ends(window: &mut Window, text: &Entity<TextareaState>, cx: &mut App) -> 
         .collect()
 }
 
-/// A bold decoration wraps its text where it is drawn, not where the regular font would end.
-/// Built on `WideStyles` instead of `#[gpui_kit::test]`, whose text system draws every font
-/// alike.
-#[test]
-fn bold_decorations_wrap_at_the_width_they_are_drawn() {
-    let mut cx = TestAppContext::build_with_text_system(
+fn assert_rows_fit(window: &mut Window, text: &Entity<TextareaState>, cx: &mut App) {
+    let right = text.read(cx).input_bounds().right();
+    for (row, end) in row_ends(window, text, cx).into_iter().enumerate() {
+        assert!(
+            end <= right,
+            "row {row} ends at {end:?}, past the field's {right:?}"
+        );
+    }
+}
+
+fn wide_styles_context() -> TestAppContext {
+    TestAppContext::build_with_text_system(
         gpui_kit::TestDispatcher::new(0),
         None,
         std::sync::Arc::new(WideStyles),
-    );
-    let value = "Bold words fill this heading ".repeat(6);
-    let value = value.trim_end().to_string();
-    let (handle, _, text) = composer(&mut cx, |state| state.rows(1).default_value(value.clone()));
-    let plain_rows = cx
-        .update_window(handle.into(), |_, window, cx| {
-            window.render_frame(cx);
-            text.read(cx).display_map().wrap_row_count()
-        })
-        .unwrap();
-    assert!(plain_rows > 1, "the line wraps even in the regular font");
+    )
+}
 
-    let bold = gpui_kit::HighlightStyle {
-        font_weight: Some(gpui_kit::FontWeight::BOLD),
+fn bold() -> HighlightStyle {
+    HighlightStyle {
+        font_weight: Some(FontWeight::BOLD),
+        ..Default::default()
+    }
+}
+
+/// Bold and italic runs inside a later line wrap where they are drawn, not where the regular
+/// font would end, with either wrapping indent. Built on `WideStyles` instead of
+/// `#[gpui_kit::test]`, whose text system draws every font alike.
+#[test]
+fn bold_and_italic_decorations_wrap_at_the_width_they_are_drawn() {
+    let heading = "# A short heading\n";
+    let lead = "Plain words lead in, ";
+    let strong = "then bold words run on and on across the row ".repeat(3);
+    let middle = "before plain words again, ";
+    let leaning = "and italic words lean over to the very end".repeat(2);
+    let value = format!("{heading}{lead}{strong}{middle}{leaning}");
+    let strong_at = heading.len() + lead.len();
+    let leaning_at = strong_at + strong.len() + middle.len();
+    let italic = HighlightStyle {
+        font_style: Some(FontStyle::Italic),
         ..Default::default()
     };
-    cx.update_window(handle.into(), |_, window, cx| {
-        text.update(cx, |state, cx| {
-            state.set_decorations(
-                vec![gpui_kit::component::input::TextDecoration::new(
-                    0..value.len(),
-                    bold,
-                )],
-                cx,
-            )
+    let decorations = vec![
+        TextDecoration::new(0..heading.len() - 1, bold()),
+        TextDecoration::new(strong_at..strong_at + strong.len(), bold()),
+        TextDecoration::new(leaning_at..value.len(), italic),
+    ];
+    for indent in [WrappingIndent::Same, WrappingIndent::None] {
+        let mut cx = wide_styles_context();
+        let (handle, _, text) = composer(&mut cx, |state| {
+            state
+                .rows(4)
+                .wrapping_indent(indent)
+                .default_value(value.clone())
         });
-        window.render_frame(cx);
-        let bold_rows = text.read(cx).display_map().wrap_row_count();
-        assert!(
-            bold_rows > plain_rows,
-            "bold text is wider, so it wraps to more rows: {bold_rows} vs {plain_rows}"
-        );
-        let right = text.read(cx).input_bounds().right();
-        let assert_rows_fit = |window: &mut Window, cx: &mut App| {
-            for (row, end) in row_ends(window, &text, cx).into_iter().enumerate() {
-                assert!(
-                    end <= right,
-                    "row {row} ends at {end:?}, past the field's {right:?}"
-                );
-            }
-        };
-        assert_rows_fit(window, cx);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let plain_rows = text.read(cx).display_map().wrap_row_count();
+            text.update(cx, |state, cx| {
+                state.set_decorations(decorations.clone(), cx)
+            });
+            window.render_frame(cx);
+            assert_rows_fit(window, &text, cx);
+            let styled_rows = text.read(cx).display_map().wrap_row_count();
+            assert!(
+                styled_rows > plain_rows,
+                "{indent:?}: {styled_rows} vs {plain_rows}"
+            );
 
-        // Typing inside the bold run widens it, and the line wraps again in bold.
-        window.click(target(&text), cx);
-        text.update(cx, |state, cx| state.set_selected_range(4..4, cx));
-        window.input(" and more bold words", cx);
-        window.render_frame(cx);
-        assert_eq!(text.read(cx).decorations()[0].range, 0..value.len() + 20);
-        assert_rows_fit(window, cx);
-        let bold_rows = text.read(cx).display_map().wrap_row_count();
+            // Typing inside the bold run widens it, and its line wraps again as drawn.
+            window.click(target(&text), cx);
+            let inside = strong_at + 4;
+            text.update(cx, |state, cx| state.set_selected_range(inside..inside, cx));
+            window.input(" and more bold words", cx);
+            window.render_frame(cx);
+            let strong_range = strong_at..strong_at + strong.len() + 20;
+            assert_eq!(text.read(cx).decorations()[1].range, strong_range);
+            assert_rows_fit(window, &text, cx);
+            let styled_rows = text.read(cx).display_map().wrap_row_count();
 
-        // Without the decoration, the line wraps as plain text again.
-        text.update(cx, |state, cx| state.set_decorations(Vec::new(), cx));
+            // Without decorations, the lines wrap as plain text again.
+            text.update(cx, |state, cx| state.set_decorations(Vec::new(), cx));
+            window.render_frame(cx);
+            let plain_rows = text.read(cx).display_map().wrap_row_count();
+            assert!(
+                plain_rows < styled_rows,
+                "{indent:?}: {plain_rows} vs {styled_rows}"
+            );
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.quit();
+    }
+}
+
+/// An auto-growing field grows to the rows its bold text wraps to, as a Markdown document
+/// field does when a heading is styled after it was typed.
+#[test]
+fn auto_grow_takes_the_rows_that_bold_text_wraps_to() {
+    let mut cx = wide_styles_context();
+    let value = "Bold words fill this heading ".repeat(6);
+    let value = value.trim_end().to_string();
+    let (handle, _, text) = composer(&mut cx, |state| {
+        state.auto_grow(1, 20).default_value(value.clone())
+    });
+    let height = |window: &mut Window, cx: &mut App| {
         window.render_frame(cx);
-        let plain_rows = text.read(cx).display_map().wrap_row_count();
-        assert!(plain_rows < bold_rows, "{plain_rows} vs {bold_rows}");
+        window.render_frame(cx);
+        window.find(target(&text)).bounds().size.height
+    };
+    cx.update_window(handle.into(), |_, window, cx| {
+        let plain = height(window, cx);
+        text.update(cx, |state, cx| {
+            state.set_decorations(vec![TextDecoration::new(0..value.len(), bold())], cx)
+        });
+        let styled = height(window, cx);
+        assert!(styled > plain, "{styled:?} vs {plain:?}");
+        assert_rows_fit(window, &text, cx);
     })
     .unwrap();
     cx.run_until_parked();
