@@ -61,7 +61,7 @@ gpui-webview = { workspace = true, optional = true }
 # follows the runtime's `gpui-fast`. It stays non-optional because GPUI's macros route their
 # paths through `gpui_kit` whenever the manifest lists it, enabled or not.
 gpui-kit = { path = "../kit", version = "0.11.0", default-features = false, features = ["x11"] }
-wry = { version = "0.53.3", package = "lb-wry", optional = true }
+wry = { version = "0.57.3", optional = true }
 
 # Keep bindings, JIT runtime and vendored standard modules on the same crates.io release.
 rquickjs = { package = "quickjs-jit", version = "=0.14.1", features = [
