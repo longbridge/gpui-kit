@@ -357,71 +357,109 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
         window: &mut Window,
         cx: &mut App,
     ) {
-        let builder = self.menu.clone();
-        let shared_state = request_layout.shared_state.clone();
+        let trigger = Rc::new(Trigger {
+            shared_state: request_layout.shared_state.clone(),
+            builder: self.menu.clone(),
+            hitbox: hitbox.clone(),
+            parent: PAINTING_TRIGGER.with(|current| current.borrow().clone()),
+        });
 
         // A finger has no right button, so a long press opens the menu. This
         // listener goes in before the children paint, so an input inside the
         // trigger claims its long press first. Rich-text selection is handled
         // by the window layer, which runs later; yield over its text geometry.
         window.on_mouse_event({
-            let shared_state = shared_state.clone();
-            let builder = builder.clone();
-            let hitbox = hitbox.clone();
+            let trigger = trigger.clone();
             move |event: &LongPressEvent, phase, window, cx| {
                 if phase.bubble()
                     && event.phase == TouchPhase::Started
                     && !window.default_prevented()
-                    && hitbox.is_hovered(window)
+                    && trigger.hitbox.is_hovered(window)
                     && !gpui_base::TextSelection::is_selectable_at(event.start_position, window, cx)
                 {
                     window.prevent_default();
-                    open_menu(&shared_state, &builder, event.start_position, window, cx);
+                    open_menu(&trigger, event.start_position, window, cx);
                 }
             }
         });
 
         // Register before child paint so bubbling reaches the innermost
         // trigger first, after its input has had a chance to take focus.
-        let hitbox = hitbox.clone();
-        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-            if phase.bubble() && event.button == MouseButton::Right && hitbox.is_hovered(window) {
-                cx.stop_propagation();
-                open_menu(&shared_state, &builder, event.position, window, cx);
+        window.on_mouse_event({
+            let trigger = trigger.clone();
+            move |event: &MouseDownEvent, phase, window, cx| {
+                if phase.bubble()
+                    && event.button == MouseButton::Right
+                    && trigger.hitbox.is_hovered(window)
+                {
+                    cx.stop_propagation();
+                    open_menu(&trigger, event.position, window, cx);
+                }
             }
         });
 
+        // Triggers painted inside this one record it as their parent, so an
+        // inner trigger with nothing to offer can hand the press outward.
+        let parent = PAINTING_TRIGGER.with(|current| current.replace(Some(trigger)));
         if let Some(element) = &mut request_layout.element {
             element.paint(window, cx);
         }
+        PAINTING_TRIGGER.with(|current| *current.borrow_mut() = parent);
     }
 }
 
 type MenuBuilder = dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu;
 
-/// Builds the menu and shows it at `position`.
-fn open_menu(
-    shared_state: &Rc<RefCell<ContextMenuSharedState>>,
-    builder: &Option<Rc<MenuBuilder>>,
-    position: Point<Pixels>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    // Capture the focused element to restore focus to on dismiss.
-    // If focus is still on the previous menu, keep its captured focus.
-    let previous_focus_handle = window.focused(cx).and_then(|focused| {
-        let shared_state = shared_state.borrow();
-        match shared_state.menu_view.as_ref() {
-            Some(menu) if menu.read(cx).focus_handle == focused => {
-                menu.read(cx).previous_focus_handle.clone()
-            }
-            _ => Some(focused),
+/// A context menu trigger as painted in the current frame.
+struct Trigger {
+    shared_state: Rc<RefCell<ContextMenuSharedState>>,
+    builder: Option<Rc<MenuBuilder>>,
+    hitbox: Hitbox,
+    /// The trigger this one was painted inside, if any.
+    parent: Option<Rc<Trigger>>,
+}
+
+thread_local! {
+    /// The innermost trigger whose children are being painted.
+    static PAINTING_TRIGGER: RefCell<Option<Rc<Trigger>>> = const { RefCell::new(None) };
+}
+
+/// Opens the menu of the innermost trigger with something to offer at
+/// `position`, starting from `trigger`.
+///
+/// The innermost trigger stops the press so outer triggers never see it, but
+/// its builder may return an empty menu (a `DataTable` or `Tree` without a
+/// menu of its own does). The press then falls through to the enclosing
+/// triggers under the pointer, innermost first.
+fn open_menu(trigger: &Rc<Trigger>, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    let mut candidates = vec![trigger.clone()];
+    let mut parent = trigger.parent.clone();
+    while let Some(trigger) = parent {
+        if trigger.hitbox.is_hovered(window) {
+            candidates.push(trigger.clone());
         }
+        parent = trigger.parent.clone();
+    }
+
+    // Capture the focused element to restore focus to on dismiss.
+    // If focus is still on a previous menu, keep its captured focus.
+    let previous_focus_handle = window.focused(cx).and_then(|focused| {
+        candidates
+            .iter()
+            .find_map(|trigger| {
+                let shared_state = trigger.shared_state.borrow();
+                shared_state
+                    .menu_view
+                    .as_ref()
+                    .filter(|menu| menu.read(cx).focus_handle == focused)
+                    .map(|menu| menu.read(cx).previous_focus_handle.clone())
+            })
+            .unwrap_or(Some(focused))
     });
 
     // Retain the old menu's owner before clearing replacement state.
-    let previous_selection_input = {
-        let state = shared_state.borrow();
+    let previous_selection_input = candidates.iter().find_map(|trigger| {
+        let state = trigger.shared_state.borrow();
         let menu_focused = state.menu_view.as_ref().is_some_and(|menu| {
             let focus = menu.focus_handle(cx);
             focus.is_focused(window) || focus.contains_focused(window, cx)
@@ -431,22 +469,18 @@ fn open_menu(
             .as_ref()
             .filter(|input| menu_focused || input.focus_handle(cx).is_focused(window))
             .cloned()
-    };
-    {
-        let mut shared_state = shared_state.borrow_mut();
-        // Clear any existing menu view to allow immediate replacement
-        // Set the new position and open the menu
+    });
+    for trigger in &candidates {
+        // Clear any existing menu view to allow immediate replacement.
+        let mut shared_state = trigger.shared_state.borrow_mut();
         shared_state.menu_view = None;
         shared_state.selection_input = None;
         shared_state._subscription = None;
-        shared_state.position = position;
-        shared_state.open = true;
+        shared_state.open = false;
     }
 
     // Use defer to build the menu in the next frame, avoiding race conditions
     window.defer(cx, {
-        let shared_state = shared_state.clone();
-        let builder = builder.clone();
         move |window, cx| {
             // Resolve after pointer dispatch: the inner input has
             // now taken focus and published its state, even if it
@@ -456,12 +490,22 @@ fn open_menu(
                     .flatten()
                     .filter(|input| input.focus_handle(cx).is_focused(window))
                     .or(previous_selection_input);
-            let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
-                let Some(build) = &builder else {
-                    return menu;
-                };
-                build(menu, window, cx)
-            });
+            // An empty menu is never drawn, so nothing would dismiss it and
+            // hand focus back: skip it and leave focus where it is.
+            let Some((shared_state, menu)) = candidates.into_iter().find_map(|trigger| {
+                let builder = trigger.builder.clone()?;
+                let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
+                    builder(menu, window, cx)
+                });
+                (!menu.read(cx).is_empty()).then(|| (trigger.shared_state.clone(), menu))
+            }) else {
+                return;
+            };
+            {
+                let mut shared_state = shared_state.borrow_mut();
+                shared_state.position = position;
+                shared_state.open = true;
+            }
             let trigger_focus_handle = shared_state.borrow().trigger_focus_handle.clone();
             menu.update(cx, |menu, cx| {
                 menu.set_trigger_focus(trigger_focus_handle, cx);
@@ -814,6 +858,53 @@ mod tests {
         cx.update(|window, cx| {
             let focused = window.focused(cx);
             assert!(focused.is_some() && focused.as_ref() != Some(&content_focus));
+        });
+    }
+
+    /// Focus in the content, beside a trigger whose builder has nothing to
+    /// offer.
+    struct EmptyMenuRoot {
+        content_focus: FocusHandle,
+    }
+
+    impl Render for EmptyMenuRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .id("content")
+                        .h(px(40.))
+                        .track_focus(&self.content_focus),
+                )
+                .child(div().id("tab").h(px(60.)).context_menu(|menu, _, _| menu))
+        }
+    }
+
+    /// A builder may have nothing to offer where the press landed. The empty
+    /// menu is never drawn, so nothing would dismiss it and hand focus back:
+    /// it must not take focus, or actions dispatched through focus have
+    /// nowhere to go until something else is focused.
+    #[gpui::test]
+    fn an_empty_menu_leaves_focus_where_it_was(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let content_focus = cx.focus_handle();
+            content_focus.focus(window, cx);
+            EmptyMenuRoot { content_focus }
+        });
+        let content_focus = root.read_with(cx, |root, _| root.content_focus.clone());
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        let press = point(px(50.), px(70.));
+        cx.simulate_mouse_down(press, MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(press, MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.focused(cx).as_ref(), Some(&content_focus));
         });
     }
 

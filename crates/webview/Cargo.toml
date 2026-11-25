@@ -28,7 +28,7 @@ doctest = false
 anyhow.workspace = true
 gpui-kit = { path = "../kit", version = "0.11.0", default-features = false, features = ["x11"] }
 log = "0.4"
-wry = { version = "0.53.3", package = "lb-wry" }
+wry = "0.57.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }
@@ -41,4 +41,4 @@ gtk = "0.18"
 x11 = { version = "2.21", features = ["xlib"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi"] }

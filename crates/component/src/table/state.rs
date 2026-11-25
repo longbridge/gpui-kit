@@ -1871,6 +1871,18 @@ where
         })
     }
 
+    /// The radius of the header's outer top corners.
+    ///
+    /// A bordered table has rounded corners, but GPUI clips content to a
+    /// rectangle, so every header part that paints the head background at a
+    /// top corner rounds that corner itself. The radius is the border's, less
+    /// the border width, so the background meets the inside of the border.
+    fn header_corner_radius(&self, cx: &App) -> Option<Pixels> {
+        self.options
+            .bordered
+            .then(|| (cx.theme().radius - px(1.)).max(px(0.)))
+    }
+
     /// Render the row header cell (when cell_selectable is enabled)
     fn render_row_header_cell(
         &self,
@@ -1887,6 +1899,12 @@ where
             .bg(cx.theme().tokens.table_head)
             .flex_shrink_0()
             .table_cell_size(self.options.size)
+            .when(is_head, |this| {
+                // The row header cell is the leftmost part of the header.
+                this.when_some(self.header_corner_radius(cx), |this, radius| {
+                    this.rounded_tl(radius)
+                })
+            })
             .when(!is_head, |this| {
                 this.when(self.row_selectable, |this| {
                     this.on_click(cx.listener(move |table, e: &ClickEvent, _window, cx| {
@@ -2143,6 +2161,13 @@ where
         let style = header.style().clone();
         let layout = self.header_layout.clone();
 
+        // Which header part sits at each top corner, to round it along with
+        // the bordered table (see `header_corner_radius`).
+        let corner_radius = self.header_corner_radius(cx);
+        let has_row_header = self.cell_selectable && self.row_header;
+        let head_cols_at_left = !has_row_header && left_columns_count == 0;
+        let head_cols_at_right = right_columns_start == total_cols;
+
         header
             // One header row holds every column header, including the pinned
             // ones, which are laid out in a separate container.
@@ -2153,6 +2178,9 @@ where
             .flex_shrink_0()
             .bg(cx.theme().tokens.table_head)
             .text_color(cx.theme().table_head_foreground)
+            .when_some(corner_radius, |this, radius| {
+                this.rounded_tl(radius).rounded_tr(radius)
+            })
             .refine_style(&style)
             .on_drag_move(cx.listener(|table, e: &DragMoveEvent<DragColumn>, _, cx| {
                 let drag = e.drag(cx);
@@ -2182,7 +2210,7 @@ where
                 let to_ix = if drag.col_ix < gap { gap - 1 } else { gap };
                 table.move_column(drag.col_ix, to_ix, window, cx);
             }))
-            .when(self.cell_selectable && self.row_header, |this| {
+            .when(has_row_header, |this| {
                 this.child(self.render_row_header_cell(0, true, cx))
             })
             .when(left_columns_count > 0, |this| {
@@ -2202,6 +2230,10 @@ where
                     .relative()
                     .track_scroll(&horizontal_scroll_handle)
                     .bg(cx.theme().tokens.table_head)
+                    .when_some(corner_radius, |this, radius| {
+                        this.when(head_cols_at_left, |this| this.rounded_tl(radius))
+                            .when(head_cols_at_right, |this| this.rounded_tr(radius))
+                    })
                     .child(v_flex().min_w_full().flex_shrink_0().children(
                         layout.iter().enumerate().map(|(row_ix, row_cells)| {
                             let is_leaf_row = row_ix + 1 == layout_len;
@@ -2298,12 +2330,23 @@ where
         let view = cx.entity();
         let header_row_height = self.header_row_height();
         let layout = self.header_layout.clone();
+        // The left columns are the leftmost part of the header unless the
+        // row header cell comes before them; the right ones are always the
+        // rightmost.
+        let corner_radius = self.header_corner_radius(cx);
+        let at_left_corner =
+            side == ColumnFixed::Left && !(self.cell_selectable && self.row_header);
+        let at_right_corner = side == ColumnFixed::Right;
 
         h_flex()
             .relative()
             .h_full()
             .flex_shrink_0()
             .bg(cx.theme().tokens.table_head)
+            .when_some(corner_radius, |this, radius| {
+                this.when(at_left_corner, |this| this.rounded_tl(radius))
+                    .when(at_right_corner, |this| this.rounded_tr(radius))
+            })
             .child(
                 v_flex()
                     .min_w_full()
@@ -2863,6 +2906,24 @@ where
             .size_full()
             .overflow_hidden()
             .child(self.render_table_header(scrollable_cols.clone(), window, cx))
+            // A right-click on the header or below the rows is not on a row:
+            // drop the last right-clicked row so the menu is not built for it.
+            // Rows set it again on their own mouse down, which runs before
+            // this listener's bubble phase.
+            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
+                if e.button == MouseButton::Right {
+                    this.right_clicked_row = None;
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    if this.right_clicked_row.is_none() && this.right_clicked_cell.is_none() {
+                        this.on_row_right_click(e, None, window, cx);
+                        cx.notify();
+                    }
+                }),
+            )
             .context_menu({
                 let view = cx.entity();
                 move |this, window: &mut Window, cx: &mut Context<PopupMenu>| {

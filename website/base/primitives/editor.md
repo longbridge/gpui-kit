@@ -108,8 +108,25 @@ collections keep empty ranges, which mark line boundaries. See
 [Gutter and overview ruler decorations](../../component/editor.md#gutter-and-overview-ruler-decorations).
 
 `create_line_decorations_collection` attaches a `LineDecorationProvider`, which is
-asked for whole-row backgrounds on every frame. Base paints the backgrounds itself.
+asked for whole-row backgrounds and gutter icons on every frame. Base paints both
+itself: a gutter icon is the SVG asset at its path, in its color, in a square sized
+from the line height. A provider that returns `true` from `has_gutter_icons` gets
+the gutter's column of icons, `GutterColumn::Icons`, while line numbers are shown.
 See [Line decorations](../../component/editor.md#line-decorations).
+
+`set_spacer_provider` attaches a `SpacerProvider`, which is asked for blank rows to
+stand above or below lines when the rows move. Base lays the rows out and paints their
+optional backgrounds. See [Spacers](../../component/editor.md#spacers).
+
+## Display map
+
+`EditorState::display_map()` returns a read-only `&DisplayMap` for custom coordinate
+queries across the whole prepared buffer. The editor owns updates; use
+`DisplayMap::version()` to invalidate cached mappings after edits, rewrapping, or
+fold changes. Import `DisplayMap`, `BufferPoint`, and `DisplayPoint` from
+`gpui_kit::base::input`. See the [Editor](../../component/editor.md#line-decorations)
+for query examples, layout timing, and the distinction between text projection
+and painted geometry with inline completion ghost lines.
 
 ## Highlighting and language features
 

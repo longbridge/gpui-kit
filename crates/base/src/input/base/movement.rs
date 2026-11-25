@@ -126,9 +126,13 @@ impl<M: InputModeKind> InputBaseState<M> {
                     .nearest_visible_display_row(display_point.row)
             });
         let max_display_row = self.display_map.display_row_count().saturating_sub(1);
-        let target_display_row = current_display_row
-            .saturating_add_signed(move_lines)
-            .min(max_display_row);
+        // A spacer row holds no text: the caret steps past it.
+        let target_display_row = self.display_map.text_display_row(
+            current_display_row
+                .saturating_add_signed(move_lines)
+                .min(max_display_row),
+            move_lines > 0,
+        );
         let target_wrap_row = self
             .display_map
             .display_row_to_wrap_row(target_display_row)

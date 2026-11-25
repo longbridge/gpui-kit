@@ -621,6 +621,18 @@
     },
     {
       "source": "ui",
+      "name": "live_region",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "LiveRegion",
+        "exports": [
+          "LiveRegion"
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "menu",
       "classification": "component",
       "registration": {
@@ -1733,6 +1745,12 @@
     },
     {
       "source": "story",
+      "name": "editor_diff",
+      "classification": "infrastructure",
+      "explanation": "The Editor Diff story lays out two Editors, registered by the Editor story, as a side-by-side diff; it adds no constructor."
+    },
+    {
+      "source": "story",
       "name": "empty",
       "classification": "component",
       "registration": {
@@ -1970,6 +1988,18 @@
         "descriptor": "List",
         "exports": [
           "List"
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "live_region",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "LiveRegion",
+        "exports": [
+          "LiveRegion"
         ]
       }
     },

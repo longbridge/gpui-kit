@@ -30,7 +30,7 @@ pub use gpui_base::input::{
     CompletionMenuOptions, CompletionProvider, Copy, Cut, DefinitionProvider, Delete,
     DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd, DeleteToPreviousWordStart,
     DisplayMap, DisplayPoint, DocumentColorProvider, DocumentRangeSemanticTokensProvider,
-    EditorState, Enter, Escape, FoldRange, GoToDefinition, GutterDecoration,
+    EditorState, Enter, Escape, FoldRange, GoToDefinition, GutterColumn, GutterDecoration,
     GutterDecorationCollection, HighlightStyleResolver, HoverPopoverState, HoverProvider, Indent,
     IndentInline, InputEdit, InputEditsEvent, InputEvent, InputHighlighter,
     InputHighlighterFactory, InputState, LineDecoration, LineDecorationCollection,
@@ -41,9 +41,9 @@ pub use gpui_base::input::{
     RangeDecoration, RangeDecorationCollection, RangeDecorationStyle, Redo, Replace, Rope, RopeExt,
     RopeLines, Search, SelectAll, SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd,
     SelectToPreviousWordStart, SelectToStart, SelectToStartOfLine, Selection, ShowCharacterPalette,
-    ShowCompletions, ShowDocumentHandler, TabSize, TextDecoration, TextDecorationCollection,
-    TextareaState, ToggleCodeActions, Undo, WrappingIndent, highlight_characters,
-    highlight_contains, highlight_prefix,
+    ShowCompletions, ShowDocumentHandler, Spacer, SpacerProvider, TabSize, TextDecoration,
+    TextDecorationCollection, TextareaState, ToggleCodeActions, Undo, WrappingIndent,
+    highlight_characters, highlight_contains, highlight_prefix,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 pub use gutter_style::GutterStyle;

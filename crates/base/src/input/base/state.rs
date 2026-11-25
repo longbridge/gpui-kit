@@ -22,7 +22,7 @@ use sum_tree::Bias;
 use unicode_segmentation::*;
 
 use super::{
-    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, InputContextMenuCapabilities,
+    DiagnosticSet, DisplayMap, FoldPlaceholderRenderer, GutterColumn, InputContextMenuCapabilities,
     InputEditorStyle, InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep,
     WrappingIndent,
     blink_cursor::BlinkCursor,
@@ -38,6 +38,7 @@ use super::{
     undo_manager::{EditIntent, UndoManager},
 };
 use crate::ScrollbarPlacement;
+use crate::Side;
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
@@ -446,6 +447,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) mode: LayoutMode,
     pub(super) text: Rope,
     pub(super) display_map: DisplayMap,
+    /// The display rows version the spacer provider was last asked at, `None`
+    /// when it must be asked again.
+    pub(super) spacers_asked: Option<usize>,
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
@@ -553,6 +557,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Overview ruler marks in display rows, kept between frames.
     pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
     pub(super) scrollbar_placement: ScrollbarPlacement,
+    pub(super) gutter_side: Side,
+    pub(super) gutter_order: [GutterColumn; 4],
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -702,6 +708,7 @@ pub struct InputPresentation {
     masked: bool,
     multi_line: bool,
     code_editor: bool,
+    gutter_side: Side,
     text_align: TextAlign,
     placeholder: SharedString,
     mask_placeholder: Option<String>,
@@ -741,6 +748,10 @@ impl InputPresentation {
 
     pub fn is_code_editor(&self) -> bool {
         self.code_editor
+    }
+
+    pub fn gutter_side(&self) -> Side {
+        self.gutter_side
     }
 
     pub fn text_align(&self) -> TextAlign {
@@ -796,6 +807,15 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Text edits use the cached wrapping parameters. Layout refreshes the
     /// cache after width or font changes; consume that count on a subsequent
     /// render, or use [`Self::prewrap`] to prepare it before the first layout.
+    ///
+    /// The map covers the whole buffer, including lines outside the viewport,
+    /// and the state owns all updates. Use [`DisplayMap::version`] to
+    /// invalidate cached mappings after edits, rewrapping, or folding changes.
+    ///
+    /// Display coordinates describe text after wrapping and folding, with the
+    /// spacer rows between lines. They do not include inline completion ghost
+    /// lines; use [`Self::row_bounds`] for the actual painted geometry of a
+    /// visible buffer line.
     pub fn display_map(&self) -> &DisplayMap {
         &self.display_map
     }
@@ -844,6 +864,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             masked: self.masked,
             multi_line: self.is_multi_line(),
             code_editor: self.is_code_editor(),
+            gutter_side: self.gutter_side,
             text_align: self.text_align,
             placeholder: self.placeholder.clone(),
             mask_placeholder: self.mask_pattern.placeholder(),
@@ -995,6 +1016,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             selection_focus: None,
             text: "".into(),
             display_map: DisplayMap::new(text_style.font(), window.rem_size(), None),
+            spacers_asked: None,
             search_session: super::SearchSession::default(),
             search_activation_revision: 0,
             searchable: false,
@@ -1060,6 +1082,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             editor_scrollbar_snapshot: Cell::new(None),
             overview_ruler_rows: Default::default(),
             scrollbar_placement: ScrollbarPlacement::default(),
+            gutter_side: Side::Left,
+            gutter_order: GutterColumn::DEFAULT_ORDER,
             longest_line_width: Cell::new(None),
             editor_paddings: Edges::default(),
             deferred_scroll_offset: None,
@@ -1206,8 +1230,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         let Some(gpui::accesskit::ActionData::Value(value)) = data else {
             return;
         };
-        // The action may have been queued before editability changed.
-        if self.is_editable() {
+        // The action may have been queued before editability or text size changed.
+        if self.is_editable() && self.exposes_full_accessibility_text() {
             self.replace_all(value.to_string(), window, cx);
         }
     }
@@ -1281,22 +1305,23 @@ impl<M: InputModeKind> InputBaseState<M> {
         let line_height = last_layout.line_height;
         let target_row = self.text.offset_to_point(offset.min(self.text.len())).row;
 
-        let mut row_offset: isize = 0;
+        let mut y_offset = last_layout.visible_top;
         for (vi, line) in last_layout.lines.iter().enumerate() {
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
             let buffer_line = last_layout.visible_buffer_lines[vi];
             if buffer_line == target_row {
-                let y_offset = last_layout.local_row_y(row_offset);
                 let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
                 let local_offset = offset.saturating_sub(prev_lines_offset).min(line.len());
                 let pos = line
                     .position_for_index(local_offset, last_layout, false)
                     .unwrap_or_else(|| point(px(0.), px(0.)));
                 let sub_line_index = (pos.y / line_height) as usize;
-                let adjusted_pos = point(pos.x + last_layout.line_number_width, pos.y + y_offset);
+                let adjusted_pos = point(pos.x + last_layout.text_origin_x, pos.y + y_offset);
                 return (vi, sub_line_index, Some(adjusted_pos));
             }
 
-            row_offset += line.wrapped_lines.len() as isize;
+            y_offset += line.size(line_height).height + spacer_below;
         }
         (0, 0, None)
     }
@@ -2813,6 +2838,9 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let mut new_selections = Vec::with_capacity(end_row - start_row + 1);
         for row in start_row..=end_row {
+            if self.display_map.is_spacer_row(row) {
+                continue;
+            }
             let sel_start = self
                 .display_map
                 .display_row_column_to_offset(row, start_col);
@@ -3268,7 +3296,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             let line = &last_layout.lines[vi];
             let local_offset = offset.saturating_sub(last_layout.visible_line_byte_offsets[vi]);
             if let Some(pos) = line.position_for_index(local_offset, last_layout, false) {
-                let bounds_width = bounds.size.width - last_layout.line_number_width;
+                let bounds_width = last_layout.text_width;
                 let col_offset_x = pos.x;
                 if col_offset_x - safety_margin < -scroll_offset.x {
                     // If the position is out of the visible area, scroll to make it visible
@@ -3906,7 +3934,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         };
 
         let line_height = last_layout.line_height;
-        let line_number_width = last_layout.line_number_width;
+        let text_origin_x = last_layout.text_origin_x;
 
         // TIP: About the IBeam cursor
         //
@@ -3918,9 +3946,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         //
         // - included the input padding.
         // - included the scroll offset.
-        let inner_position = position - bounds.origin - point(line_number_width, px(0.));
+        let inner_position = position - bounds.origin - point(text_origin_x, px(0.));
 
-        let mut row_offset: isize = 0;
+        let mut y_offset = last_layout.visible_top;
         // Position relative to the last line walked, kept for a pointer that ends up
         // below every line.
         let mut last_line_pos = None;
@@ -3933,11 +3961,19 @@ impl<M: InputModeKind> InputBaseState<M> {
             .enumerate()
         {
             let line_start_offset = last_layout.visible_line_byte_offsets[vi];
-            let y_offset = last_layout.local_row_y(row_offset);
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
+            let height = line_layout.size(line_height).height;
 
             // Calculate line origin for this display row
             let line_origin = point(px(0.), y_offset);
-            let pos = inner_position - line_origin;
+            let mut pos = inner_position - line_origin;
+            // A pointer on a spacer row is on the row of text it stands beside.
+            if pos.y < px(0.) && pos.y >= -spacer_above {
+                pos.y = px(0.);
+            } else if pos.y >= height && pos.y < height + spacer_below {
+                pos.y = height - line_height;
+            }
 
             // Return offset by use closest_index_for_x if is single line mode.
             if self.is_single_line() {
@@ -3964,7 +4000,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (self.resolve_index(line_start_offset), false, 0);
             }
 
-            row_offset += line_layout.wrapped_lines.len() as isize;
+            y_offset += height + spacer_below;
             last_line_pos = Some(pos);
         }
 
@@ -5337,13 +5373,12 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
     ) -> Option<Bounds<Pixels>> {
         let last_layout = self.last_layout.as_ref()?;
         let line_height = last_layout.line_height;
-        let line_number_width = last_layout.line_number_width;
         let range = self.range_from_utf16(&range_utf16);
 
         let mut start_origin = None;
         let mut end_origin = None;
-        let line_number_origin = point(line_number_width, px(0.));
-        let mut row_offset: isize = 0;
+        let text_origin = point(last_layout.text_origin_x, px(0.));
+        let mut y_offset = last_layout.visible_top;
 
         let start_row = self
             .text
@@ -5359,7 +5394,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 break;
             }
 
-            let y_offset = last_layout.local_row_y(row_offset);
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
             let buffer_line = last_layout.visible_buffer_lines[vi];
             let index_offset = last_layout.visible_line_byte_offsets[vi];
 
@@ -5379,13 +5415,13 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 end_origin = Some(p + point(px(0.), y_offset));
             }
 
-            row_offset += line.wrapped_lines.len() as isize;
+            y_offset += line.size(line_height).height + spacer_below;
         }
 
         let start_origin = start_origin.or_else(|| {
             let offset = self.last_cursor.or(Some(self.cursor()))?;
             let (_, _, origin) = self.line_and_position_for_offset(offset);
-            origin.map(|origin| origin - line_number_origin)
+            origin.map(|origin| origin - text_origin)
         })?;
         let mut end_origin = end_origin.unwrap_or(start_origin);
         // Ensure at same line.
@@ -5395,9 +5431,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         }
 
         Some(Bounds::from_corners(
-            bounds.origin + line_number_origin + start_origin,
+            bounds.origin + text_origin + start_origin,
             // + line_height for show IME panel under the cursor line.
-            bounds.origin + line_number_origin + point(end_origin.x, end_origin.y + line_height),
+            bounds.origin + text_origin + point(end_origin.x, end_origin.y + line_height),
         ))
     }
 
@@ -5411,17 +5447,18 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         // The same origin as `resolve_mouse_position`: past the gutter, at the first
         // visible line.
         let inner_point = self.last_bounds?.localize(&point)?
-            - gpui::point(last_layout.line_number_width, last_layout.visible_top);
+            - gpui::point(last_layout.text_origin_x, last_layout.visible_top);
 
-        let mut row_offset: usize = 0;
+        let mut line_top = px(0.);
         for (vi, line) in last_layout.lines.iter().enumerate() {
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            line_top += spacer_above;
             let offset = last_layout.visible_line_byte_offsets[vi];
-            let line_top = last_layout.line_height * (row_offset as f32);
             let line_point = inner_point - gpui::point(px(0.), line_top);
             if let Some(utf8_index) = line.index_for_position(line_point, last_layout) {
                 return Some(self.offset_to_utf16(self.resolve_index(offset + utf8_index)));
             }
-            row_offset += line.wrapped_lines.len();
+            line_top += line.size(last_layout.line_height).height + spacer_below;
         }
 
         None
@@ -5461,11 +5498,13 @@ impl<M: InputModeKind> InputBaseState<M> {
             .projected_editor_style
             .resolved(&crate::Theme::global(cx).tokens);
         let entity = cx.entity();
+        let expose_full_text = self.exposes_full_accessibility_text();
         let exposed_text = self
             .accessibility
             .as_ref()
             .is_some_and(|accessibility| {
-                accessibility.value_exposed
+                expose_full_text
+                    && accessibility.value_exposed
                     && !self.masked
                     && (window.is_a11y_active() || cfg!(feature = "test-support"))
             })
@@ -5516,7 +5555,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                             });
                         }
                     })
-                    .when(self.is_editable(), |this| {
+                    .when(self.is_editable() && expose_full_text, |this| {
                         this.on_a11y_action(gpui::AccessibleAction::SetValue, {
                             let entity = entity.clone();
                             move |data, window, cx| {
@@ -5773,6 +5812,23 @@ mod tests {
             });
         });
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+    }
+
+    #[gpui::test]
+    fn accessibility_set_value_cannot_replace_a_bounded_document(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            crate::input::EditorState::new(window, cx).default_value(
+                "x".repeat(super::super::a11y_text::FULL_ACCESSIBILITY_TEXT_LIMIT + 1),
+            )
+        });
+        let action = gpui::accesskit::ActionData::Value("replacement".into());
+        cx.update(|window, cx| {
+            editor.update(cx, |editor, cx| {
+                editor.handle_accessibility_set_value(Some(&action), window, cx)
+            });
+        });
+        assert!(editor.read_with(cx, |editor, _| editor.value().starts_with('x')));
     }
 
     #[gpui::test]
@@ -13768,8 +13824,9 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
     /// The placement of the scrollbars, default is [`ScrollbarPlacement::BottomRight`].
     ///
     /// On the left, the vertical scrollbar sits on the input's left edge, over
-    /// the line numbers. At the top, the horizontal scrollbar overlays the
-    /// first line, as at the bottom it overlays the last.
+    /// the gutter when that is on the left too; otherwise the text keeps clear
+    /// of it. At the top, the horizontal scrollbar overlays the first line, as
+    /// at the bottom it overlays the last.
     pub fn scrollbar_placement(mut self, placement: ScrollbarPlacement) -> Self {
         self.scrollbar_placement = placement;
         self
@@ -13782,6 +13839,47 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.scrollbar_placement = placement;
+        cx.notify();
+    }
+
+    /// The side of the gutter with the line numbers and fold icons, default is
+    /// [`Side::Left`].
+    ///
+    /// [`Side::Right`] is for the left pane of a side-by-side diff, so that both
+    /// gutters face the center and corresponding line numbers sit next to each
+    /// other. On the right, the gutter is mirrored: its columns keep their order
+    /// from the text outward, see [`InputBaseState::gutter_order`], and the
+    /// line numbers are aligned toward the text. A vertical scrollbar on the
+    /// same side stays outermost.
+    pub fn gutter_side(mut self, side: Side) -> Self {
+        self.gutter_side = side;
+        self
+    }
+
+    /// See [`InputBaseState::gutter_side`].
+    pub fn set_gutter_side(&mut self, side: Side, cx: &mut Context<Self>) {
+        self.gutter_side = side;
+        cx.notify();
+    }
+
+    /// The order of the gutter's columns from the text outward, default is
+    /// `[GutterColumn::FoldIcons, GutterColumn::LineNumbers, GutterColumn::Icons,
+    /// GutterColumn::Decorations]`.
+    ///
+    /// A column left out follows the listed ones in its default order, and a
+    /// repeated one is ignored. The order holds on either side.
+    pub fn gutter_order(mut self, columns: impl IntoIterator<Item = GutterColumn>) -> Self {
+        self.gutter_order = GutterColumn::order(columns);
+        self
+    }
+
+    /// See [`InputBaseState::gutter_order`].
+    pub fn set_gutter_order(
+        &mut self,
+        columns: impl IntoIterator<Item = GutterColumn>,
+        cx: &mut Context<Self>,
+    ) {
+        self.gutter_order = GutterColumn::order(columns);
         cx.notify();
     }
 
@@ -14067,18 +14165,18 @@ impl InputBaseState<crate::input::EditorMode> {
 
     /// Horizontal offset from the content area's left edge to unscrolled source text.
     ///
-    /// Includes the laid-out gap, line numbers, folding controls, and gutter
-    /// decorations. Excludes input-frame padding, horizontal scrolling, and
-    /// text alignment. For left-aligned text, add this to the content area's
-    /// origin and the horizontal scroll offset to recover the text origin.
+    /// With the gutter on the left, includes the laid-out gap, line numbers,
+    /// folding controls, and gutter decorations; with it on the right, only the
+    /// clearance kept from a scrollbar on the left. Excludes input-frame padding,
+    /// horizontal scrolling, and text alignment. For left-aligned text, add this
+    /// to the content area's origin and the horizontal scroll offset to recover
+    /// the text origin.
     ///
     /// Returns `None` before the first layout. Like [`Self::range_to_bounds`],
     /// this describes the most recent layout; render again after changing
     /// gutter settings or typography before using it to align a static view.
     pub fn text_origin_offset(&self) -> Option<Pixels> {
-        self.last_layout
-            .as_ref()
-            .map(|layout| layout.line_number_width)
+        self.last_layout.as_ref().map(|layout| layout.text_origin_x)
     }
 
     /// Set enable/disable line number.

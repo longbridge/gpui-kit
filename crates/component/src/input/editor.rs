@@ -530,6 +530,35 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_gutter_on_the_right_keeps_the_padding_it_has_on_the_left(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("fn main() {}"));
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        let mut padding = |side: crate::Side| {
+            VisualTestContext::update(cx, |window, cx| {
+                state.update(cx, |state, cx| state.set_gutter_side(side, cx));
+                window.draw(cx).clear(cx);
+                let bounds = state.read(cx).input_bounds();
+                (bounds.left(), window.viewport_size().width - bounds.right())
+            })
+        };
+
+        let (left_outer, left_inner) = padding(crate::Side::Left);
+        let (right_inner, right_outer) = padding(crate::Side::Right);
+        assert!(left_outer < left_inner);
+        assert_eq!(right_outer, left_outer);
+        assert_eq!(right_inner, left_inner);
+    }
+
+    #[gpui::test]
     fn language_config_works_without_render_sync(cx: &mut TestAppContext) {
         use crate::input::{AutoClosingPair, language_config::LanguageConfig, set_language_config};
         use gpui::EntityInputHandler as _;
@@ -709,6 +738,121 @@ mod tests {
                 state.replace_text_in_range(None, "!", window, cx);
                 assert_eq!(state.text().to_string(), "/*x*/!");
             });
+        });
+    }
+
+    #[gpui::test]
+    fn row_backgrounds_alone_keep_the_gutter_width(cx: &mut TestAppContext) {
+        use crate::input::{LineDecoration, LineDecorationProvider};
+        use std::ops::Range;
+
+        struct Backgrounds;
+
+        impl LineDecorationProvider for Backgrounds {
+            fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+                rows.map(|row| LineDecoration::new(row).with_background(cx.theme().success))
+                    .collect()
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx).default_value("first\nsecond"));
+            editor = Some(state.clone());
+            Harness {
+                state,
+                text_size: None,
+            }
+        });
+        let editor = editor.unwrap();
+        VisualTestContext::update(cx, |window, cx| {
+            window.draw(cx).clear(cx);
+            let text_x = |cx: &App| editor.read(cx).range_to_bounds(&(0..0)).unwrap().left();
+            let plain = text_x(cx);
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Rc::new(Backgrounds), cx);
+            });
+            window.draw(cx).clear(cx);
+            assert_eq!(text_x(cx), plain);
+        });
+    }
+
+    #[gpui::test]
+    fn gutter_icons_follow_editor_font_changes_without_changing_rem(cx: &mut TestAppContext) {
+        use crate::IconName;
+        use crate::input::{LineDecoration, LineDecorationProvider};
+        use gpui_kit_assets::IconNamed as _;
+        use std::ops::Range;
+
+        struct Icons;
+
+        impl LineDecorationProvider for Icons {
+            fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+                rows.map(|row| {
+                    LineDecoration::new(row)
+                        .with_gutter_icon(IconName::Plus.path(), cx.theme().success)
+                })
+                .collect()
+            }
+
+            fn has_gutter_icons(&self) -> bool {
+                true
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let mut harness = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx).default_value("first\nsecond"));
+            editor = Some(state.clone());
+            harness = Some(cx.entity());
+            Harness {
+                state,
+                text_size: None,
+            }
+        });
+        let editor = editor.unwrap();
+        let harness = harness.unwrap();
+        VisualTestContext::update(cx, |window, cx| {
+            let rem_size = window.rem_size();
+            let mut previous = None;
+            for font_size in [px(11.), px(20.)] {
+                harness.update(cx, |view, cx| {
+                    view.text_size = Some(font_size);
+                    cx.notify();
+                });
+                window.draw(cx).clear(cx);
+                let without = editor.read(cx).range_to_bounds(&(0..0)).unwrap().left();
+                let collection = editor.update(cx, |state, cx| {
+                    state.create_line_decorations_collection(Rc::new(Icons), cx)
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let column = state.range_to_bounds(&(0..0)).unwrap().left() - without;
+                let row_height = state.row_bounds(0).unwrap().size.height;
+                assert!(column > px(0.));
+                if let Some((previous_column, previous_height)) = previous {
+                    assert!(
+                        column > previous_column,
+                        "the icons' column did not follow the font"
+                    );
+                    let expected = previous_column * (row_height / previous_height);
+                    assert!(
+                        (column - expected).abs() < px(0.01),
+                        "icons and rows scaled apart: column {column:?}, previous column {previous_column:?}, row {row_height:?}, previous row {previous_height:?}"
+                    );
+                }
+                previous = Some((column, row_height));
+                assert_eq!(window.rem_size(), rem_size);
+                collection.clear(cx);
+                window.draw(cx).clear(cx);
+                assert_eq!(
+                    editor.read(cx).range_to_bounds(&(0..0)).unwrap().left(),
+                    without
+                );
+            }
         });
     }
 

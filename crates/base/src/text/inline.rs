@@ -2443,7 +2443,10 @@ pub(super) mod test_fonts {
         Pixels, PlatformTextSystem, RenderGlyphParams, ShapedGlyph, ShapedRun, Size,
         TextRenderingMode, point, px, size,
     };
-    use std::{borrow::Cow, cell::RefCell};
+    use std::{
+        borrow::Cow,
+        cell::{Cell, RefCell},
+    };
 
     pub(crate) const BODY: &str = "Body";
     pub(crate) const MONO: &str = "Mono";
@@ -2476,6 +2479,25 @@ pub(super) mod test_fonts {
 
     thread_local! {
         static SHAPED_LINE_RECORDER: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    thread_local! {
+        static KERNING_UNITS: Cell<f32> = const { Cell::new(0.) };
+    }
+
+    /// Runs `f` while every glyph after the first of a shaped line is set
+    /// `units` (in em units) closer to the one before, as kerning does. A
+    /// character shaped alone, as the line wrapper measures it, keeps its
+    /// full advance.
+    pub(crate) fn with_kerning<R>(units: f32, f: impl FnOnce() -> R) -> R {
+        struct Reset(f32);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                KERNING_UNITS.with(|kerning| kerning.set(self.0));
+            }
+        }
+        let _reset = Reset(KERNING_UNITS.with(|kerning| kerning.replace(units)));
+        f()
     }
 
     struct ShapeRecorderGuard;
@@ -2577,6 +2599,7 @@ pub(super) mod test_fonts {
                 }
             });
 
+            let kerning = font_size * (KERNING_UNITS.with(Cell::get) / UNITS_PER_EM);
             let mut position = px(0.);
             let mut shaped_runs = Vec::new();
             let mut run_start = 0;
@@ -2585,6 +2608,9 @@ pub(super) mod test_fonts {
                 let advance = font_size * (Self::advance_units(run.font_id) / UNITS_PER_EM);
                 let mut glyphs = Vec::new();
                 for (ix, ch) in run_text.char_indices() {
+                    if run_start + ix > 0 {
+                        position -= kerning;
+                    }
                     glyphs.push(ShapedGlyph {
                         id: GlyphId(ch as u32),
                         position: point(position, px(0.)),

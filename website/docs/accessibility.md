@@ -301,6 +301,18 @@ Check each path in the running window. A pointer click should change **Activatio
 
 If Tab skips the control, check both `.tab_stop(true)` on the retained handle and `.track_focus(...)` on the current rendered node. If its role or name is missing, check that the same node has a stable ID, role, and label. If an activation produces two increments, look for a second Click or key handler calling the same command. This exercise demonstrates one button-like control; for real application commands, prefer the standard Button, which also handles its other component states and styling.
 
+## Announce status changes
+
+`Role::Status` describes a node; it does not make platforms speak it when it changes. For a result the user should hear without moving focus, such as a save finishing or a search's result count, show it with a `LiveRegion`:
+
+```rust
+use gpui_kit::component::live_region::LiveRegion;
+
+LiveRegion::new("save-status", status).text_sm()
+```
+
+`LiveRegion` writes AccessKit's `live` property, which GPUI elements cannot set themselves, and names its text for every adapter: macOS announces the value, Windows and Linux the name. It draws its text and is the one node for it, so a reader browsing the view hears it once; style it like a `div`, or give it no size (`.absolute().size_0().overflow_hidden()`) to announce without showing anything. A region is announced when its text changes and when it first appears with text; empty text says nothing, and setting the same text again is silent. Keep its ID stable, since a new ID is a new node and is announced again. Announcements are polite and wait for current speech; `.assertive()` interrupts it and is for errors that block the current task.
+
 ## Custom `Element` implementations
 
 When composition with `div()` is insufficient, a low-level `Element` has explicit hooks. Continue the [EventSurface exercise](./element#make-the-surface-visible-and-respond-to-a-press), which already implements `IntoElement`, layout, prepaint, and paint in `examples/hello_world/src/main.rs`. Make these three edits inside that existing example:
@@ -329,7 +341,7 @@ Enable GPUI Kit's `test-support` feature for UI integration tests and import `gp
 
 `None` from a snapshot state reader means the property is unavailable, not `false`. In particular, `.disabled()` is `Some(true)` only if the node exposes that flag; test disabled behavior by attempting activation and checking that the result did not change. `ElementSnapshot::value()` reads a string accessibility value, not Slider's numeric value or painted text. Masked and password inputs intentionally expose no accessibility value. The current Input implementation registers `SetValue` when it is not disabled, including in read-only mode; its handler uses a programmatic replacement path. Do not treat `readonly(true)` as protection against this accessible write path without verifying the behavior you need. See [Testing](./test) for test setup, frame, and focus details.
 
-Headless snapshots read AccessKit properties produced by GPUI elements; they do not inspect the final platform adapter tree, a screen reader announcement, or pixels. Inspect the running app with assistive technology on each target platform for announcement order, focus movement, editing, and actions. In particular, verify that a changing `Role::Status` is actually announced rather than assuming its role alone guarantees a live announcement. Platform adapters differ, and [WebAssembly support](./webassembly.md) must be checked independently from native desktop behavior. Pair this with visual checks for focus contrast, readable text, target size, reduced motion, and information that must not depend on color alone; see [Design Guides](./design-guides).
+Headless snapshots read AccessKit properties produced by GPUI elements; they do not inspect the final platform adapter tree, a screen reader announcement, or pixels. Inspect the running app with assistive technology on each target platform for announcement order, focus movement, editing, and actions. In particular, verify that a changing status is actually announced: a `Role::Status` alone does not guarantee it, and a `LiveRegion` should be checked with a screen reader on each platform. Platform adapters differ, and [WebAssembly support](./webassembly.md) must be checked independently from native desktop behavior. Pair this with visual checks for focus contrast, readable text, target size, reduced motion, and information that must not depend on color alone; see [Design Guides](./design-guides).
 
 ### A practical acceptance pass
 

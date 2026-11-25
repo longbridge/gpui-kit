@@ -1,5 +1,7 @@
 use gpui_kit::component::{
     calendar::{Calendar, CalendarState},
+    h_flex,
+    scroll::ScrollableElement as _,
     v_flex,
 };
 use gpui_kit::{
@@ -69,8 +71,13 @@ impl Render for CalendarStory {
             .child(
                 section("Multiple months")
                     .description("Three months shown together.")
-                    .w_128()
-                    .child(Calendar::new(&self.calendar_wide).number_of_months(3)),
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_center()
+                            .child(Calendar::new(&self.calendar_wide).number_of_months(3))
+                            .overflow_x_scrollbar(),
+                    ),
             )
             .child(
                 section("Disabled dates")

@@ -123,11 +123,31 @@ let editor = cx.new(|cx| {
 
 `active_line_only_when_focused(true)` 让当前行的行号、当前行背景和光标所在行的折叠按钮只在编辑器或其右键菜单获得焦点时显示，这样界面上有多个编辑器时，只有获得焦点的那个显示当前行。
 
-滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上；若 gutter 位于右侧，文本会与滚动条保持间距。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+
+在右侧 gutter、左侧滚动条的镜像窗格中，横向轨道会避开 gutter，纵向轨道仍位于窗格外侧边缘。
 
 ```rust
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
+
+行号和折叠图标所在的 gutter 默认位于左侧。在并排 diff 中，两侧的 gutter 可以朝向中间，使对应行的行号隔着分隔线相邻。左侧窗格用 `gutter_side` 将 gutter 放到右侧（镜像排列，折叠图标紧邻文本），并把滚动条放到外侧边缘：
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号、[行号槽图标](#行装饰)和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。运行时可用 `set_gutter_side` 切换位置。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后，重复列出的列会被忽略。在 diff 中，这样可以把变更竖条放在文本与行号之间：
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Decorations])
+```
+
+运行时可用 `set_gutter_order` 修改顺序。
+
+Editor Diff 示例展示了这两种布局，两个窗格同步滚动。
 
 ## 主动补全
 
@@ -307,7 +327,8 @@ Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用�
 ### 行号槽与概览标尺装饰
 
 需要在文本之外标记整行（例如版本控制 diff 中新增、修改或删除的行）时，使用这两个集合。
-`GutterDecorationCollection` 在行号之前的窄带中绘制标记。
+`GutterDecorationCollection` 在 gutter 外侧边缘、行号之前的窄带中绘制标记；
+可用 `gutter_order` 通过 `GutterColumn::Decorations` 调整其位置。
 `OverviewRulerDecorationCollection` 在垂直滚动条轨道上绘制标记，Monaco 将这条轨道称为概览标尺。
 要同时在两处显示标记，请分别创建两个集合。
 
@@ -365,7 +386,7 @@ let ruler = editor.update(cx, |state, cx| {
 
 ### 行装饰
 
-`LineDecorationCollection` 以整行为单位绘制：横跨所装饰行的背景色带。
+`LineDecorationCollection` 以整行为单位绘制：横跨该行的背景色带、行号槽中的图标，或两者兼有。
 条目由 `LineDecorationProvider` 提供：编辑器每绘制一帧，都会以当前可见的缓冲区行范围询问它。
 
 ```rust
@@ -373,7 +394,7 @@ use std::{ops::Range, rc::Rc};
 
 use gpui_kit::App;
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, IconName, IconNamed as _,
     input::{LineDecoration, LineDecorationProvider},
 };
 
@@ -386,8 +407,16 @@ impl LineDecorationProvider for AddedRows {
         let end = self.0.partition_point(|&row| row < rows.end);
         self.0[start..end]
             .iter()
-            .map(|&row| LineDecoration::new(row).with_background(cx.theme().success.opacity(0.16)))
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_gutter_icon(IconName::Plus.path(), cx.theme().success)
+            })
             .collect()
+    }
+
+    fn has_gutter_icons(&self) -> bool {
+        true
     }
 }
 
@@ -406,11 +435,105 @@ added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
 后创建的集合绘制在先创建的集合之上。
 
 背景横跨整行（包括行号槽），覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
-选区和文字下方。它不影响命中测试或焦点，也不提供鼠标或键盘操作。
+选区和文字下方。
+
+行号槽图标是传给 `with_gutter_icon` 的路径对应的 SVG 资源，以给定颜色绘制在边长为行高 60% 的正方形中，
+并在所在行垂直居中，因此图标既跟随界面缩放，也跟随编辑器单独设置的 `.text_size(...)`。图标位于独立的列
+`GutterColumn::Icons` 中，只在显示行号时出现，与行号之间留有行高 20% 的间距。默认顺序下，该列位于行号外侧；
+使用 `gutter_order` 可将其移到更靠近文本的位置，与 IntelliJ IDEA 放置标记的方式一致。只有当某个 provider 的
+`has_gutter_icons` 返回 `true` 时才会预留该列，并且对每一行都预留，因此带图标的行滚入或滚出视图时行号槽宽度不变，
+只使用背景的编辑器与没有行装饰的编辑器布局相同。其他 provider 的行号槽图标不会绘制。
+
+背景和行号槽图标都不影响命中测试或焦点，也不提供鼠标或键盘操作。
 
 `EditorState::row_bounds(row)` 返回某一行在窗口坐标中实际绘制的区域：多行内联补全下方的行会随
 文字一起下移。该行尚未布局时返回 `None`。
 Editor 展示页的 **Decorations** 标签用 provider 为最后两行着色。
+
+`EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
+`DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
+`gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、
+同步视图，以及缓冲区坐标与显示坐标之间的转换。
+
+```rust
+use gpui_kit::base::input::BufferPoint;
+
+let state = editor.read(cx);
+let map = state.display_map();
+let count = map.display_row_count();
+let rows = map.buffer_line_to_display_row_range(0); // 折叠隐藏的行返回 None
+let display = map.buffer_pos_to_display_pos(BufferPoint::new(0, 0));
+let buffer = map.display_pos_to_buffer_pos(display);
+let version = map.version();
+```
+
+映射覆盖整个已准备的文本，包括视口外的行。软换行使用最近准备的布局参数；文本尚未准备时，
+映射没有显示行。编辑、重新换行、折叠或填充行变化会改变 `map.version()`。比较同一映射的版本可以判断
+何时需要重新查询；滚动不会改变版本。
+
+映射不包含内联补全的额外行。显示行序号乘以行高表示文本映射位置，不一定是实际绘制位置：
+多行内联补全会把后续文本向下推，而映射和版本不变。可见行的实际几何信息应通过 `row_bounds` 获取。
+
+缓冲区和显示坐标的序号均从零开始。被折叠隐藏的缓冲区行没有显示行范围（返回 `None`）；
+缓冲区位置与显示位置之间的转换使用映射的坐标转换方法。
+
+### 填充行
+
+`Spacer` 是位于某个缓冲区行上方或下方的一组空白行。它不包含文本：没有行号，光标会跳过它，
+点击它会落到旁边的文本行上，行装饰、选区、搜索匹配和内联颜色都不会覆盖它。它的行与其他显示行一样，
+因此滚动高度、滚动到某一行以及 `row_bounds` 都会把它计算在内。并排显示的两个编辑器可以用填充行补齐
+较矮的行，使两侧对应的行无论各自如何换行都从同一高度开始，就像并排 diff 那样。
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::{App, WeakEntity};
+use gpui_kit::component::input::{EditorState, Spacer, SpacerProvider};
+
+/// 为每一行补上 `other` 中同一行因换行而多出的行数。
+struct Level {
+    this: WeakEntity<EditorState>,
+    other: WeakEntity<EditorState>,
+}
+
+impl SpacerProvider for Level {
+    fn spacers(&self, lines: Range<usize>, cx: &App) -> Vec<Spacer> {
+        let (Some(this), Some(other)) = (self.this.upgrade(), self.other.upgrade()) else {
+            return Vec::new();
+        };
+        let rows = |editor: &EditorState, line| {
+            editor
+                .display_map()
+                .buffer_line_to_display_row_range(line)
+                .map_or(0, |rows| rows.len())
+        };
+        let (this, other) = (this.read(cx), other.read(cx));
+        lines
+            .filter_map(|line| {
+                let (own, theirs) = (rows(this, line), rows(other, line));
+                (theirs > own).then(|| Spacer::below(line, theirs - own))
+            })
+            .collect()
+    }
+}
+
+let level = Rc::new(Level {
+    this: left.downgrade(),
+    other: right.downgrade(),
+});
+left.update(cx, |state, cx| state.set_spacer_provider(Some(level), cx));
+```
+
+与行装饰不同，填充行会推动其下方的所有行，因此编辑器一次性询问所有行的填充行并保留结果：设置 provider 时、
+编辑之后、文本重新换行或折叠变化之后，以及调用 `refresh_spacers` 时。询问发生在布局阶段，此时文本已按编辑器的
+宽度完成换行，并且不在编辑器的任何更新之内，因此 provider 可以读取本编辑器和其他编辑器。若结果依赖另一个
+编辑器的行，请在该编辑器的 `display_map().version()` 变化时调用 `refresh_spacers`。`Spacer::above(0, rows)`
+在文本顶部补行，`with_background` 为这些行（包括行号槽）填充颜色。位于折叠隐藏的行或最后一行之后的填充行不会显示。
+
+在显示映射中，填充行也是显示行：`display_row_count()` 会计入它们，`buffer_line_to_display_row_range(line)`
+只包含该行文本所占的行，`display_row_to_buffer_line(row)` 把填充行视为它旁边的那一行，`is_spacer_row(row)`
+用于区分填充行和文本行。填充行变化时 `version()` 也会变化，因此按版本缓存的行映射不会过期；provider 返回与当前相同的填充行时版本不变，
+所以在版本变化时调用 `refresh_spacers` 最终会稳定下来。
 
 ## 值与事件
 

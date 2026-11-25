@@ -51,6 +51,9 @@ pub(super) struct FoldMap {
     /// Used for lazy evaluation to avoid expensive rebuilds on every text change
     needs_rebuild: bool,
 
+    /// Bumped whenever the folded ranges change.
+    version: usize,
+
     /// Cached wrap_row_count from last rebuild
     /// Used to detect if WrapMap changed and rebuild is needed
     cached_wrap_row_count: usize,
@@ -66,6 +69,7 @@ impl FoldMap {
             folded: Vec::new(),
             needs_rebuild: true,
             cached_wrap_row_count: 0,
+            version: 0,
         }
     }
 
@@ -167,32 +171,40 @@ impl FoldMap {
         self.candidates = candidates;
 
         // Remove any folded ranges that are no longer in candidates
+        let folded = self.folded.len();
         self.folded.retain(|fold| {
             self.candidates
                 .iter()
                 .any(|c| c.start_line == fold.start_line)
         });
+        if self.folded.len() != folded {
+            self.version = self.version.wrapping_add(1);
+        }
     }
 
     /// Merge new candidates extracted from an edited region into existing candidates.
     ///
     /// Replaces candidates within [edit_start_line, edit_end_line] with `new_candidates`,
-    /// keeping candidates outside the edit range intact.
+    /// keeping candidates outside the edit range intact. A new candidate replaces an
+    /// old one with the same start line, so a range that grew past the edit keeps
+    /// its new end.
     pub(super) fn merge_candidates_for_edit(
         &mut self,
         edit_start_line: usize,
         edit_end_line: usize,
-        new_candidates: Vec<FoldRange>,
+        mut new_candidates: Vec<FoldRange>,
     ) {
         // Remove old candidates within the edit range (already done by adjust_folds_for_edit)
         // But do it again in case adjust wasn't called or range differs
-        self.candidates
-            .retain(|c| c.start_line < edit_start_line || c.start_line > edit_end_line);
-
-        // Add new candidates
-        self.candidates.extend(new_candidates);
-        self.candidates.sort_by_key(|r| r.start_line);
-        self.candidates.dedup_by_key(|r| r.start_line);
+        new_candidates.extend(
+            self.candidates
+                .drain(..)
+                .filter(|c| c.start_line < edit_start_line || c.start_line > edit_end_line),
+        );
+        // The sort is stable, so the new candidate leads its start line and survives dedup.
+        new_candidates.sort_by_key(|r| r.start_line);
+        new_candidates.dedup_by_key(|r| r.start_line);
+        self.candidates = new_candidates;
     }
 
     /// Set a fold at the given start_line (must be in candidates)
@@ -205,12 +217,17 @@ impl FoldMap {
                     self.folded.push(*candidate);
                     self.folded.sort_by_key(|r| r.start_line);
                     self.needs_rebuild = true;
+                    self.version = self.version.wrapping_add(1);
                 }
             }
         } else {
             // Remove from folded
+            let folded = self.folded.len();
             self.folded.retain(|f| f.start_line != start_line);
             self.needs_rebuild = true;
+            if self.folded.len() != folded {
+                self.version = self.version.wrapping_add(1);
+            }
         }
     }
 
@@ -236,6 +253,12 @@ impl FoldMap {
         &self.candidates
     }
 
+    /// A number that changes whenever the folded ranges change.
+    #[inline]
+    pub(super) fn version(&self) -> usize {
+        self.version
+    }
+
     /// Get all currently folded ranges
     #[inline]
     pub(super) fn folded_ranges(&self) -> &[FoldRange] {
@@ -245,7 +268,10 @@ impl FoldMap {
     /// Clear all folds
     #[inline]
     pub(super) fn clear_folds(&mut self) {
-        self.folded.clear();
+        if !self.folded.is_empty() {
+            self.folded.clear();
+            self.version = self.version.wrapping_add(1);
+        }
     }
 
     /// Adjust folds and candidates after a text edit.
@@ -262,6 +288,7 @@ impl FoldMap {
     ) {
         // Adjust folded ranges
         if !self.folded.is_empty() {
+            self.version = self.version.wrapping_add(1);
             self.folded.retain(|fold| {
                 !(fold.start_line <= edit_end_line && fold.end_line >= edit_start_line)
             });
@@ -442,5 +469,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn merged_candidate_replaces_the_old_one_on_its_start_line() {
+        let mut fold_map = FoldMap::new();
+        fold_map.set_candidates(vec![
+            FoldRange::new(0, 9),
+            FoldRange::new(1, 3),
+            FoldRange::new(6, 8),
+        ]);
+        // An edit on line 4 extended the range starting on line 1; the one on
+        // line 0 encloses it and is extracted again unchanged.
+        fold_map.merge_candidates_for_edit(4, 4, vec![FoldRange::new(0, 9), FoldRange::new(1, 4)]);
+        assert_eq!(
+            fold_map.fold_candidates(),
+            &[
+                FoldRange::new(0, 9),
+                FoldRange::new(1, 4),
+                FoldRange::new(6, 8),
+            ]
+        );
     }
 }

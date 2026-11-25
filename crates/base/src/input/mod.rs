@@ -72,6 +72,8 @@ mod scrollbar_presentation;
 mod search;
 #[path = "base/selection.rs"]
 mod selection;
+#[path = "editor/spacers.rs"]
+mod spacers;
 #[path = "base/state.rs"]
 mod state;
 #[path = "base/tab_stops.rs"]
@@ -117,6 +119,7 @@ pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};
 pub(crate) use language_config::LanguageConfig;
 pub use language_config::{AutoClosingPair, BracketPair, IndentationRules};
+pub use layout::GutterColumn;
 pub use line_decorations::{LineDecoration, LineDecorationCollection, LineDecorationProvider};
 pub use lsp::{
     CodeActionItem, CodeActionMenuState, CodeActionProvider, CompletionHighlighter,
@@ -134,5 +137,6 @@ pub use native::{NativeMenu, NativeMenuItem};
 pub use rope_ext::{InputEdit, Point, RopeExt, RopeLines};
 pub use ropey::Rope;
 pub use search::{SearchMatcher, SearchSession};
+pub use spacers::{Spacer, SpacerProvider};
 pub use state::*;
 pub use textarea::{Textarea, TextareaState};

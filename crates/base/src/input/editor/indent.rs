@@ -123,15 +123,17 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         let tab_size = state.mode.tab_size();
         let line_height = last_layout.line_height;
         let mut builder = PathBuilder::stroke(px(1.));
-        let mut row_offset: isize = 0;
+        let mut offset_y = last_layout.visible_top;
         let mut last_indents = vec![];
 
-        for (&buffer_line, line_layout) in last_layout
+        for (ix, (&buffer_line, line_layout)) in last_layout
             .visible_buffer_lines
             .iter()
             .zip(last_layout.lines.iter())
+            .enumerate()
         {
-            let offset_y = last_layout.local_row_y(row_offset);
+            let (spacer_above, spacer_below) = last_layout.spacers(ix);
+            offset_y += spacer_above;
             let line = state.text.slice_line(buffer_line);
             let mut current_indents = vec![];
             if line.len() > 0 {
@@ -143,7 +145,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                         px(0.)
                     };
 
-                    let pos = point(x + last_layout.line_number_width, offset_y);
+                    let pos = point(x + last_layout.text_origin_x, offset_y);
 
                     builder.move_to(pos);
                     builder.line_to(point(pos.x, pos.y + line_height));
@@ -158,7 +160,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                 current_indents = last_indents.clone();
             }
 
-            row_offset += line_layout.wrapped_lines.len() as isize;
+            offset_y += line_layout.wrapped_lines.len() * line_height + spacer_below;
             last_indents = current_indents;
         }
 

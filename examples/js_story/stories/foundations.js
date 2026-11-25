@@ -51,6 +51,16 @@ export const stories = [
     api: "Kbd",
   }),
   pendingStory({
+    id: "live-region",
+    title: "LiveRegion",
+    group: "Foundations",
+    rustStory: "LiveRegionStory",
+    description: "Status that screen readers announce as it changes.",
+    states: ["polite", "assertive"],
+    availability: "pending",
+    api: "LiveRegion",
+  }),
+  pendingStory({
     id: "separator",
     title: "Separator",
     group: "Foundations",

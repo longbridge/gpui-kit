@@ -52,6 +52,8 @@ mod input_focus;
 mod interactions;
 #[cfg(feature = "test-support")]
 mod lifecycle;
+#[cfg(all(feature = "test-support", feature = "gpui-fast", feature = "component"))]
+mod live_region;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod menu;
 #[cfg(all(feature = "test-support", feature = "component"))]

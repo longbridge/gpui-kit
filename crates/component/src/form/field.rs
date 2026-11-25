@@ -327,7 +327,7 @@ impl RenderOnce for Field {
                                 }),
                         )
                     })
-                    .child(div().w_full().flex_1().children(self.children)),
+                    .child(div().w_full().flex_1().min_w_0().children(self.children)),
             )
             .child(
                 // Other
@@ -342,6 +342,7 @@ impl RenderOnce for Field {
                     .when_some(self.description, |this, builder| {
                         this.child(
                             div()
+                                .min_w_0()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(builder.render(window, cx)),
