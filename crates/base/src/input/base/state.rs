@@ -45,7 +45,8 @@ use crate::input::movement::MoveDirection;
 use crate::input::rope_ext::{next_grapheme_boundary, previous_grapheme_boundary};
 use crate::input::{
     EditorLineNumberRenderer, InputEdit, InputExtras as _, Position, RopeExt as _,
-    element::RIGHT_MARGIN, layout::LastLayout,
+    element::RIGHT_MARGIN,
+    layout::{InputHit, InputHitArea, LastLayout},
 };
 use crate::overscroll::Overscroll;
 use crate::{AutoScroll, StepAction, TestSupportExt as _};
@@ -508,6 +509,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// The fully visible part of the window this input last asked its scroll
     /// containers to reveal it in, while focused. `None` while unfocused.
     pub(super) revealed_viewport: Option<Bounds<Pixels>>,
+    /// The gutter bounds, `None` without a gutter.
+    pub(super) last_gutter_bounds: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<CursorSelection>,
     /// The current edit batch, copied into an event when a change is emitted.
     pub(super) last_input_edits: Vec<(InputEdit, Rope)>,
@@ -1066,6 +1069,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             prepaint_caret_geometry: None,
             last_bounds: None,
             revealed_viewport: None,
+            last_gutter_bounds: None,
             last_selected_range: None,
             last_input_edits: Vec::new(),
             column_select_start: None,
@@ -3954,7 +3958,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let mut last_line_pos = None;
 
         // Traverse visible buffer lines (compact, no hidden entries)
-        for (vi, (line_layout, _buffer_line)) in last_layout
+        for (vi, (line_layout, &buffer_line)) in last_layout
             .lines
             .iter()
             .zip(last_layout.visible_buffer_lines.iter())
@@ -3964,14 +3968,19 @@ impl<M: InputModeKind> InputBaseState<M> {
             let (spacer_above, spacer_below) = last_layout.spacers(vi);
             y_offset += spacer_above;
             let height = line_layout.size(line_height).height;
+            let ghost_height = match last_layout.ghost_lines {
+                Some((ghost_row, ghost_height)) if ghost_row == buffer_line => ghost_height,
+                _ => px(0.),
+            };
 
             // Calculate line origin for this display row
             let line_origin = point(px(0.), y_offset);
             let mut pos = inner_position - line_origin;
-            // A pointer on a spacer row is on the row of text it stands beside.
+            // A pointer on a spacer row, or on the ghost lines, is on the row
+            // of text it stands beside.
             if pos.y < px(0.) && pos.y >= -spacer_above {
                 pos.y = px(0.);
-            } else if pos.y >= height && pos.y < height + spacer_below {
+            } else if pos.y >= height && pos.y < height + ghost_height + spacer_below {
                 pos.y = height - line_height;
             }
 
@@ -4000,7 +4009,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (self.resolve_index(line_start_offset), false, 0);
             }
 
-            y_offset += height + spacer_below;
+            y_offset += height + ghost_height + spacer_below;
             last_line_pos = Some(pos);
         }
 
@@ -4554,6 +4563,51 @@ impl<M: InputModeKind> InputBaseState<M> {
             point(self.input_bounds.origin.x, last_bounds.origin.y + top),
             gpui::size(self.input_bounds.size.width, height),
         ))
+    }
+
+    /// Return what `position`, in window coordinates, is over, as last painted.
+    ///
+    /// A point on a spacer row is beside the row of text it stands by, as for
+    /// a click. Returns `None` before the first paint and outside the input.
+    pub fn hit_test(&self, position: Point<Pixels>) -> Option<InputHit> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let beside = last_layout.row_at(position.y - last_bounds.origin.y);
+        let spacer = beside.is_some_and(|(_, spacer)| spacer);
+
+        if self
+            .last_gutter_bounds
+            .is_some_and(|gutter| gutter.contains(&position))
+        {
+            let folding = self.mode.is_folding();
+            let column = last_layout.gutter_order.iter().copied().find(|&column| {
+                let (x, width) = super::element::gutter_column(last_layout, folding, column);
+                let left = self.input_bounds.origin.x + x;
+                position.x >= left && position.x < left + width
+            });
+            return Some(InputHit {
+                area: InputHitArea::Gutter { column },
+                row: beside.map(|(row, _)| row),
+                spacer,
+            });
+        }
+
+        let paddings = self.editor_paddings;
+        let ghost_height = last_layout.ghost_lines.map_or(px(0.), |(_, height)| height);
+        let outer = Bounds::from_corners(
+            self.input_bounds.origin - point(paddings.left, paddings.top),
+            self.input_bounds.bottom_right()
+                + point(paddings.right, paddings.bottom + ghost_height),
+        );
+        if !outer.contains(&position) {
+            return None;
+        }
+        let (offset, _) = self.index_for_mouse_position(position);
+        Some(InputHit {
+            area: InputHitArea::Text { offset },
+            row: Some(self.text.offset_to_point(offset).row),
+            spacer,
+        })
     }
 
     /// Replace text in range in silent.

@@ -448,6 +448,26 @@ added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
 文字一起下移。该行尚未布局时返回 `None`。
 Editor 展示页的 **Decorations** 标签用 provider 为最后两行着色。
 
+`EditorState::hit_test(position)` 按最近一次绘制，返回窗口坐标中的某个点落在什么上：文本（附带在该处
+单击时光标所在的偏移量），或行号栏（附带所在的 `GutterColumn`，落在边距中时为 `None`）。两种情况下
+`row` 都是该点旁边的缓冲区行，`spacer` 表示该点是否位于这一行的间隔行上。在行号栏中，第一行之上和最后
+一行之下的 `row` 为 `None`。首次绘制之前以及编辑器之外返回 `None`；它不会改变编辑器对单击的处理，
+因此应用可以自行响应在行号栏图标或行号上的按下。
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(event.position) {
+    match hit.area {
+        InputHitArea::Gutter { column: Some(GutterColumn::Icons), .. } if !hit.spacer => {
+            // 缓冲区行 `hit.row` 的行号栏图标。
+        }
+        InputHitArea::Text { offset, .. } => { /* 文本，位于 `offset` */ }
+        _ => {}
+    }
+}
+```
+
 `EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
 `DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
 `gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、
