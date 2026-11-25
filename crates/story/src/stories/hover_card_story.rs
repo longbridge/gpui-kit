@@ -1,6 +1,6 @@
 use gpui_kit::component::{
     ActiveTheme, StyledExt, avatar::Avatar, button::Button, h_flex, hover_card::HoverCard,
-    link::Link, v_flex,
+    link::Link, scroll::ScrollableElement as _, v_flex,
 };
 use gpui_kit::{
     Anchor, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
@@ -30,6 +30,7 @@ impl Render for HoverCardStory {
             .gap_6()
             .child(self.render_basic_example(cx))
             .child(self.render_user_profile_example(cx))
+            .child(self.render_long_content_example(cx))
             .child(self.render_custom_timing_example(cx))
             .child(self.render_positioning_examples(cx))
     }
@@ -108,6 +109,83 @@ impl HoverCardStory {
                             }),
                     )
                     .child(" to see their profile"),
+            )
+    }
+
+    /// Long documentation example: the card keeps its footprint and scrolls.
+    fn render_long_content_example(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let muted = cx.theme().muted_foreground;
+        let mono = cx.theme().mono_font_family.clone();
+        let code_background = cx.theme().muted;
+        let radius = cx.theme().radius;
+
+        section("Long Content")
+            .description("Bound the body and give the overflow one scroll owner, so a long card keeps its footprint.")
+            .w(px(520.))
+            .child(
+                v_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        HoverCard::new("long-content")
+                            .trigger(
+                                Link::new("long-content-link").child("Hover for documentation"),
+                            )
+                            .child(
+                                v_flex()
+                                    .w(px(440.))
+                                    .max_h(px(180.))
+                                    .child(
+                                        // The scroll area carries the height bound
+                                        // itself, so the card scrolls instead of
+                                        // clipping the rest of its body.
+                                        v_flex()
+                                            .max_h(px(180.))
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .font_family(mono.clone())
+                                                    .text_sm()
+                                                    .child(
+                                                        "pub fn open_delay(self, delay: Duration) -> Self",
+                                                    ),
+                                            )
+                                            .children(LONG_CONTENT.into_iter().map(|block| {
+                                                match block {
+                                                    DocBlock::Paragraph(text) => div()
+                                                        .text_sm()
+                                                        .text_color(muted)
+                                                        .child(text)
+                                                        .into_any_element(),
+                                                    DocBlock::Code(code) => div()
+                                                        .p_2()
+                                                        .rounded(radius)
+                                                        .bg(code_background)
+                                                        .font_family(mono.clone())
+                                                        .text_xs()
+                                                        .child(code)
+                                                        .into_any_element(),
+                                                    DocBlock::Link(label) => h_flex()
+                                                        .gap_1()
+                                                        .text_sm()
+                                                        .child(div().text_color(muted).child("See"))
+                                                        .child(
+                                                            Link::new("long-content-reference")
+                                                                .child(label),
+                                                        )
+                                                        .into_any_element(),
+                                                }
+                                            }))
+                                            .overflow_y_scrollbar(),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Scroll inside the card for the rest"),
+                    ),
             )
     }
 
@@ -208,3 +286,27 @@ impl Story for HoverCardStory {
         Self::view(window, cx)
     }
 }
+
+/// One block of documentation-shaped copy, in the shape a symbol hover
+/// carries: prose, a sample, and a way into the fuller reference.
+enum DocBlock {
+    Paragraph(&'static str),
+    Code(&'static str),
+    Link(&'static str),
+}
+
+const LONG_CONTENT: [DocBlock; 5] = [
+    DocBlock::Paragraph(
+        "Sets how long the pointer must rest on the trigger before the card opens, and how long the card stays open once the pointer leaves.",
+    ),
+    DocBlock::Code(
+        "let card = HoverCard::new(\"account\")\n    .open_delay(Duration::from_millis(300))\n    .close_delay(Duration::from_millis(150));",
+    ),
+    DocBlock::Paragraph(
+        "The open delay is cancelled when the pointer leaves the trigger early, so a pointer passing over the trigger never flashes the card. Both delays default to the presentation in the theme.",
+    ),
+    DocBlock::Paragraph(
+        "A long card keeps the same footprint as a short one: bound the body and let it scroll. Extending the card instead pushes it past the window edge, where the shell clips it and the reader cannot reach the rest.",
+    ),
+    DocBlock::Link("API reference"),
+];
