@@ -1959,8 +1959,9 @@ fn code_line(
             }
         })
         .when_some(split_offset, |this, offset| this.relative().left(-offset))
+        // A `Label` node is named by its value, not its label.
         .role(gpui::accesskit::Role::Label)
-        .aria_label(source_line.text().clone())
+        .aria_value(source_line.text().clone())
         .aria_description(
             t!(
                 if changed {

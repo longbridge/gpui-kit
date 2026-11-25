@@ -372,7 +372,8 @@ fn source_accessibility_labels_preserve_raw_tabs_unicode_and_trailing_spaces(
         ] {
             let source = window.within((side, ix)).find("source");
             assert_eq!(source.role(), Some(Role::Label));
-            assert_eq!(source.label(), Some(expected));
+            assert_eq!(source.value(), Some(expected));
+            assert_eq!(source.label(), None);
         }
     })
     .unwrap();
