@@ -12,9 +12,14 @@ pub(crate) struct WhitespaceIndicators {
     pub(crate) tab: ShapedLine,
 }
 
-/// A column of the editor's gutter.
+/// A column of the editor's gutter, ordered from the text outward with
+/// `gutter_order`.
+///
+/// The order is the same on either [`Side`], so a gutter on the right is the
+/// mirror of one on the left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum GutterColumn {
+#[non_exhaustive]
+pub enum GutterColumn {
     /// The fold icons.
     FoldIcons,
     /// The line numbers.
@@ -24,8 +29,26 @@ pub(super) enum GutterColumn {
 }
 
 impl GutterColumn {
-    /// The columns in their order, from the text outward.
-    pub(super) const ORDER: [Self; 3] = [Self::FoldIcons, Self::LineNumbers, Self::Decorations];
+    /// The columns in their default order, from the text outward.
+    pub(crate) const DEFAULT_ORDER: [Self; 3] =
+        [Self::FoldIcons, Self::LineNumbers, Self::Decorations];
+
+    /// Return every column once, those listed first and the rest in their
+    /// default order.
+    pub(super) fn order(columns: impl IntoIterator<Item = Self>) -> [Self; 3] {
+        let mut order = Self::DEFAULT_ORDER;
+        let mut len = 0;
+        for column in columns.into_iter().chain(Self::DEFAULT_ORDER) {
+            if len == order.len() {
+                break;
+            }
+            if !order[..len].contains(&column) {
+                order[len] = column;
+                len += 1;
+            }
+        }
+        order
+    }
 }
 
 #[derive(Clone)]
@@ -50,6 +73,7 @@ pub(super) struct LastLayout {
     /// The buffer row that inline completion ghost lines follow, and their height.
     pub(super) ghost_lines: Option<(usize, Pixels)>,
     pub(super) gutter_side: Side,
+    pub(super) gutter_order: [GutterColumn; 3],
     /// The x of the text, relative to the input bounds.
     pub(super) text_origin_x: Pixels,
     /// The x of the gutter, relative to the input bounds.

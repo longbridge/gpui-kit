@@ -174,7 +174,16 @@ EditorState::new(window, cx)
 
 On either side, the fold icons sit next to the text, then the line numbers,
 then the strip of the [gutter decorations](#gutter-and-overview-ruler-decorations).
-`set_gutter_side` changes the side at runtime.
+`set_gutter_side` changes the side at runtime. Use `gutter_order` to list the
+columns from the text outward; a column left out follows the listed ones, and a
+repeated one is ignored. In a diff, this puts the change strip between the text
+and the line numbers:
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Decorations])
+```
+
+`set_gutter_order` changes the order at runtime.
 
 The Editor Diff story shows both layouts, with the two panes scrolling together.
 
@@ -398,7 +407,8 @@ The Editor showcase's **Decorations** tab demonstrates both collection types.
 
 Use these collections to mark whole lines outside the text, such as lines that a
 version-control diff added, modified, or deleted. A `GutterDecorationCollection`
-draws in a strip at the outer edge of the gutter, before the line numbers. An
+draws in a strip at the outer edge of the gutter, before the line numbers;
+`gutter_order` can move it, as `GutterColumn::Decorations`. An
 `OverviewRulerDecorationCollection`
 draws on the vertical scrollbar track. Monaco calls this track the overview ruler.
 Create one collection for each surface you want to use.
