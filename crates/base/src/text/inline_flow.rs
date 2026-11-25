@@ -1602,6 +1602,7 @@ fn line_ranges(
         // it overflows, so the painted line never exceeds `wrap_width`.
         let spans = shaped_spans(flow, image_sizes, objects, text_style, &hard_line, window);
         let mut fragments = WrapFragments::new(wrap_fragments);
+        let mut opportunities = None;
         let mut start = hard_line.start;
         while start < hard_line.end {
             fragments.start_line(start - hard_line.start);
@@ -1631,6 +1632,21 @@ fn line_ranges(
             // sized to its measured text would drop its last character.
             if end < hard_line.end && spans.fit(start..hard_line.end, wrap_width) {
                 end = hard_line.end;
+            }
+            // For the same reason the wrapper can break before a word that
+            // fits once shaped, which GPUI's plain text layout keeps on the
+            // line. Move the break to the last opportunity whose shaped run
+            // fits, so a paragraph wraps the same with or without an object.
+            if end < hard_line.end {
+                let opportunities =
+                    opportunities.get_or_insert_with(|| fragments.break_opportunities());
+                let after = opportunities.partition_point(|&ix| hard_line.start + ix <= end);
+                for &ix in &opportunities[after..] {
+                    if !spans.fit(start..hard_line.start + ix, wrap_width) {
+                        break;
+                    }
+                    end = hard_line.start + ix;
+                }
             }
             if end > start && end < hard_line.end {
                 end += hanging_len(flow, end, hard_line.end);
@@ -1704,6 +1720,8 @@ struct WrapFragments<'a> {
     ix_start: usize,
     /// The fragments last handed to the wrapper, kept for their allocation.
     input: Vec<WrapLineFragment<'a>>,
+    /// The text fragment at `ix` before a line start trimmed it.
+    untrimmed: Option<&'a str>,
 }
 
 impl<'a> WrapFragments<'a> {
@@ -1731,6 +1749,7 @@ impl<'a> WrapFragments<'a> {
             ix: 0,
             ix_start: 0,
             input: Vec::new(),
+            untrimmed: None,
         }
     }
 
@@ -1747,6 +1766,9 @@ impl<'a> WrapFragments<'a> {
                 break;
             }
             self.ix_start += len;
+            if let Some(text) = self.untrimmed.take() {
+                self.fragments[self.ix] = WrapLineFragment::text(text);
+            }
             self.ix += 1;
         }
         // Wrap boundaries fall on character or element starts, so a text
@@ -1754,9 +1776,35 @@ impl<'a> WrapFragments<'a> {
         if let Some(&WrapLineFragment::Text { text }) = self.fragments.get(self.ix)
             && start > self.ix_start
         {
+            self.untrimmed.get_or_insert(text);
             self.fragments[self.ix] = WrapLineFragment::text(&text[start - self.ix_start..]);
             self.ix_start = start;
         }
+    }
+
+    /// The line break opportunities inside the hard line, as offsets in it,
+    /// found over the text the wrapper sees: an element counts as letters,
+    /// which keep it attached to the words next to it.
+    fn break_opportunities(&self) -> Vec<usize> {
+        let mut text = String::with_capacity(self.len);
+        for (ix, fragment) in self.fragments.iter().enumerate() {
+            match *fragment {
+                WrapLineFragment::Text { text: fragment } => {
+                    text.push_str(self.untrimmed.filter(|_| ix == self.ix).unwrap_or(fragment))
+                }
+                WrapLineFragment::Element { len_utf8, .. } => {
+                    text.extend(std::iter::repeat_n('a', len_utf8));
+                }
+            }
+        }
+        let ends: Vec<usize> = text
+            .grapheme_indices(true)
+            .map(|(ix, grapheme)| ix + grapheme.len())
+            .collect();
+        unicode_linebreak::linebreaks(&text)
+            .map(|(ix, _)| ix)
+            .filter(|&ix| ix < text.len() && ends.binary_search(&ix).is_ok())
+            .collect()
     }
 
     /// Where the current line, which starts at flow offset `start`, wraps at
@@ -2652,6 +2700,153 @@ mod tests {
             "the trailing word wraps to a second line: {text_lines:?}"
         );
     }
+    /// The text of each row of `layout`, with an image or object as `▣`.
+    fn row_texts(layout: &InlineFlowLayout) -> Vec<String> {
+        let mut rows: Vec<(Pixels, String)> = Vec::new();
+        for fragment in &layout.fragments {
+            let (top, text) = match fragment {
+                PositionedFragment::Text {
+                    selection_bounds,
+                    text,
+                    ..
+                } => (selection_bounds.top(), text.to_string()),
+                PositionedFragment::Object {
+                    selection_bounds, ..
+                } => (selection_bounds.top(), "▣".to_string()),
+                PositionedFragment::Image { origin, .. } => (origin.y, "▣".to_string()),
+            };
+            match rows.last_mut() {
+                Some((row_top, row)) if *row_top == top => row.push_str(&text),
+                _ => rows.push((top, text)),
+            }
+        }
+        rows.into_iter().map(|(_, row)| row).collect()
+    }
+
+    /// Kerning sets a shaped run narrower than the sum of its characters
+    /// measured one at a time, which is what the line wrapper adds up. A word
+    /// that fits once shaped stays on its line, as in GPUI's plain text, and
+    /// one that does not still wraps.
+    #[test]
+    fn a_word_that_fits_once_kerned_stays_on_the_line() {
+        use super::super::inline::test_fonts::{BODY, WideMonoTextSystem, with_kerning};
+        use gpui::{Empty, TestApp};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let style = TextStyle {
+            font_family: BODY.into(),
+            font_size: AbsoluteLength::Pixels(px(10.)),
+            ..Default::default()
+        };
+        let mut rows = |text: &str, kerning: f32, width: f32| {
+            let items = vec![MeasureItem::Text {
+                text: SharedString::from(text.to_string()),
+                links: Arc::default(),
+                highlights: Arc::default(),
+            }];
+            let layout = with_kerning(kerning, || {
+                window.update(|_, window, cx| {
+                    layout_flow(&items, &[None], &style, Some(px(width)), window, cx)
+                })
+            });
+            row_texts(&layout)
+        };
+
+        // 5px a character alone, 1px of kerning between neighbours: "aa bb "
+        // adds up to 30px and is shaped at 24px.
+        assert_eq!(rows("aa bb cc", 100., 27.), ["aa bb ", "cc"]);
+        assert_eq!(
+            rows("aa bb cc", 100., 24.),
+            ["aa bb ", "cc"],
+            "exactly as wide"
+        );
+        assert_eq!(
+            rows("aa bb cc", 100., 23.5),
+            ["aa ", "bb cc"],
+            "just too narrow"
+        );
+        // GPUI caches shaped lines by their text, so this one is new text.
+        assert_eq!(rows("dd ee ff", 0., 27.), ["dd ", "ee ff"], "no kerning");
+        assert_eq!(rows("aa bb cc", 100., 20.), ["aa ", "bb ", "cc"]);
+        // A word moved up keeps its closing mark: no break comes before it.
+        // "aa bb. " is shaped at 28px; at 26px its space does not fit, which
+        // GPUI's plain text wraps before "bb." too.
+        assert_eq!(rows("aa bb. cc", 100., 28.), ["aa bb. ", "cc"]);
+        assert_eq!(rows("aa bb. cc", 100., 26.), ["aa ", "bb. cc"]);
+        assert_eq!(rows("aa (bb) cc", 100., 32.), ["aa (bb) ", "cc"]);
+    }
+
+    /// A paragraph with an inline object wraps its text where GPUI's plain
+    /// text layout wraps the same text, at every width, when kerning makes
+    /// shaped runs narrower than their summed characters.
+    #[test]
+    fn a_paragraph_with_an_object_wraps_like_plain_text_when_kerned() {
+        use super::super::inline::test_fonts::{BODY, WideMonoTextSystem, with_kerning};
+        use gpui::{Empty, TestApp};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let font_size = px(10.);
+        let style = TextStyle {
+            font_family: BODY.into(),
+            font_size: AbsoluteLength::Pixels(font_size),
+            ..Default::default()
+        };
+        let text = "The quick brown fox jumps over the lazy dog, and then it naps. \
+            Wrapping should not change when an object joins the paragraph.";
+        let items = vec![
+            MeasureItem::Text {
+                text: SharedString::from(format!("{text}\n")),
+                links: Arc::default(),
+                highlights: Arc::default(),
+            },
+            MeasureItem::Image {
+                source: SharedUri::from("https://example.com/formula.png").into(),
+                width: None,
+                height: None,
+            },
+        ];
+        let image_sizes = [None, Some(size(px(12.), px(12.)))];
+
+        let mut differ = Vec::new();
+        for width in (60..=300).map(|n| px(n as f32)) {
+            let (flow, plain) = with_kerning(60., || {
+                window.update(|_, window, cx| {
+                    let flow = layout_flow(&items, &image_sizes, &style, Some(width), window, cx);
+                    let lines = window
+                        .text_system()
+                        .shape_text(
+                            SharedString::from(text),
+                            font_size,
+                            &[style.to_run(text.len())],
+                            Some(width),
+                            None,
+                        )
+                        .unwrap();
+                    let line = &lines[0];
+                    let mut plain = Vec::new();
+                    let mut start = 0;
+                    for boundary in line.wrap_boundaries() {
+                        let end = line.unwrapped_layout.runs[boundary.run_ix].glyphs
+                            [boundary.glyph_ix]
+                            .index;
+                        plain.push(text[start..end].to_string());
+                        start = end;
+                    }
+                    plain.push(text[start..].to_string());
+                    (flow, plain)
+                })
+            });
+            let mut rows = row_texts(&flow);
+            assert_eq!(rows.pop().as_deref(), Some("▣"), "at {width:?}");
+            if rows != plain {
+                differ.push((width, rows, plain));
+            }
+        }
+        assert!(differ.is_empty(), "{differ:#?}");
+    }
+
     #[test]
     fn a_period_or_space_after_inline_code_as_wide_as_the_line_stays_on_it() {
         use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
