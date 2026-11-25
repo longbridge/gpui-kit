@@ -1264,6 +1264,118 @@ mod rendering {
         }
     }
 
+    /// Columns for the header corner checks: `count` columns 100px wide,
+    /// with the first and last pinned when `fixed`.
+    struct Wide {
+        count: usize,
+        fixed: bool,
+    }
+    impl TableDelegate for Wide {
+        fn columns_count(&self, _: &App) -> usize {
+            self.count
+        }
+        fn rows_count(&self, _: &App) -> usize {
+            20
+        }
+        fn column(&self, ix: usize, _: &App) -> Column {
+            let column = Column::new(format!("column-{ix}"), format!("Col {ix}")).width(px(100.));
+            match (self.fixed, ix) {
+                (true, 0) => column.fixed_left(),
+                (true, ix) if ix + 1 == self.count => column.fixed_right(),
+                _ => column,
+            }
+        }
+        fn render_td(
+            &mut self,
+            row: usize,
+            col: usize,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) -> impl IntoElement {
+            div().child(format!("{row}:{col}"))
+        }
+    }
+
+    struct WideTable {
+        table: Entity<TableState<Wide>>,
+    }
+    impl Render for WideTable {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .bg(cx.theme().background)
+                .p_4()
+                .child(div().h(px(140.)).child(DataTable::new(&self.table)))
+        }
+    }
+
+    /// A bordered table has rounded corners, so the header background must
+    /// stay inside them rather than paint square over the border, whichever
+    /// header part sits at a corner: the scrolling columns, scrolled or not,
+    /// pinned columns, or the row header cell (#4111).
+    fn header_background_follows_rounded_corners() {
+        let head = hsla(0., 0.8, 0.4, 1.);
+        let is_head = |[r, g, b]: [i32; 3]| r > 140 && g < 80 && b < 80;
+        let cases: [(&str, usize, bool, bool, Option<usize>); 5] = [
+            ("columns fit", 2, false, false, None),
+            ("columns overflow", 8, false, false, None),
+            ("columns scrolled", 8, false, false, Some(7)),
+            ("pinned columns", 8, true, false, Some(4)),
+            ("row header", 8, false, true, None),
+        ];
+        for (name, count, fixed, row_header, scroll_to) in cases {
+            let mut cx = context(Arc::new(Assets));
+            cx.update(|cx| {
+                Theme::change(ThemeMode::Light, None, cx);
+                Theme::update(cx, |theme| {
+                    theme.radius = px(8.);
+                    theme.tokens.table_head = head.into();
+                });
+            });
+            let state = Rc::new(std::cell::RefCell::new(None));
+            let handle = open_window(&mut cx, (320., 180.), {
+                let state = state.clone();
+                move |window, cx| {
+                    let table = cx.new(|cx| {
+                        TableState::new(Wide { count, fixed }, window, cx)
+                            .cell_selectable(row_header)
+                            .row_header(row_header)
+                    });
+                    *state.borrow_mut() = Some(table.clone());
+                    WideTable { table }
+                }
+            });
+            if let Some(col) = scroll_to {
+                let table = state.borrow().clone().unwrap();
+                cx.update_window(handle, |_, window, cx| {
+                    table.update(cx, |table, cx| table.scroll_to_col(col, cx));
+                    window.render_frame(cx);
+                    window.render_frame(cx);
+                })
+                .unwrap();
+            }
+            let bounds = table_bounds(&mut cx, handle);
+            let shot = Capture::take(&mut cx, handle);
+            let at = |x: Pixels, y: Pixels| shot.get_pixel(shot.device(x), shot.device(y));
+            let middle = at(bounds.center().x, bounds.top() + px(6.));
+            assert!(
+                is_head(middle),
+                "{name}: the header must paint the theme's head color, got {middle:?}"
+            );
+            let inset = px(1.5);
+            for (corner, x) in [
+                ("top-left", bounds.left() + inset),
+                ("top-right", bounds.right() - inset),
+            ] {
+                let pixel = at(x, bounds.top() + inset);
+                assert!(
+                    !is_head(pixel),
+                    "{name}: the header must not cover the {corner} rounded corner, got {pixel:?}"
+                );
+            }
+        }
+    }
+
     pub fn run() {
         println!("running gutter_lane_contains_digits_wider_than_plus");
         gutter_lane_contains_digits_wider_than_plus();
@@ -1310,6 +1422,9 @@ mod rendering {
             table_shows_keyboard_focus_only(focus_ring);
             println!("passed table_shows_keyboard_focus_only (focus_ring = {focus_ring})");
         }
-        println!("rendering: 16 passed (real offscreen renderer)");
+        println!("running header_background_follows_rounded_corners");
+        header_background_follows_rounded_corners();
+        println!("passed header_background_follows_rounded_corners");
+        println!("rendering: 17 passed (real offscreen renderer)");
     }
 }
