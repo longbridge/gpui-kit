@@ -230,7 +230,8 @@ self.diff.update(cx, |state, cx| {
 ```
 
 `scroll_to_line` reveals supplied context and expands a collapsed file when
-needed; it cannot reveal lines absent from the patch — `has_line` says whether
+needed, and lands the line below the pinned file header rather than under it;
+it cannot reveal lines absent from the patch — `has_line` says whether
 the patch carries a line, so the application can decide where a navigation
 lands before scrolling. `scroll_to_file` shows a
 file's header, including a file without source rows, for example from a file
@@ -391,6 +392,12 @@ Diff::new(&self.diff)
     .render_header_suffix(|file, _, _| div().child(format!("{} lines", file.additions())))
     .h(rems(24.))
 ```
+
+While a file's content scrolls, its header stays pinned over the list, so long
+files keep their name and controls in view; the next file's header pushes it
+out. The pinned bar repeats the header without the file's annotation cards.
+`sticky_header(false)` turns the pinning off, and headers scroll away with
+their files.
 
 Each callback receives `&DiffFile`, `&mut Window` and `&mut App`, and returns an
 `IntoElement`. `header_visible(false)` hides headers. Callbacks implement `Fn`

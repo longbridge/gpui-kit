@@ -197,7 +197,7 @@ self.diff.update(cx, |state, cx| {
 });
 ```
 
-`scroll_to_line` 会按需展开 patch 已提供的隐藏上下文和已收起的文件，不能显示 patch 中不存在的行；
+`scroll_to_line` 会按需展开 patch 已提供的隐藏上下文和已收起的文件，目标行落在置顶文件头下方而不会被它遮住，不能显示 patch 中不存在的行；
 `has_line` 回答 patch 是否携带某一行，应用可以先判断再决定导航落在哪里。
 `scroll_to_file` 滚动到文件头，没有源文本行的文件也可以定位，适合配合文件列表使用。
 变更导航跨所有文件在各个变更组之间移动，到达两端后循环。
@@ -329,6 +329,10 @@ Diff::new(&self.diff)
     .render_header_suffix(|file, _, _| div().child(format!("{} lines", file.additions())))
     .h(rems(24.))
 ```
+
+文件内容滚动时，它的文件头会置顶固定在列表上方，长文件始终保持名称和控件可见；
+下一个文件的文件头会把它推出。置顶栏重复文件头的内容，但不带该文件的批注卡片。
+`sticky_header(false)` 关闭置顶，文件头随文件一起滚出视口。
 
 每个回调接收 `&DiffFile`、`&mut Window` 和 `&mut App`，返回 `IntoElement`。
 `header_visible(false)` 隐藏文件头。回调实现 `Fn`，捕获的值必须满足 `'static`；
