@@ -80,6 +80,20 @@ Kbd::new(Keystroke::parse("cmd-s").unwrap())
     .appearance(false)
 ```
 
+### Text Label
+
+For a hint that is not one keystroke, such as a key name, a range or a choice
+of keys, show the text as it is, with the same styling:
+
+```rust
+Kbd::label("Esc")
+Kbd::label("⌘1–9")
+Kbd::label("↑↓")
+Kbd::label("Enter / Tab")
+```
+
+The label is not parsed or formatted for the platform.
+
 ### From Action Bindings
 
 ```rust

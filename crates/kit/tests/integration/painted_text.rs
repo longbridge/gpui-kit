@@ -13,6 +13,7 @@ impl Render for Painted {
             .flex_col()
             .child(Label::new("Hello"))
             .child(Kbd::new(Keystroke::parse("ctrl-s").unwrap()))
+            .child(Kbd::label("⌘1–9"))
             .child(Avatar::new().name("Jane Doe"))
             .child(
                 Button::new("save")
@@ -45,6 +46,7 @@ fn painted_text_and_alternative_text_are_observed(cx: &mut TestAppContext) {
         assert!(!label.is_alternative());
         assert!(label.path().contains(&"painted".into()));
         find(&Kbd::format(&Keystroke::parse("ctrl-s").unwrap()));
+        find("⌘1–9");
         find("A painted paragraph.");
         assert!(find("Jane Doe").is_alternative());
 
