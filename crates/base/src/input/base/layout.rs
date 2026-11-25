@@ -2,12 +2,30 @@ use std::{ops::Range, rc::Rc};
 
 use gpui::{Bounds, Pixels, ShapedLine, TextAlign, px};
 
+use crate::Side;
+
 use super::{WrappingIndent, display_map::LineLayout};
 
 #[derive(Clone, Default)]
 pub(crate) struct WhitespaceIndicators {
     pub(crate) space: ShapedLine,
     pub(crate) tab: ShapedLine,
+}
+
+/// A column of the editor's gutter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GutterColumn {
+    /// The fold icons.
+    FoldIcons,
+    /// The line numbers.
+    LineNumbers,
+    /// The strip of the gutter decorations.
+    Decorations,
+}
+
+impl GutterColumn {
+    /// The columns in their order, from the text outward.
+    pub(super) const ORDER: [Self; 3] = [Self::FoldIcons, Self::LineNumbers, Self::Decorations];
 }
 
 #[derive(Clone)]
@@ -23,8 +41,22 @@ pub(super) struct LastLayout {
     pub(super) wrap_width: Option<Pixels>,
     pub(super) wrapping_indent: WrappingIndent,
     pub(super) line_number_width: Pixels,
+    /// Resolved gap between the text and the gutter columns for this frame.
+    pub(super) gutter_gap: Pixels,
+    /// Width reserved for the gutter decoration strip and its gap toward the
+    /// line numbers, zero without a gutter decoration collection. Part of
+    /// `line_number_width`.
+    pub(super) gutter_decorations_width: Pixels,
     /// The buffer row that inline completion ghost lines follow, and their height.
     pub(super) ghost_lines: Option<(usize, Pixels)>,
+    pub(super) gutter_side: Side,
+    /// The x of the text, relative to the input bounds.
+    pub(super) text_origin_x: Pixels,
+    /// The x of the gutter, relative to the input bounds.
+    pub(super) gutter_origin_x: Pixels,
+    /// The width of the text, without the gutter and the margin kept from a
+    /// scrollbar on the left.
+    pub(super) text_width: Pixels,
     /// Width of one space in the editor font.
     ///
     /// Past the end of a line there are no glyphs to hit-test against, so this is the

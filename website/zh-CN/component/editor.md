@@ -121,11 +121,25 @@ let editor = cx.new(|cx| {
 
 `active_line_only_when_focused(true)` 让当前行的行号、当前行背景和光标所在行的折叠按钮只在编辑器或其右键菜单获得焦点时显示，这样界面上有多个编辑器时，只有获得焦点的那个显示当前行。
 
-滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上；若 gutter 位于右侧，文本会与滚动条保持间距。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+
+在右侧 gutter、左侧滚动条的镜像窗格中，横向轨道会避开 gutter，纵向轨道仍位于窗格外侧边缘。
 
 ```rust
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
+
+行号和折叠图标所在的 gutter 默认位于左侧。在并排 diff 中，两侧的 gutter 可以朝向中间，使对应行的行号隔着分隔线相邻。左侧窗格用 `gutter_side` 将 gutter 放到右侧（镜像排列，折叠图标紧邻文本），并把滚动条放到外侧边缘：
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+无论 gutter 位于哪一侧，折叠图标都紧邻文本，向外依次是行号和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。运行时可用 `set_gutter_side` 切换位置。
+
+Editor Diff 示例展示了这两种布局，两个窗格同步滚动。
 
 ## 主动补全
 
@@ -305,7 +319,7 @@ Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用�
 ### 行号槽与概览标尺装饰
 
 需要在文本之外标记整行（例如版本控制 diff 中新增、修改或删除的行）时，使用这两个集合。
-`GutterDecorationCollection` 在行号之前的窄带中绘制标记。
+`GutterDecorationCollection` 在 gutter 外侧边缘、行号之前的窄带中绘制标记。
 `OverviewRulerDecorationCollection` 在垂直滚动条轨道上绘制标记，Monaco 将这条轨道称为概览标尺。
 要同时在两处显示标记，请分别创建两个集合。
 
