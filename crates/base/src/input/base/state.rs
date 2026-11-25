@@ -447,6 +447,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) mode: LayoutMode,
     pub(super) text: Rope,
     pub(super) display_map: DisplayMap,
+    /// The display rows version the spacer provider was last asked at, `None`
+    /// when it must be asked again.
+    pub(super) spacers_asked: Option<usize>,
     pub(super) undo_manager: UndoManager,
     pub(super) inline_tokens: Option<Box<super::inline_tokens::InlineTokenStore>>,
     pub(super) pending_token: Option<super::InlineToken>,
@@ -809,9 +812,10 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// and the state owns all updates. Use [`DisplayMap::version`] to
     /// invalidate cached mappings after edits, rewrapping, or folding changes.
     ///
-    /// Display coordinates describe text after wrapping and folding. They do
-    /// not include inline completion ghost lines; use [`Self::row_bounds`] for
-    /// the actual painted geometry of a visible buffer line.
+    /// Display coordinates describe text after wrapping and folding, with the
+    /// spacer rows between lines. They do not include inline completion ghost
+    /// lines; use [`Self::row_bounds`] for the actual painted geometry of a
+    /// visible buffer line.
     pub fn display_map(&self) -> &DisplayMap {
         &self.display_map
     }
@@ -1012,6 +1016,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             selection_focus: None,
             text: "".into(),
             display_map: DisplayMap::new(text_style.font(), window.rem_size(), None),
+            spacers_asked: None,
             search_session: super::SearchSession::default(),
             search_activation_revision: 0,
             searchable: false,
@@ -1300,11 +1305,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         let line_height = last_layout.line_height;
         let target_row = self.text.offset_to_point(offset.min(self.text.len())).row;
 
-        let mut row_offset: isize = 0;
+        let mut y_offset = last_layout.visible_top;
         for (vi, line) in last_layout.lines.iter().enumerate() {
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
             let buffer_line = last_layout.visible_buffer_lines[vi];
             if buffer_line == target_row {
-                let y_offset = last_layout.local_row_y(row_offset);
                 let prev_lines_offset = last_layout.visible_line_byte_offsets[vi];
                 let local_offset = offset.saturating_sub(prev_lines_offset).min(line.len());
                 let pos = line
@@ -1315,7 +1321,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (vi, sub_line_index, Some(adjusted_pos));
             }
 
-            row_offset += line.wrapped_lines.len() as isize;
+            y_offset += line.size(line_height).height + spacer_below;
         }
         (0, 0, None)
     }
@@ -2832,6 +2838,9 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let mut new_selections = Vec::with_capacity(end_row - start_row + 1);
         for row in start_row..=end_row {
+            if self.display_map.is_spacer_row(row) {
+                continue;
+            }
             let sel_start = self
                 .display_map
                 .display_row_column_to_offset(row, start_col);
@@ -3939,7 +3948,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // - included the scroll offset.
         let inner_position = position - bounds.origin - point(text_origin_x, px(0.));
 
-        let mut row_offset: isize = 0;
+        let mut y_offset = last_layout.visible_top;
         // Position relative to the last line walked, kept for a pointer that ends up
         // below every line.
         let mut last_line_pos = None;
@@ -3952,11 +3961,19 @@ impl<M: InputModeKind> InputBaseState<M> {
             .enumerate()
         {
             let line_start_offset = last_layout.visible_line_byte_offsets[vi];
-            let y_offset = last_layout.local_row_y(row_offset);
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
+            let height = line_layout.size(line_height).height;
 
             // Calculate line origin for this display row
             let line_origin = point(px(0.), y_offset);
-            let pos = inner_position - line_origin;
+            let mut pos = inner_position - line_origin;
+            // A pointer on a spacer row is on the row of text it stands beside.
+            if pos.y < px(0.) && pos.y >= -spacer_above {
+                pos.y = px(0.);
+            } else if pos.y >= height && pos.y < height + spacer_below {
+                pos.y = height - line_height;
+            }
 
             // Return offset by use closest_index_for_x if is single line mode.
             if self.is_single_line() {
@@ -3983,7 +4000,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (self.resolve_index(line_start_offset), false, 0);
             }
 
-            row_offset += line_layout.wrapped_lines.len() as isize;
+            y_offset += height + spacer_below;
             last_line_pos = Some(pos);
         }
 
@@ -5361,7 +5378,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         let mut start_origin = None;
         let mut end_origin = None;
         let text_origin = point(last_layout.text_origin_x, px(0.));
-        let mut row_offset: isize = 0;
+        let mut y_offset = last_layout.visible_top;
 
         let start_row = self
             .text
@@ -5377,7 +5394,8 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 break;
             }
 
-            let y_offset = last_layout.local_row_y(row_offset);
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            y_offset += spacer_above;
             let buffer_line = last_layout.visible_buffer_lines[vi];
             let index_offset = last_layout.visible_line_byte_offsets[vi];
 
@@ -5397,7 +5415,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 end_origin = Some(p + point(px(0.), y_offset));
             }
 
-            row_offset += line.wrapped_lines.len() as isize;
+            y_offset += line.size(line_height).height + spacer_below;
         }
 
         let start_origin = start_origin.or_else(|| {
@@ -5431,15 +5449,16 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         let inner_point = self.last_bounds?.localize(&point)?
             - gpui::point(last_layout.text_origin_x, last_layout.visible_top);
 
-        let mut row_offset: usize = 0;
+        let mut line_top = px(0.);
         for (vi, line) in last_layout.lines.iter().enumerate() {
+            let (spacer_above, spacer_below) = last_layout.spacers(vi);
+            line_top += spacer_above;
             let offset = last_layout.visible_line_byte_offsets[vi];
-            let line_top = last_layout.line_height * (row_offset as f32);
             let line_point = inner_point - gpui::point(px(0.), line_top);
             if let Some(utf8_index) = line.index_for_position(line_point, last_layout) {
                 return Some(self.offset_to_utf16(self.resolve_index(offset + utf8_index)));
             }
-            row_offset += line.wrapped_lines.len();
+            line_top += line.size(last_layout.line_height).height + spacer_below;
         }
 
         None

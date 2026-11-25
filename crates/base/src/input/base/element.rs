@@ -499,6 +499,26 @@ fn clamp_vertical_scroll_offset(
     ) as f32)
 }
 
+/// Where the spacer rows that have a background are painted: their top
+/// relative to the content origin, their height and their color. Rows from
+/// `ghost_end` on are below the ghost lines and move down by their height.
+fn place_spacer_backgrounds(
+    layout: &LastLayout,
+    rows: Vec<(Range<usize>, Hsla)>,
+    ghost_end: Option<usize>,
+) -> Vec<(Pixels, Pixels, Hsla)> {
+    let ghost_height = layout.ghost_lines.map_or(px(0.), |(_, height)| height);
+    rows.into_iter()
+        .map(|(rows, color)| {
+            let mut top = layout.display_row_y(rows.start);
+            if ghost_end.is_some_and(|end| rows.start >= end) {
+                top += ghost_height;
+            }
+            (top, layout.line_height * rows.len(), color)
+        })
+        .collect()
+}
+
 fn editor_gutter_bounds(
     input_bounds: Bounds<Pixels>,
     line_number_width: Pixels,
@@ -1184,7 +1204,8 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         }
 
         let line_height_f64 = f64::from(f32::from(line_height));
-        let total_wrapped_lines = state.display_map.wrap_row_count();
+        let total_wrapped_lines =
+            state.display_map.wrap_row_count() + state.display_map.spacer_row_count();
         let empty_bottom = empty_bottom_height(
             state.is_code_editor(),
             state.scroll_beyond_last_line,
@@ -1475,16 +1496,18 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             return None;
         }
 
-        let mut row_offset: isize = 0;
+        let mut y = last_layout.visible_top;
         let mut corners = Vec::new();
-        for (&line_offset, line) in last_layout
+        for (ix, (&line_offset, line)) in last_layout
             .visible_line_byte_offsets
             .iter()
             .zip(last_layout.lines.iter())
+            .enumerate()
         {
+            let (spacer_above, spacer_below) = last_layout.spacers(ix);
+            y += spacer_above;
             let mut offset = line_offset;
             for (row, shaped) in line.wrapped_lines.iter().enumerate() {
-                let y = last_layout.local_row_y(row_offset);
                 let end = offset + shaped.len;
                 let start_ix = range.start.max(offset);
                 let end_ix = range.end.min(end);
@@ -1509,8 +1532,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                     });
                 }
                 offset = end;
-                row_offset += 1;
+                y += last_layout.line_height;
             }
+            y += spacer_below;
         }
         (!corners.is_empty()).then_some(corners)
     }
@@ -1771,12 +1795,16 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
         let start_line = state.display_map.display_row_to_buffer_line(first_display);
         let end_line = state.display_map.display_row_to_buffer_line(last_display);
 
-        // Viewport-local y of the top of the first visible buffer line.
+        // Viewport-local y of the top of the first visible buffer line, above
+        // the spacers standing above it.
         let anchor_display_row = match state
             .display_map
             .buffer_line_to_display_row_range(start_line)
         {
-            Some(range) => range.start,
+            Some(range) => {
+                let (above, _) = state.display_map.spacer_rows_beside(start_line);
+                range.start - above
+            }
             None => first_display,
         };
         let visible_top =
@@ -2112,24 +2140,27 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             }
 
             let mut infos = Vec::with_capacity(last_layout.visible_buffer_lines.len());
-            let mut row_offset: isize = 0;
+            let mut offset_y = last_layout.visible_top;
 
-            for (line, &buffer_line) in last_layout
+            for (ix, (line, &buffer_line)) in last_layout
                 .lines
                 .iter()
                 .zip(last_layout.visible_buffer_lines.iter())
+                .enumerate()
             {
+                let (spacer_above, spacer_below) = last_layout.spacers(ix);
+                offset_y += spacer_above;
                 if state.display_map.is_fold_candidate(buffer_line) {
                     let is_folded = state.display_map.is_folded_at(buffer_line);
                     infos.push(FoldInfo {
                         buffer_line,
                         is_folded,
                         display_row: buffer_line,
-                        offset_y: last_layout.local_row_y(row_offset),
+                        offset_y,
                     });
                 }
 
-                row_offset += line.wrapped_lines.len() as isize;
+                offset_y += line.wrapped_lines.len() * last_layout.line_height + spacer_below;
             }
 
             infos
@@ -2244,27 +2275,29 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             // Each folded line on screen, the top of its first row, how many
             // rows it wraps to, and where its text ends.
             let mut folded = Vec::new();
-            let mut row_offset: isize = 0;
-            let mut ghost_offset = px(0.);
-            for (line, &buffer_line) in last_layout
+            let mut offset_y = last_layout.visible_top;
+            for (ix, (line, &buffer_line)) in last_layout
                 .lines
                 .iter()
                 .zip(last_layout.visible_buffer_lines.iter())
+                .enumerate()
             {
+                let (spacer_above, spacer_below) = last_layout.spacers(ix);
+                offset_y += spacer_above;
                 let rows = line.wrapped_lines.len();
-                let top = last_layout.local_row_y(row_offset) + ghost_offset;
                 if state.display_map.is_folded_at(buffer_line)
                     && let Some(last) = line.wrapped_lines.last()
                 {
                     let end = line.row_x(rows - 1, last_layout.content_width) + last.width;
-                    folded.push((buffer_line, top, rows, end));
+                    folded.push((buffer_line, offset_y, rows, end));
                 }
-                row_offset += rows as isize;
+                offset_y += rows * line_height;
                 if let Some((row, height)) = ghost_rows
                     && row == buffer_line
                 {
-                    ghost_offset += height;
+                    offset_y += height;
                 }
+                offset_y += spacer_below;
             }
             (
                 state.fold_background,
@@ -2316,6 +2349,33 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             folded_lines.placeholders.push(placeholder);
         }
         folded_lines
+    }
+
+    /// Ask the spacer provider for the spacers of every line, when the rows have
+    /// moved since it was last asked or it was told to be asked again.
+    ///
+    /// The provider is asked outside of any update of the state, so it may read
+    /// this editor as well as others.
+    fn ask_for_spacers(&self, cx: &mut App) {
+        let (provider, lines, version) = {
+            let state = self.state.read(cx);
+            let version = state.display_map.rows_version();
+            if state.spacers_asked == Some(version) {
+                return;
+            }
+            (
+                state.extras.spacer_provider(),
+                0..state.display_map.buffer_line_count(),
+                version,
+            )
+        };
+        let spacers = provider
+            .map(|provider| provider.spacers(lines, cx))
+            .unwrap_or_default();
+        self.state.update(cx, |state, _| {
+            state.display_map.set_spacers(spacers);
+            state.spacers_asked = Some(version);
+        });
     }
 
     /// Layout line decoration backgrounds for the visible rows.
@@ -2946,9 +3006,10 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
             .and_then(|c| c.key.as_ref())
             .map_or(bounds.size.width, |k| k.2);
         let mut placements = Vec::new();
-        let mut row_offset: isize = 0;
+        let mut y = layout.visible_top;
         for (ix, &row) in layout.visible_buffer_lines.iter().enumerate() {
-            let y = layout.local_row_y(row_offset);
+            let (spacer_above, spacer_below) = layout.spacers(ix);
+            y += spacer_above;
             let start = state.text.line_start_offset(row);
             let end = state.text.line_end_offset(row);
             let spans = state.token_spans();
@@ -2963,7 +3024,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                     ));
                 }
             }
-            row_offset += layout.lines[ix].wrapped_lines.len() as isize;
+            y += layout.lines[ix].size(layout.line_height).height + spacer_below;
         }
         let mut out = Vec::new();
         let mut token_bounds = std::collections::HashMap::new();
@@ -3345,6 +3406,9 @@ pub(super) struct PrepaintState {
     folded_lines: FoldedLines,
     /// Line decoration layout data
     line_decoration_layout: LineDecorationLayout,
+    /// (top, height, color) of the spacer rows that have a background, top
+    /// relative to the content origin.
+    spacer_backgrounds: Vec<(Pixels, Pixels, Hsla)>,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
     ghost_lines: Vec<ShapedLine>,
@@ -3665,6 +3729,9 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             window,
             cx,
         );
+        // Spacers move every row below them, so they are placed once the text
+        // is wrapped to this width and before anything is laid out by row.
+        self.ask_for_spacers(cx);
         let (resolved_scroll_y_f64, reveal_on_resize, resize_reveal_owned) =
             self.resolve_vertical_scroll_f64(bounds.size, line_height, window, cx);
         let state = self.state.read(cx);
@@ -3681,6 +3748,24 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             bounds.size.height,
             resolved_scroll_y_f64,
         );
+        let spacer_rows = if state.display_map.spacer_row_count() > 0 {
+            visible_buffer_lines
+                .iter()
+                .map(|&line| state.display_map.spacer_rows_beside(line))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // The display rows of the spacers that have a background; placed once
+        // the layout knows where its rows are.
+        let spacer_background_rows: Vec<(Range<usize>, Hsla)> =
+            match (visible_buffer_lines.first(), visible_buffer_lines.last()) {
+                (Some(&first), Some(&last)) => state
+                    .display_map
+                    .spacer_backgrounds(first..last + 1)
+                    .collect(),
+                _ => Vec::new(),
+            };
         let visible_start_offset = state.text.line_start_offset(visible_range.start);
         let visible_end_offset = state
             .text
@@ -3731,6 +3816,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             gutter_gap,
             gutter_decorations_width: Self::gutter_decorations_width(state),
             ghost_lines: None,
+            spacer_rows,
             gutter_side,
             gutter_order: state.gutter_order,
             text_origin_x,
@@ -3914,7 +4000,8 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
         let ghost_line_count = ghost_lines.len();
         let ghost_lines_height = ghost_line_count as f32 * line_height;
 
-        let total_wrapped_lines = state.display_map.wrap_row_count();
+        let total_wrapped_lines =
+            state.display_map.wrap_row_count() + state.display_map.spacer_row_count();
         let empty_bottom_height = empty_bottom_height(
             state.is_code_editor(),
             state.scroll_beyond_last_line,
@@ -4022,6 +4109,18 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     || state.has_selection_focus(window, cx)
             })
         };
+        // Ghost lines follow the cursor row's text, so they push down the
+        // spacers below it as well as every row after it.
+        let ghost_end = last_layout.ghost_lines.and_then(|(row, _)| {
+            let rows = self
+                .state
+                .read(cx)
+                .display_map
+                .buffer_line_to_display_row_range(row)?;
+            Some(rows.end)
+        });
+        let spacer_backgrounds =
+            place_spacer_backgrounds(&last_layout, spacer_background_rows, ghost_end);
         // Completion/code-action menus position at the active caret.
         last_layout.cursor_bounds = cursor_infos
             .iter()
@@ -4249,6 +4348,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             fold_icon_layout,
             folded_lines,
             line_decoration_layout,
+            spacer_backgrounds,
             ghost_first_line,
             ghost_lines,
             ghost_lines_height,
@@ -4314,6 +4414,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             .line_decoration_layout
             .backgrounds
             .iter()
+            .chain(&prepaint.spacer_backgrounds)
             .map(|&(top, height, color)| {
                 (
                     origin.y + top,
@@ -4339,18 +4440,14 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
 
         // Paint active line
         if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
-            let mut row_offset: isize = 0;
-
-            // Each item is the normal lines.
-            for ((_, rows), &buffer_line) in line_numbers
+            // Each item is the normal lines, painted where its row is laid out.
+            for (((_, rows), &buffer_line), (top, _)) in line_numbers
                 .iter()
                 .zip(prepaint.last_layout.visible_buffer_lines.iter())
+                .zip(prepaint.last_layout.row_extents())
             {
                 let is_active = prepaint.active_row == Some(buffer_line);
-                let p = point(
-                    input_bounds.origin.x,
-                    origin.y + prepaint.last_layout.local_row_y(row_offset),
-                );
+                let p = point(input_bounds.origin.x, origin.y + top);
                 let height = line_height * *rows as f32;
                 // Paint the current line background
                 if is_active {
@@ -4361,7 +4458,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                         ));
                     }
                 }
-                row_offset += *rows as isize;
             }
         }
 
@@ -4397,17 +4493,18 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             // gpui's `paint` only draws glyphs, underlines, and strikethroughs, so decoration
             // backgrounds need their own pass. It runs ahead of the indent guides, selections,
             // and text so a highlighted range sits under them instead of covering them.
-            let mut row_offset: isize = 0;
-            let mut ghost_offset = px(0.);
-            for (line, &buffer_line) in prepaint
+            //
+            // Every row is painted where it is laid out: past the ghost lines
+            // and the spacers above it.
+            for (line, (top, _)) in prepaint
                 .last_layout
                 .lines
                 .iter()
-                .zip(prepaint.last_layout.visible_buffer_lines.iter())
+                .zip(prepaint.last_layout.row_extents())
             {
                 let p = point(
                     origin.x + prepaint.last_layout.text_origin_x + scroll_offset,
-                    origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
+                    origin.y + top,
                 );
 
                 line.paint_background(
@@ -4417,13 +4514,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     window,
                     cx,
                 );
-
-                row_offset += line.wrapped_lines.len() as isize;
-
-                // Ghost lines shift every later line down.
-                if Some(buffer_line) == prepaint.current_row {
-                    ghost_offset += prepaint.ghost_lines_height;
-                }
             }
 
             // Paint indent guides
@@ -4470,22 +4560,21 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             }
 
             // Paint text with inline completion ghost line support
-            let mut row_offset: isize = 0;
-            let mut ghost_offset = px(0.);
             let ghost_lines = &prepaint.ghost_lines;
             let has_ghost_lines = !ghost_lines.is_empty();
 
             // Track the y-position of the cursor row for positioning the first line suffix
             let mut cursor_row_y = None;
 
-            for (line, &buffer_line) in prepaint
+            for ((line, &buffer_line), (top, height)) in prepaint
                 .last_layout
                 .lines
                 .iter()
                 .zip(prepaint.last_layout.visible_buffer_lines.iter())
+                .zip(prepaint.last_layout.row_extents())
             {
                 let row = buffer_line;
-                let line_y = origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
+                let line_y = origin.y + top;
                 let p = point(
                     origin.x + prepaint.last_layout.text_origin_x + (scroll_offset),
                     line_y,
@@ -4499,8 +4588,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     window,
                     cx,
                 );
-                row_offset += line.wrapped_lines.len() as isize;
-
                 if Some(row) == prepaint.current_row {
                     cursor_row_y = Some(line_y);
                 }
@@ -4508,12 +4595,10 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 // After the cursor row, paint ghost lines (which shifts subsequent content down)
                 if has_ghost_lines && Some(row) == prepaint.current_row {
                     let ghost_x = origin.x + prepaint.last_layout.text_origin_x;
-                    let ghost_base_y =
-                        origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset;
+                    let mut ghost_y = line_y + height;
 
-                    for (ghost_ix, ghost_line) in ghost_lines.iter().enumerate() {
-                        let ghost_p =
-                            point(ghost_x, ghost_base_y + line_height * (ghost_ix as f32));
+                    for ghost_line in ghost_lines {
+                        let ghost_p = point(ghost_x, ghost_y);
 
                         // Paint semi-transparent background for ghost line
                         let ghost_bounds = Bounds::new(
@@ -4531,8 +4616,8 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                             window,
                             cx,
                         );
+                        ghost_y += line_height;
                     }
-                    ghost_offset += line_height * (ghost_lines.len() as f32);
                 }
             }
 
@@ -4558,9 +4643,6 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
 
         // Paint line numbers
         if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
-            let mut row_offset: isize = 0;
-            let mut ghost_offset = px(0.);
-
             // The gutter is a fixed overlay above horizontally scrolling text.
             // Always give it an opaque editor background when the theme does not
             // provide a dedicated gutter color, and cover the complete gutter so
@@ -4580,15 +4662,14 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             }
             let folding = self.state.read(cx).mode.is_folding();
 
-            // Each item is the normal lines.
-            for ((line_no, rows), &buffer_line) in line_numbers
+            // Each item is the normal lines, numbered where its row is laid
+            // out, so a spacer row has no number.
+            for (((line_no, rows), &buffer_line), (top, _)) in line_numbers
                 .iter()
                 .zip(prepaint.last_layout.visible_buffer_lines.iter())
+                .zip(prepaint.last_layout.row_extents())
             {
-                let p = point(
-                    input_bounds.origin.x,
-                    origin.y + prepaint.last_layout.local_row_y(row_offset) + ghost_offset,
-                );
+                let y = origin.y + top;
                 let is_active = prepaint.active_row == Some(buffer_line);
 
                 let height = line_height * *rows as f32;
@@ -4597,7 +4678,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     if let Some(bg_color) = active_line_color {
                         window.paint_quad(fill(
                             Bounds::new(
-                                point(gutter_bounds.origin.x, p.y),
+                                point(gutter_bounds.origin.x, y),
                                 size(gutter_bounds.size.width, height),
                             ),
                             bg_color,
@@ -4606,24 +4687,11 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                 }
 
                 let x = line_number_x(&prepaint.last_layout, folding, line_no.width);
-                let number_origin = point(
+                let p = point(
                     input_bounds.origin.x + x,
-                    p.y + prepaint.line_number_baseline_offset,
+                    y + prepaint.line_number_baseline_offset,
                 );
-                _ = line_no.paint(
-                    number_origin,
-                    line_height,
-                    TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                );
-                row_offset += *rows as isize;
-
-                // Add ghost line height after cursor row for line numbers alignment
-                if !prepaint.ghost_lines.is_empty() && prepaint.current_row == Some(buffer_line) {
-                    ghost_offset += prepaint.ghost_lines_height;
-                }
+                _ = line_no.paint(p, line_height, TextAlign::Left, None, window, cx);
             }
         }
 
@@ -7411,6 +7479,475 @@ mod tests {
         });
     }
 
+    /// Hands out the spacers it holds, and counts how often it was asked.
+    #[derive(Default)]
+    struct HeldSpacers {
+        spacers: std::cell::RefCell<Vec<crate::input::Spacer>>,
+        asked: std::cell::Cell<usize>,
+    }
+
+    impl crate::input::SpacerProvider for HeldSpacers {
+        fn spacers(&self, lines: Range<usize>, _: &App) -> Vec<crate::input::Spacer> {
+            self.asked.set(self.asked.get() + 1);
+            self.spacers
+                .borrow()
+                .iter()
+                .filter(|spacer| lines.contains(&spacer.line()))
+                .cloned()
+                .collect()
+        }
+    }
+
+    /// Five short lines, the second long enough to wrap when `wrap` is on, then
+    /// twenty more and an empty one; padded by `spacers`.
+    fn spaced_editor(
+        cx: &mut TestAppContext,
+        wrap: bool,
+        spacers: Vec<crate::input::Spacer>,
+    ) -> (
+        Entity<EditorState>,
+        gpui::WindowHandle<DecorationHarness>,
+        Rc<HeldSpacers>,
+    ) {
+        let text = format!(
+            "one\n{}\nthree\nfour\nfive\n{}",
+            "word ".repeat(8),
+            "x\n".repeat(20)
+        );
+        let (editor, window) = decoration_editor(cx, &text, wrap);
+        let held = Rc::new(HeldSpacers::default());
+        *held.spacers.borrow_mut() = spacers;
+        cx.update(|cx| {
+            editor.update(cx, |state, cx| {
+                state.set_spacer_provider(Some(held.clone()), cx);
+            });
+        });
+        (editor, window, held)
+    }
+
+    /// The display row a laid-out caret or element stands on.
+    fn row_at(state: &EditorState, y: Pixels) -> usize {
+        let layout = state.last_layout.as_ref().unwrap();
+        let top = state.last_bounds.unwrap().origin.y + state.scroll_offset().y;
+        ((y - top) / layout.line_height).floor() as usize
+    }
+
+    /// The display rows of a visible line's text.
+    fn text_rows(state: &EditorState, line: usize) -> Range<usize> {
+        state
+            .display_map()
+            .buffer_line_to_display_row_range(line)
+            .unwrap()
+    }
+
+    #[gpui::test]
+    fn spacer_rows_are_display_rows_that_push_every_row_below_them(cx: &mut TestAppContext) {
+        use crate::input::{BufferPoint, DisplayPoint, Spacer};
+        for wrap in [false, true] {
+            let (editor, window, _) = spaced_editor(
+                cx,
+                wrap,
+                vec![
+                    Spacer::above(0, 1),
+                    Spacer::below(0, 2),
+                    Spacer::below(1, 3),
+                    Spacer::below(25, 4),
+                ],
+            );
+            let mut cx = VisualTestContext::from_window(window.into(), cx);
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                let (line_height, wrapped, starts, scroll_height) = {
+                    let state = editor.read(cx);
+                    let line_height = state.line_height().unwrap();
+                    let wrapped = text_rows(state, 1).len();
+                    assert_eq!(wrapped > 1, wrap);
+                    assert_eq!(state.display_map().display_row_count(), 25 + wrapped + 10);
+                    let starts: Vec<usize> =
+                        (0..5).map(|line| text_rows(state, line).start).collect();
+                    assert_eq!(starts, [1, 4, 7 + wrapped, 8 + wrapped, 9 + wrapped]);
+                    for row in 0..state.display_map().display_row_count() + 2 {
+                        let spacer = [0, 2, 3].contains(&row)
+                            || (4 + wrapped..7 + wrapped).contains(&row)
+                            || (31 + wrapped..35 + wrapped).contains(&row);
+                        assert_eq!(
+                            state.display_map().is_spacer_row(row),
+                            spacer,
+                            "row {row}, wrap {wrap}"
+                        );
+                    }
+                    let map = state.display_map();
+                    assert_eq!(map.display_row_to_buffer_line(0), 0);
+                    assert_eq!(map.display_row_to_buffer_line(3), 0);
+                    assert_eq!(map.display_row_to_buffer_line(6 + wrapped), 1);
+                    let last_row = map.display_pos_to_buffer_pos(DisplayPoint::new(3 + wrapped, 0));
+                    assert_eq!(
+                        map.display_pos_to_buffer_pos(DisplayPoint::new(6 + wrapped, 0)),
+                        last_row
+                    );
+                    assert_eq!(
+                        map.display_pos_to_buffer_pos(DisplayPoint::new(0, 0)),
+                        BufferPoint::new(0, 0)
+                    );
+
+                    // Every laid-out row is drawn at its display row, its height its own.
+                    let top = state.last_bounds.unwrap().origin.y;
+                    let laid_out = &state.last_layout.as_ref().unwrap().visible_buffer_lines;
+                    assert!(laid_out.contains(&1));
+                    for &line in laid_out {
+                        let start = text_rows(state, line).start;
+                        let bounds = state.row_bounds(line).unwrap();
+                        assert_eq!(bounds.origin.y - top, line_height * start);
+                        assert_eq!(
+                            bounds.size.height,
+                            line_height * text_rows(state, line).len()
+                        );
+                    }
+                    (line_height, wrapped, starts, state.scroll_size.height)
+                };
+
+                // The caret on the last line is scrolled into view past every spacer.
+                editor.update(cx, |state, cx| {
+                    state.set_cursor_position(Position::new(25, 0), window, cx);
+                });
+                window.draw(cx).clear(cx);
+                window.draw(cx).clear(cx);
+                {
+                    // The caret is laid out where it is painted.
+                    let state = editor.read(cx);
+                    let caret = state.last_layout.as_ref().unwrap().cursor_bounds.unwrap();
+                    let shown = caret.center();
+                    assert!(state.input_bounds.contains(&shown), "{caret:?}");
+                    assert_eq!(row_at(state, shown.y), 30 + wrapped);
+                }
+
+                // Without the provider the rows close up, and the scroll height
+                // is ten rows shorter.
+                editor.update(cx, |state, cx| state.set_spacer_provider(None, cx));
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                assert_eq!(state.display_map().display_row_count(), 25 + wrapped);
+                assert_eq!(text_rows(state, 1).start, starts[1] - 3);
+                assert_eq!(scroll_height - state.scroll_size.height, line_height * 10);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn a_spacer_background_stays_on_its_rows_when_scrolled(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        let color = gpui::hsla(0., 1., 0.5, 1.);
+        let (editor, window, _) =
+            spaced_editor(cx, false, vec![Spacer::below(1, 2).with_background(color)]);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            for scroll in [px(0.), px(-30.)] {
+                editor.update(cx, |state, cx| {
+                    state.set_scroll_offset(point(px(0.), scroll), cx)
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                assert_eq!(state.scroll_offset().y, scroll);
+                let layout = state.last_layout.as_ref().unwrap();
+                let rows = state
+                    .display_map
+                    .spacer_backgrounds(0..state.display_map.buffer_line_count())
+                    .collect();
+                let placed = place_spacer_backgrounds(layout, rows, None);
+                let top = state.row_bounds(1).unwrap().bottom() - state.last_bounds.unwrap().top();
+                assert_eq!(placed, [(top, layout.line_height * 2, color)], "{scroll:?}");
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn the_caret_and_a_click_never_stand_on_a_spacer_row(cx: &mut TestAppContext) {
+        use crate::input::{MoveDown, MoveUp, Spacer};
+        for wrap in [false, true] {
+            let (editor, window, _) = spaced_editor(
+                cx,
+                wrap,
+                vec![
+                    Spacer::below(0, 2),
+                    Spacer::above(1, 1),
+                    Spacer::below(25, 3),
+                ],
+            );
+            let mut cx = VisualTestContext::from_window(window.into(), cx);
+            let (above_one, below_zero) = cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                let wrapped = text_rows(editor.read(cx), 1).len();
+                let line = |editor: &Entity<EditorState>, cx: &App| {
+                    editor.read(cx).cursor_position().line as usize
+                };
+
+                editor.update(cx, |state, cx| {
+                    state.set_cursor_position(Position::new(0, 1), window, cx);
+                    state.down(&MoveDown, window, cx);
+                });
+                assert_eq!(line(&editor, cx), 1, "past the rows between lines 0 and 1");
+                window.draw(cx).clear(cx);
+                {
+                    let state = editor.read(cx);
+                    let caret = state.last_layout.as_ref().unwrap().cursor_bounds.unwrap();
+                    assert_eq!(row_at(state, caret.center().y), 4);
+                }
+                for _ in 0..wrapped {
+                    editor.update(cx, |state, cx| state.down(&MoveDown, window, cx));
+                }
+                assert_eq!(line(&editor, cx), 2);
+                editor.update(cx, |state, cx| state.up(&MoveUp, window, cx));
+                assert_eq!(line(&editor, cx), 1);
+                for _ in 0..wrapped {
+                    editor.update(cx, |state, cx| state.up(&MoveUp, window, cx));
+                }
+                assert_eq!(line(&editor, cx), 0);
+
+                // Down from the last line, with spacers below it, stays on it.
+                editor.update(cx, |state, cx| {
+                    state.set_cursor_position(Position::new(25, 0), window, cx);
+                    state.down(&MoveDown, window, cx);
+                });
+                assert_eq!(line(&editor, cx), 25);
+
+                // A block selection takes the rows of text and none of the spacers.
+                if !wrap {
+                    editor.update(cx, |state, cx| {
+                        state.build_columnar_selection(
+                            crate::input::state::ColumnarPoint::new(1, 0),
+                            crate::input::state::ColumnarPoint::new(6, 0),
+                            cx,
+                        );
+                        let ranges: Vec<_> =
+                            state.selections.iter().map(|s| (s.start, s.end)).collect();
+                        assert_eq!(ranges, vec![(1, 2), (5, 6)]);
+                    });
+                }
+
+                editor.update(cx, |state, cx| {
+                    state.set_cursor_position(Position::new(0, 0), window, cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let origin = state.last_bounds.unwrap().origin;
+                // The x of the third character of a line, on the row `row`.
+                let at = |line: usize, row: f32| {
+                    let x = layout.text_origin_x
+                        + layout
+                            .line(line)
+                            .unwrap()
+                            .position_for_index(2, layout, false)
+                            .unwrap()
+                            .x;
+                    origin + point(x, layout.line_height * row)
+                };
+                (at(1, 3.5), at(0, 1.5))
+            });
+
+            // A click on a spacer row is a click on the row of text beside it.
+            cx.simulate_click(below_zero, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert_eq!(state.selected_range(), 2..2, "wrap {wrap}");
+            });
+            cx.simulate_click(above_one, gpui::Modifiers::default());
+            editor.read_with(&cx, |state, _| {
+                assert_eq!(state.selected_range(), 6..6, "wrap {wrap}");
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn bands_and_fold_icons_stand_on_text_rows_only(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        for wrap in [false, true] {
+            let (editor, window, _) = spaced_editor(
+                cx,
+                wrap,
+                vec![
+                    Spacer::below(0, 2).with_background(gpui::blue()),
+                    Spacer::above(2, 1),
+                    Spacer::below(2, 1),
+                ],
+            );
+            let mut cx = VisualTestContext::from_window(window.into(), cx);
+            cx.update(|window, cx| {
+                let icons = record_fold_icons(&editor, cx);
+                editor.update(cx, |state, cx| {
+                    state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
+                    state.create_line_decorations_collection(Bands::new(), cx);
+                });
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let line_height = layout.line_height;
+                let start = |line| text_rows(state, line).start;
+
+                // A band for every laid-out line, on its text rows.
+                for (ix, (band_top, height)) in layout.row_extents().enumerate() {
+                    let line = layout.visible_buffer_lines[ix];
+                    assert_eq!(band_top, line_height * start(line));
+                    assert_eq!(height, line_height * text_rows(state, line).len());
+                }
+
+                // The fold icon of line 2 is on its row, not on the spacer above it.
+                let icon = *icons.borrow().first().expect("a fold icon is laid out");
+                assert_eq!(row_at(state, icon.center().y), start(2));
+
+                // A spacer's background covers its rows and nothing else.
+                let backgrounds: Vec<_> = state.display_map.spacer_backgrounds(0..26).collect();
+                assert_eq!(backgrounds, vec![(1..3, gpui::blue())]);
+                assert_eq!(start(1), 3);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn ranges_are_laid_out_on_text_rows_only(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        for wrap in [false, true] {
+            let (editor, window, _) = spaced_editor(
+                cx,
+                wrap,
+                vec![
+                    Spacer::above(0, 1),
+                    Spacer::below(1, 2),
+                    Spacer::above(2, 1),
+                ],
+            );
+            let mut cx = VisualTestContext::from_window(window.into(), cx);
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                // From the middle of line 0 to the middle of line 2: a selection, a
+                // search match and a colour box are all laid out this way.
+                let end = state.text.line_start_offset(2) + 3;
+                let corners =
+                    TextElement::<EditorMode>::layout_range_corners(&(1..end), layout).unwrap();
+                let rows: Vec<usize> = corners
+                    .iter()
+                    .map(|corners| (corners.top_left.y / layout.line_height).round() as usize)
+                    .collect();
+                let expected: Vec<usize> = [0, 1, 2]
+                    .into_iter()
+                    .flat_map(|line| text_rows(state, line))
+                    .collect();
+                assert_eq!(rows, expected, "wrap {wrap}");
+                assert!(
+                    rows.iter()
+                        .all(|&row| !state.display_map().is_spacer_row(row))
+                );
+                assert_eq!(rows[0], 1);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn spacers_beside_a_right_gutter_and_a_left_scroll_bar(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        let (editor, window, _) = spaced_editor(cx, true, vec![Spacer::below(0, 3)]);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let in_text = cx.update(|window, cx| {
+            let icons = record_fold_icons(&editor, cx);
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(1, 3)], cx);
+                state.set_gutter_side(Side::Right, cx);
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.as_ref().unwrap();
+            let icon = *icons.borrow().first().expect("a fold icon is laid out");
+            assert!(icon.left() > state.input_bounds.left() + layout.text_width);
+            assert_eq!(row_at(state, icon.center().y), 4);
+            let x = layout.text_origin_x
+                + layout.lines[1]
+                    .position_for_index(2, layout, false)
+                    .unwrap()
+                    .x;
+            state.last_bounds.unwrap().origin + point(x, layout.line_height * 4.5)
+        });
+        cx.simulate_click(in_text, gpui::Modifiers::default());
+        editor.read_with(&cx, |state, _| {
+            assert_eq!(state.selected_range(), 6..6);
+        });
+    }
+
+    #[gpui::test]
+    fn spacers_are_asked_for_when_the_rows_move(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        let (editor, window, held) = spaced_editor(
+            cx,
+            true,
+            vec![
+                Spacer::below(1, 2),
+                Spacer::below(3, 5),
+                Spacer::below(40, 9),
+            ],
+        );
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 1);
+            // Line 40 does not exist.
+            assert_eq!(editor.read(cx).display_map.spacer_row_count(), 7);
+
+            // A frame, or a scroll, moves no row.
+            window.draw(cx).clear(cx);
+            editor.update(cx, |state, cx| {
+                state.set_scroll_offset(point(px(0.), px(-40.)), cx);
+            });
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 1);
+
+            // An edit, a rewrap, a fold and a refresh do. The spacers are placed
+            // again at once, before the provider is asked: a line that now wraps
+            // to more rows has no spacer inside it.
+            editor.update(cx, |state, cx| {
+                state.set_cursor_position(Position::new(1, 0), window, cx);
+                state.insert("more ".repeat(8), window, cx);
+            });
+            {
+                let state = editor.read(cx);
+                assert_eq!(
+                    text_rows(state, 1).len(),
+                    state.display_map.visible_wrap_row_count_for_buffer_line(1)
+                );
+                assert!(text_rows(state, 1).len() > 2);
+            }
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 2);
+            editor.update(cx, |state, cx| state.set_soft_wrap(false, window, cx));
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 3);
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
+                state.display_map.set_folded(2, true);
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 4);
+            // Line 3 is folded away, and its spacers with it.
+            assert_eq!(editor.read(cx).display_map.spacer_row_count(), 2);
+            // The same answer leaves the version; cached rows stay valid.
+            let version = editor.read(cx).display_map().version();
+            editor.update(cx, |state, cx| state.refresh_spacers(cx));
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 5);
+            assert_eq!(editor.read(cx).display_map().version(), version);
+
+            // A different one moves it, without asking the provider anew.
+            *held.spacers.borrow_mut() = vec![Spacer::below(1, 4)];
+            editor.update(cx, |state, cx| state.refresh_spacers(cx));
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            assert_eq!(held.asked.get(), 6);
+            assert_ne!(editor.read(cx).display_map().version(), version);
+            assert_eq!(editor.read(cx).display_map.spacer_row_count(), 4);
+        });
+    }
+
     #[gpui::test]
     fn the_display_map_version_moves_with_the_wrap_width(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, &"word ".repeat(16), true);
@@ -9075,6 +9612,7 @@ mod tests {
                     gutter_gap: LINE_NUMBER_RIGHT_MARGIN,
                     gutter_decorations_width: px(0.),
                     ghost_lines: None,
+                    spacer_rows: Vec::new(),
                     gutter_side: crate::Side::Left,
                     gutter_order: crate::input::GutterColumn::DEFAULT_ORDER,
                     text_origin_x: px(60.),
