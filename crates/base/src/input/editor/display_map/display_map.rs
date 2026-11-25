@@ -25,7 +25,12 @@ use crate::input::rope_ext::RopeExt as _;
 /// 1. Buffer → Wrap (soft-wrapping)
 /// 2. Wrap → Display (folding)
 ///
-/// Editor/Input only needs to work with BufferPoint and DisplayPoint.
+/// [`crate::input::InputBaseState::display_map`] exposes the editor-owned map
+/// through a shared reference for application coordinate queries. Text edits,
+/// wrapping, and folding remain owned by the editor state.
+///
+/// Coordinates describe the prepared text projection, including offscreen
+/// lines. They exclude inline completion ghost lines and other painted geometry.
 pub struct DisplayMap {
     wrap_map: WrapMap,
     fold_map: FoldMap,
@@ -64,6 +69,20 @@ impl DisplayMap {
         // Wrap → Buffer
         let wrap_pos = WrapPoint::new(wrap_row, pos.col);
         self.wrap_map.wrap_pos_to_buffer_pos(wrap_pos)
+    }
+
+    /// A number that changes whenever a buffer line may have taken different
+    /// display rows: an edit, a rewrap or a change of folds.
+    ///
+    /// Compare versions for equality on the same map to invalidate cached
+    /// queries. The counter can wrap; it is not a document revision or a count
+    /// of edits. Scrolling and inline completion ghost lines do not change it.
+    #[inline]
+    pub fn version(&self) -> usize {
+        self.wrap_map
+            .wrapper()
+            .version()
+            .wrapping_add(self.fold_map.version())
     }
 
     /// Get total number of visible display rows

@@ -111,6 +111,16 @@ collections keep empty ranges, which mark line boundaries. See
 asked for whole-row backgrounds on every frame. Base paints the backgrounds itself.
 See [Line decorations](../../component/editor.md#line-decorations).
 
+## Display map
+
+`EditorState::display_map()` returns a read-only `&DisplayMap` for custom coordinate
+queries across the whole prepared buffer. The editor owns updates; use
+`DisplayMap::version()` to invalidate cached mappings after edits, rewrapping, or
+fold changes. Import `DisplayMap`, `BufferPoint`, and `DisplayPoint` from
+`gpui_kit::base::input`. See the [Editor](../../component/editor.md#line-decorations)
+for query examples, layout timing, and the distinction between text projection
+and painted geometry with inline completion ghost lines.
+
 ## Highlighting and language features
 
 `InputHighlighterFactory`, `InputHighlighter`, diagnostic types, and the LSP
