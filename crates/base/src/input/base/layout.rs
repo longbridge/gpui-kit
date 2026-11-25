@@ -24,18 +24,24 @@ pub enum GutterColumn {
     FoldIcons,
     /// The line numbers.
     LineNumbers,
+    /// The column of the line decorations' gutter icons.
+    Icons,
     /// The strip of the gutter decorations.
     Decorations,
 }
 
 impl GutterColumn {
     /// The columns in their default order, from the text outward.
-    pub(crate) const DEFAULT_ORDER: [Self; 3] =
-        [Self::FoldIcons, Self::LineNumbers, Self::Decorations];
+    pub(crate) const DEFAULT_ORDER: [Self; 4] = [
+        Self::FoldIcons,
+        Self::LineNumbers,
+        Self::Icons,
+        Self::Decorations,
+    ];
 
     /// Return every column once, those listed first and the rest in their
     /// default order.
-    pub(super) fn order(columns: impl IntoIterator<Item = Self>) -> [Self; 3] {
+    pub(super) fn order(columns: impl IntoIterator<Item = Self>) -> [Self; 4] {
         let mut order = Self::DEFAULT_ORDER;
         let mut len = 0;
         for column in columns.into_iter().chain(Self::DEFAULT_ORDER) {
@@ -66,6 +72,10 @@ pub(super) struct LastLayout {
     pub(super) line_number_width: Pixels,
     /// Resolved gap between the text and the gutter columns for this frame.
     pub(super) gutter_gap: Pixels,
+    /// Width reserved for the column of the line decorations' gutter icons and
+    /// its gap toward the line numbers, zero while no provider has gutter icons.
+    /// Part of `line_number_width`.
+    pub(super) gutter_icon_width: Pixels,
     /// Width reserved for the gutter decoration strip and its gap toward the
     /// line numbers, zero without a gutter decoration collection. Part of
     /// `line_number_width`.
@@ -76,7 +86,7 @@ pub(super) struct LastLayout {
     /// `visible_buffer_lines` order; empty when the editor has no spacers.
     pub(super) spacer_rows: Vec<(usize, usize)>,
     pub(super) gutter_side: Side,
-    pub(super) gutter_order: [GutterColumn; 3],
+    pub(super) gutter_order: [GutterColumn; 4],
     /// The x of the text, relative to the input bounds.
     pub(super) text_origin_x: Pixels,
     /// The x of the gutter, relative to the input bounds.

@@ -558,7 +558,7 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
     pub(super) scrollbar_placement: ScrollbarPlacement,
     pub(super) gutter_side: Side,
-    pub(super) gutter_order: [GutterColumn; 3],
+    pub(super) gutter_order: [GutterColumn; 4],
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -13863,7 +13863,7 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
     }
 
     /// The order of the gutter's columns from the text outward, default is
-    /// `[GutterColumn::FoldIcons, GutterColumn::LineNumbers,
+    /// `[GutterColumn::FoldIcons, GutterColumn::LineNumbers, GutterColumn::Icons,
     /// GutterColumn::Decorations]`.
     ///
     /// A column left out follows the listed ones in its default order, and a

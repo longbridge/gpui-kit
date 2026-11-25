@@ -137,7 +137,7 @@ EditorState::new(window, cx)
     .gutter_side(Side::Right)
 ```
 
-无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。运行时可用 `set_gutter_side` 切换位置。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后，重复列出的列会被忽略。在 diff 中，这样可以把变更竖条放在文本与行号之间：
+无论 gutter 位于哪一侧，折叠图标默认紧邻文本，向外依次是行号、[行号槽图标](#行装饰)和[行号槽装饰](#行号槽与概览标尺装饰)的竖条。运行时可用 `set_gutter_side` 切换位置。使用 `gutter_order` 可按从文本向外的顺序列出各列，未列出的列依次排在其后，重复列出的列会被忽略。在 diff 中，这样可以把变更竖条放在文本与行号之间：
 
 ```rust
 EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Decorations])
@@ -384,7 +384,7 @@ let ruler = editor.update(cx, |state, cx| {
 
 ### 行装饰
 
-`LineDecorationCollection` 以整行为单位绘制：横跨所装饰行的背景色带。
+`LineDecorationCollection` 以整行为单位绘制：横跨该行的背景色带、行号槽中的图标，或两者兼有。
 条目由 `LineDecorationProvider` 提供：编辑器每绘制一帧，都会以当前可见的缓冲区行范围询问它。
 
 ```rust
@@ -392,7 +392,7 @@ use std::{ops::Range, rc::Rc};
 
 use gpui_kit::App;
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, IconName, IconNamed as _,
     input::{LineDecoration, LineDecorationProvider},
 };
 
@@ -405,8 +405,16 @@ impl LineDecorationProvider for AddedRows {
         let end = self.0.partition_point(|&row| row < rows.end);
         self.0[start..end]
             .iter()
-            .map(|&row| LineDecoration::new(row).with_background(cx.theme().success.opacity(0.16)))
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_gutter_icon(IconName::Plus.path(), cx.theme().success)
+            })
             .collect()
+    }
+
+    fn has_gutter_icons(&self) -> bool {
+        true
     }
 }
 
@@ -425,7 +433,16 @@ added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
 后创建的集合绘制在先创建的集合之上。
 
 背景横跨整行（包括行号槽），覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
-选区和文字下方。它不影响命中测试或焦点，也不提供鼠标或键盘操作。
+选区和文字下方。
+
+行号槽图标是传给 `with_gutter_icon` 的路径对应的 SVG 资源，以给定颜色绘制在边长为行高 60% 的正方形中，
+并在所在行垂直居中，因此图标既跟随界面缩放，也跟随编辑器单独设置的 `.text_size(...)`。图标位于独立的列
+`GutterColumn::Icons` 中，只在显示行号时出现，与行号之间留有行高 20% 的间距。默认顺序下，该列位于行号外侧；
+使用 `gutter_order` 可将其移到更靠近文本的位置，与 IntelliJ IDEA 放置标记的方式一致。只有当某个 provider 的
+`has_gutter_icons` 返回 `true` 时才会预留该列，并且对每一行都预留，因此带图标的行滚入或滚出视图时行号槽宽度不变，
+只使用背景的编辑器与没有行装饰的编辑器布局相同。其他 provider 的行号槽图标不会绘制。
+
+背景和行号槽图标都不影响命中测试或焦点，也不提供鼠标或键盘操作。
 
 `EditorState::row_bounds(row)` 返回某一行在窗口坐标中实际绘制的区域：多行内联补全下方的行会随
 文字一起下移。该行尚未布局时返回 `None`。
