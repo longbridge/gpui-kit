@@ -734,6 +734,7 @@ impl RenderOnce for Input {
             .clone()
             .filter(|_| state.presentation(cx).is_editable());
         let mut overlays = state.render_overlays(window, cx);
+        let search_open = overlays.search.is_some();
         overlays
             .floating
             .extend(Self::render_touch_selection(&state, window, cx));
@@ -937,6 +938,21 @@ impl RenderOnce for Input {
                         if handler(&clipboard, window, cx) {
                             cx.stop_propagation();
                         }
+                    }
+                })
+            })
+            // The frame holds both the editor and its search panel, so these
+            // reach the panel from either one.
+            .when(search_open, |this| {
+                let replace_all = state.clone();
+                this.on_action(move |_: &super::ReplaceNext, window, cx| {
+                    if !state.replace_next(window, cx) {
+                        cx.propagate();
+                    }
+                })
+                .on_action(move |_: &super::ReplaceAll, window, cx| {
+                    if !replace_all.replace_all(window, cx) {
+                        cx.propagate();
                     }
                 })
             })

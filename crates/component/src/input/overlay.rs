@@ -451,6 +451,20 @@ pub(super) fn render_overlays<M: OverlayMode>(
     overlays
 }
 
+/// The search panel of this input, while it is open in replace mode.
+pub(super) fn replace_panel<M: OverlayMode>(
+    state: &Entity<InputBaseState<M>>,
+    cx: &App,
+) -> Option<Entity<SearchPanel<M>>> {
+    let session = state.read(cx).search_session();
+    if !session.open || !session.replace_mode {
+        return None;
+    }
+    let registry = cx.try_global::<InputOverlayRegistry<M>>()?;
+    let (_, host) = registry.hosts.get(&state.entity_id())?;
+    Some(host.search.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -833,5 +847,67 @@ mod tests {
         state.read_with(&cx, |state, _| {
             assert_eq!(state.search_session().query, "host");
         });
+    }
+
+    /// `ReplaceNext` and `ReplaceAll` replace with the replace field's text
+    /// while the panel is in replace mode, and propagate otherwise.
+    #[gpui::test]
+    fn replace_actions_use_the_replace_field(cx: &mut gpui::TestAppContext) {
+        use crate::input::{Editor, ReplaceAll, ReplaceNext};
+
+        struct EditorProbe(Entity<crate::input::EditorState>);
+        impl Render for EditorProbe {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                Editor::new(&self.0)
+            }
+        }
+
+        cx.update(crate::init);
+        let mut editor = None;
+        let window = cx
+            .update(|cx| {
+                cx.open_window(Default::default(), |window, cx| {
+                    let state =
+                        cx.new(|cx| crate::input::EditorState::new(window, cx).searchable(true));
+                    editor = Some(state.clone());
+                    let probe = cx.new(|_| EditorProbe(state));
+                    cx.new(|cx| crate::Root::new(probe, window, cx))
+                })
+            })
+            .unwrap();
+        let state = editor.unwrap();
+        let mut cx = gpui::VisualTestContext::from_window(window.into(), cx);
+        // Searches "foo" with the panel in `replace_mode`, or closed, and
+        // dispatches `action` from the editor body.
+        let mut run = |replace_mode: Option<bool>, action: Box<dyn gpui::Action>| {
+            cx.update(|window, cx| {
+                state.update(cx, |state, cx| {
+                    state.set_value("foo bar foo", window, cx);
+                    state.set_selected_range(0..3, cx);
+                    state.focus(window, cx);
+                    match replace_mode {
+                        Some(replace_mode) => state.open_search(replace_mode, cx),
+                        None => state.close_search(cx),
+                    }
+                });
+                window.draw(cx).clear(cx);
+                let panel = cx
+                    .try_global::<InputOverlayRegistry<crate::input::EditorMode>>()
+                    .and_then(|registry| registry.hosts.get(&state.entity_id()))
+                    .map(|(_, host)| host.search.clone());
+                if let Some(panel) = panel {
+                    let field = panel.read(cx).replace_input().clone();
+                    field.update(cx, |field, cx| field.set_value("baz", window, cx));
+                }
+                window.dispatch_action(action, cx);
+            });
+            // The action runs once that update returns.
+            state.read_with(&cx, |state, _| state.value().to_string())
+        };
+
+        assert_eq!(run(Some(false), Box::new(ReplaceNext)), "foo bar foo");
+        assert_eq!(run(None, Box::new(ReplaceNext)), "foo bar foo");
+        assert_eq!(run(Some(true), Box::new(ReplaceNext)), "baz bar foo");
+        assert_eq!(run(Some(true), Box::new(ReplaceAll)), "baz bar baz");
     }
 }

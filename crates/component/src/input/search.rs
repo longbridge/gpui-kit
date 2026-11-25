@@ -22,7 +22,16 @@ use crate::{
 
 const CONTEXT: &'static str = "SearchPanel";
 
-actions!(input, [Tab]);
+actions!(
+    input,
+    [
+        Tab,
+        /// Replace the current search match, as the search panel's Replace button does.
+        ReplaceNext,
+        /// Replace every search match, as the search panel's Replace All button does.
+        ReplaceAll,
+    ]
+);
 
 #[cfg(test)]
 use gpui_base::input::SearchMatcher;
@@ -87,6 +96,12 @@ impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
     #[cfg(test)]
     pub(super) fn search_input(&self) -> &Entity<InputState> {
         &self.search_input
+    }
+
+    /// The panel's replace input, so a test can fill in the replacement.
+    #[cfg(test)]
+    pub(super) fn replace_input(&self) -> &Entity<InputState> {
+        &self.replace_input
     }
 
     pub(crate) fn new(
@@ -280,7 +295,7 @@ impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
         });
     }
 
-    fn replace_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn replace_next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.replaceable(cx) {
             self.session.replace_mode = false;
             cx.notify();
@@ -293,7 +308,7 @@ impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
         });
     }
 
-    fn replace_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn replace_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.replaceable(cx) {
             self.session.replace_mode = false;
             cx.notify();
