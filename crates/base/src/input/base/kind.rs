@@ -85,6 +85,12 @@ pub trait InputExtras: Default + 'static {
         Vec::new()
     }
 
+    /// Changes whenever [`Self::decoration_layers`] are set again. Edits that only move
+    /// their ranges leave it as it is.
+    fn decorations_revision(&self) -> u64 {
+        0
+    }
+
     /// Geometric decorations intersecting visible, non-folded buffer spans.
     fn range_decorations(&self, _ranges: &[std::ops::Range<usize>]) -> Vec<&RangeDecoration> {
         Vec::new()
@@ -413,6 +419,7 @@ impl InputModeKind for TextareaMode {
 #[derive(Default)]
 pub struct TextareaExtras {
     pub(crate) decorations: Vec<TextDecoration>,
+    pub(crate) revision: u64,
 }
 
 impl InputExtras for TextareaExtras {
@@ -422,6 +429,10 @@ impl InputExtras for TextareaExtras {
         } else {
             vec![&self.decorations[..]]
         }
+    }
+
+    fn decorations_revision(&self) -> u64 {
+        self.revision
     }
 }
 // `EditorMode`'s implementation lives with the editor code, next to the

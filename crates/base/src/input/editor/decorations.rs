@@ -787,7 +787,7 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
     }
 }
 
-fn adjust_range_for_edit(
+pub(super) fn adjust_range_for_edit(
     range: &Range<usize>,
     edited_range: &Range<usize>,
     inserted_len: usize,
@@ -892,6 +892,7 @@ impl InputBaseState<TextareaMode> {
         let decorations = normalize(&self.text, decorations);
         if self.extras.decorations != decorations {
             self.extras.decorations = decorations;
+            self.extras.revision = self.extras.revision.wrapping_add(1);
             cx.notify();
         }
     }

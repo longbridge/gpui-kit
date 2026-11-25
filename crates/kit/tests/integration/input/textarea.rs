@@ -1760,3 +1760,224 @@ fn scrolling_vertically_over_a_single_line_input_scrolls_the_page(cx: &mut TestA
     })
     .unwrap();
 }
+
+/// A text system whose bold and italic glyphs are wider than regular ones, as in real fonts.
+/// The default test text system draws every font alike, which would hide a wrap measured in
+/// the wrong font.
+struct WideStyles;
+
+impl WideStyles {
+    fn font_id(font: &gpui_kit::Font) -> gpui_kit::FontId {
+        let bold = font.weight >= gpui_kit::FontWeight::SEMIBOLD;
+        let italic = font.style != gpui_kit::FontStyle::Normal;
+        gpui_kit::FontId(1 + usize::from(bold) + 2 * usize::from(italic))
+    }
+
+    fn scale(font_id: gpui_kit::FontId) -> f32 {
+        match font_id.0 {
+            2 => 1.3,
+            3 => 1.1,
+            4 => 1.4,
+            _ => 1.,
+        }
+    }
+}
+
+impl gpui_kit::PlatformTextSystem for WideStyles {
+    fn add_fonts(&self, _: Vec<std::borrow::Cow<'static, [u8]>>) -> gpui_kit::Result<()> {
+        Ok(())
+    }
+
+    fn all_font_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn font_id(&self, descriptor: &gpui_kit::Font) -> gpui_kit::Result<gpui_kit::FontId> {
+        Ok(Self::font_id(descriptor))
+    }
+
+    fn font_metrics(&self, font_id: gpui_kit::FontId) -> gpui_kit::FontMetrics {
+        gpui_kit::NoopTextSystem.font_metrics(font_id)
+    }
+
+    fn typographic_bounds(
+        &self,
+        font_id: gpui_kit::FontId,
+        glyph_id: gpui_kit::GlyphId,
+    ) -> gpui_kit::Result<gpui_kit::Bounds<f32>> {
+        gpui_kit::NoopTextSystem.typographic_bounds(font_id, glyph_id)
+    }
+
+    fn advance(
+        &self,
+        font_id: gpui_kit::FontId,
+        glyph_id: gpui_kit::GlyphId,
+    ) -> gpui_kit::Result<gpui_kit::Size<f32>> {
+        Ok(size(600. * glyph_id.0 as f32 * Self::scale(font_id), 0.))
+    }
+
+    fn glyph_for_char(&self, font_id: gpui_kit::FontId, ch: char) -> Option<gpui_kit::GlyphId> {
+        gpui_kit::NoopTextSystem.glyph_for_char(font_id, ch)
+    }
+
+    fn glyph_raster_bounds(
+        &self,
+        params: &gpui_kit::RenderGlyphParams,
+    ) -> gpui_kit::Result<gpui_kit::Bounds<gpui_kit::DevicePixels>> {
+        gpui_kit::NoopTextSystem.glyph_raster_bounds(params)
+    }
+
+    fn rasterize_glyph(
+        &self,
+        params: &gpui_kit::RenderGlyphParams,
+        raster_bounds: gpui_kit::Bounds<gpui_kit::DevicePixels>,
+    ) -> gpui_kit::Result<(gpui_kit::Size<gpui_kit::DevicePixels>, Vec<u8>)> {
+        gpui_kit::NoopTextSystem.rasterize_glyph(params, raster_bounds)
+    }
+
+    fn layout_line(
+        &self,
+        text: &str,
+        font_size: Pixels,
+        runs: &[gpui_kit::FontRun],
+    ) -> gpui_kit::LineLayout {
+        let mut x = px(0.);
+        let mut start = 0;
+        let mut shaped = Vec::new();
+        for run in runs {
+            let end = (start + run.len).min(text.len());
+            let advance = font_size * 0.6 * Self::scale(run.font_id);
+            let mut glyphs = Vec::new();
+            for (ix, ch) in text[start..end].char_indices() {
+                glyphs.push(gpui_kit::ShapedGlyph {
+                    id: gpui_kit::GlyphId(ch.len_utf16() as u32),
+                    position: point(x, px(0.)),
+                    index: start + ix,
+                    is_emoji: false,
+                });
+                x += advance;
+            }
+            shaped.push(gpui_kit::ShapedRun {
+                font_id: run.font_id,
+                glyphs,
+            });
+            start = end;
+        }
+        gpui_kit::LineLayout {
+            font_size,
+            width: x,
+            ascent: font_size * 1.025,
+            descent: font_size * -0.275,
+            runs: shaped,
+            len: text.len(),
+        }
+    }
+
+    fn recommended_rendering_mode(
+        &self,
+        _: gpui_kit::FontId,
+        _: Pixels,
+    ) -> gpui_kit::TextRenderingMode {
+        gpui_kit::TextRenderingMode::Grayscale
+    }
+}
+
+/// The caret's left edge at each soft-wrapped row's last character, past which nothing is drawn
+/// but that row's trailing space.
+fn row_ends(window: &mut Window, text: &Entity<TextareaState>, cx: &mut App) -> Vec<Pixels> {
+    let rows = text.read(cx).display_map().wrap_row_count();
+    let len = text.read(cx).value().len();
+    (0..rows)
+        .map(|row| {
+            let next = if row + 1 < rows {
+                let point = gpui_kit::base::input::DisplayPoint::new(row + 1, 0);
+                text.read(cx)
+                    .display_map()
+                    .display_pos_to_buffer_pos(point)
+                    .col
+            } else {
+                len
+            };
+            let end = next - 1;
+            text.update(cx, |state, cx| state.set_selected_range(end..end, cx));
+            window.render_frame(cx);
+            text.read(cx)
+                .cursor_layout()
+                .expect("laid-out caret")
+                .0
+                .left()
+        })
+        .collect()
+}
+
+/// A bold decoration wraps its text where it is drawn, not where the regular font would end.
+/// Built on `WideStyles` instead of `#[gpui_kit::test]`, whose text system draws every font
+/// alike.
+#[test]
+fn bold_decorations_wrap_at_the_width_they_are_drawn() {
+    let mut cx = TestAppContext::build_with_text_system(
+        gpui_kit::TestDispatcher::new(0),
+        None,
+        std::sync::Arc::new(WideStyles),
+    );
+    let value = "Bold words fill this heading ".repeat(6);
+    let value = value.trim_end().to_string();
+    let (handle, _, text) = composer(&mut cx, |state| state.rows(1).default_value(value.clone()));
+    let plain_rows = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            text.read(cx).display_map().wrap_row_count()
+        })
+        .unwrap();
+    assert!(plain_rows > 1, "the line wraps even in the regular font");
+
+    let bold = gpui_kit::HighlightStyle {
+        font_weight: Some(gpui_kit::FontWeight::BOLD),
+        ..Default::default()
+    };
+    cx.update_window(handle.into(), |_, window, cx| {
+        text.update(cx, |state, cx| {
+            state.set_decorations(
+                vec![gpui_kit::component::input::TextDecoration::new(
+                    0..value.len(),
+                    bold,
+                )],
+                cx,
+            )
+        });
+        window.render_frame(cx);
+        let bold_rows = text.read(cx).display_map().wrap_row_count();
+        assert!(
+            bold_rows > plain_rows,
+            "bold text is wider, so it wraps to more rows: {bold_rows} vs {plain_rows}"
+        );
+        let right = text.read(cx).input_bounds().right();
+        let assert_rows_fit = |window: &mut Window, cx: &mut App| {
+            for (row, end) in row_ends(window, &text, cx).into_iter().enumerate() {
+                assert!(
+                    end <= right,
+                    "row {row} ends at {end:?}, past the field's {right:?}"
+                );
+            }
+        };
+        assert_rows_fit(window, cx);
+
+        // Typing inside the bold run widens it, and the line wraps again in bold.
+        window.click(target(&text), cx);
+        text.update(cx, |state, cx| state.set_selected_range(4..4, cx));
+        window.input(" and more bold words", cx);
+        window.render_frame(cx);
+        assert_eq!(text.read(cx).decorations()[0].range, 0..value.len() + 20);
+        assert_rows_fit(window, cx);
+        let bold_rows = text.read(cx).display_map().wrap_row_count();
+
+        // Without the decoration, the line wraps as plain text again.
+        text.update(cx, |state, cx| state.set_decorations(Vec::new(), cx));
+        window.render_frame(cx);
+        let plain_rows = text.read(cx).display_map().wrap_row_count();
+        assert!(plain_rows < bold_rows, "{plain_rows} vs {bold_rows}");
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.quit();
+}
