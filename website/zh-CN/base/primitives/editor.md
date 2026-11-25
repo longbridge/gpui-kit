@@ -77,6 +77,9 @@ Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边�
 `create_line_decorations_collection` 挂载一个 `LineDecorationProvider`，编辑器每一帧都会向它
 询问整行背景。背景由 Base 直接绘制。参见[行装饰](../../component/editor.md#行装饰)。
 
+`set_spacer_provider` 挂载一个 `SpacerProvider`，每当行发生移动时，编辑器都会向它询问需要放在各行上方或下方的空白行。
+这些行由 Base 负责布局，并绘制其可选的背景色。参见[填充行](../../component/editor.md#填充行)。
+
 ## 显示映射
 
 `EditorState::display_map()` 返回只读的 `&DisplayMap`，供应用查询整个已准备缓冲区的坐标映射。

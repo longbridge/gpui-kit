@@ -111,6 +111,10 @@ collections keep empty ranges, which mark line boundaries. See
 asked for whole-row backgrounds on every frame. Base paints the backgrounds itself.
 See [Line decorations](../../component/editor.md#line-decorations).
 
+`set_spacer_provider` attaches a `SpacerProvider`, which is asked for blank rows to
+stand above or below lines when the rows move. Base lays the rows out and paints their
+optional backgrounds. See [Spacers](../../component/editor.md#spacers).
+
 ## Display map
 
 `EditorState::display_map()` returns a read-only `&DisplayMap` for custom coordinate
