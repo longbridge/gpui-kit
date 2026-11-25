@@ -2863,6 +2863,24 @@ where
             .size_full()
             .overflow_hidden()
             .child(self.render_table_header(scrollable_cols.clone(), window, cx))
+            // A right-click on the header or below the rows is not on a row:
+            // drop the last right-clicked row so the menu is not built for it.
+            // Rows set it again on their own mouse down, which runs before
+            // this listener's bubble phase.
+            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
+                if e.button == MouseButton::Right {
+                    this.right_clicked_row = None;
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    if this.right_clicked_row.is_none() && this.right_clicked_cell.is_none() {
+                        this.on_row_right_click(e, None, window, cx);
+                        cx.notify();
+                    }
+                }),
+            )
             .context_menu({
                 let view = cx.entity();
                 move |this, window: &mut Window, cx: &mut Context<PopupMenu>| {
