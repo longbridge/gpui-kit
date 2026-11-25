@@ -193,6 +193,19 @@ impl NativeMenu {
         self.items.is_empty()
     }
 
+    #[cfg(test)]
+    pub(crate) fn labels(&self) -> Vec<Option<SharedString>> {
+        self.items
+            .iter()
+            .map(|item| match item {
+                NativeMenuItem::Separator => None,
+                NativeMenuItem::Item { label, .. } | NativeMenuItem::Submenu { label, .. } => {
+                    Some(label.clone())
+                }
+            })
+            .collect()
+    }
+
     /// Pop up the menu at `position` (window coordinates, in logical pixels).
     ///
     /// The menu is shown without blocking the caller: the OS tracking loop runs

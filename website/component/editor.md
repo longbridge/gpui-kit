@@ -576,6 +576,28 @@ if let Some(hit) = editor.read(cx).hit_test(event.position) {
 }
 ```
 
+A custom context menu reads `context_menu_hit()`, what `hit_test` told at the
+right-click that opened it, to offer items for a line number, and
+`default_context_menu` adds the built-in items after its own.
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHit, InputHitArea, default_context_menu};
+
+let state = editor.clone();
+Editor::new(&editor).context_menu(move |menu, _, cx| {
+    let state = state.read(cx);
+    let menu = match state.context_menu_hit() {
+        Some(InputHit {
+            area: InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. },
+            row: Some(row),
+            ..
+        }) => menu.menu(format!("Copy line {}", row + 1), Box::new(CopyLine)).separator(),
+        _ => menu,
+    };
+    default_context_menu(menu, state.context_menu_capabilities())
+})
+```
+
 `EditorState::display_map()` returns `&DisplayMap`, a read-only reference to the
 editor-owned text projection. `DisplayMap`, `BufferPoint`, and `DisplayPoint` are
 available from both `gpui_kit::base::input` and `gpui_kit::component::input`.

@@ -246,6 +246,9 @@ Input::new(&input).context_menu(move |menu, _, cx| {
 })
 ```
 
+To keep the built-in items, add them after your own with
+`default_context_menu(menu, state.read(cx).context_menu_capabilities())`.
+
 ### Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps
