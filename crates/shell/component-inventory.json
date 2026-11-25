@@ -621,6 +621,18 @@
     },
     {
       "source": "ui",
+      "name": "live_region",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "LiveRegion",
+        "exports": [
+          "LiveRegion"
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "menu",
       "classification": "component",
       "registration": {
@@ -1976,6 +1988,18 @@
         "descriptor": "List",
         "exports": [
           "List"
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "live_region",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "LiveRegion",
+        "exports": [
+          "LiveRegion"
         ]
       }
     },

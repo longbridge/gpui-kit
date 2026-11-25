@@ -37,7 +37,16 @@ mod tests {
         assert_eq!(
             exports,
             [
-                "Button", "Checkbox", "Switch", "Toggle", "Badge", "Tag", "Label", "Link", "Kbd"
+                "Button",
+                "Checkbox",
+                "Switch",
+                "Toggle",
+                "Badge",
+                "Tag",
+                "Label",
+                "Link",
+                "Kbd",
+                "LiveRegion"
             ]
         );
     }

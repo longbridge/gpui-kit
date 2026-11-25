@@ -41,6 +41,7 @@ export const coveredBy = [
   { route: "label", registrations: ["Label"] },
   { route: "layout-direction", registrations: [] },
   { route: "list", registrations: ["List"] },
+  { route: "live-region", registrations: ["LiveRegion"] },
   { route: "menu", registrations: ["MenuBar"] },
   { route: "marker", registrations: ["Marker"] },
   { route: "message", registrations: ["Message"] },

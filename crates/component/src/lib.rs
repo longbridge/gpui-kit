@@ -58,6 +58,7 @@ pub mod kbd;
 pub mod label;
 pub mod link;
 pub mod list;
+pub mod live_region;
 pub mod marker;
 pub mod menu;
 pub mod message;
