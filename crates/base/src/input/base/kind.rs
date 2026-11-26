@@ -389,11 +389,25 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
 impl InputModeKind for InputMode {
     const MULTI_LINE: bool = false;
 
-    /// A single-line field needs nothing beyond the shared engine. Masking,
+    /// A single-line field needs little beyond the shared engine. Masking,
     /// validation and number stepping live there: together they are ~120 bytes
     /// and their access sites sit inside the shared edit path, so separating
-    /// them would cost more in dispatch than it saves.
-    type Extras = ();
+    /// them would cost more in dispatch than it saves. It shares the
+    /// textarea's one layer of decorations its owner sets, such as a search
+    /// field colouring the terms it parsed.
+    type Extras = TextareaExtras;
+
+    fn reset_annotations(state: &mut InputBaseState<Self>) {
+        state.extras.decorations.clear();
+    }
+
+    fn adjust_annotations(
+        state: &mut InputBaseState<Self>,
+        range: &std::ops::Range<usize>,
+        new_len: usize,
+    ) {
+        state.extras.adjust_for_edit(range, new_len);
+    }
 }
 impl InputModeKind for TextareaMode {
     const MULTI_LINE: bool = true;
@@ -414,8 +428,9 @@ impl InputModeKind for TextareaMode {
     }
 }
 
-/// What a textarea adds: one layer of text decorations, such as inline marks.
-/// Their ranges follow edits like an editor's decoration collections.
+/// What a textarea and a single-line input add: one layer of text
+/// decorations, such as inline marks. Their ranges follow edits like an
+/// editor's decoration collections.
 #[derive(Default)]
 pub struct TextareaExtras {
     pub(crate) decorations: Vec<TextDecoration>,
