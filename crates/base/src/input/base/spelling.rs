@@ -86,7 +86,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// The UTF-8 byte ranges of the misspelled words, checked again only
     /// when the text has changed. None while the input is masked.
-    pub fn misspelled_words(&self, cx: &App) -> Rc<[Range<usize>]> {
+    pub(crate) fn misspelled_words(&self, cx: &App) -> Rc<[Range<usize>]> {
         let Some(spelling) = self.spelling.as_ref().filter(|_| !self.masked) else {
             return Rc::new([]);
         };
@@ -117,7 +117,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     /// The misspelled word at the UTF-8 offset `offset`, if one is there.
-    pub fn misspelling_at(&self, offset: usize, cx: &App) -> Option<Misspelling> {
+    pub(crate) fn misspelling_at(&self, offset: usize, cx: &App) -> Option<Misspelling> {
         let spelling = self.spelling.as_ref()?;
         let range = self
             .misspelled_words(cx)
