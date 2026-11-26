@@ -80,6 +80,19 @@ Popover::new("top-center")
     .child("在触发器下方居中")
 ```
 
+### 将 Popover 限制在面板内
+
+Popover 默认被限制在窗口内。当触发器位于分栏视图的某个面板中（例如侧边栏、Dock 面板或编辑器）时，可以把该面板的边界（窗口坐标）传给 `boundary`，Popover 就会按面板的边缘进行限制，而不会盖住相邻的面板：
+
+```rust
+// `pane` 保存面板在布局时测得的边界。
+Popover::new("model-picker")
+    .anchor(Anchor::TopRight)
+    .boundary(pane.get())
+    .trigger(Button::new("btn").label("Model").outline())
+    .child("向左展开，但不超出面板")
+```
+
 ### 在 Popover 中渲染 View
 
 你也可以把实现了 [Render] 的 `Entity<T>` 作为 Popover 内容：

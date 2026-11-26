@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme, Sizable, StyledExt, WindowExt,
+    ActiveTheme, ElementExt as _, Sizable, StyledExt, WindowExt,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -10,9 +10,10 @@ use gpui_kit::component::{
     separator::Separator,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde::Deserialize;
-use std::time::Duration;
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 use crate::section;
 
@@ -141,6 +142,8 @@ pub struct PopoverStory {
     arrow: bool,
     checked: bool,
     message: String,
+    /// Where the bounded pane of the Boundary section was last drawn.
+    pane: Rc<Cell<Bounds<Pixels>>>,
 }
 
 impl super::Story for PopoverStory {
@@ -180,6 +183,7 @@ impl PopoverStory {
             arrow: false,
             focus_handle: cx.focus_handle(),
             message: "".to_string(),
+            pane: Rc::default(),
         }
     }
 
@@ -388,6 +392,47 @@ impl Render for PopoverStory {
                             }),
                     )
                     .child(self.message.clone()),
+            )
+            .child(
+                section("Boundary")
+                    .description(
+                        "Keep a popover inside the pane its trigger sits in, not just the window.",
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap_4()
+                            .children([false, true].map(|bounded| {
+                                let pane = self.pane.clone();
+                                v_flex()
+                                    .flex_1()
+                                    .h(rems(10.))
+                                    .p_3()
+                                    .gap_2()
+                                    .items_start()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .rounded(cx.theme().radius)
+                                    .child(if bounded { "With boundary" } else { "Without" })
+                                    .child(
+                                        Popover::new(SharedString::from(format!(
+                                            "boundary-{bounded}"
+                                        )))
+                                        .anchor(Anchor::TopRight)
+                                        .when(bounded, |this| this.boundary(self.pane.get()))
+                                        .trigger(
+                                            Button::new("trigger").small().outline().label("Open"),
+                                        )
+                                        .w(rems(16.))
+                                        .child(
+                                            "Opens leftward from the trigger, wider than the room.",
+                                        ),
+                                    )
+                                    .when(bounded, |this| {
+                                        this.on_prepaint(move |bounds, _, _| pane.set(bounds))
+                                    })
+                            })),
+                    ),
             )
             .child(
                 section("Anchor")

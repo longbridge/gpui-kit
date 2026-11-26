@@ -108,6 +108,22 @@ Popover::new("bottom-right")
     .child("Above the trigger, aligned right")
 ```
 
+### Keep a Popover Inside a Pane
+
+A popover is kept inside the window. When its trigger sits in one pane of a
+split view, such as a sidebar, a dock panel or an editor, pass that pane's
+bounds (in window coordinates) to `boundary` so the popover is clamped against
+the pane's edges instead and does not spill over the neighbouring pane:
+
+```rust
+// `pane` holds the pane's bounds, measured as it is laid out.
+Popover::new("model-picker")
+    .anchor(Anchor::TopRight)
+    .boundary(pane.get())
+    .trigger(Button::new("btn").label("Model").outline())
+    .child("Opens leftward, but no further than the pane")
+```
+
 ### View in Popover
 
 You can add any `Entity<T>` that implemented [Render] as the popover content.

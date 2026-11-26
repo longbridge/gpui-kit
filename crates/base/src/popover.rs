@@ -240,6 +240,7 @@ pub struct Popover {
     style: StyleRefinement,
     anchor: Anchor,
     offset: gpui::Pixels,
+    boundary: Option<gpui::Bounds<gpui::Pixels>>,
     on_position: Option<Box<dyn Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>)>>,
     default_open: bool,
     open: Option<bool>,
@@ -258,6 +259,7 @@ impl Popover {
             style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
             offset: gpui::px(0.),
+            boundary: None,
             on_position: None,
             default_open: false,
             open: None,
@@ -278,6 +280,13 @@ impl Popover {
     /// Gap from the trigger along the anchor's outward direction, zero by default.
     pub fn offset(mut self, offset: gpui::Pixels) -> Self {
         self.offset = offset;
+        self
+    }
+
+    /// Keep the popup inside `boundary`, in window coordinates, rather than
+    /// the whole window. See [`crate::Positioner::boundary`].
+    pub fn boundary(mut self, boundary: gpui::Bounds<gpui::Pixels>) -> Self {
+        self.boundary = Some(boundary);
         self
     }
 
@@ -387,6 +396,7 @@ impl RenderOnce for Popover {
             .refine_style(&self.style)
             .anchor(self.anchor)
             .offset(self.offset)
+            .when_some(self.boundary, |this, boundary| this.boundary(boundary))
             .when_some(self.on_position, |this, callback| {
                 this.on_position(callback)
             })
