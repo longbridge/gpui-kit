@@ -44,6 +44,7 @@ where
     point_count: Option<usize>,
     axes: PointAxes,
     id: ElementId,
+    accessibility_label: Option<SharedString>,
     interactive: bool,
     appear: ChartAppear,
 }
@@ -74,6 +75,7 @@ where
             point_count: None,
             axes: PointAxes::default(),
             id: caller_id(),
+            accessibility_label: None,
             interactive: true,
             appear: ChartAppear::default(),
         }
@@ -87,6 +89,18 @@ where
     /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
+        self
+    }
+
+    /// Name this chart for assistive technology, such as screen readers.
+    ///
+    /// A chart paints its data directly, so without a label it has no
+    /// accessibility node and a screen reader passes over it. With one, it is an
+    /// image named by `label`: say what it shows, such as
+    /// `"CPU usage, last 60 seconds"`. Leave it unset for a chart that only
+    /// decorates, or one whose value is already in text next to it.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
         self
     }
 
@@ -501,6 +515,10 @@ where
 
     fn id(&self) -> Option<ElementId> {
         Some(self.id.clone())
+    }
+
+    fn accessibility_label(&self) -> Option<SharedString> {
+        self.accessibility_label.clone()
     }
 
     fn interactive(&self) -> bool {
