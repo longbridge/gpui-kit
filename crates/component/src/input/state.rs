@@ -2,6 +2,7 @@ use crate::root::WindowState;
 use gpui::{App, Bounds, Entity, FocusHandle, Focusable as _, Pixels, SharedString, Window};
 use gpui_base::OtpState;
 use ropey::Rope;
+use std::rc::Rc;
 
 use super::{EditorState, InputState, TextareaState};
 
@@ -74,6 +75,18 @@ impl TextInputState {
     ) {
         dispatch!(self, |state| state.update(cx, |state, _| state
             .install_token_hover_presentation(hover_listener)))
+    }
+
+    /// Reads the misspelled word the context menu was opened on. It holds the
+    /// state weakly, so a handler the state keeps can own it without keeping
+    /// the state alive.
+    pub(crate) fn context_menu_misspelling(
+        &self,
+    ) -> Rc<dyn Fn(&App) -> Option<gpui_base::input::Misspelling>> {
+        dispatch!(self, |state| {
+            let state = state.downgrade();
+            Rc::new(move |cx: &App| state.upgrade()?.read(cx).context_menu_misspelling(cx))
+        })
     }
 
     pub(crate) fn entity_id(&self) -> gpui::EntityId {
