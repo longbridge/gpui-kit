@@ -1,7 +1,7 @@
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
     button::Button,
     command::{Command, CommandEntry, CommandGroup, CommandItem, CommandState},
     h_flex,
@@ -657,6 +657,7 @@ impl Render for CommandStory {
                                             // the propagated action belongs to Dialog.
                                             content.child(with_entries(
                                                 Command::new(&command)
+                                                    .large()
                                                     .bordered(false)
                                                     .rounded(cx.theme().radius_lg)
                                                     .placeholder("Type a command or search...")

@@ -5,11 +5,11 @@ use gpui::{
     StyleRefinement, Styled, Window, rems,
 };
 
-use crate::IndexPath;
 use crate::command::{
     item::{CommandEntry, CommandGroup, CommandItem},
     state::{CommandModel, CommandState, OnCancel, OnIndex, OnQuery},
 };
+use crate::{IndexPath, Sizable, Size};
 
 pub(crate) type CommandSlot = dyn Fn(&CommandState, &mut Window, &mut App) -> AnyElement;
 
@@ -22,6 +22,7 @@ pub(crate) struct CommandOptions {
     pub(crate) max_h: DefiniteLength,
     pub(crate) scroll_bounce: Option<bool>,
     pub(crate) bordered: bool,
+    pub(crate) size: Size,
     pub(crate) header: Option<Rc<CommandSlot>>,
     pub(crate) footer: Option<Rc<CommandSlot>>,
 }
@@ -35,6 +36,7 @@ impl Default for CommandOptions {
             max_h: rems(18.75).into(),
             scroll_bounce: None,
             bordered: true,
+            size: Size::default(),
             header: None,
             footer: None,
         }
@@ -246,6 +248,18 @@ impl Command {
         self.options.footer = Some(Rc::new(move |state, window, cx| {
             f(state, window, cx).into_any_element()
         }));
+        self
+    }
+}
+
+/// Sizes the search field: its height, text and icon follow [`crate::input::Input`]'s
+/// sizes, default: `Size::Medium`.
+///
+/// A palette opened on its own, such as in a [`crate::Dialog`], is usually
+/// `large`; one inline in a form or a popover keeps the default or `small`.
+impl Sizable for Command {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.options.size = size.into();
         self
     }
 }
