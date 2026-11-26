@@ -72,6 +72,16 @@ pub(super) fn init(cx: &mut App) {
     .detach();
 }
 
+/// A file in the themes directory that did not load.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ThemeLoadError {
+    /// The theme file.
+    pub path: PathBuf,
+    /// Why it did not load: it could not be read, or is not a valid theme set.
+    pub message: SharedString,
+}
+
 #[derive(Default, Debug)]
 pub struct ThemeRegistry {
     themes_dir: PathBuf,
@@ -80,7 +90,7 @@ pub struct ThemeRegistry {
     /// The file in `themes_dir` each theme loaded from it came from.
     theme_paths: HashMap<SharedString, PathBuf>,
     /// The files in `themes_dir` that did not load, with why.
-    failed_files: Vec<(PathBuf, SharedString)>,
+    failed_files: Vec<ThemeLoadError>,
     has_custom_themes: bool,
 }
 
@@ -148,7 +158,7 @@ impl ThemeRegistry {
     /// Returns the files in the themes directory that did not load on the
     /// last reload, each with why: one that could not be read, or is not a
     /// valid theme set.
-    pub fn failed_files(&self) -> &[(PathBuf, SharedString)] {
+    pub fn failed_files(&self) -> &[ThemeLoadError] {
         &self.failed_files
     }
 
@@ -285,7 +295,10 @@ impl ThemeRegistry {
                                 path.display(),
                                 e
                             );
-                            self.failed_files.push((path, e.into()));
+                            self.failed_files.push(ThemeLoadError {
+                                path,
+                                message: e.into(),
+                            });
                         }
                     }
                 }
@@ -345,7 +358,7 @@ mod tests {
         let default = registry.default_dark_theme().name.clone();
         assert_eq!(registry.theme_path(&default), None);
         assert_eq!(registry.failed_files().len(), 1);
-        assert_eq!(registry.failed_files()[0].0, bad);
+        assert_eq!(registry.failed_files()[0].path, bad);
 
         std::fs::remove_file(&bad).unwrap();
         registry.reload().unwrap();
