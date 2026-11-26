@@ -4,8 +4,8 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
-    InspectorElementId, LayoutId, LongPressEvent, MouseMoveEvent, Pixels, Point, Size, Style,
-    TouchPhase, Window,
+    InspectorElementId, LayoutId, LongPressEvent, MouseMoveEvent, Pixels, Point, Role, Size, Style,
+    TouchPhase, Window, accesskit,
 };
 
 use super::{Plot, PlotAppear, appear::track_appear, hover::track_hover};
@@ -60,6 +60,16 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
         None
+    }
+
+    fn a11y_role(&self) -> Option<Role> {
+        self.0.accessibility_label().map(|_| Role::Image)
+    }
+
+    fn write_a11y_info(&self, node: &mut accesskit::Node) {
+        if let Some(label) = self.0.accessibility_label() {
+            node.set_label(label.to_string());
+        }
     }
 
     fn request_layout(

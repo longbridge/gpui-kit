@@ -17,8 +17,8 @@ pub mod shape;
 use std::{fmt::Debug, ops::Add, time::Duration};
 
 use gpui::{
-    AnyElement, App, Bounds, ElementId, IntoElement, Path, PathBuilder, Pixels, Point, Window,
-    point, px,
+    AnyElement, App, Bounds, ElementId, IntoElement, Path, PathBuilder, Pixels, Point,
+    SharedString, Window, point, px,
 };
 
 use crate::{Spring, motion::Transition};
@@ -138,6 +138,17 @@ pub trait Plot: IntoElement {
     /// The charts in GPUI Component always return `Some`: their id defaults to the
     /// source location they were constructed at, and `id` renames it.
     fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    /// The name assistive technology reads for this plot.
+    ///
+    /// A plot paints its marks directly and has no text of its own, so it is
+    /// left out of the accessibility tree unless it returns `Some`. Then it is
+    /// an image node named by the label, which needs an [`Plot::id`] too.
+    ///
+    /// The default returns `None`.
+    fn accessibility_label(&self) -> Option<SharedString> {
         None
     }
 
