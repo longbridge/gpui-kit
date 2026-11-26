@@ -55,6 +55,20 @@ impl SystemRecognizer {
         self
     }
 
+    /// The languages this recognizer can recognize on this machine, sorted by
+    /// name: those whose model is on the Mac on macOS, those with a speech pack
+    /// installed on Windows, none elsewhere.
+    ///
+    /// Pass a locale's [`tag`](SpeechLocale::tag) to [`Self::locale`]. The list
+    /// changes as the user installs languages, and building it asks the system
+    /// about each one, so read it when a language picker opens rather than on
+    /// every render.
+    pub fn supported_locales() -> Vec<SpeechLocale> {
+        let mut locales = platform::supported_locales();
+        locales.sort_by(|a, b| a.name.cmp(&b.name));
+        locales
+    }
+
     fn platform(&self) -> &Rc<platform::PlatformRecognizer> {
         self.platform
             .get_or_init(|| Rc::new(platform::PlatformRecognizer::new(self.locale.clone())))
@@ -64,6 +78,35 @@ impl SystemRecognizer {
 impl Default for SystemRecognizer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A language the [`SystemRecognizer`] supports, from
+/// [`SystemRecognizer::supported_locales`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SpeechLocale {
+    tag: SharedString,
+    name: SharedString,
+}
+
+impl SpeechLocale {
+    fn new(tag: impl Into<SharedString>, name: impl Into<SharedString>) -> Self {
+        Self {
+            tag: tag.into(),
+            name: name.into(),
+        }
+    }
+
+    /// The BCP 47 language tag, such as `en-US`, for
+    /// [`SystemRecognizer::locale`].
+    pub fn tag(&self) -> &SharedString {
+        &self.tag
+    }
+
+    /// The language's name in the user's language, such as "English (United
+    /// States)", to show in a language picker.
+    pub fn name(&self) -> &SharedString {
+        &self.name
     }
 }
 
