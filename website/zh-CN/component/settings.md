@@ -84,6 +84,20 @@ Settings::new("app-settings")
     ])
 ```
 
+### 分区
+
+页面较多时，可以用 `SettingSection` 在侧边栏中按标题分组。直接用 `page` 添加的页面没有标题。搜索时，只有当分区中有页面匹配时才显示它的标题。
+
+```rust
+Settings::new("app-settings")
+    .page(SettingPage::new("General"))
+    .section(
+        SettingSection::new("Editor")
+            .pages(vec![SettingPage::new("Font"), SettingPage::new("Theme")]),
+    )
+    .section(SettingSection::new("Network").page(SettingPage::new("Proxy")))
+```
+
 ### 搜索时的选择行为
 
 搜索时，如果当前页面仍包含匹配的设置项，就保留当前页面；否则选择第一个匹配页面。

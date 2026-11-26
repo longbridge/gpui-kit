@@ -85,6 +85,22 @@ Settings::new("app-settings")
     ])
 ```
 
+### Sections
+
+With many pages, group them in the sidebar under headings with
+`SettingSection`. Pages added with `page` are listed without a heading. While
+searching, a heading is shown only if one of its pages matches.
+
+```rust
+Settings::new("app-settings")
+    .page(SettingPage::new("General"))
+    .section(
+        SettingSection::new("Editor")
+            .pages(vec![SettingPage::new("Font"), SettingPage::new("Theme")]),
+    )
+    .section(SettingSection::new("Network").page(SettingPage::new("Proxy")))
+```
+
 ### Selection While Searching
 
 Search keeps the current page selected while it contains matching settings.

@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     Root,
     group_box::GroupBoxVariant,
-    setting::{SettingGroup, SettingItem},
+    setting::{SettingGroup, SettingItem, SettingSection},
 };
 use gpui::{
     Context, KeyBinding, Render, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
@@ -614,4 +614,34 @@ fn an_application_state_selects_searches_and_reads_the_page(cx: &mut TestAppCont
         let input = state.read(cx).search_input.read(cx).focus_handle(cx);
         assert!(input.is_focused(window));
     });
+}
+
+#[gpui::test]
+fn sections_head_the_pages_after_them_and_hide_without_results(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let page = |keyword| SettingPage::new(keyword).group(SettingGroup::new().item(item(keyword)));
+    let settings = Settings::new("sections-test")
+        .page(page("general"))
+        .section(SettingSection::new("Editor").pages([page("font"), page("theme")]))
+        .section(SettingSection::new("Empty"))
+        .section(SettingSection::new("Network").page(page("proxy")))
+        .page(page("about"));
+    let sections = |query: &str, cx: &mut TestAppContext| {
+        cx.update(|cx| settings.sidebar_sections(&SettingsFilter::new(&settings.pages, query, cx)))
+    };
+
+    // Pages outside a section have no heading; an empty section is never
+    // shown.
+    assert_eq!(
+        sections("", cx),
+        vec![
+            (None, vec![0]),
+            (Some(0), vec![1, 2]),
+            (Some(2), vec![3]),
+            (None, vec![4])
+        ]
+    );
+    // A heading stays while one of its pages matches, by its original index.
+    assert_eq!(sections("theme", cx), vec![(Some(0), vec![2])]);
+    assert_eq!(sections("proxy", cx), vec![(Some(2), vec![3])]);
 }
