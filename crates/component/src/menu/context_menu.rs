@@ -6,12 +6,46 @@ use std::{
 use gpui::{
     Anchor, AnyElement, App, Bounds, Context, DismissEvent, Element, ElementId, Entity,
     FocusHandle, Focusable, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent,
-    ParentElement, Pixels, Point, Position, Style, StyleRefinement, Styled, Subscription,
-    TouchPhase, Window, anchored, deferred, div, px,
+    InteractiveElement, IntoElement, KeyBinding, LayoutId, LongPressEvent, MouseButton,
+    MouseDownEvent, ParentElement, Pixels, Point, Position, Style, StyleRefinement, Styled,
+    Subscription, TouchPhase, Window, actions, anchored, deferred, div, point, px,
 };
 
 use crate::{input::AnyInputState, menu::PopupMenu, root::WindowState};
+
+actions!(
+    menu,
+    [
+        /// Open the context menu of the focused element, as a right click on it
+        /// would. Bound to Shift+F10, the keyboard's way to a context menu on
+        /// Windows and Linux, and in macOS's accessibility keyboard navigation.
+        ShowContextMenu
+    ]
+);
+
+pub(crate) fn init(cx: &mut App) {
+    cx.bind_keys([KeyBinding::new("shift-f10", ShowContextMenu, None)]);
+}
+
+/// Where a trigger is, as last painted, for the keyboard to open its menu.
+pub(crate) type KeyboardTrigger = Rc<RefCell<Option<Rc<Trigger>>>>;
+
+/// Open the menu of `trigger` from the keyboard, at its bottom start corner
+/// (a pixel up, inside it: the trigger that holds the position draws the
+/// menu). Whether it had been painted, and so could be opened.
+pub(crate) fn open_from_keyboard(
+    trigger: &KeyboardTrigger,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Some(trigger) = trigger.borrow().clone() else {
+        return false;
+    };
+    let bounds = trigger.hitbox.bounds;
+    let at = point(bounds.left(), (bounds.bottom() - px(1.)).max(bounds.top()));
+    open_menu(&trigger, at, window, cx);
+    true
+}
 
 /// A extension trait for adding a context menu to an element.
 pub trait ContextMenuExt: InteractiveElement + ParentElement + Styled {
@@ -19,6 +53,9 @@ pub trait ContextMenuExt: InteractiveElement + ParentElement + Styled {
     ///
     /// This will changed the element to be `relative` positioned, and add a child `ContextMenu` element.
     /// Because the `ContextMenu` element is positioned `absolute`, it will not affect the layout of the parent element.
+    ///
+    /// The menu also opens from the keyboard ([`ShowContextMenu`], Shift+F10)
+    /// while focus is on the element or inside it.
     #[track_caller]
     fn context_menu(
         mut self,
@@ -27,6 +64,15 @@ pub trait ContextMenuExt: InteractiveElement + ParentElement + Styled {
     where
         Self: Sized,
     {
+        let keyboard = KeyboardTrigger::default();
+        self.interactivity().on_action({
+            let keyboard = keyboard.clone();
+            move |_: &ShowContextMenu, window, cx| {
+                if !open_from_keyboard(&keyboard, window, cx) {
+                    cx.propagate();
+                }
+            }
+        });
         // The ID must be stable across renders, otherwise the element state
         // (open menu) is lost on every re-render.
         let caller = std::panic::Location::caller();
@@ -36,7 +82,9 @@ pub trait ContextMenuExt: InteractiveElement + ParentElement + Styled {
             .clone()
             .map(|id| ElementId::Name(format!("context-menu-{:?}", id).into()))
             .unwrap_or_else(|| ElementId::CodeLocation(*caller));
-        ContextMenu::new(id, self).menu(f)
+        let mut menu = ContextMenu::new(id, self).menu(f);
+        menu.keyboard = keyboard;
+        menu
     }
 }
 
@@ -50,6 +98,7 @@ pub struct ContextMenu<E: ParentElement + Styled + Sized> {
     // This is not in use, just for style refinement forwarding.
     _ignore_style: StyleRefinement,
     anchor: Anchor,
+    keyboard: KeyboardTrigger,
 }
 
 impl<E: ParentElement + Styled> ContextMenu<E> {
@@ -61,7 +110,14 @@ impl<E: ParentElement + Styled> ContextMenu<E> {
             menu: None,
             anchor: Anchor::TopLeft,
             _ignore_style: StyleRefinement::default(),
+            keyboard: KeyboardTrigger::default(),
         }
+    }
+
+    /// Where this trigger is once painted, for the keyboard to open its
+    /// menu from outside the element (a list's chosen row, say).
+    pub(crate) fn keyboard_trigger(&self) -> KeyboardTrigger {
+        self.keyboard.clone()
     }
 
     /// Build the context menu using the given builder function.
@@ -398,6 +454,8 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
             }
         });
 
+        *self.keyboard.borrow_mut() = Some(trigger.clone());
+
         // Triggers painted inside this one record it as their parent, so an
         // inner trigger with nothing to offer can hand the press outward.
         let parent = PAINTING_TRIGGER.with(|current| current.replace(Some(trigger)));
@@ -411,7 +469,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
 type MenuBuilder = dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu;
 
 /// A context menu trigger as painted in the current frame.
-struct Trigger {
+pub(crate) struct Trigger {
     shared_state: Rc<RefCell<ContextMenuSharedState>>,
     builder: Option<Rc<MenuBuilder>>,
     hitbox: Hitbox,
@@ -664,6 +722,60 @@ mod tests {
         cx.update(|window, cx| {
             assert_eq!(window.focused(cx).as_ref(), Some(&content_focus));
         });
+    }
+
+    /// Focus inside a trigger: Shift+F10 opens its menu, as a right click
+    /// would, so a keyboard user reaches what the menu offers.
+    struct KeyboardRoot {
+        field: FocusHandle,
+        received: Rc<Cell<bool>>,
+    }
+
+    impl Render for KeyboardRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let received = self.received.clone();
+            div()
+                .size_full()
+                .on_action(move |_: &RemoveTab, _, _| received.set(true))
+                .child(
+                    div()
+                        .id("tab")
+                        .w(px(100.))
+                        .h(px(30.))
+                        .context_menu(|menu, _, _| menu.menu("Close", Box::new(RemoveTab)))
+                        .child(div().id("field").size_full().track_focus(&self.field)),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn shift_f10_opens_the_menu_of_the_focused_element(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let received = Rc::new(Cell::new(false));
+        let (_, cx) = cx.add_window_view({
+            let received = received.clone();
+            move |window, cx| {
+                let field = cx.focus_handle();
+                field.focus(window, cx);
+                KeyboardRoot { field, received }
+            }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        cx.simulate_keystrokes("shift-f10");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+
+        assert!(
+            received.get(),
+            "Shift+F10 must open the menu, and its item run"
+        );
     }
 
     const CONTEXT: &str = "context_menu_test";
