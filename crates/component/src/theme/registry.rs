@@ -4,7 +4,7 @@ use anyhow::Result;
 use gpui::{App, Global, SharedString};
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock},
 };
@@ -72,11 +72,25 @@ pub(super) fn init(cx: &mut App) {
     .detach();
 }
 
+/// A file in the themes directory that did not load.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct ThemeLoadError {
+    /// The theme file.
+    pub path: PathBuf,
+    /// Why it did not load: it could not be read, or is not a valid theme set.
+    pub message: SharedString,
+}
+
 #[derive(Default, Debug)]
 pub struct ThemeRegistry {
     themes_dir: PathBuf,
     default_themes: HashMap<ThemeMode, Rc<ThemeConfig>>,
     themes: HashMap<SharedString, Rc<ThemeConfig>>,
+    /// The file in `themes_dir` each theme loaded from it came from.
+    theme_paths: HashMap<SharedString, PathBuf>,
+    /// The files in `themes_dir` that did not load, with why.
+    failed_files: Vec<ThemeLoadError>,
     has_custom_themes: bool,
 }
 
@@ -133,6 +147,19 @@ impl ThemeRegistry {
                 .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         themes
+    }
+
+    /// Returns the file in the themes directory the theme `name` was loaded
+    /// from, or `None` for a default theme or one loaded from a string.
+    pub fn theme_path(&self, name: &str) -> Option<&Path> {
+        self.theme_paths.get(name).map(PathBuf::as_path)
+    }
+
+    /// Returns the files in the themes directory that did not load on the
+    /// last reload, each with why: one that could not be read, or is not a
+    /// valid theme set.
+    pub fn failed_files(&self) -> &[ThemeLoadError] {
+        &self.failed_files
     }
 
     /// Returns a reference to the map of default themes.
@@ -246,17 +273,21 @@ impl ThemeRegistry {
     /// Reload themes from the `themes_dir`.
     fn reload(&mut self) -> Result<()> {
         let mut themes = vec![];
+        self.failed_files.clear();
 
         if self.themes_dir.exists() {
             for entry in std::fs::read_dir(&self.themes_dir)? {
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
-                    let file_content = std::fs::read_to_string(path.clone())?;
-
-                    match serde_json::from_str::<ThemeSet>(&file_content) {
+                    let read = std::fs::read_to_string(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|content| {
+                            serde_json::from_str::<ThemeSet>(&content).map_err(|e| e.to_string())
+                        });
+                    match read {
                         Ok(theme_set) => {
-                            themes.extend(theme_set.themes);
+                            themes.extend(theme_set.themes.into_iter().map(|t| (t, path.clone())));
                         }
                         Err(e) => {
                             tracing::error!(
@@ -264,6 +295,10 @@ impl ThemeRegistry {
                                 path.display(),
                                 e
                             );
+                            self.failed_files.push(ThemeLoadError {
+                                path,
+                                message: e.into(),
+                            });
                         }
                     }
                 }
@@ -271,12 +306,13 @@ impl ThemeRegistry {
         }
 
         self.themes.clear();
+        self.theme_paths.clear();
         for theme in self.default_themes.values() {
             self.themes
                 .insert(theme.name.clone(), Rc::new((**theme).clone()));
         }
 
-        for theme in themes.iter() {
+        for (theme, path) in themes.iter() {
             if self.themes.contains_key(&theme.name) {
                 continue;
             }
@@ -287,10 +323,47 @@ impl ThemeRegistry {
             }
 
             self.has_custom_themes = true;
+            self.theme_paths.insert(theme.name.clone(), path.clone());
             self.themes
                 .insert(theme.name.clone(), Rc::new(theme.clone()));
         }
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reload_says_which_file_each_theme_came_from_and_which_did_not_load() {
+        let dir = std::env::temp_dir().join(format!("gpui-kit-themes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("ocean.json");
+        std::fs::write(
+            &good,
+            r#"{"name": "Ocean", "themes": [{"name": "Ocean Dark", "mode": "dark", "colors": {}}]}"#,
+        )
+        .unwrap();
+        let bad = dir.join("broken.json");
+        std::fs::write(&bad, "{ not json").unwrap();
+
+        let mut registry = ThemeRegistry::default();
+        registry.init_default_themes();
+        registry.themes_dir = dir.clone();
+        registry.reload().unwrap();
+
+        assert_eq!(registry.theme_path("Ocean Dark"), Some(good.as_path()));
+        let default = registry.default_dark_theme().name.clone();
+        assert_eq!(registry.theme_path(&default), None);
+        assert_eq!(registry.failed_files().len(), 1);
+        assert_eq!(registry.failed_files()[0].path, bad);
+
+        std::fs::remove_file(&bad).unwrap();
+        registry.reload().unwrap();
+        assert!(registry.failed_files().is_empty());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
