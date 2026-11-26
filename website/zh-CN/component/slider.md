@@ -10,7 +10,7 @@ Slider 用于在给定范围内选择数值，支持单值和区间选择、横�
 ## 导入
 
 ```rust
-use gpui_kit::component::slider::{Slider, SliderState, SliderEvent, SliderValue};
+use gpui_kit::component::slider::{Slider, SliderState, SliderEvent, SliderValue, ValueMapping};
 ```
 
 ## 用法
@@ -160,14 +160,14 @@ Slider::new(&slider_state)
     .rounded(px(4.))
 ```
 
-### Scale
+### 映射
 
-Slider 支持两种比例模式：
+Slider 支持两种内置映射：
 
-- `Linear`
-- `Logarithmic`
+- `ValueMapping::Linear`
+- `ValueMapping::Logarithmic`
 
-对数比例适合跨度很大的取值范围，可以让较小数值获得更细的控制精度。
+对数映射适合跨度很大的取值范围，可以让较小数值获得更细的控制精度。
 
 ```rust
 let log_slider = cx.new(|_| {
@@ -176,7 +176,7 @@ let log_slider = cx.new(|_| {
         .max(1000.0)
         .default_value(10.0)
         .step(1.0)
-        .scale(SliderScale::Logarithmic)
+        .mapping(ValueMapping::Logarithmic)
 });
 ```
 

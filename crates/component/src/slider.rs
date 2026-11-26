@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use crate::{ActiveTheme, AxisExt, StyledExt, ThemeStyled as _};
+pub use gpui_base::ValueMapping;
+#[allow(deprecated)]
 pub use gpui_base::slider::{SliderEvent, SliderScale, SliderState, SliderValue};
 use gpui_base::{
     LogicalStyledExt as _, Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack, spring,
