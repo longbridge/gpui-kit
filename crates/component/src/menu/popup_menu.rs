@@ -55,6 +55,9 @@ pub enum PopupMenuItem {
     /// A menu item with custom element render.
     ElementItem {
         icon: Option<Icon>,
+        /// The name assistive technology reads, set with
+        /// [`PopupMenuItem::accessibility_label`].
+        accessibility_label: Option<SharedString>,
         disabled: bool,
         checked: bool,
         action: Option<Box<dyn Action>>,
@@ -95,6 +98,7 @@ impl PopupMenuItem {
     {
         PopupMenuItem::ElementItem {
             icon: None,
+            accessibility_label: None,
             disabled: false,
             checked: false,
             action: None,
@@ -141,6 +145,23 @@ impl PopupMenuItem {
                 *i = Some(icon.into());
             }
             _ => {}
+        }
+        self
+    }
+
+    /// Set the name assistive technology reads for an item drawn by
+    /// [`PopupMenuItem::element`], which has no label of its own to read:
+    /// without one, a screen reader announces it as an unnamed menu item.
+    ///
+    /// Only works for [`PopupMenuItem::ElementItem`]; the other items are
+    /// named by their label.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        if let PopupMenuItem::ElementItem {
+            accessibility_label,
+            ..
+        } = &mut self
+        {
+            *accessibility_label = Some(label.into());
         }
         self
     }
@@ -280,7 +301,11 @@ impl PopupMenuItem {
             PopupMenuItem::Item { label, .. }
             | PopupMenuItem::Label(label)
             | PopupMenuItem::Submenu { label, .. } => Some(label.clone()),
-            PopupMenuItem::Separator | PopupMenuItem::ElementItem { .. } => None,
+            PopupMenuItem::ElementItem {
+                accessibility_label,
+                ..
+            } => accessibility_label.clone(),
+            PopupMenuItem::Separator => None,
         }
     }
 }
@@ -1746,6 +1771,12 @@ mod tests {
         );
         assert_eq!(PopupMenuItem::separator().a11y_label(), None);
         assert_eq!(PopupMenuItem::element(|_, _| div()).a11y_label(), None);
+        assert_eq!(
+            PopupMenuItem::element(|_, _| div())
+                .accessibility_label("Custom")
+                .a11y_label(),
+            Some("Custom".into())
+        );
     }
 
     #[gpui::test]

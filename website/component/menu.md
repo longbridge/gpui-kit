@@ -215,6 +215,20 @@ menu.menu_element(Box::new(CustomAction), |window, cx| {
     )
 ```
 
+A custom element has no label for assistive technology to read. Build the item
+with `PopupMenuItem::element` and name it with `accessibility_label`, so a
+screen reader does not announce an unnamed menu item:
+
+```rust
+use gpui_kit::component::menu::PopupMenuItem;
+
+menu.item(
+    PopupMenuItem::element(|_, _| h_flex().gap_1().child("Status").child("✓ Connected"))
+        .accessibility_label("Status: Connected")
+        .action(Box::new(InfoAction)),
+)
+```
+
 ### Keyboard Shortcuts
 
 Menu items automatically display keyboard shortcuts if they're bound to actions:
