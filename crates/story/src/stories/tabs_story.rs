@@ -6,6 +6,7 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Selectable as _, Sizable, Size,
     button::{Button, ButtonGroup, ButtonVariants},
     h_flex,
+    menu::PopupMenuItem,
     tab::{Tab, TabBar},
     v_flex,
 };
@@ -85,6 +86,27 @@ impl TabsStory {
         self.dynamic_active_tab_ix = self.dynamic_tabs.len() - 1;
         self.dynamic_scroll_handle
             .scroll_to_item(self.dynamic_active_tab_ix);
+        cx.notify();
+    }
+
+    /// Keep the dynamic tabs `keep` picks, given each one's index and the
+    /// index of the tab whose menu was used; one tab always stays.
+    fn close_dynamic_tabs(
+        &mut self,
+        ix: usize,
+        keep: fn(usize, usize) -> bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut at = 0;
+        let before = self.dynamic_tabs.clone();
+        self.dynamic_tabs.retain(|_| {
+            at += 1;
+            keep(at - 1, ix)
+        });
+        if self.dynamic_tabs.is_empty() {
+            self.dynamic_tabs = vec![before[ix]];
+        }
+        self.dynamic_active_tab_ix = self.dynamic_active_tab_ix.min(self.dynamic_tabs.len() - 1);
         cx.notify();
     }
 
@@ -348,7 +370,7 @@ impl Render for TabsStory {
             .child(
                 section("Dynamic Tabs")
                     .description(
-                        "Tabs can be added, removed, and composed with prefix and suffix content.",
+                        "Tabs can be added, removed, and composed with prefix and suffix content. Right-click a tab to close it, the others, or those to its right.",
                     )
                     .w_full()
                     .child(
@@ -379,6 +401,24 @@ impl Render for TabsStory {
                             .on_click(cx.listener(|this, ix: &usize, window, cx| {
                                 this.set_dynamic_active_tab(*ix, window, cx);
                             }))
+                            .context_menu({
+                                let view = cx.entity();
+                                move |ix, menu, _, _| {
+                                    let close = |label: &str, keep: fn(usize, usize) -> bool| {
+                                        let view = view.clone();
+                                        PopupMenuItem::new(label.to_string()).on_click(
+                                            move |_, _, cx| {
+                                                view.update(cx, |this, cx| {
+                                                    this.close_dynamic_tabs(ix, keep, cx);
+                                                });
+                                            },
+                                        )
+                                    };
+                                    menu.item(close("Close", |at, ix| at != ix))
+                                        .item(close("Close Others", |at, ix| at == ix))
+                                        .item(close("Close to the Right", |at, ix| at <= ix))
+                                }
+                            })
                             .children(self.dynamic_tabs.iter().enumerate().map(|(ix, id)| {
                                 let label = format!("Tab {id}");
                                 Tab::new()

@@ -347,7 +347,18 @@ impl Theme {
         let fonts_changed =
             (&theme.font_family, &theme.mono_font_family) != (&fonts_before.0, &fonts_before.1);
         if mode_changed || reload_mode || fonts_changed {
-            system_font::resolve_default_font(cx);
+            // Probed once the current update is done, so an app that names its
+            // own UI font right after `init` is never probed: GPUI logs a
+            // warning resolving `.SystemUIFont` where its platform font is not
+            // installed (#4125).
+            cx.defer(|cx| {
+                let before = Theme::global(cx).font_family.clone();
+                system_font::resolve_default_font(cx);
+                if Theme::global(cx).font_family != before {
+                    Self::sync_base(cx);
+                    cx.refresh_windows();
+                }
+            });
             mono_font::resolve_default_mono_font(cx);
         }
         Self::sync_base(cx);
@@ -872,6 +883,19 @@ mod update_tests {
             from,
             linear_gradient(135., linear_color_stop(from, 0.), linear_color_stop(to, 1.)),
         )
+    }
+
+    /// The UI font probe waits until the update that ran `init` is done, so
+    /// an app that names its own family right after `init` keeps it and is
+    /// never probed for `.SystemUIFont` (#4125).
+    #[gpui::test]
+    fn an_app_font_named_after_init_is_not_probed(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            assert_eq!(Theme::global(cx).font_family, ".SystemUIFont");
+            Theme::global_mut(cx).font_family = "Noto Sans".into();
+        });
+        cx.update(|cx| assert_eq!(Theme::global(cx).font_family, "Noto Sans"));
     }
 
     /// A color edited on `colors` reaches the token the components paint

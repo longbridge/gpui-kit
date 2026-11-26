@@ -15,9 +15,10 @@ use std::rc::Weak;
 
 use gpui::ScrollStrategy;
 use gpui_base::NumberStep;
+use gpui_base::ValueMapping;
 use gpui_base::VirtualListScrollHandle;
 use gpui_base::input::{InputBaseState, InputModeKind};
-use gpui_base::slider::{SliderScale, SliderValue};
+use gpui_base::slider::SliderValue;
 use rquickjs::{
     Ctx, FromJs, Function, Object, Persistent, Result as JsResult, Value, function::Func,
 };
@@ -436,9 +437,9 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                   -> JsResult<EntityHandle> {
                 refuse_creation_in_render(&ctx, "SliderState.new(...)")?;
 
-                let scale = match scale.as_str() {
-                    "linear" => SliderScale::Linear,
-                    "logarithmic" => SliderScale::Logarithmic,
+                let mapping = match scale.as_str() {
+                    "linear" => ValueMapping::Linear,
+                    "logarithmic" => ValueMapping::Logarithmic,
                     _ => {
                         return Err(js_error::type_error(
                             &ctx,
@@ -465,7 +466,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     && step.is_finite()
                     && max > min
                     && step > 0.0
-                    && (scale.is_linear() || min > 0.0);
+                    && (mapping.is_linear() || min > 0.0);
                 if !sane {
                     return Err(js_error::type_error(
                         &ctx,
@@ -482,7 +483,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                             min,
                             max,
                             step,
-                            scale,
+                            mapping,
                             value,
                             scope::current_application_generation(),
                             cx,

@@ -12,7 +12,7 @@ pub(crate) use hover_popover::*;
 
 use gpui::{
     App, Div, ElementId, InteractiveElement as _, SharedString, Stateful, StyleRefinement,
-    Styled as _, Window, div, px, rems,
+    Styled as _, Window, div, rems,
 };
 
 use crate::{
@@ -39,9 +39,31 @@ pub(super) fn render_markdown(
                     StyleRefinement::default()
                         .bg(cx.theme().transparent)
                         .p_0()
-                        .text_size(px(11.)),
+                        .border_0()
+                        .rounded_none()
+                        .text_size(rems(0.75)),
                 ),
         )
+        // A hover is already one contextual card. Keep fenced signatures
+        // highlighted, but omit the repeated per-block language/action header.
+        .code_block_actions(|_, _, _| gpui::Empty)
+        .on_link_click(|destination, event, _, cx| {
+            // Empty/unresolved Markdown references are not URLs. In particular,
+            // NSURL accepts an empty relative URL which Launch Services rejects.
+            let activate = match event {
+                gpui::ClickEvent::Mouse(click) => matches!(
+                    click.up.button,
+                    gpui::MouseButton::Left | gpui::MouseButton::Middle
+                ),
+                gpui::ClickEvent::Keyboard(_) => true,
+                gpui::ClickEvent::Touch(click) => !click.long_press,
+            };
+            if activate
+                && (destination.starts_with("https://") || destination.starts_with("http://"))
+            {
+                cx.open_url(destination);
+            }
+        })
         .selectable(true)
 }
 

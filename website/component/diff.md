@@ -507,6 +507,22 @@ color; `with_foreground` sets the text color over a strong fill. A fully
 transparent background leaves whatever the line shows beneath the span, and
 `with_underline` underlines the span in its text color — the way a link reads.
 
+To find text, read each file's `source_lines()`: the lines the patch supplies
+in the order a unified diff shows them (an unchanged line once, at its modified
+side; a change's deleted lines before its added ones), each with its position
+and its text. A match becomes a span highlight, and `scroll_to_line` brings it
+into view:
+
+```rust
+let hits: Vec<DiffSpanHighlight> = self.diff.read(cx).files().iter()
+    .flat_map(|file| file.source_lines().flat_map(|(at, text)| {
+        text.match_indices(words)
+            .map(move |(start, _)| DiffSpanHighlight::new(at.clone(), start..start + words.len()))
+            .collect::<Vec<_>>()
+    }))
+    .collect();
+```
+
 Like annotations, decorations, markers and span highlights are supplied on
 every render, so the current builder call is their only source.
 

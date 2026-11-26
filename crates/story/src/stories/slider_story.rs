@@ -3,7 +3,7 @@ use gpui_kit::component::{
     button::Button,
     clipboard::Clipboard,
     h_flex,
-    slider::{Slider, SliderEvent, SliderScale, SliderState, SliderValue},
+    slider::{Slider, SliderEvent, SliderState, SliderValue, ValueMapping},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -11,6 +11,36 @@ use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::{section, story_toolbar_group};
+
+const DB_MIN: f32 = -60.;
+const DB_MAX: f32 = 6.;
+/// Where 0 dB sits on the track: the lower range is compressed so 0 dB has
+/// more travel than the boost above it.
+const DB_ZERO_POSITION: f32 = 0.8;
+
+fn db_to_norm(db: f32) -> f32 {
+    if db <= 0. {
+        DB_ZERO_POSITION * (1. - (-db / -DB_MIN).sqrt())
+    } else {
+        DB_ZERO_POSITION + (1. - DB_ZERO_POSITION) * db / DB_MAX
+    }
+}
+
+fn norm_to_db(position: f32) -> f32 {
+    if position <= DB_ZERO_POSITION {
+        DB_MIN * (1. - position / DB_ZERO_POSITION).powi(2)
+    } else {
+        DB_MAX * (position - DB_ZERO_POSITION) / (1. - DB_ZERO_POSITION)
+    }
+}
+
+fn format_db(db: f32) -> String {
+    if db <= DB_MIN {
+        "-∞ dB".to_string()
+    } else {
+        format!("{db:.1} dB")
+    }
+}
 
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = slider_story, no_json)]
@@ -26,6 +56,8 @@ pub struct SliderStory {
     slider_hsl: [Entity<SliderState>; 4],
     slider_hsl_value: Hsla,
     slider_logarithmic: Entity<SliderState>,
+    slider_db: Entity<SliderState>,
+    output_db: f32,
     slider_reverse: Entity<SliderState>,
     slider_duration: Entity<SliderState>,
     duration_months: f32,
@@ -108,7 +140,16 @@ impl SliderStory {
                 .max(4.0)
                 .default_value(1.0)
                 .step(0.05)
-                .scale(SliderScale::Logarithmic)
+                .mapping(ValueMapping::Logarithmic)
+        });
+
+        let slider_db = cx.new(|_| {
+            SliderState::new()
+                .min(DB_MIN)
+                .max(DB_MAX)
+                .step(0.)
+                .default_value(0.)
+                .mapping(ValueMapping::custom(db_to_norm, norm_to_db))
         });
 
         let slider_reverse = cx.new(|_| {
@@ -171,6 +212,12 @@ impl SliderStory {
                     cx.notify();
                 }
             }),
+            cx.subscribe(&slider_db, |this, _, event: &SliderEvent, cx| {
+                if let SliderEvent::Change(value) = event {
+                    this.output_db = value.start();
+                    cx.notify();
+                }
+            }),
         ];
 
         _subscritions.extend(
@@ -207,6 +254,8 @@ impl SliderStory {
             slider_hsl,
             slider_hsl_value: gpui_kit::red(),
             slider_logarithmic,
+            slider_db,
+            output_db: 0.,
             slider_reverse,
             slider_duration,
             duration_months: 5.,
@@ -552,7 +601,7 @@ impl Render for SliderStory {
             )
             .child(
                 section("Playback speed")
-                    .description("Logarithmic scales provide finer control near common values.")
+                    .description("Logarithmic mappings provide finer control near common values.")
                     .w_128()
                     .items_center()
                     .child(
@@ -571,6 +620,29 @@ impl Render for SliderStory {
                             )
                             .child(
                                 Slider::new(&self.slider_logarithmic)
+                                    .horizontal()
+                                    .disabled(self.disabled),
+                            ),
+                    ),
+            )
+            .child(
+                section("Output level")
+                    .description("A dB fader from silence to +6 dB, with finer travel around 0 dB.")
+                    .w_128()
+                    .items_center()
+                    .child(
+                        v_flex()
+                            .w(px(360.))
+                            .gap_4()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(div().font_medium().child("Level"))
+                                    .child(format_db(self.output_db)),
+                            )
+                            .child(
+                                Slider::new(&self.slider_db)
                                     .horizontal()
                                     .disabled(self.disabled),
                             ),

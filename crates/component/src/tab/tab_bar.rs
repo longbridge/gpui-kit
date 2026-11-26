@@ -1,9 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
-    Anchor, AnyElement, App, Background, Bounds, ClickEvent, Edges, ElementId, Entity, EntityId,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point,
+    Anchor, AnyElement, App, Background, Bounds, ClickEvent, Context, Edges, ElementId, Entity,
+    EntityId, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point,
     prelude::FluentBuilder as _, px,
 };
 use gpui_base::{LayoutDirection, LogicalStyledExt as _, spring};
@@ -15,7 +15,7 @@ use super::{
     tab::{FOLDER_TAB_GAP, FolderTabMetrics},
 };
 use crate::button::{Button, ButtonVariants as _};
-use crate::menu::{DropdownMenu as _, PopupMenuItem};
+use crate::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 use crate::scroll::ScrollableMask;
 use crate::{
     ActiveTheme, ElementExt, Icon, InteractiveElementExt as _, Selectable, Sizable, Size,
@@ -44,6 +44,9 @@ impl TabIndicatorBounds {
     }
 }
 
+/// Builds a tab's context menu, given the tab's index.
+type TabContextMenu = dyn Fn(usize, PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu;
+
 /// A TabBar element that contains multiple [`Tab`] items.
 #[derive(IntoElement)]
 pub struct TabBar {
@@ -61,6 +64,7 @@ pub struct TabBar {
     menu: bool,
     max_width: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>>,
+    context_menu: Option<Rc<TabContextMenu>>,
 }
 
 impl TabBar {
@@ -80,6 +84,7 @@ impl TabBar {
             last_empty_space: div().w_3().into_any_element(),
             selected_index: None,
             on_click: None,
+            context_menu: None,
             menu: false,
             max_width: None,
         }
@@ -189,6 +194,21 @@ impl TabBar {
         F: Fn(&usize, &mut Window, &mut App) + 'static,
     {
         self.on_click = Some(Rc::new(on_click));
+        self
+    }
+
+    /// Set a context menu for the tabs, shown when one is right-clicked (or
+    /// long-pressed); the builder receives the index of that tab, so its
+    /// items (Close, Close Others, Close to the Right, ...) act on it.
+    ///
+    /// A [`Tab`] handed to the bar cannot carry a menu of its own, as the bar
+    /// takes each child as a `Tab`; this is the per-tab menu editors and
+    /// browsers put on their tabs.
+    pub fn context_menu<F>(mut self, f: F) -> Self
+    where
+        F: Fn(usize, PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    {
+        self.context_menu = Some(Rc::new(f));
         self
     }
 
@@ -567,6 +587,17 @@ impl RenderOnce for TabBar {
             // to zero once the tabs overflow, so they still scroll from the
             // origin rather than past the left edge of the viewport.
             let push_end = rtl && !has_suffix_or_menu && ix + 1 == num_tabs;
+            // A plain tab is the flex item itself, so it takes the push.
+            let tab = tab.when(
+                push_end && bounds_rc.is_none() && hovered_tab.is_none(),
+                |this| this.ml_auto(),
+            );
+            let tab = match self.context_menu.clone() {
+                Some(build) => tab
+                    .context_menu(move |menu, window, cx| build(ix, menu, window, cx))
+                    .into_any_element(),
+                None => tab.into_any_element(),
+            };
 
             rendered_tabs.push(if let Some(ref rc) = bounds_rc {
                 let rc = rc.clone();
@@ -640,7 +671,7 @@ impl RenderOnce for TabBar {
                     .child(tab)
                     .into_any_element()
             } else {
-                tab.when(push_end, |this| this.ml_auto()).into_any_element()
+                tab
             });
         }
         // `ScrollHandle` indexes the strip's children in layout order, which
@@ -2219,5 +2250,53 @@ mod tests {
         let cx = show_late_bar(cx, px(0.));
         next_frame(cx);
         assert_eq!(cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
+    }
+
+    struct ContextMenuHarness {
+        closed: Rc<RefCell<Vec<usize>>>,
+    }
+
+    impl Render for ContextMenuHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let closed = self.closed.clone();
+            div().size_full().child(
+                TabBar::new("context-tabs")
+                    .children(["First", "Second", "Third"].map(|label| {
+                        Tab::new()
+                            .debug_selector(move || format!("{label}-tab"))
+                            .label(label)
+                    }))
+                    .context_menu(move |ix, menu, _, _| {
+                        let closed = closed.clone();
+                        menu.item(
+                            PopupMenuItem::new("Close")
+                                .on_click(move |_, _, _| closed.borrow_mut().push(ix)),
+                        )
+                    }),
+            )
+        }
+    }
+
+    /// Right-clicking a tab opens the bar's menu built for that tab, and
+    /// its item acts on that tab alone.
+    #[gpui::test]
+    fn a_right_clicked_tab_opens_the_menu_built_for_it(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let closed = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let closed = closed.clone();
+            move |_, _| ContextMenuHarness { closed }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let press = cx.debug_bounds("Second-tab").unwrap().center();
+        cx.simulate_mouse_down(press, MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(press, MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let item = point(press.x + px(30.), press.y + px(17.));
+        cx.simulate_mouse_move(item, None, Default::default());
+        cx.simulate_click(item, Default::default());
+        cx.run_until_parked();
+        assert_eq!(*closed.borrow(), [1]);
     }
 }

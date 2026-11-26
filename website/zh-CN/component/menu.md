@@ -71,6 +71,18 @@ Button::new("menu-btn")
 如果你不想使用 [Action]，也可以通过 `item` 方法配合 [PopupMenuItem] 创建自定义菜单项，并使用 `on_click` 直接处理点击事件。
 :::
 
+用 `accessibility_label` 为菜单设置无障碍名称，通常与打开它的按钮同名，这样屏幕阅读器能说出当前是哪个菜单。子菜单无需设置，会自动使用对应菜单项的名称：
+
+```rust
+Button::new("sort")
+    .label("Sort")
+    .dropdown_menu(|menu, _, _| {
+        menu.accessibility_label("Sort")
+            .menu("Name", Box::new(SortByName))
+            .menu("Date", Box::new(SortByDate))
+    })
+```
+
 ### 锚点位置
 
 控制下拉菜单相对触发器的显示位置：
@@ -95,6 +107,14 @@ menu.menu_with_icon("Search", IconName::Search, Box::new(Search))
     .menu_with_icon("Settings", IconName::Settings, Box::new(OpenSettings))
     .separator()
     .menu_with_icon("Help", IconName::Help, Box::new(ShowHelp))
+```
+
+图标默认以小尺寸绘制；如果为图标单独设置了尺寸，则保留该尺寸：
+
+```rust
+use gpui_kit::component::{Icon, Sizable as _, Size};
+
+menu.menu_with_icon("Search", Icon::new(IconName::Search).with_size(Size::Medium), Box::new(Search))
 ```
 
 ### 禁用状态

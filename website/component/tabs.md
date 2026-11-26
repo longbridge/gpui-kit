@@ -219,6 +219,24 @@ TabBar::new("tabs-with-menu")
     .child(Tab::new().label("Settings"))
 ```
 
+### Tabs with a Context Menu
+
+Use `context_menu` to show a menu when a tab is right-clicked (or long-pressed
+on touch). The builder receives the index of that tab, so items such as Close,
+Close Others and Close to the Right act on the tab under the pointer.
+
+```rust
+TabBar::new("documents")
+    .children(tabs.iter().map(|title| Tab::new().label(title.clone())))
+    .context_menu(move |ix, menu, _, _| {
+        menu.item(PopupMenuItem::new("Close").on_click(move |_, _, cx| {
+            // close tab `ix`
+        }))
+        .item(PopupMenuItem::new("Close Others"))
+        .item(PopupMenuItem::new("Close to the Right"))
+    })
+```
+
 ### Maximum Tab Width
 
 Use `max_width` to cap the width of each tab. For tabs created with `.label()`, text longer than the limit is truncated with an ellipsis automatically. Icon-only tabs (`.icon()`) are not affected. Prefix and suffix elements (e.g. a close button) are never truncated — the label yields space first. The *more* menu (when enabled) still shows the full label text.
@@ -297,6 +315,7 @@ TabBar::new("custom-tabs")
 | `last_empty_space(element)` | Custom element for empty space at the end          |
 | `track_scroll(handle)`      | Track scrolling with a handle to reveal a tab explicitly; clicking a tab scrolls it into view with part of the next tab showing |
 | `menu(bool)`                | Enable dropdown menu for tab selection             |
+| `context_menu(fn)`          | Menu shown when a tab is right-clicked, built for that tab's index |
 | `max_width(width)`      | Set maximum width of each tab; truncates           |
 
 ### TabBar Variants

@@ -20,6 +20,29 @@ fn sparse_hunks_preserve_source_numbers_and_available_copy() {
 }
 
 #[test]
+fn source_lines_come_in_unified_order_with_their_positions() {
+    let patch =
+        "--- a/src/a.rs\n+++ b/src/a.rs\n@@ -10,3 +20,3 @@ fn first\n keep\n-old\n+new\n tail\n";
+    let files = DiffFile::parse(patch).unwrap();
+    let lines: Vec<(DiffSide, usize, &str)> = files[0]
+        .source_lines()
+        .map(|(at, text)| {
+            assert_eq!(at.path().as_ref(), "src/a.rs");
+            (at.side(), at.line(), text.as_ref())
+        })
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            (DiffSide::Modified, 20, "keep"),
+            (DiffSide::Original, 11, "old"),
+            (DiffSide::Modified, 21, "new"),
+            (DiffSide::Modified, 22, "tail"),
+        ]
+    );
+}
+
+#[test]
 fn multi_file_missing_sides_metadata_and_binary() {
     let patch = "diff --git a/new b/new\nnew file mode 100644\n--- /dev/null\n+++ b/new\n@@ -0,0 +1 @@\n+added\ndiff --git a/old b/old\ndeleted file mode 100644\n--- a/old\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted\ndiff --git a/from b/to\nsimilarity index 100%\nrename from from\nrename to to\ndiff --git a/pic b/pic\nBinary files a/pic and b/pic differ\n";
     let files = DiffFile::parse(patch).unwrap();

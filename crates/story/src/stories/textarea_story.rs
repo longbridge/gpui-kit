@@ -15,11 +15,66 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
     hover_card::HoverCard,
-    input::{InputEvent, Textarea, TextareaState},
+    input::{InputEvent, SpellChecker, Textarea, TextareaState},
     v_flex,
 };
 
 pub fn init(_: &mut App) {}
+
+/// A spell checker that knows a short word list, standing in for the
+/// platform's or a dictionary's.
+struct WordList(std::cell::RefCell<Vec<String>>);
+
+impl WordList {
+    fn new() -> Self {
+        let words = "a an and are as checker do does for guesses here is it know menu one \
+            not offers right-click spell spelling the this underlined what word words you";
+        Self(std::cell::RefCell::new(
+            words.split_whitespace().map(str::to_owned).collect(),
+        ))
+    }
+}
+
+impl SpellChecker for WordList {
+    fn misspelled_words(&self, text: &str, _: &App) -> Vec<std::ops::Range<usize>> {
+        let known = self.0.borrow();
+        let mut found = Vec::new();
+        let mut start = None;
+        for (at, char) in text.char_indices().chain([(text.len(), ' ')]) {
+            match (start, char.is_alphabetic() || char == '-') {
+                (None, true) => start = Some(at),
+                (Some(begin), false) => {
+                    let word = text[begin..at].to_lowercase();
+                    if !known.contains(&word) {
+                        found.push(begin..at);
+                    }
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        found
+    }
+
+    fn guesses(&self, word: &str, _: &App) -> Vec<gpui_kit::SharedString> {
+        let mut letters: Vec<char> = word.to_lowercase().chars().collect();
+        letters.sort_unstable();
+        self.0
+            .borrow()
+            .iter()
+            .filter(|known| {
+                let mut theirs: Vec<char> = known.chars().collect();
+                theirs.sort_unstable();
+                theirs == letters
+            })
+            .map(|known| known.clone().into())
+            .collect()
+    }
+
+    fn learn(&self, word: &str, _: &mut App) {
+        self.0.borrow_mut().push(word.to_lowercase());
+    }
+}
 
 struct ComposerAttachment {
     id: u64,
@@ -34,6 +89,7 @@ pub struct TextareaStory {
     textarea_no_wrap: Entity<TextareaState>,
     textarea_auto_grow_no_wrap: Entity<TextareaState>,
     chat_input: Entity<TextareaState>,
+    spelling: Entity<TextareaState>,
     chat_messages: Vec<String>,
     composer: Entity<TextareaState>,
     attachments: Vec<ComposerAttachment>,
@@ -121,6 +177,13 @@ impl TextareaStory {
                 )
         });
 
+        let spelling = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(2, 5)
+                .spell_checker(WordList::new())
+                .default_value("Teh words this spell checker does not know are underlined; right-click one for what it guesses.")
+        });
+
         let textarea_auto_grow_no_wrap = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(1, 5)
@@ -167,6 +230,7 @@ impl TextareaStory {
             textarea_no_wrap,
             textarea_auto_grow_no_wrap,
             chat_input,
+            spelling,
             chat_messages: Vec::new(),
             composer,
             attachments: Vec::new(),
@@ -261,6 +325,11 @@ impl Render for TextareaStory {
                 section("Auto Grow")
                     .w(px(560.))
                     .child(Textarea::new(&self.textarea_auto_grow).with_size(self.size)),
+            )
+            .child(
+                section("Spell Check")
+                    .w(px(560.))
+                    .child(Textarea::new(&self.spelling).with_size(self.size)),
             )
             .child(
                 section("Auto Grow with No Wrap")

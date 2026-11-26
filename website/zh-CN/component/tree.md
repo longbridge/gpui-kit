@@ -129,6 +129,8 @@ tree_state.update(cx, |state, cx| {
 - `set_selected_item(item, cx)`
 - `selected_entry()`
 - `scroll_to_item(ix, strategy)`
+- `focus(window, cx)`
+- `focus_handle(cx)`（`Focusable`）
 
 ### TreeItem
 
@@ -156,6 +158,14 @@ tree_state.update(cx, |state, cx| {
 | `→` | 展开当前节点 |
 | `Enter` | 切换展开/折叠 |
 | `Space` | 自定义动作 |
+
+### 显示键盘焦点
+
+无论 Tree 是否拥有键盘焦点，方向键都从选中项开始移动。`TreeState` 实现了 `Focusable`，视图可以据此区分两者，例如只在 Tree 获得焦点时绘制焦点环：
+
+```rust
+let focused = tree_state.read(cx).focus_handle(cx).contains_focused(window, cx);
+```
 
 ## 滚动回弹
 

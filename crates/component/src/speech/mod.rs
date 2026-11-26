@@ -35,7 +35,7 @@ pub use recognizer::{
 };
 pub use state::{SpeechEvent, SpeechState, SpeechStatus};
 #[cfg(all(feature = "speech", not(target_family = "wasm")))]
-pub use system::SystemRecognizer;
+pub use system::{SpeechLocale, SystemRecognizer};
 pub use waveform::SpeechWaveform;
 
 /// The input a [`SpeechState`] captures from unless told otherwise.

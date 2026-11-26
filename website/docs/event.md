@@ -132,9 +132,10 @@ The complete example above begins at a button callback. To exercise the full [Ac
    .key_context("Chat")
    .on_action(cx.listener(Self::on_send_message))
 
-   .on_click(cx.listener(|workspace, _, window, cx| {
-       workspace.focus.dispatch_action(&SendMessage, window, cx);
-   }))
+   .on_click({
+       let focus = self.focus.clone();
+       move |_, window, cx| focus.dispatch_action(&SendMessage, window, cx)
+   })
    ```
 
 4. In `main`, after `gpui_kit::init(cx)`, bind Enter. Change the `open_window` closure to pass its window to the constructor:

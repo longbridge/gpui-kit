@@ -21,7 +21,7 @@ use gpui_kit::component::{
     StyledExt as _, TitleBar, WindowExt as _,
     button::{Button, ButtonGroup, ButtonVariants as _},
     h_flex,
-    input::{Textarea, TextareaState},
+    input::{InputEvent, Textarea, TextareaState},
     kbd::Kbd,
     notification::Notification,
     scroll::ScrollableElement as _,
@@ -96,20 +96,15 @@ impl SelectItem for Language {
     }
 }
 
+/// The languages the system recognizer supports on this machine.
 fn languages() -> Vec<Language> {
-    [
-        ("en-US", "English (US)"),
-        ("en-GB", "English (UK)"),
-        ("zh-CN", "简体中文"),
-        ("zh-HK", "中文（香港）"),
-        ("ja-JP", "日本語"),
-    ]
-    .into_iter()
-    .map(|(tag, name)| Language {
-        tag: tag.into(),
-        name: name.into(),
-    })
-    .collect()
+    SystemRecognizer::supported_locales()
+        .into_iter()
+        .map(|locale| Language {
+            tag: locale.tag().clone(),
+            name: locale.name().clone(),
+        })
+        .collect()
 }
 
 /// One line of the session log.
@@ -128,12 +123,21 @@ enum Tone {
     Danger,
 }
 
-fn new_speech(engine: Engine, language: &str, cx: &mut App) -> Entity<SpeechState> {
+fn new_speech(
+    engine: Engine,
+    language: &str,
+    expected_phrases: Vec<SharedString>,
+    cx: &mut App,
+) -> Entity<SpeechState> {
     let language = language.to_string();
     cx.new(|cx| {
         let state = SpeechState::new(cx);
         match engine {
-            Engine::System => state.recognizer(SystemRecognizer::new().locale(language)),
+            Engine::System => state.recognizer(
+                SystemRecognizer::new()
+                    .locale(language)
+                    .expected_phrases(expected_phrases),
+            ),
             Engine::Demo => state.recognizer(DemoRecognizer::new(&language)),
         }
     })
@@ -169,6 +173,8 @@ struct SpeechApp {
     speech: Entity<SpeechState>,
     notes: Entity<TextareaState>,
     language_select: Entity<SelectState<SearchableVec<Language>>>,
+    /// Names and terms the system recognizer should expect, one per line.
+    expected_phrases: Entity<TextareaState>,
     input_device: Option<SharedString>,
     /// When the current or last session started.
     session_started: Option<Instant>,
@@ -182,8 +188,14 @@ struct SpeechApp {
 impl SpeechApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let engine = Engine::System;
-        let language = SharedString::from("en-US");
-        let speech = new_speech(engine, &language, cx);
+        // US English if the recognizer has it, otherwise its first language.
+        let languages = languages();
+        let selected = languages
+            .iter()
+            .position(|language| language.tag == "en-US")
+            .or((!languages.is_empty()).then_some(0));
+        let language = selected.map_or("en-US".into(), |ix| languages[ix].tag.clone());
+        let speech = new_speech(engine, &language, Vec::new(), cx);
         let _speech_subscription = Self::subscribe_speech(&speech, window, cx);
 
         let notes = cx.new(|cx| {
@@ -192,22 +204,38 @@ impl SpeechApp {
         });
         let language_select = cx.new(|cx| {
             SelectState::new(
-                SearchableVec::new(languages()),
-                Some(IndexPath::default()),
+                SearchableVec::new(languages),
+                selected.map(|ix| IndexPath::default().row(ix)),
                 window,
                 cx,
             )
         });
-        let _subscriptions = vec![cx.subscribe_in(
-            &language_select,
-            window,
-            |this, _, event: &SelectEvent<SearchableVec<Language>>, window, cx| {
-                if let SelectEvent::Confirm(Some(tag)) = event {
-                    this.language = tag.clone();
-                    this.rebuild_speech(window, cx);
-                }
-            },
-        )];
+        let expected_phrases = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(3, 8)
+                .placeholder("Names and terms, one per line")
+        });
+        let _subscriptions = vec![
+            cx.subscribe_in(
+                &language_select,
+                window,
+                |this, _, event: &SelectEvent<SearchableVec<Language>>, window, cx| {
+                    if let SelectEvent::Confirm(Some(tag)) = event {
+                        this.language = tag.clone();
+                        this.rebuild_speech(window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &expected_phrases,
+                window,
+                |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) && this.engine == Engine::System {
+                        this.rebuild_speech(window, cx);
+                    }
+                },
+            ),
+        ];
         notes.update(cx, |notes, cx| notes.focus(window, cx));
 
         Self {
@@ -217,6 +245,7 @@ impl SpeechApp {
             speech,
             notes,
             language_select,
+            expected_phrases,
             input_device: input_device_name(),
             session_started: None,
             opened: Instant::now(),
@@ -238,10 +267,20 @@ impl SpeechApp {
         )
     }
 
-    /// Recreate the speech state for the chosen engine and language.
+    /// Recreate the speech state for the chosen engine, language and expected
+    /// phrases.
     fn rebuild_speech(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.speech.update(cx, |speech, cx| speech.cancel(cx));
-        self.speech = new_speech(self.engine, &self.language, cx);
+        let expected_phrases = self
+            .expected_phrases
+            .read(cx)
+            .value()
+            .lines()
+            .map(str::trim)
+            .filter(|phrase| !phrase.is_empty())
+            .map(|phrase| SharedString::from(phrase.to_string()))
+            .collect();
+        self.speech = new_speech(self.engine, &self.language, expected_phrases, cx);
         self._speech_subscription = Self::subscribe_speech(&self.speech, window, cx);
         self.input_device = input_device_name();
         cx.notify();
@@ -397,6 +436,20 @@ impl SpeechApp {
                 sidebar_section("Language", cx)
                     .child(Select::new(&self.language_select).small().disabled(active)),
             )
+            .when(self.engine == Engine::System, |this| {
+                this.child(
+                    sidebar_section("Expected phrases", cx)
+                        .child(
+                            Textarea::new(&self.expected_phrases)
+                                .small()
+                                .disabled(active),
+                        )
+                        .child(caption(
+                            "Names, product terms and jargon the recognizer should favor.",
+                            cx,
+                        )),
+                )
+            })
             .child(sidebar_section("Checks", cx).child(self.render_checks(cx)))
     }
 

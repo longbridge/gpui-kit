@@ -8,13 +8,14 @@ use gpui::{App, SharedString, Task};
 use objc2::{AnyThread as _, rc::Retained, runtime::NSObjectProtocol as _, sel};
 use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
 use objc2_avf_audio::{AVAudioCommonFormat, AVAudioFormat, AVAudioPCMBuffer};
-use objc2_foundation::{NSBundle, NSError, NSLocale, NSString};
+use objc2_foundation::{NSArray, NSBundle, NSError, NSLocale, NSString};
 use objc2_speech::{
     SFSpeechAudioBufferRecognitionRequest, SFSpeechRecognitionResult, SFSpeechRecognitionTask,
     SFSpeechRecognizer, SFSpeechRecognizerAuthorizationStatus,
 };
 use smol::channel::{Receiver, Sender, unbounded};
 
+use super::SpeechLocale;
 use crate::speech::{AudioFormat, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink};
 
 /// Without this `Info.plist` key, asking for speech recognition access
@@ -29,16 +30,27 @@ pub(super) struct PlatformRecognizer {
     /// `None` when the locale has no recognizer or the application cannot ask
     /// for access.
     recognizer: Option<Retained<SFSpeechRecognizer>>,
+    /// Each request's `contextualStrings`.
+    expected_phrases: Retained<NSArray<NSString>>,
 }
 
 impl PlatformRecognizer {
-    pub(super) fn new(locale: Option<SharedString>) -> Self {
+    pub(super) fn new(locale: Option<SharedString>, expected_phrases: &[SharedString]) -> Self {
+        let expected_phrases = NSArray::from_retained_slice(
+            &expected_phrases
+                .iter()
+                .map(|phrase| NSString::from_str(phrase))
+                .collect::<Vec<_>>(),
+        );
         if !has_usage_description() {
             tracing::warn!(
                 "speech recognition is unavailable: the application's Info.plist has no \
                  `{USAGE_DESCRIPTION_KEY}`, and asking for access without it terminates the process"
             );
-            return Self { recognizer: None };
+            return Self {
+                recognizer: None,
+                expected_phrases,
+            };
         }
 
         let recognizer = match &locale {
@@ -62,7 +74,10 @@ impl PlatformRecognizer {
             );
         }
 
-        Self { recognizer }
+        Self {
+            recognizer,
+            expected_phrases,
+        }
     }
 
     /// The recognizer, if it can recognize on the device.
@@ -97,7 +112,8 @@ impl SpeechRecognizer for PlatformRecognizer {
         }
 
         let (events, rx) = unbounded();
-        let mut recognition = Recognition::new(recognizer, sink, events.clone())?;
+        let mut recognition =
+            Recognition::new(recognizer, &self.expected_phrases, sink, events.clone())?;
         if authorization == SFSpeechRecognizerAuthorizationStatus::Authorized {
             recognition.begin(cx);
         } else {
@@ -115,6 +131,29 @@ impl SpeechRecognizer for PlatformRecognizer {
             _task: task,
         }))
     }
+}
+
+/// The locales with a recognizer that works on the device, which is the only
+/// way [`PlatformRecognizer`] recognizes.
+pub(super) fn supported_locales() -> Vec<SpeechLocale> {
+    let current = NSLocale::currentLocale();
+    // SAFETY: a plain class property read; it never prompts.
+    let locales = unsafe { SFSpeechRecognizer::supportedLocales() };
+    locales
+        .iter()
+        .filter(|locale| {
+            // SAFETY: `locale` is a valid `NSLocale` and the property reads never
+            // prompt; the initializer returns nil for a locale without a
+            // recognizer.
+            unsafe { SFSpeechRecognizer::initWithLocale(SFSpeechRecognizer::alloc(), locale) }
+                .is_some_and(|recognizer| unsafe { recognizer.supportsOnDeviceRecognition() })
+        })
+        .map(|locale| {
+            let identifier = locale.localeIdentifier();
+            let name = current.localizedStringForLocaleIdentifier(&identifier);
+            SpeechLocale::new(identifier.to_string().replace('_', "-"), name.to_string())
+        })
+        .collect()
 }
 
 /// Whether the user or a policy denied this application the microphone.
@@ -240,6 +279,7 @@ struct Recognition {
 impl Recognition {
     fn new(
         recognizer: Retained<SFSpeechRecognizer>,
+        expected_phrases: &NSArray<NSString>,
         sink: SpeechSink,
         events: Sender<Event>,
     ) -> Result<Self, SpeechError> {
@@ -264,6 +304,7 @@ impl Recognition {
             request.setShouldReportPartialResults(true);
             // Never send audio to Apple's servers.
             request.setRequiresOnDeviceRecognition(true);
+            request.setContextualStrings(expected_phrases);
             // Punctuation needs macOS 13.
             if request.respondsToSelector(sel!(setAddsPunctuation:)) {
                 request.setAddsPunctuation(true);

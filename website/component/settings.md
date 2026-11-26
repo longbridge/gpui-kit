@@ -85,6 +85,22 @@ Settings::new("app-settings")
     ])
 ```
 
+### Sections
+
+With many pages, group them in the sidebar under headings with
+`SettingSection`. Pages added with `page` are listed without a heading. While
+searching, a heading is shown only if one of its pages matches.
+
+```rust
+Settings::new("app-settings")
+    .page(SettingPage::new("General"))
+    .section(
+        SettingSection::new("Editor")
+            .pages(vec![SettingPage::new("Font"), SettingPage::new("Theme")]),
+    )
+    .section(SettingSection::new("Network").page(SettingPage::new("Proxy")))
+```
+
 ### Selection While Searching
 
 Search keeps the current page selected while it contains matching settings.
@@ -96,6 +112,43 @@ is retained for when results return.
 
 Escape in the search box clears a non-empty query. With an empty query, Escape
 reaches the enclosing dialog or window.
+
+### Control from the Application
+
+The settings keep the page on display and the search to themselves. To open
+them at a page after they are shown, such as from a menu item or a shortcut,
+to search them from a command, or to read which page is on display, create a
+[SettingsState] and hand it to the settings:
+
+```rust
+use gpui_kit::component::setting::{SelectIndex, Settings, SettingsState};
+
+// When the view is created.
+let settings = cx.new(|cx| SettingsState::new(window, cx));
+
+// In render.
+Settings::new("app-settings")
+    .state(&settings)
+    .pages(vec![...])
+
+// Open the second page, scrolled to its third group.
+settings.update(cx, |state, cx| {
+    state.set_selected_index(SelectIndex { page_ix: 1, group_ix: Some(2) }, cx)
+});
+
+// Search, as if typed in the search box.
+settings.update(cx, |state, cx| state.set_query("font", window, cx));
+
+// The page on display.
+let page_ix = settings.read(cx).selected_index().page_ix;
+
+// Put the cursor in the search box: its focus handle is the state's.
+window.focus(&settings.focus_handle(cx), cx);
+```
+
+Indices are those of the pages and groups as added, whatever the search shows.
+With a state, `default_selected_index` is not used: select the page on the
+state instead.
 
 ### Group Variants
 
@@ -505,6 +558,7 @@ SettingItem::new(
 ## API Reference
 
 - [Settings]
+- [SettingsState]
 - [SettingPage]
 - [SettingGroup]
 - [SettingItem]
@@ -610,6 +664,7 @@ Settings::new("app-settings")
 ```
 
 [Settings]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.Settings.html
+[SettingsState]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingsState.html
 [SettingPage]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingPage.html
 [SettingGroup]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingGroup.html
 [SettingItem]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingItem.html

@@ -13,8 +13,8 @@ use std::rc::Rc;
 use wrap_width::{MeasuredWrap, WidthRange};
 
 use gpui::{
-    App, Bounds, ContentMask, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign,
-    Window, point, px, size,
+    App, Bounds, ContentMask, Font, FontStyle, FontWeight, LineFragment, Pixels, Point, ShapedLine,
+    Size, TextAlign, Window, point, px, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -26,6 +26,25 @@ use crate::input::{
     layout::{LastLayout, WhitespaceIndicators},
     tab_stops::{expanded_width, tab_stop_width},
 };
+
+/// A byte range drawn in another weight or style than the wrapper's font, such as a bold
+/// text decoration. Wrapping measures it as drawn, so it does not run past the wrap width.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FontSpan {
+    pub(crate) range: Range<usize>,
+    pub(crate) weight: Option<FontWeight>,
+    pub(crate) style: Option<FontStyle>,
+}
+
+impl FontSpan {
+    fn font(&self, base: &Font) -> Font {
+        Font {
+            weight: self.weight.unwrap_or(base.weight),
+            style: self.style.unwrap_or(base.style),
+            ..base.clone()
+        }
+    }
+}
 
 /// Controls how soft-wrapped continuation lines are indented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -517,6 +536,8 @@ pub(crate) struct TextWrapper {
     pub(crate) lines: SumTree<LineItem>,
 
     inline_metrics: Rc<[(Range<usize>, Pixels)]>,
+    /// Sorted, disjoint ranges drawn in another weight or style than `font`.
+    font_spans: Rc<[FontSpan]>,
     /// Exact native widths avoid reshaping the same prefix when a drag crosses wrap thresholds.
     width_measurements: Rc<std::cell::RefCell<WidthMeasurements>>,
     /// Bumped whenever the lines are wrapped again.
@@ -543,6 +564,7 @@ impl TextWrapper {
             tab_size: TabSize::default().tab_size,
             lines: SumTree::new(&()),
             inline_metrics: Rc::from([]),
+            font_spans: Rc::from([]),
             width_measurements: Rc::default(),
             version: 0,
             monospace: None,
@@ -806,6 +828,7 @@ impl TextWrapper {
             .text_system()
             .line_wrapper(self.font.clone(), self.font_size);
         let metrics = self.inline_metrics.clone();
+        let spans = self.font_spans.clone();
         let measurements = self.width_measurements.clone();
         if reuse == Reuse::Nothing {
             measurements.borrow_mut().clear();
@@ -831,6 +854,36 @@ impl TextWrapper {
             )
         };
         let shaped = |text: &str| expanded_width(&layout(text), text, tab_stop);
+        // `text` starts at buffer offset `start` and is drawn in `spans` where they cover it.
+        let styled = |text: &str, start: usize, spans: &[FontSpan]| {
+            let mut runs = Vec::with_capacity(spans.len() * 2 + 1);
+            let mut offset = 0;
+            let mut run = |len: usize, font: Font| {
+                if len > 0 {
+                    runs.push(gpui::TextRun {
+                        len,
+                        font,
+                        color: gpui::black(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    });
+                }
+            };
+            for span in spans {
+                let from = span.range.start.saturating_sub(start).min(text.len());
+                let to = span.range.end.saturating_sub(start).min(text.len());
+                if from >= to || from < offset {
+                    continue;
+                }
+                run(from - offset, font.clone());
+                run(to - from, span.font(&font));
+                offset = to;
+            }
+            run(text.len() - offset, font.clone());
+            let layout = text_system.layout_line(text, font_size, &runs, None);
+            expanded_width(&layout, text, tab_stop)
+        };
         let cached = |text: &str| measurements.borrow_mut().measure(text, || shaped(text));
         let glyph_starts = |text: &str| {
             let layout = layout(text);
@@ -881,6 +934,27 @@ impl TextWrapper {
                 offset = range.end;
             }
             if fragments.is_empty() {
+                // A line drawn partly in another weight or style is measured as drawn. The
+                // shortcuts below, and the cache, know only the wrapper's font.
+                let line_end = line_start + line_str.len();
+                let first = spans.partition_point(|span| span.range.end <= line_start);
+                let last = spans.partition_point(|span| span.range.start < line_end);
+                let line_spans = &spans[first..last.max(first)];
+                if !line_spans.is_empty() && !line_str.is_empty() {
+                    return measured_wrap_ranges(
+                        line_str,
+                        wrap_width,
+                        wrapping_indent,
+                        &mut scratch,
+                        |range| {
+                            styled(
+                                &line_str[range.clone()],
+                                line_start + range.start,
+                                line_spans,
+                            )
+                        },
+                    );
+                }
                 if let Some(monospace) = &monospace
                     && is_printable_ascii(line_str)
                 {
@@ -1012,6 +1086,79 @@ impl TextWrapper {
                 cx,
             );
         }
+    }
+
+    /// Move the font spans over an edit of `range` into `new_len` bytes, the way text
+    /// decorations move, so that only spans their owner changes need another wrap.
+    pub(crate) fn adjust_font_spans(&mut self, range: &Range<usize>, new_len: usize) {
+        if self.font_spans.is_empty() {
+            return;
+        }
+        self.font_spans = self
+            .font_spans
+            .iter()
+            .filter_map(|span| {
+                let range =
+                    crate::input::decorations::adjust_range_for_edit(&span.range, range, new_len);
+                (!range.is_empty()).then(|| FontSpan {
+                    range,
+                    ..span.clone()
+                })
+            })
+            .collect();
+    }
+
+    /// Set the ranges drawn in another weight or style than the font, sorted and disjoint,
+    /// and wrap again the lines whose spans changed.
+    pub(crate) fn set_font_spans(&mut self, spans: Rc<[FontSpan]>, cx: &mut App) {
+        if self.font_spans == spans {
+            return;
+        }
+        let old = std::mem::replace(&mut self.font_spans, spans);
+        // Before the first layout there are no rows yet; that layout wraps with the spans.
+        if !self._initialized || self.wrap_width.is_none() {
+            return;
+        }
+        // The spans in only one of the two lists are the ones that changed.
+        let new = self.font_spans.clone();
+        let (mut old, mut new) = (old.iter().peekable(), new.iter().peekable());
+        let text = self.text.clone();
+        let mut rows: Vec<Range<usize>> = Vec::new();
+        loop {
+            let changed = match (old.peek(), new.peek()) {
+                (Some(a), Some(b)) if a == b => {
+                    old.next();
+                    new.next();
+                    continue;
+                }
+                (Some(a), Some(b)) if a.range.start <= b.range.start => old.next(),
+                (_, Some(_)) => new.next(),
+                (Some(_), None) => old.next(),
+                (None, None) => break,
+            };
+            let Some(span) = changed else { break };
+            let start = text.offset_to_point(span.range.start.min(text.len())).row;
+            let end = text.offset_to_point(span.range.end.min(text.len())).row + 1;
+            rows.push(start..end);
+        }
+        rows.sort_unstable_by_key(|rows| rows.start);
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(rows.len());
+        for row in rows {
+            match merged.last_mut() {
+                Some(last) if last.end >= row.start => last.end = last.end.max(row.end),
+                _ => merged.push(row),
+            }
+        }
+        let edits: Vec<(Range<usize>, Rope)> = merged
+            .into_iter()
+            .map(|rows| {
+                let range = text.line_start_offset(rows.start)..text.line_end_offset(rows.end - 1);
+                let new_text = Rope::from(text.slice(range.clone()));
+                (range, new_text)
+            })
+            .collect();
+        // The font is unchanged, so the cached plain widths stay valid.
+        self.update_wrapped_ranges(&text, &edits, Reuse::Measurements, cx);
     }
 
     /// Keep the existing synthetic edit tests independent of native glyph measurement.
@@ -2149,6 +2296,25 @@ mod tests {
             features: FontFeatures::default(),
             fallbacks: None,
         }
+    }
+
+    /// Font spans move over edits by the same rule as the decorations they come from.
+    #[test]
+    fn font_spans_follow_edits_like_decorations() {
+        let bold = |range: Range<usize>| FontSpan {
+            range,
+            weight: Some(FontWeight::BOLD),
+            style: None,
+        };
+        let mut wrapper = TextWrapper::new(test_font(), px(14.), Some(px(100.)));
+        wrapper.font_spans = Rc::from([bold(2..6), bold(10..12)]);
+        // Typing at a span's edge leaves it as it is; typing inside widens it.
+        wrapper.adjust_font_spans(&(2..2), 3);
+        wrapper.adjust_font_spans(&(8..8), 1);
+        assert_eq!(&*wrapper.font_spans, &[bold(5..10), bold(14..16)]);
+        // A span whose text is deleted is dropped; one deleted in part shrinks.
+        wrapper.adjust_font_spans(&(4..15), 0);
+        assert_eq!(&*wrapper.font_spans, &[bold(4..5)]);
     }
 
     /// The longest-row summary stays exact when the previously-longest line is shrunk.

@@ -3806,9 +3806,7 @@ mod tests {
                 let quad = window
                     .painted_quads()
                     .into_iter()
-                    .find(|quad| {
-                        quad.background == head && quad.corner_radii != Default::default()
-                    })
+                    .find(|quad| quad.background == head && quad.corner_radii != Default::default())
                     .unwrap_or_else(|| panic!("{mode}: the header background quad is painted"));
                 (quad, window.scale_factor())
             });

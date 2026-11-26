@@ -161,6 +161,24 @@ RadioGroup::vertical("disabled-group")
     .disabled(true) // Disables all radio buttons in the group
 ```
 
+## Keyboard
+
+A `RadioGroup` is a single stop in the Tab order. Tab lands on the checked radio, or on the first enabled radio when nothing is checked, and the next Tab leaves the group.
+
+Inside the group:
+
+| Key | Action |
+| --- | --- |
+| Down / Right | Move to the next enabled radio and check it |
+| Up / Left | Move to the previous enabled radio and check it |
+| Space | Check the focused radio |
+
+The arrows skip disabled radios and wrap around at both ends. They work the same way in horizontal and vertical groups. In a right-to-left layout, Left and Right swap.
+
+Moving with an arrow calls `on_change` with the new index, so the group stays controlled: write the index and call `cx.notify()` as you do for clicks.
+
+Inside a group, the group decides the Tab order, so `tab_index` and `tab_stop` on its radios are ignored. They still apply to a radio used on its own.
+
 ## API Reference
 
 ### Radio

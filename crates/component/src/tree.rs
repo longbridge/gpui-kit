@@ -8,7 +8,7 @@ use gpui::{
 use crate::{
     Selectable as _, StyledExt,
     list::ListItem,
-    menu::{ContextMenuExt as _, PopupMenu},
+    menu::{ContextMenuExt as _, KeyboardTrigger, PopupMenu, ShowContextMenu, open_from_keyboard},
     scroll::ScrollableElement,
 };
 
@@ -87,10 +87,24 @@ impl RenderOnce for Tree {
         let render_item = self.render_item;
         let context_menu_builder = self.context_menu_builder;
         let scroll_handle = self.state.read(cx).scroll_handle().clone();
+        // The selected row's menu, for Shift+F10 while the tree has focus:
+        // the rows are drawn inside the focused tree, not around it, so the
+        // tree opens it for them.
+        let selected_menu: Rc<std::cell::RefCell<Option<KeyboardTrigger>>> = Rc::default();
+        let row_menu = selected_menu.clone();
 
         div()
             .id(self.id)
             .size_full()
+            .on_action(move |_: &ShowContextMenu, window, cx| {
+                let opened = selected_menu
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|trigger| open_from_keyboard(trigger, window, cx));
+                if !opened {
+                    cx.propagate();
+                }
+            })
             .child(
                 gpui_base::Tree::new(&self.state)
                     .item(move |ix, entry, entry_state, window, cx| {
@@ -104,24 +118,25 @@ impl RenderOnce for Tree {
                             .selected(entry_state.is_selected())
                             .secondary_selected(entry_state.is_right_clicked());
 
-                        div()
-                            .child(item)
-                            .context_menu(move |menu, window, cx| {
-                                let Some(build) = context_menu_builder.as_ref() else {
-                                    return menu;
-                                };
-                                let Some(entry) = context_menu_state
-                                    .read(cx)
-                                    .entry(ix)
-                                    .filter(|entry| entry.item().id == id)
-                                    .filter(|entry| !entry.is_disabled())
-                                    .cloned()
-                                else {
-                                    return menu;
-                                };
-                                build(ix, &entry, menu, window, cx)
-                            })
-                            .into_any_element()
+                        let row = div().child(item).context_menu(move |menu, window, cx| {
+                            let Some(build) = context_menu_builder.as_ref() else {
+                                return menu;
+                            };
+                            let Some(entry) = context_menu_state
+                                .read(cx)
+                                .entry(ix)
+                                .filter(|entry| entry.item().id == id)
+                                .filter(|entry| !entry.is_disabled())
+                                .cloned()
+                            else {
+                                return menu;
+                            };
+                            build(ix, &entry, menu, window, cx)
+                        });
+                        if entry_state.is_selected() {
+                            *row_menu.borrow_mut() = Some(row.keyboard_trigger());
+                        }
+                        row.into_any_element()
                     })
                     .list_style(StyleRefinement::default().flex_grow_1().size_full())
                     .relative()
@@ -193,6 +208,42 @@ mod tests {
         let press = point(px(10.), px(36.));
         cx.simulate_mouse_down(press, MouseButton::Right, Default::default());
         cx.simulate_mouse_up(press, MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("down right");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        assert_eq!(ran.borrow().as_slice(), ["b"]);
+    }
+
+    #[gpui::test]
+    fn shift_f10_opens_the_selected_rows_menu(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let ran = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let ran = ran.clone();
+            move |window, cx| {
+                let items = vec![TreeItem::new("a", "a"), TreeItem::new("b", "b")];
+                let tree = cx.new(|cx| TreeState::new(cx).items(items));
+                tree.update(cx, |tree, cx| {
+                    tree.set_selected_index(Some(1), cx);
+                    tree.focus(window, cx);
+                });
+                TreeRoot { tree, ran }
+            }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        cx.simulate_keystrokes("shift-f10");
         cx.run_until_parked();
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);

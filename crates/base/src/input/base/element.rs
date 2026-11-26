@@ -22,7 +22,11 @@ use std::{collections::BTreeSet, ops::Range, rc::Rc};
 
 use crate::{
     Scrollbar, ScrollbarPlacement, Side,
-    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
+    input::{
+        RopeExt as _,
+        blink_cursor::CURSOR_WIDTH,
+        display_map::{FontSpan, LineLayout},
+    },
 };
 
 use super::{
@@ -199,6 +203,71 @@ fn compose_decoration_collections<'a>(
     }
 
     (!styles.is_empty()).then_some(styles)
+}
+
+impl<M: InputModeKind> InputBaseState<M> {
+    /// Give soft wrap the ranges that decorations draw in another weight or style than the
+    /// font, so that a bold run wraps where it is drawn instead of running past the edge.
+    /// Worked out again only when the text or the decorations changed.
+    pub(super) fn sync_font_spans(&mut self, cx: &mut gpui::Context<Self>) {
+        let key = (
+            self.document_revision,
+            self.extras.decorations_revision(),
+            self.masked,
+        );
+        if self.font_spans_key == Some(key) {
+            return;
+        }
+        self.font_spans_key = Some(key);
+        let changes_font =
+            |d: &&TextDecoration| d.style.font_weight.is_some() || d.style.font_style.is_some();
+        // A masked input draws no decorations.
+        let layers: Vec<Vec<TextDecoration>> = if self.masked {
+            Vec::new()
+        } else {
+            self.extras
+                .decoration_layers()
+                .into_iter()
+                .map(|layer| layer.iter().filter(changes_font).cloned().collect())
+                .collect()
+        };
+        let mut spans: Vec<FontSpan> = Vec::new();
+        if layers.iter().any(|layer| !layer.is_empty()) {
+            let styles = compose_decoration_collections(
+                Vec::new(),
+                layers.iter().map(Vec::as_slice),
+                0..self.text.len(),
+            );
+            for (range, style) in styles.unwrap_or_default() {
+                let (weight, font_style) = (style.font_weight, style.font_style);
+                if weight.is_none() && font_style.is_none() {
+                    continue;
+                }
+                match spans.last_mut() {
+                    Some(last)
+                        if last.range.end == range.start
+                            && last.weight == weight
+                            && last.style == font_style =>
+                    {
+                        last.range.end = range.end;
+                    }
+                    _ => spans.push(FontSpan {
+                        range,
+                        weight,
+                        style: font_style,
+                    }),
+                }
+            }
+        }
+        let rows = self.display_map.wrap_row_count();
+        self.display_map.set_font_spans(spans.into(), cx);
+        // This frame's height was set from the rows before; an auto-growing field takes the
+        // new count on the next.
+        if self.mode.is_auto_grow() && self.display_map.wrap_row_count() != rows {
+            self.mode.update_auto_grow(&self.display_map);
+            cx.notify();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -778,7 +847,7 @@ fn layout_overview_ruler<M: InputModeKind>(
 /// From the text outward, a gutter holds a margin, then its columns in the
 /// order of `gutter_order`. A gutter on the right is the mirror of one on the
 /// left.
-fn gutter_column(
+pub(super) fn gutter_column(
     last_layout: &LastLayout,
     folding: bool,
     column: GutterColumn,
@@ -3290,11 +3359,20 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                 ..
             } => (highlighter.borrow_mut(), diagnostics),
             _ => {
+                // The words misspelled, under every decoration the app set.
+                let style = diagnostic_highlight_style(
+                    crate::input::DiagnosticSeverity::Error,
+                    state.editor_style.diagnostics,
+                );
+                let misspelled: Vec<_> = (state.misspellings_shown(cx).into_iter())
+                    .map(|range| crate::input::TextDecoration::new(range, style))
+                    .collect();
                 return (!state.masked)
                     .then(|| {
                         compose_decoration_collections(
                             Vec::new(),
-                            state.extras.decoration_layers().into_iter(),
+                            (state.extras.decoration_layers().into_iter())
+                                .chain(std::iter::once(&misspelled[..])),
                             visible_byte_range,
                         )
                     })
@@ -3693,6 +3771,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             state.display_map.set_font(font, text_size, cx);
             let tab_size = state.mode.tab_size().tab_size;
             state.display_map.set_tab_size(tab_size, cx);
+            state.sync_font_spans(cx);
             state.display_map.ensure_text_prepared(&state.text, cx);
             if cx.reduce_motion() {
                 state.overscroll.reset();
@@ -4368,6 +4447,15 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
                     });
                     caret_moved || layout.line_height != last_layout.line_height
                 });
+            state.last_gutter_bounds = (last_layout.line_number_width > px(0.)).then(|| {
+                editor_gutter_bounds(
+                    input_bounds,
+                    last_layout.line_number_width,
+                    ghost_lines_height,
+                    state.editor_paddings,
+                    last_layout.gutter_side,
+                )
+            });
             state.last_layout = Some(last_layout.clone());
             state.last_bounds = Some(bounds);
             state.last_cursor = Some(state.cursor());
@@ -5095,6 +5183,7 @@ mod tests {
         GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
         Position, RangeDecoration, Redo, TextDecoration, Undo,
     };
+    use crate::input::{InputHit, InputHitArea};
     use crate::{ScrollbarMode, ScrollbarStyles, ScrollbarTheme, Theme};
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -8344,7 +8433,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn custom_gutter_gaps_keep_reordered_columns_aligned(cx: &mut TestAppContext) {
+    fn custom_gutter_gaps_keep_reordered_columns_and_hit_testing_aligned(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, "a\n  b\nc", false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
         cx.update(|_, cx| {
@@ -8372,6 +8461,7 @@ mod tests {
                         let layout = state.last_layout.as_ref().unwrap();
                         assert_eq!(layout.gutter_gap, gap);
                         assert!(layout.gutter_icon_width > px(0.));
+                        let y = state.row_bounds(1).unwrap().center().y;
                         let mut inset = gap;
                         for column in order {
                             let (x, width) = gutter_column(layout, true, column);
@@ -8387,6 +8477,11 @@ mod tests {
                                 (from_text - inset).abs() < px(0.001),
                                 "{gap:?} {side:?} {column:?}"
                             );
+                            let hit = state
+                                .hit_test(point(state.input_bounds.left() + x + width.half(), y))
+                                .unwrap();
+                            assert_eq!(hit_column(hit), Some(column));
+                            assert_eq!(hit.row, Some(1));
                             inset += width;
                         }
                     }
@@ -10016,5 +10111,212 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The middle of the `column`'s band in the gutter, in window coordinates.
+    fn gutter_column_middle(state: &EditorState, column: GutterColumn) -> Option<Pixels> {
+        let layout = state.last_layout.as_ref().unwrap();
+        let (x, width) = gutter_column(layout, state.mode.is_folding(), column);
+        (width > px(0.)).then(|| state.input_bounds.origin.x + x + width.half())
+    }
+
+    fn hit_column(hit: InputHit) -> Option<GutterColumn> {
+        match hit.area {
+            InputHitArea::Gutter { column, .. } => column,
+            _ => None,
+        }
+    }
+
+    fn hit_offset(hit: InputHit) -> Option<usize> {
+        match hit.area {
+            InputHitArea::Text { offset, .. } => Some(offset),
+            _ => None,
+        }
+    }
+
+    #[gpui::test]
+    fn hit_test_tells_the_gutter_from_the_text(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let unpainted = cx.new(|cx| EditorState::new(window, cx).default_value("a"));
+            assert!(unpainted.read(cx).hit_test(point(px(1.), px(1.))).is_none());
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Bands::new(true), cx);
+            });
+
+            for side in [Side::Left, Side::Right] {
+                editor.update(cx, |state, cx| state.set_gutter_side(side, cx));
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let gutter = state.last_gutter_bounds.unwrap();
+                let row = state.row_bounds(1).unwrap();
+                let y = row.center().y;
+
+                let mut columns = 0;
+                for column in [
+                    GutterColumn::FoldIcons,
+                    GutterColumn::LineNumbers,
+                    GutterColumn::Icons,
+                ] {
+                    let Some(x) = gutter_column_middle(state, column) else {
+                        continue;
+                    };
+                    columns += 1;
+                    let hit = state.hit_test(point(x, y)).unwrap();
+                    assert_eq!(hit_column(hit), Some(column), "{side:?}");
+                    assert_eq!(hit.row, Some(1));
+                    assert!(!hit.spacer);
+                }
+                assert!(columns >= 2, "line numbers and icons");
+                assert!(gutter_column_middle(state, GutterColumn::Icons).is_some());
+
+                let margin = if side.is_left() {
+                    gutter.right() - px(1.)
+                } else {
+                    gutter.left() + px(1.)
+                };
+                let hit = state.hit_test(point(margin, y)).unwrap();
+                assert_eq!(hit.area, InputHitArea::Gutter { column: None });
+                assert_eq!(hit.row, Some(1));
+
+                let below = state.row_bounds(2).unwrap().bottom() + state.line_height().unwrap();
+                let x = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+                let hit = state.hit_test(point(x, below)).unwrap();
+                assert!(matches!(hit.area, InputHitArea::Gutter { .. }));
+                assert_eq!(hit.row, None);
+
+                let x = if side.is_left() {
+                    gutter.right() + px(30.)
+                } else {
+                    gutter.left() - px(30.)
+                };
+                let hit = state.hit_test(point(x, y)).unwrap();
+                assert_eq!(hit.row, Some(1));
+                assert_eq!(
+                    hit_offset(hit),
+                    Some(state.index_for_mouse_position(point(x, y)).0)
+                );
+                assert!((4..=7).contains(&hit_offset(hit).unwrap()), "{hit:?}");
+
+                let outside = point(state.input_bounds.right() + px(500.), y);
+                assert!(state.hit_test(outside).is_none());
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn hit_test_puts_a_spacer_row_beside_its_line(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        let (editor, window, _) =
+            spaced_editor(cx, false, vec![Spacer::above(1, 1), Spacer::below(1, 2)]);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let line_height = state.line_height().unwrap();
+            let row = state.row_bounds(1).unwrap();
+            let gutter_x = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+            let text_x = state.last_gutter_bounds.unwrap().right() + px(10.);
+            for (y, spacer) in [
+                (row.top() - line_height.half(), true),
+                (row.center().y, false),
+                (row.bottom() + line_height.half(), true),
+                (row.bottom() + line_height * 1.5, true),
+            ] {
+                for x in [gutter_x, text_x] {
+                    let hit = state.hit_test(point(x, y)).unwrap();
+                    assert_eq!(hit.row, Some(1), "{y:?} {hit:?}");
+                    assert_eq!(hit.spacer, spacer, "{y:?} {hit:?}");
+                }
+            }
+            let probe = point(gutter_x, state.row_bounds(2).unwrap().top() + px(1.));
+            let next = state.hit_test(probe).unwrap();
+            assert_eq!((next.row, next.spacer), (Some(2), false));
+
+            editor.update(cx, |state, cx| {
+                state.set_cursor_position(lsp_types::Position::new(1, 3), window, cx);
+                state.extras.inline_completion.item = Some(lsp_types::InlineCompletionItem {
+                    insert_text: "\nghost".into(),
+                    filter_text: None,
+                    range: None,
+                    command: None,
+                    insert_text_format: None,
+                });
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let row = state.row_bounds(1).unwrap();
+            let ghost = state.hit_test(point(gutter_x, row.bottom() + line_height.half()));
+            assert_eq!(ghost.unwrap().row, None);
+            let ghost = state.hit_test(point(text_x, row.bottom() + line_height.half()));
+            assert_eq!(
+                ghost.map(|hit| (hit.row, hit.spacer)),
+                Some((Some(1), false))
+            );
+            for y in [
+                row.bottom() + line_height * 1.5,
+                row.bottom() + line_height * 2.5,
+            ] {
+                for x in [gutter_x, text_x] {
+                    let hit = state.hit_test(point(x, y)).unwrap();
+                    assert_eq!((hit.row, hit.spacer), (Some(1), true), "{y:?}");
+                }
+            }
+            for x in [gutter_x, text_x] {
+                let probe = point(x, state.row_bounds(2).unwrap().top() + px(1.));
+                let next = state.hit_test(probe).unwrap();
+                assert_eq!((next.row, next.spacer), (Some(2), false));
+            }
+        });
+    }
+    #[gpui::test]
+    fn a_right_click_on_the_gutter_tells_the_menu_its_row(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let opened: Rc<std::cell::RefCell<Vec<Option<InputHit>>>> = Default::default();
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                let input = cx.weak_entity();
+                let opened = opened.clone();
+                state.on_context_menu(Rc::new(move |_, _, _, _, cx| {
+                    let hit = input
+                        .upgrade()
+                        .and_then(|input| input.read(cx).context_menu_hit());
+                    opened.borrow_mut().push(hit);
+                }));
+            });
+            window.draw(cx).clear(cx);
+        });
+        let (gutter, text, rows) = cx.update(|_, cx| {
+            let state = editor.read(cx);
+            let gutter = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+            let text = state.last_gutter_bounds.unwrap().right() + px(10.);
+            let rows: Vec<Pixels> = (0..3)
+                .map(|row| state.row_bounds(row).unwrap().center().y)
+                .collect();
+            (gutter, text, rows)
+        });
+        let right_click = |cx: &mut VisualTestContext, position: Point<Pixels>| {
+            cx.simulate_mouse_down(position, MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(position, MouseButton::Right, Default::default());
+            cx.run_until_parked();
+            let hit = opened.borrow_mut().pop().expect("the menu opened");
+            let selected = cx.update(|_, cx| editor.read(cx).selected_range());
+            (hit.unwrap(), selected)
+        };
+
+        let (hit, selected) = right_click(&mut cx, point(gutter, rows[1]));
+        assert_eq!(hit_column(hit), Some(GutterColumn::LineNumbers));
+        assert_eq!(hit.row, Some(1));
+        assert_eq!(selected, 4..4);
+
+        let (hit, selected) = right_click(&mut cx, point(text, rows[2]));
+        assert_eq!(hit.row, Some(2));
+        let offset = hit_offset(hit).unwrap();
+        assert!(offset >= 8, "{hit:?}");
+        assert_eq!(selected, offset..offset);
+        cx.update(|_, cx| assert_eq!(editor.read(cx).context_menu_offset(), Some(offset)));
     }
 }

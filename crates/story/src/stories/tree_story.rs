@@ -215,10 +215,16 @@ impl Story for TreeStory {
 impl Render for TreeStory {
     fn render(
         &mut self,
-        _: &mut gpui_kit::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<Self>,
     ) -> impl gpui_kit::IntoElement {
         let view = cx.entity();
+        // The frame shows keyboard focus apart from the selected row.
+        let focused = self
+            .tree_state
+            .read(cx)
+            .focus_handle(cx)
+            .contains_focused(window, cx);
         v_flex()
             .w_full()
             .gap_3()
@@ -245,7 +251,10 @@ impl Render for TreeStory {
             )
             .child(
                 section("File tree")
-                    .sub_title("Press `enter` to rename. Right-click for context menu.")
+                    .sub_title(
+                        "Press `enter` to rename. Right-click for context menu. \
+                         The frame shows the tree's keyboard focus.",
+                    )
                     .w(px(480.))
                     .child(
                         v_flex()
@@ -301,7 +310,11 @@ impl Render for TreeStory {
                                 })
                                 .p_1()
                                 .border_1()
-                                .border_color(cx.theme().border)
+                                .border_color(if focused {
+                                    cx.theme().ring
+                                } else {
+                                    cx.theme().border
+                                })
                                 .rounded(cx.theme().radius)
                                 .h(px(540.)),
                             )

@@ -117,6 +117,7 @@ window.open_dialog(cx, move |dialog, _, _| {
     dialog.close_button(false).p_0().content(move |content, _, _| {
         content.child(
             Command::new(&state)
+                .large()
                 .bordered(false)
                 .placeholder("Type a command or search...")
                 .items([
@@ -268,6 +269,8 @@ Command::new(&state).scroll_bounce(true)
 | `footer` | `footer<F, E>(F) -> Self`，使用相同的回调约束；渲染在列表之下。 |
 
 `Command` 实现了 [`Styled`]，因此 `w`、`max_w`、`bg` 和其他样式可作用于面板外框。
+
+`Command` 也实现了 [`Sizable`]：`xsmall`、`small`、`large` 和 `with_size` 设置搜索框的高度、文字和图标，与 `Input` 的尺寸一致。默认：`Size::Medium`。在对话框中单独打开的命令面板通常使用 `large`。
 
 ## CommandItem
 

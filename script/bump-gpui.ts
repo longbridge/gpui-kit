@@ -88,6 +88,13 @@ const DEPENDENCY_OVERRIDES: Record<
   { package: string; version: string }
 > = {
   reqwest: { package: "gpui-pre-reqwest", version: "0.12.15" },
+  // Keep the schema and platform adapters on the same AccessKit generation.
+  // macOS 0.27.2 fixes SubclassingAdapter teardown when a view is observed
+  // through KVO (AccessKit/accesskit#835).
+  accesskit: { package: "accesskit", version: "0.25.2" },
+  accesskit_macos: { package: "accesskit_macos", version: "0.27.2" },
+  accesskit_unix: { package: "accesskit_unix", version: "0.24.1" },
+  accesskit_windows: { package: "accesskit_windows", version: "0.35.2" },
   // Zed pins a git revision; `test-support` compiles against the crates.io
   // release, which has the `attr-macro` feature Zed enables.
   proptest: { package: "proptest", version: "1" },
@@ -1125,6 +1132,7 @@ function stageWorkspace(
   makeDeclarativeMacrosCrateRelative(staging, crates, zedSha);
   vendorGpuiSourcesForApple(staging, crates, zedSha);
   adaptWgpuRelease(staging, crates, zedSha);
+  adaptAccessKitRelease(staging, crates, zedSha);
   carryLicenseFiles(ws.root, staging, crates);
 
   writeFileSync(
@@ -1468,7 +1476,34 @@ function adaptWgpuRelease(staging: string, crates: Crate[], zedSha: string) {
   logWarn("wgpu: using crates.io 30.0.1 without the unreleased Vulkan surface-drop fix (gfx-rs/wgpu#10230)");
 }
 
+/** Use AccessKit 0.25's name without changing TreeUpdate or TreeId. */
+function rewriteAccessKitSource(source: string): string {
+  return source.replace(/\baccesskit::Tree\b/g, "accesskit::TreeInfo");
+}
+
+function adaptAccessKitRelease(staging: string, crates: Crate[], zedSha: string) {
+  const gpui = crates.find((crate) => crate.name === "gpui");
+  if (gpui === undefined)
+    throw new BumpError("gpui is missing from the staged crate set");
+  for (const file of ["window.rs", "window/a11y.rs"]) {
+    const path = join(staging, gpui.relDir, "src", file);
+    if (!existsSync(path)) continue;
+    const source = readFileSync(path, "utf8");
+    const rewritten = rewriteAccessKitSource(source);
+    if (rewritten !== source)
+      writeFileSync(
+        path,
+        modificationNotice(zedSha, "use AccessKit 0.25's TreeInfo type") + rewritten,
+      );
+  }
+}
+
 function runSelfTest() {
+  const accesskitFixture = "accesskit::TreeUpdate { tree: Some(accesskit::Tree::new(root)), tree_id: accesskit::TreeId::ROOT }";
+  const accesskitExpected = "accesskit::TreeUpdate { tree: Some(accesskit::TreeInfo::new(root)), tree_id: accesskit::TreeId::ROOT }";
+  if (rewriteAccessKitSource(accesskitFixture) !== accesskitExpected ||
+      rewriteAccessKitSource(accesskitExpected) !== accesskitExpected)
+    throw new BumpError("self-test did not adapt AccessKit's tree metadata type");
   const queueFixture = "wgpu::DeviceDescriptor {\n    label: None,\n    default_queue: wgpu::QueueDescriptor::default(),\n}\n";
   const queueExpected = "wgpu::DeviceDescriptor {\n    label: None,\n}\n";
   if (rewriteWgpuSource(queueFixture) !== queueExpected ||
@@ -1492,6 +1527,14 @@ function runSelfTest() {
         dependencies: {
           reqwest: { git: "https://github.com/zed-industries/reqwest.git" },
           proptest: { git: "https://github.com/proptest-rs/proptest" },
+          accesskit: { version: "0.24.0", features: ["enumn"] },
+          accesskit_macos: "0.26.0",
+          accesskit_unix: {
+            version: "0.22",
+            "default-features": false,
+            features: ["tokio"],
+          },
+          accesskit_windows: "0.34",
           wgpu: {
             git: "https://github.com/gfx-rs/wgpu",
             rev: "3b3506ea31154edc04de64debda0e780cba2639c",
@@ -1541,6 +1584,41 @@ function runSelfTest() {
   );
   if (JSON.stringify(generatedWorkspace.workspace.dependencies.wgpu) !== JSON.stringify(wgpu))
     throw new BumpError("self-test changed the wgpu override when generating TOML");
+  const accessibilityFixture: Crate = {
+    ...rendererFixture,
+    relDir: "crates/gpui",
+    name: "gpui",
+    publishedName: "gpui-pre",
+    manifest: {
+      dependencies: { accesskit: { workspace: true } },
+      target: Object.fromEntries(
+        ["macos", "unix", "windows"].map((platform) => [
+          platform === "unix" ? "cfg(unix)" : `cfg(target_os = "${platform}")`,
+          { dependencies: { [`accesskit_${platform}`]: { workspace: true } } },
+        ]),
+      ),
+    },
+  };
+  const accessibilityWorkspace = Bun.TOML.parse(
+    tomlDump(workspaceManifest(dependencyFixture, [accessibilityFixture], "0.3.0")),
+  ).workspace.dependencies;
+  for (const [name, version] of Object.entries({
+    accesskit: "0.25.2",
+    accesskit_macos: "0.27.2",
+    accesskit_unix: "0.24.1",
+    accesskit_windows: "0.35.2",
+  })) {
+    const dependency = accessibilityWorkspace[name];
+    if (dependency?.version !== version || dependency.package !== name)
+      throw new BumpError(`self-test did not upgrade ${name} to ${version}`);
+  }
+  if (
+    JSON.stringify(accessibilityWorkspace.accesskit.features) !== JSON.stringify(["enumn"]) ||
+    accessibilityWorkspace.accesskit_unix["default-features"] !== false ||
+    JSON.stringify(accessibilityWorkspace.accesskit_unix.features) !== JSON.stringify(["tokio"])
+  ) {
+    throw new BumpError("self-test changed AccessKit's schema or runtime features");
+  }
   logSuccess("Dependency override self-test passed");
   const declarativeFixture = [
     "macro_rules! actions {",

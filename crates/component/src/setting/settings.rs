@@ -1,19 +1,20 @@
 use std::ops::Range;
 
 use crate::{
-    Icon, IconName, Sizable, Size, StyledExt,
+    Collapsible, Icon, IconName, Sizable, Size, StyledExt,
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
     input::{Escape, Input, InputState},
     resizable_panel,
     setting::SettingPage,
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    sidebar::{Sidebar, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
-    prelude::FluentBuilder as _, px, relative,
+    App, AppContext as _, Axis, Context, ElementId, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, container_query, div, prelude::FluentBuilder as _, px,
+    relative,
 };
 use rust_i18n::t;
 
@@ -35,6 +36,8 @@ const STACKED_LAYOUT_MAX_WIDTH: Pixels = px(480.);
 pub struct Settings {
     id: ElementId,
     pages: Vec<SettingPage>,
+    /// The headings of the sidebar, each with the range of its pages.
+    sections: Vec<(Range<usize>, SharedString)>,
     group_variant: GroupBoxVariant,
     size: Size,
     sidebar_width: Pixels,
@@ -42,6 +45,7 @@ pub struct Settings {
     sidebar_style: StyleRefinement,
     default_selected_index: SelectIndex,
     header_style: StyleRefinement,
+    state: Option<Entity<SettingsState>>,
 }
 
 impl Settings {
@@ -50,6 +54,7 @@ impl Settings {
         Self {
             id: id.into(),
             pages: vec![],
+            sections: vec![],
             group_variant: GroupBoxVariant::default(),
             size: Size::default(),
             sidebar_width: px(250.0),
@@ -57,6 +62,7 @@ impl Settings {
             sidebar_style: StyleRefinement::default(),
             default_selected_index: SelectIndex::default(),
             header_style: StyleRefinement::default(),
+            state: None,
         }
     }
 
@@ -84,6 +90,18 @@ impl Settings {
         self
     }
 
+    /// Add a section of pages, listed in the sidebar under its heading.
+    ///
+    /// Pages added with [`Settings::page`] are listed without a heading.
+    /// A heading is hidden while the search leaves none of its pages.
+    pub fn section(mut self, section: SettingSection) -> Self {
+        let start = self.pages.len();
+        self.pages.extend(section.pages);
+        self.sections
+            .push((start..self.pages.len(), section.heading));
+        self
+    }
+
     /// Set the default variant for all setting groups.
     ///
     /// All setting groups will use this variant unless overridden individually.
@@ -99,6 +117,8 @@ impl Settings {
     }
 
     /// Set the default index of the page to be selected.
+    ///
+    /// Not used with [`Settings::state`]: select the page on the state instead.
     pub fn default_selected_index(mut self, index: SelectIndex) -> Self {
         self.default_selected_index = index;
         self
@@ -107,6 +127,15 @@ impl Settings {
     /// Set the style refinement for the header.
     pub fn header_style(mut self, style: &StyleRefinement) -> Self {
         self.header_style = style.clone();
+        self
+    }
+
+    /// Use a [`SettingsState`] owned by the application, to select a page or
+    /// search from outside the settings and to read the page on display.
+    ///
+    /// Without it, the settings keep their own state.
+    pub fn state(mut self, state: &Entity<SettingsState>) -> Self {
+        self.state = Some(state.clone());
         self
     }
 
@@ -161,6 +190,65 @@ impl Settings {
         let selected_index = state.read(cx).selected_index;
         let search_input = state.read(cx).search_input.clone();
 
+        let page_item = |page_ix: usize| {
+            let page = &self.pages[page_ix];
+            let groups = &filter.groups[page_ix];
+            let is_page_active = selected_index.page_ix == page_ix
+                && (selected_index.group_ix.is_none() || groups.len() == 1);
+            // Going to a page opens its groups; clicking the title of
+            // the page on display again folds or unfolds them.
+            let is_page_shown = selected_index.page_ix == page_ix;
+            SidebarMenuItem::new(page.title.clone())
+                .click_to_open(!is_page_shown)
+                .click_to_toggle(is_page_shown)
+                .when_some(page.icon.clone(), |this, icon| this.icon(icon))
+                .default_open(page.default_open)
+                .active(is_page_active)
+                .on_click({
+                    let state = state.clone();
+                    move |_, _, cx| {
+                        state.update(cx, |state, cx| {
+                            state.set_selected_index(
+                                SelectIndex {
+                                    page_ix,
+                                    group_ix: None,
+                                },
+                                cx,
+                            )
+                        })
+                    }
+                })
+                .when(groups.len() > 1, |this| {
+                    this.children(
+                        groups
+                            .iter()
+                            .copied()
+                            .filter(|&ix| page.groups[ix].title.is_some())
+                            .map(|group_ix| {
+                                let group = &page.groups[group_ix];
+                                let is_active = selected_index.page_ix == page_ix
+                                    && selected_index.group_ix == Some(group_ix);
+                                let title = group.title.clone().unwrap_or_default();
+
+                                SidebarMenuItem::new(title).active(is_active).on_click({
+                                    let state = state.clone();
+                                    move |_, _, cx| {
+                                        state.update(cx, |state, cx| {
+                                            state.set_selected_index(
+                                                SelectIndex {
+                                                    page_ix,
+                                                    group_ix: Some(group_ix),
+                                                },
+                                                cx,
+                                            )
+                                        })
+                                    }
+                                })
+                            }),
+                    )
+                })
+        };
+
         Sidebar::new("settings-sidebar")
             .w(relative(1.))
             .border_0()
@@ -189,64 +277,107 @@ impl Settings {
                     })
                     .child(Input::new(&search_input).prefix(IconName::Search)),
             )
-            .child(
-                SidebarMenu::new().children(filter.visible_pages().map(|page_ix| {
-                    let page = &self.pages[page_ix];
-                    let groups = &filter.groups[page_ix];
-                    let is_page_active = selected_index.page_ix == page_ix
-                        && (selected_index.group_ix.is_none() || groups.len() == 1);
-                    // Going to a page opens its groups; clicking the title of
-                    // the page on display again folds or unfolds them.
-                    let is_page_shown = selected_index.page_ix == page_ix;
-                    SidebarMenuItem::new(page.title.clone())
-                        .click_to_open(!is_page_shown)
-                        .click_to_toggle(is_page_shown)
-                        .when_some(page.icon.clone(), |this, icon| this.icon(icon))
-                        .default_open(page.default_open)
-                        .active(is_page_active)
-                        .on_click({
-                            let state = state.clone();
-                            move |_, _, cx| {
-                                state.update(cx, |state, cx| {
-                                    state.selected_index = SelectIndex {
-                                        page_ix,
-                                        ..Default::default()
-                                    };
-                                    state.deferred_scroll_group_ix = None;
-                                    cx.notify();
-                                })
-                            }
-                        })
-                        .when(groups.len() > 1, |this| {
-                            this.children(
-                                groups
-                                    .iter()
-                                    .copied()
-                                    .filter(|&ix| page.groups[ix].title.is_some())
-                                    .map(|group_ix| {
-                                        let group = &page.groups[group_ix];
-                                        let is_active = selected_index.page_ix == page_ix
-                                            && selected_index.group_ix == Some(group_ix);
-                                        let title = group.title.clone().unwrap_or_default();
-
-                                        SidebarMenuItem::new(title).active(is_active).on_click({
-                                            let state = state.clone();
-                                            move |_, _, cx| {
-                                                state.update(cx, |state, cx| {
-                                                    state.selected_index = SelectIndex {
-                                                        page_ix,
-                                                        group_ix: Some(group_ix),
-                                                    };
-                                                    state.deferred_scroll_group_ix = Some(group_ix);
-                                                    cx.notify();
-                                                })
-                                            }
-                                        })
-                                    }),
-                            )
-                        })
-                })),
+            .children(
+                self.sidebar_sections(filter)
+                    .into_iter()
+                    .map(|(section, pages)| {
+                        let menu = SidebarMenu::new().children(pages.into_iter().map(&page_item));
+                        SidebarSection {
+                            heading: section.map(|ix| self.sections[ix].1.clone()),
+                            menu,
+                        }
+                    }),
             )
+    }
+}
+
+impl Settings {
+    /// The visible pages, in runs that share a section of the sidebar: the
+    /// index of the section, if any, and its pages.
+    fn sidebar_sections(&self, filter: &SettingsFilter) -> Vec<(Option<usize>, Vec<usize>)> {
+        let mut sections: Vec<(Option<usize>, Vec<usize>)> = Vec::new();
+        for page_ix in filter.visible_pages() {
+            let section = self
+                .sections
+                .iter()
+                .position(|(range, _)| range.contains(&page_ix));
+            match sections.last_mut() {
+                Some((last, pages)) if *last == section => pages.push(page_ix),
+                _ => sections.push((section, vec![page_ix])),
+            }
+        }
+        sections
+    }
+}
+
+/// A group of setting pages, listed in the sidebar under a heading.
+///
+/// ```ignore
+/// Settings::new("app-settings")
+///     .page(SettingPage::new("General"))
+///     .section(SettingSection::new("Editor").page(SettingPage::new("Font")))
+/// ```
+pub struct SettingSection {
+    heading: SharedString,
+    pages: Vec<SettingPage>,
+}
+
+impl SettingSection {
+    /// Create a new section with the given heading.
+    pub fn new(heading: impl Into<SharedString>) -> Self {
+        Self {
+            heading: heading.into(),
+            pages: vec![],
+        }
+    }
+
+    /// Add a page to the section.
+    pub fn page(mut self, page: SettingPage) -> Self {
+        self.pages.push(page);
+        self
+    }
+
+    /// Add pages to the section.
+    pub fn pages(mut self, pages: impl IntoIterator<Item = SettingPage>) -> Self {
+        self.pages.extend(pages);
+        self
+    }
+}
+
+/// A run of pages in the sidebar, under a heading or not.
+#[derive(Clone)]
+struct SidebarSection {
+    heading: Option<SharedString>,
+    menu: SidebarMenu,
+}
+
+impl Collapsible for SidebarSection {
+    fn is_collapsed(&self) -> bool {
+        self.menu.is_collapsed()
+    }
+
+    fn collapsed(mut self, collapsed: bool) -> Self {
+        self.menu = self.menu.collapsed(collapsed);
+        self
+    }
+}
+
+impl SidebarItem for SidebarSection {
+    fn render(
+        self,
+        id: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
+        let collapsed = self.menu.is_collapsed();
+        match self.heading {
+            Some(heading) => SidebarGroup::new(heading)
+                .child(self.menu)
+                .collapsed(collapsed)
+                .render(id, window, cx)
+                .into_any_element(),
+            None => self.menu.render(id, window, cx).into_any_element(),
+        }
     }
 }
 
@@ -305,11 +436,77 @@ impl SettingsFilter {
     }
 }
 
-pub(super) struct SettingsState {
+/// The state of a [`Settings`]: the page on display and the search.
+///
+/// Create one to control the settings from outside, such as opening them at
+/// a page from a menu or searching them from a command, and hand it to
+/// [`Settings::state`]. Its focus handle is the search box's.
+pub struct SettingsState {
     pub(super) selected_index: SelectIndex,
     /// If set, defer scrolling to this group index after rendering.
     pub(super) deferred_scroll_group_ix: Option<usize>,
     pub(super) search_input: Entity<InputState>,
+}
+
+impl Focusable for SettingsState {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.search_input.focus_handle(cx)
+    }
+}
+
+impl SettingsState {
+    /// Create a state with the first page selected and an empty search.
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_selected_index(SelectIndex::default(), window, cx)
+    }
+
+    fn with_selected_index(
+        selected_index: SelectIndex,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("Settings.search_placeholder"))
+                .default_value("")
+        });
+
+        Self {
+            search_input,
+            selected_index,
+            deferred_scroll_group_ix: None,
+        }
+    }
+
+    /// The page on display, and the group the sidebar marks in it.
+    ///
+    /// Indices are those of the pages and groups as added, whatever the
+    /// search shows.
+    pub fn selected_index(&self) -> SelectIndex {
+        self.selected_index
+    }
+
+    /// Show a page, scrolled to the given group if any.
+    ///
+    /// While a search hides the page or the group, the first page that
+    /// matches is shown, as when the selected page stops matching.
+    pub fn set_selected_index(&mut self, index: SelectIndex, cx: &mut Context<Self>) {
+        self.selected_index = index;
+        self.deferred_scroll_group_ix = index.group_ix;
+        cx.notify();
+    }
+
+    /// Search the settings for the given text, as if typed in the search box.
+    pub fn set_query(
+        &mut self,
+        query: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let query = query.into();
+        self.search_input
+            .update(cx, |input, cx| input.set_value(query, window, cx));
+    }
 }
 
 /// Options for rendering setting item.
@@ -415,7 +612,9 @@ impl Default for RenderOptions {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+/// A page of the [`Settings`], and optionally a group in it, by the order
+/// they were added in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SelectIndex {
     pub page_ix: usize,
     pub group_ix: Option<usize>,
@@ -423,19 +622,12 @@ pub struct SelectIndex {
 
 impl RenderOnce for Settings {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {
-            let search_input = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder(t!("Settings.search_placeholder"))
-                    .default_value("")
-            });
-
-            SettingsState {
-                search_input,
-                selected_index: self.default_selected_index,
-                deferred_scroll_group_ix: None,
-            }
-        });
+        let state = match self.state.clone() {
+            Some(state) => state,
+            None => window.use_keyed_state(self.id.clone(), cx, |window, cx| {
+                SettingsState::with_selected_index(self.default_selected_index, window, cx)
+            }),
+        };
 
         // The placeholder is localized when the state is created, and rebuilding
         // the state would lose the selected page, so follow a runtime locale
@@ -452,10 +644,16 @@ impl RenderOnce for Settings {
         let filter = SettingsFilter::new(&self.pages, &query, cx);
         let previous = state.read(cx).selected_index;
         let selected = filter.selected_index(previous);
-        if selected.page_ix != previous.page_ix || selected.group_ix != previous.group_ix {
+        if selected != previous {
             state.update(cx, |state, _| {
                 state.selected_index = selected;
                 state.deferred_scroll_group_ix = None;
+            });
+            // A view that read the selection earlier in this frame shows the
+            // page the search moved to. Notifying is ignored while drawing.
+            window.defer(cx, {
+                let state = state.clone();
+                move |_, cx| state.update(cx, |_, cx| cx.notify())
             });
         }
         let options = RenderOptions::new()

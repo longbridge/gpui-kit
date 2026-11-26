@@ -63,6 +63,19 @@ Kbd::new(Keystroke::parse("cmd-s").unwrap())
     .appearance(false)
 ```
 
+### 文本标签
+
+提示内容不是单个按键时（按键名称、按键范围或多个可选按键），可以按原样显示文本，样式保持一致：
+
+```rust
+Kbd::label("Esc")
+Kbd::label("⌘1–9")
+Kbd::label("↑↓")
+Kbd::label("Enter / Tab")
+```
+
+标签不会被解析，也不会按平台格式化。
+
 ### 从 Action 绑定读取
 
 ```rust

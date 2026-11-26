@@ -186,8 +186,10 @@ impl AppMenu {
         let popup_menu = match self.popup_menu.as_ref() {
             None => {
                 let items = self.menu.items.clone();
+                let name = self.name.clone();
                 let popup_menu = PopupMenu::build(window, cx, |menu, window, cx| {
-                    menu.with_menu_items(items, window, cx)
+                    menu.accessibility_label(name)
+                        .with_menu_items(items, window, cx)
                 });
                 popup_menu.update(cx, |menu, cx| {
                     menu.set_action_context(action_context.clone(), cx);

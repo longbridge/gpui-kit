@@ -12,7 +12,7 @@ use gpui::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, ElementExt as _, Icon, IconName, IndexPath, StyledExt as _,
+    ActiveTheme as _, ElementExt as _, Icon, IconName, IndexPath, Sizable as _, StyledExt as _,
     VirtualListScrollHandle,
     actions::{Cancel, Confirm, SelectDown, SelectUp},
     command::{
@@ -976,6 +976,7 @@ impl Render for CommandState {
                         .border_color(cx.theme().border)
                         .child(
                             Input::new(&self.query_input)
+                                .with_size(self.options.size)
                                 .prefix(
                                     Icon::new(IconName::Search)
                                         .text_color(cx.theme().muted_foreground),

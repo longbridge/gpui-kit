@@ -16,21 +16,23 @@ use gpui::{App, AsyncApp, SharedString, Task};
 use smol::channel::{Receiver, Sender, bounded, unbounded};
 use windows::{
     Foundation::{
-        AsyncActionCompletedHandler, AsyncOperationCompletedHandler, EventRegistrationToken,
-        IAsyncAction, IAsyncOperation, TypedEventHandler,
+        AsyncActionCompletedHandler, AsyncOperationCompletedHandler, Collections::IIterable,
+        EventRegistrationToken, IAsyncAction, IAsyncOperation, TypedEventHandler,
     },
     Globalization::Language,
     Media::SpeechRecognition::{
         SpeechContinuousRecognitionCompletedEventArgs,
         SpeechContinuousRecognitionResultGeneratedEventArgs, SpeechContinuousRecognitionSession,
         SpeechRecognitionConfidence, SpeechRecognitionHypothesisGeneratedEventArgs,
-        SpeechRecognitionResult, SpeechRecognitionResultStatus, SpeechRecognitionScenario,
-        SpeechRecognitionTopicConstraint, SpeechRecognizer as WinSpeechRecognizer,
+        SpeechRecognitionListConstraint, SpeechRecognitionResult, SpeechRecognitionResultStatus,
+        SpeechRecognitionScenario, SpeechRecognitionTopicConstraint,
+        SpeechRecognizer as WinSpeechRecognizer,
     },
     Win32::Foundation::E_ACCESSDENIED,
     core::{HRESULT, HSTRING, RuntimeType},
 };
 
+use super::SpeechLocale;
 use crate::speech::{AudioFormat, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink};
 
 /// `SPERR_SPEECH_PRIVACY_POLICY_NOT_ACCEPTED`: "Online speech recognition" is
@@ -44,10 +46,11 @@ pub(super) struct PlatformRecognizer {
     /// has no speech pack installed.
     language: Option<Language>,
     separator: &'static str,
+    expected_phrases: Vec<HSTRING>,
 }
 
 impl PlatformRecognizer {
-    pub(super) fn new(locale: Option<SharedString>) -> Self {
+    pub(super) fn new(locale: Option<SharedString>, expected_phrases: &[SharedString]) -> Self {
         let language = supported_language(locale.as_deref())
             .inspect_err(|error| log::warn!("speech: no dictation language: {error:#}"))
             .ok()
@@ -59,6 +62,10 @@ impl PlatformRecognizer {
         Self {
             language,
             separator,
+            expected_phrases: expected_phrases
+                .iter()
+                .map(|phrase| HSTRING::from(phrase.as_ref()))
+                .collect(),
         }
     }
 }
@@ -96,15 +103,20 @@ impl SpeechRecognizer for PlatformRecognizer {
             _task: None,
         };
 
-        let constraint = SpeechRecognitionTopicConstraint::Create(
+        let constraints = recognizer.Constraints().map_err(speech_error)?;
+        let dictation = SpeechRecognitionTopicConstraint::Create(
             SpeechRecognitionScenario::Dictation,
             &HSTRING::from("dictation"),
         )
         .map_err(speech_error)?;
-        recognizer
-            .Constraints()
-            .and_then(|constraints| constraints.Append(&constraint))
-            .map_err(speech_error)?;
+        constraints.Append(&dictation).map_err(speech_error)?;
+        // A list beside the topic favors its phrases during dictation.
+        if !self.expected_phrases.is_empty() {
+            let phrases = IIterable::<HSTRING>::try_from(self.expected_phrases.clone())
+                .and_then(|phrases| SpeechRecognitionListConstraint::Create(&phrases))
+                .map_err(speech_error)?;
+            constraints.Append(&phrases).map_err(speech_error)?;
+        }
 
         session.hypothesis_token = Some(
             recognizer
@@ -316,6 +328,23 @@ fn phrase_separator(tag: &str) -> &'static str {
     } else {
         " "
     }
+}
+
+/// The dictation languages with a speech pack installed, as
+/// [`supported_language`] finds them.
+pub(super) fn supported_locales() -> Vec<SpeechLocale> {
+    let languages = WinSpeechRecognizer::SupportedTopicLanguages()
+        .inspect_err(|error| log::warn!("speech: no dictation languages: {error:#}"));
+    languages
+        .into_iter()
+        .flatten()
+        .filter_map(|language| {
+            Some(SpeechLocale::new(
+                language.LanguageTag().ok()?.to_string_lossy(),
+                language.DisplayName().ok()?.to_string_lossy(),
+            ))
+        })
+        .collect()
 }
 
 /// The language to dictate `locale` (or, without one, the system's speech
