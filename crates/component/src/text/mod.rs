@@ -51,6 +51,7 @@ pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewS
         .with_foreground(theme.foreground)
         .with_muted_foreground(theme.muted_foreground)
         .with_link(theme.link)
+        .with_link_hover(theme.link_hover)
         .with_selection(theme.selection)
         .with_code_background(theme.muted)
         .with_border(theme.border)

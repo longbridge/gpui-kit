@@ -317,6 +317,23 @@ pub(super) fn text_runs(
     runs
 }
 
+/// `highlights` with the link at `range` recolored to `color`, keeping each
+/// part's own alpha so a streamed fade still fades the hovered link.
+fn hovered_link_highlights(
+    highlights: &[(Range<usize>, InlineHighlight)],
+    range: &Range<usize>,
+    color: Hsla,
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    let mut highlights = highlights.to_vec();
+    for (part, highlight) in &mut highlights {
+        if part.start >= range.start && part.end <= range.end {
+            let alpha = highlight.style.color.map_or(1., |color| color.a);
+            highlight.style.color = Some(color.opacity(alpha));
+        }
+    }
+    highlights
+}
+
 pub(super) fn code_insets(
     highlights: &[(Range<usize>, InlineHighlight)],
     font_size: Pixels,
@@ -417,6 +434,10 @@ pub(crate) struct InlineState {
     pub(crate) editor_key: Option<u64>,
     /// UI owners of retained layouts; cleanup metadata is not document state.
     pub(super) cleanup_senders: Vec<Sender<()>>,
+    /// The link under the pointer and the color it is laid out in, when the
+    /// text view gives hovered links a color of their own. Written where the
+    /// pointer is read (paint and mouse moves) and read by the next layout.
+    pub(super) hovered_link: Option<(Range<usize>, Hsla)>,
 }
 
 impl PartialEq for InlineState {
@@ -585,6 +606,16 @@ impl Drop for InlineState {
 }
 
 impl InlineState {
+    /// Records the hovered link to lay out in its hover color; `true` when
+    /// that changed, so the text has to be laid out again.
+    fn set_hovered_link(&mut self, hovered: Option<(Range<usize>, Hsla)>) -> bool {
+        if self.hovered_link == hovered {
+            return false;
+        }
+        self.hovered_link = hovered;
+        true
+    }
+
     /// Save actually rendered text for selected text to use.
     pub(crate) fn set_text(&mut self, text: SharedString) {
         self.text = text;
@@ -959,6 +990,14 @@ impl Inline {
         });
     }
 
+    /// Records the hovered link to lay out in its hover color; `true` when
+    /// that changed, so the text has to be laid out again.
+    fn set_hovered_link(state: &Mutex<InlineState>, hovered: Option<(Range<usize>, Hsla)>) -> bool {
+        state
+            .lock()
+            .is_ok_and(|mut state| state.set_hovered_link(hovered))
+    }
+
     /// Get the range of the link at given mouse position.
     fn link_range_for_position(
         layout: &TextLayout,
@@ -1187,7 +1226,19 @@ impl Element for Inline {
             .text_style
             .clone()
             .unwrap_or_else(|| window.text_style());
-        let runs = text_runs(self.text.len(), &text_style, &self.highlights);
+        let hovered_link = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|state| state.hovered_link.clone());
+        let runs = match hovered_link {
+            Some((range, color)) => text_runs(
+                self.text.len(),
+                &text_style,
+                &hovered_link_highlights(&self.highlights, &range, color),
+            ),
+            None => text_runs(self.text.len(), &text_style, &self.highlights),
+        };
 
         // Reuse the previous frame's shaped text when it was shaped from the
         // same text, runs and style; `StyledText` consumes its runs on every
@@ -1314,6 +1365,23 @@ impl Element for Inline {
             .flatten();
         if hovered_link.is_some() {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
+        }
+
+        // The hovered link's color is laid out, so a change shows next frame.
+        // Mouse moves record it as they happen; this catches the link under a
+        // pointer that did not move, such as after a scroll.
+        let link_hover = if self.links.is_empty() {
+            None
+        } else {
+            GlobalState::global(cx).text_view_state().and_then(|view| {
+                let style = &view.read(cx).text_view_style;
+                (style.link_hover() != style.link()).then(|| style.link_hover())
+            })
+        };
+        // `state` is already locked for this paint; locking `self.state`
+        // again here would deadlock.
+        if state.set_hovered_link(hovered_link.clone().zip(link_hover)) {
+            cx.notify(current_view);
         }
 
         if self.link_tooltip
@@ -1497,13 +1565,15 @@ impl Element for Inline {
                 let text_layout = text_layout.clone();
                 let links = self.links.clone();
                 let link_tooltip = self.link_tooltip;
+                let state = self.state.clone();
                 let mut hovered_link = hovered_link;
                 move |event: &MouseMoveEvent, phase, window, cx| {
                     if !phase.bubble() {
                         return;
                     }
                     if !hitbox.is_hovered(window) {
-                        if link_tooltip && hovered_link.take().is_some() {
+                        let unstyled = Self::set_hovered_link(&state, None);
+                        if (link_tooltip && hovered_link.take().is_some()) || unstyled {
                             cx.notify(current_view);
                         }
                         return;
@@ -1511,7 +1581,8 @@ impl Element for Inline {
 
                     let updated =
                         Self::link_range_for_position(&text_layout, &links, event.position);
-                    if hovered_link != updated || (link_tooltip && updated.is_some()) {
+                    let restyled = Self::set_hovered_link(&state, updated.clone().zip(link_hover));
+                    if hovered_link != updated || (link_tooltip && updated.is_some()) || restyled {
                         hovered_link = updated;
                         cx.notify(current_view);
                     }
@@ -3334,5 +3405,54 @@ mod retained_layout_tests {
             RETAINED_LAYOUTS.with(|layouts| layouts.borrow().is_empty()),
             "closing the last document must not need another text layout to release it"
         );
+    }
+}
+
+#[cfg(test)]
+mod link_hover_tests {
+    use std::sync::Mutex;
+
+    use gpui::HighlightStyle;
+
+    use super::{Inline, InlineHighlight, InlineState, hovered_link_highlights};
+
+    fn colored(color: gpui::Hsla) -> InlineHighlight {
+        InlineHighlight {
+            style: HighlightStyle {
+                color: Some(color),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn only_the_hovered_link_takes_the_hover_color() {
+        let link = gpui::blue();
+        let highlights = vec![
+            (0..4, colored(link)),
+            // The hovered link, split where a streamed fade starts.
+            (6..9, colored(link)),
+            (9..12, colored(link.opacity(0.5))),
+            (14..18, colored(link)),
+        ];
+
+        let hovered = hovered_link_highlights(&highlights, &(6..12), gpui::red());
+
+        assert_eq!(hovered[0], highlights[0]);
+        assert_eq!(hovered[1].1.style.color, Some(gpui::red()));
+        assert_eq!(hovered[2].1.style.color, Some(gpui::red().opacity(0.5)));
+        assert_eq!(hovered[3], highlights[3]);
+    }
+
+    #[test]
+    fn a_changed_hover_asks_for_a_new_layout_once() {
+        let state = Mutex::new(InlineState::default());
+        let hovered = Some((6..12, gpui::red()));
+
+        assert!(Inline::set_hovered_link(&state, hovered.clone()));
+        assert!(!Inline::set_hovered_link(&state, hovered));
+        assert!(Inline::set_hovered_link(&state, None));
+        assert!(!Inline::set_hovered_link(&state, None));
     }
 }
