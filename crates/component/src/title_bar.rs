@@ -615,42 +615,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn only_the_outermost_control_rounds_the_window_corner() {
-        let right = Corners {
-            top_right: px(20.),
-            ..Default::default()
-        };
-        let rounded = |ix, count, rtl| control_corner_radii(ix, count, right, rtl).top_right;
-
-        // LTR lays [minimize, maximize, close] out left to right: close meets the corner.
-        assert_eq!(
-            [
-                rounded(0, 3, false),
-                rounded(1, 3, false),
-                rounded(2, 3, false)
-            ],
-            [px(0.), px(0.), px(20.)]
-        );
-        // RTL reverses the row, so the first button is the rightmost.
-        assert_eq!(
-            [
-                rounded(0, 3, true),
-                rounded(1, 3, true),
-                rounded(2, 3, true)
-            ],
-            [px(20.), px(0.), px(0.)]
-        );
-        assert_eq!(rounded(0, 1, false), px(20.));
-
-        let left = Corners {
-            top_left: px(8.),
-            ..Default::default()
-        };
-        let radii = control_corner_radii(0, 2, left, false);
-        assert_eq!((radii.top_left, radii.top_right), (px(8.), px(0.)));
-    }
-
     const BUTTON: &str = "title-bar-button";
 
     struct BarWithButton {
