@@ -264,6 +264,38 @@ fn new_edit_after_undo_discards_the_redo_branch(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn set_value_clears_undo_and_redo_so_old_edits_cannot_replay(cx: &mut TestAppContext) {
+    let (handle, content) = inputs(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        let text = content.read(cx).text.clone();
+        window.click("text", cx);
+
+        // An undo entry recorded against the old text is dropped.
+        window.input("secret", cx);
+        text.update(cx, |state, cx| state.set_value("loaded", window, cx));
+        window.render_frame(cx);
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("loaded"));
+
+        // So is a redo entry.
+        window.input("x", cx);
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("loaded"));
+        text.update(cx, |state, cx| state.set_value("other", window, cx));
+        window.render_frame(cx);
+        window.press(REDO, cx);
+        assert_eq!(window.find("text").value(), Some("other"));
+
+        // Edits after set_value are recorded as usual.
+        window.input("!", cx);
+        assert_eq!(window.find("text").value(), Some("other!"));
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("other"));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn emoji_navigation_and_both_delete_directions_round_trip(cx: &mut TestAppContext) {
     let (handle, content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
