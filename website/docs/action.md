@@ -61,6 +61,8 @@ impl Counter {
 
 impl Render for Counter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let focus = self.focus.clone();
+
         div()
             .flex()
             .flex_col()
@@ -74,9 +76,9 @@ impl Render for Counter {
             .child(
                 Button::new("increment")
                     .label("Increment")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.focus.dispatch_action(&Increment, window, cx);
-                    })),
+                    .on_click(move |_, window, cx| {
+                        focus.dispatch_action(&Increment, window, cx);
+                    }),
             )
     }
 }
@@ -99,7 +101,7 @@ Run it from the repository root:
 cargo run -p hello_world --bin hello_world
 ```
 
-The window starts at `Count: 0`. Press **Enter** while the counter region has Focus, or click **Increment**; each operation increases the displayed count by one. The counter's `FocusHandle` is retained in its Entity and attached to the rendered container. `cx.bind_keys` maps Enter to `Increment` only on a path containing `Counter`. The container's `.on_action` calls `on_increment`, which changes retained state and calls `cx.notify()` so the new count renders. The button sends the *same* Action to that container through its saved handle, even if clicking the button moves Focus.
+The window starts at `Count: 0`. Press **Enter** while the counter region has Focus, or click **Increment**; each operation increases the displayed count by one. The counter's `FocusHandle` is retained in its Entity and attached to the rendered container. `cx.bind_keys` maps Enter to `Increment` only on a path containing `Counter`. The container's `.on_action` calls `on_increment`, which changes retained state and calls `cx.notify()` so the new count renders. The button sends the *same* Action to that container through a clone of the handle, even if clicking the button moves Focus. Its click handler is a plain closure, not `cx.listener`: `dispatch_action` runs `on_increment` right away, and calling it from inside a `cx.listener` callback would update `Counter` while it is already being updated, which panics.
 
 Check each link in the route with two small experiments, then restore the original source. First, remove `.key_context("Counter")`: Enter no longer selects this binding, while the button still works because direct dispatch does not consult Key Context. Next, restore the context and remove `.on_action(...)`: neither input changes the count because the route has no handler. If a handler runs but the label stays stale, check whether it mutates retained state and calls `cx.notify()`. Restore `examples/hello_world/src/main.rs` when finished.
 

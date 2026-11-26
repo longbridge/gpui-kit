@@ -125,17 +125,19 @@ The complete example above begins at a button callback. To exercise the full [Ac
    }
    ```
 
-   In `render`, add the following three calls to the **outer** `div()` before its children, then replace only the button's `.on_click(...)` with the callback below:
+   In `render`, add the following three calls to the **outer** `div()` before its children, then replace only the button's `.on_click(...)` with the callback below. Clone the handle first, at the top of `render`, with `let focus = self.focus.clone();`:
 
    ```rust
    .track_focus(&self.focus)
    .key_context("Chat")
    .on_action(cx.listener(Self::on_send_message))
 
-   .on_click(cx.listener(|workspace, _, window, cx| {
-       workspace.focus.dispatch_action(&SendMessage, window, cx);
-   }))
+   .on_click(move |_, window, cx| {
+       focus.dispatch_action(&SendMessage, window, cx);
+   })
    ```
+
+   The click callback is a plain closure, not `cx.listener`: `dispatch_action` runs `on_send_message` right away, and running it inside a `cx.listener` callback would update `Workspace` while it is already being updated, which panics.
 
 4. In `main`, after `gpui_kit::init(cx)`, bind Enter. Change the `open_window` closure to pass its window to the constructor:
 
