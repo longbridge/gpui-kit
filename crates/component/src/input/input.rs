@@ -765,13 +765,13 @@ impl RenderOnce for Input {
         state.set_readonly(self.readonly, cx);
         state.set_text_align(text_align, cx);
         let custom = self.context_menu_builder.clone();
-        let spelling = state.clone();
+        let misspelling = state.context_menu_misspelling();
         state.on_context_menu(
             Rc::new(move |_, capabilities, position, window, cx| {
                 let menu = match custom.as_ref() {
                     Some(custom) => custom(NativeMenu::new(), window, cx),
                     None => {
-                        let misspelling = spelling.context_menu_misspelling(cx);
+                        let misspelling = misspelling(cx);
                         let menu = spelling_context_menu(NativeMenu::new(), misspelling.as_ref());
                         default_context_menu(menu, capabilities)
                     }
