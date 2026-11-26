@@ -606,6 +606,16 @@ impl Drop for InlineState {
 }
 
 impl InlineState {
+    /// Records the hovered link to lay out in its hover color; `true` when
+    /// that changed, so the text has to be laid out again.
+    fn set_hovered_link(&mut self, hovered: Option<(Range<usize>, Hsla)>) -> bool {
+        if self.hovered_link == hovered {
+            return false;
+        }
+        self.hovered_link = hovered;
+        true
+    }
+
     /// Save actually rendered text for selected text to use.
     pub(crate) fn set_text(&mut self, text: SharedString) {
         self.text = text;
@@ -983,14 +993,9 @@ impl Inline {
     /// Records the hovered link to lay out in its hover color; `true` when
     /// that changed, so the text has to be laid out again.
     fn set_hovered_link(state: &Mutex<InlineState>, hovered: Option<(Range<usize>, Hsla)>) -> bool {
-        let Ok(mut state) = state.lock() else {
-            return false;
-        };
-        if state.hovered_link == hovered {
-            return false;
-        }
-        state.hovered_link = hovered;
-        true
+        state
+            .lock()
+            .is_ok_and(|mut state| state.set_hovered_link(hovered))
     }
 
     /// Get the range of the link at given mouse position.
@@ -1373,7 +1378,9 @@ impl Element for Inline {
                 (style.link_hover() != style.link()).then(|| style.link_hover())
             })
         };
-        if Self::set_hovered_link(&self.state, hovered_link.clone().zip(link_hover)) {
+        // `state` is already locked for this paint; locking `self.state`
+        // again here would deadlock.
+        if state.set_hovered_link(hovered_link.clone().zip(link_hover)) {
             cx.notify(current_view);
         }
 
