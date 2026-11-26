@@ -584,6 +584,28 @@ impl DiffFile {
         self
     }
 
+    /// The lines the patch supplies, in the order a unified diff shows
+    /// them: an unchanged line once, at its modified side, and a change's
+    /// deleted lines before its added ones. Each comes with its position,
+    /// which [`DiffSpanHighlight`](super::DiffSpanHighlight) and
+    /// [`DiffState::scroll_to_line`](super::DiffState::scroll_to_line) take,
+    /// and its text without the line ending, for finding text in a diff,
+    /// copying it or linking to a line.
+    pub fn source_lines(&self) -> impl Iterator<Item = (DiffLinePosition, &SharedString)> + '_ {
+        self.patch_lines().iter().filter_map(|line| {
+            let (side, ix) = match (line.line(DiffSide::Modified), line.line(DiffSide::Original)) {
+                (Some(ix), _) => (DiffSide::Modified, ix),
+                (None, Some(ix)) => (DiffSide::Original, ix),
+                (None, None) => return None,
+            };
+            let source = &self.lines(side)[ix];
+            Some((
+                DiffLinePosition::new(self.path().clone(), side, source.line_number()),
+                source.text(),
+            ))
+        })
+    }
+
     pub(crate) fn lines_count(&self, side: DiffSide) -> usize {
         self.lines(side).len()
     }
