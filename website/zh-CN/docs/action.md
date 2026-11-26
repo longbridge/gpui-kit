@@ -74,9 +74,10 @@ impl Render for Counter {
             .child(
                 Button::new("increment")
                     .label("Increment")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.focus.dispatch_action(&Increment, window, cx);
-                    })),
+                    .on_click({
+                        let focus = self.focus.clone();
+                        move |_, window, cx| focus.dispatch_action(&Increment, window, cx)
+                    }),
             )
     }
 }
@@ -99,7 +100,7 @@ fn main() {
 cargo run -p hello_world --bin hello_world
 ```
 
-窗口从 `Count: 0` 开始。在计数器区域拥有 Focus 时按 **Enter**，或点击 **Increment**，每次都会让界面上的数字增加 1。计数器的 `FocusHandle` 保存在 Entity 中，并附加到渲染出的容器。`cx.bind_keys` 只在路径中包含 `Counter` 时才把 Enter 映射为 `Increment`。容器上的 `.on_action` 调用 `on_increment`，修改保留状态，再通过 `cx.notify()` 让新数字显示出来。按钮借助保存的 handle 向同一个容器派发同一个 Action；即使点击按钮改变 Focus，命令仍能到达计数器。
+窗口从 `Count: 0` 开始。在计数器区域拥有 Focus 时按 **Enter**，或点击 **Increment**，每次都会让界面上的数字增加 1。计数器的 `FocusHandle` 保存在 Entity 中，并附加到渲染出的容器。`cx.bind_keys` 只在路径中包含 `Counter` 时才把 Enter 映射为 `Increment`。容器上的 `.on_action` 调用 `on_increment`，修改保留状态，再通过 `cx.notify()` 让新数字显示出来。按钮借助保存的 handle 的克隆向同一个容器派发同一个 Action；即使点击按钮改变 Focus，命令仍能到达计数器。这里的 callback 是普通闭包，不能用 `cx.listener`：`focus_handle.dispatch_action` 返回前就会执行 `on_increment`，而 listener 此时仍在更新 `Counter`，第二次更新会 panic。
 
 可以做两个小实验，逐项检查路由，然后还原源码。先删掉 `.key_context("Counter")`：Enter 不再匹配该绑定，按钮仍然有效，因为直接派发不会查询 Key Context。恢复 Context 后删掉 `.on_action(...)`：两个入口都无法改变计数，因为路径上没有 handler。如果 handler 已执行而数字未刷新，检查它是否修改了保留状态并调用 `cx.notify()`。实验结束后恢复 `examples/hello_world/src/main.rs`。
 
@@ -269,7 +270,7 @@ Capture listener 可以调用 `cx.stop_propagation()`，阻止派发到达目标
 | 调用 | 目标 | 适用场景 |
 | --- | --- | --- |
 | `window.dispatch_action(Box::new(action), cx)` | 调用时本窗口的当前 Focus | 面向获得 Focus 的区域的菜单或按钮命令；派发会延后执行。 |
-| `focus_handle.dispatch_action(&action, window, cx)` | 当前帧中渲染该 handle 的元素 | 即使其他控件已获得 Focus，仍要命中指定的已渲染区域；handle 未渲染时不会派发。 |
+| `focus_handle.dispatch_action(&action, window, cx)` | 当前帧中渲染该 handle 的元素 | 即使其他控件已获得 Focus，仍要命中指定的已渲染区域；handle 未渲染时不会派发。派发会立即执行，不要在处理它的 Entity 正被更新时调用。 |
 | `cx.dispatch_action(&action)` | 活跃窗口；没有活跃窗口时为全局 handler | 调用方只有 `App` context 的应用级命令。 |
 
 这些调用都不会计算 Key Context predicate。只有**按键**通过 keymap 选取 Action 时，Key Context 才参与匹配。派发后的 Action 仍需要在选定目标的路径上找到 handler。
