@@ -3,10 +3,10 @@ use gpui::StatefulInteractiveElement as _;
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, InteractiveElement,
-    IntoElement, KeyBinding, MouseButton, ParentElement, Render, RenderOnce, SharedString,
-    StyleRefinement, Styled, UniformListScrollHandle, Window, div, prelude::FluentBuilder as _,
-    uniform_list,
+    AnyElement, App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement, Render, RenderOnce,
+    SharedString, StyleRefinement, Styled, UniformListScrollHandle, Window, div,
+    prelude::FluentBuilder as _, uniform_list,
 };
 
 use crate::{
@@ -200,6 +200,12 @@ pub struct TreeState {
 }
 
 impl EventEmitter<TreeEvent> for TreeState {}
+
+impl Focusable for TreeState {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
 
 impl TreeState {
     pub fn new(cx: &mut App) -> Self {
@@ -783,6 +789,16 @@ mod tests {
 
     fn folder() -> TreeItem {
         TreeItem::new("src", "src").child(TreeItem::new("src/lib.rs", "lib.rs"))
+    }
+
+    #[gpui::test]
+    fn the_focus_handle_tells_whether_the_tree_has_focus(cx: &mut TestAppContext) {
+        let (state, cx, entry) = open_tree(cx, vec![folder()], false);
+        let handle = state.read_with(cx, |state, cx| state.focus_handle(cx));
+        cx.update(|window, _| assert!(!handle.is_focused(window)));
+
+        cx.simulate_click(entry, Modifiers::default());
+        cx.update(|window, _| assert!(handle.is_focused(window)));
     }
 
     #[gpui::test]

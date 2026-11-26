@@ -201,6 +201,8 @@ tree_state.update(cx, |state, cx| {
 | `selected_item(item, cx)`      | Get currently selected tree item |
 | `selected_entry()`             | Get currently selected entry     |
 | `scroll_to_item(ix, strategy)` | Scroll to specific item          |
+| `focus(window, cx)`            | Move keyboard focus to the tree  |
+| `focus_handle(cx)`             | The tree's focus handle (`Focusable`) |
 
 ### TreeItem
 
@@ -396,6 +398,16 @@ tree(&tree_state)
     .on_action(cx.listener(|this, action: &MyCustomAction, _, cx| {
         // Handle custom actions
     }))
+```
+
+### Showing keyboard focus
+
+The selected item is where the arrow keys move from, whether or not the tree
+has keyboard focus. `TreeState` is `Focusable`, so a view can tell the two
+apart, for example to draw a focus ring only while the tree is focused:
+
+```rust
+let focused = tree_state.read(cx).focus_handle(cx).contains_focused(window, cx);
 ```
 
 ## Scroll bounce
