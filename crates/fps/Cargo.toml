@@ -17,7 +17,7 @@ doctest = false
 [dependencies]
 # `gpui/profiler` belongs here, not on the workspace dependency: this is the
 # only crate that uses it, and cargo unifies features across the graph.
-gpui = { workspace = true, features = ["profiler"] }
+gpui = { workspace = true, features = ["profiler"], optional = true }
 gpui-fast = { workspace = true, features = ["profiler"] , optional = true }
 web-time = "1"
 
@@ -64,4 +64,8 @@ gpui-fast = { workspace = true, features = ["test-support"] }
 workspace = true
 
 [features]
+default = ["gpui-pre"]
+# The default engine, Zed's GPUI through the `gpui-pre` crates. Turn default
+# features off and enable `gpui-fast` instead to build without it.
+gpui-pre = ["dep:gpui"]
 gpui-fast = ["dep:gpui-fast"]

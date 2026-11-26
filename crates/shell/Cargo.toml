@@ -18,6 +18,15 @@ name = "gpui-shell"
 path = "src/bin/gpui-shell.rs"
 
 [features]
+# The default engine, Zed's GPUI through the `gpui-pre` crates.
+gpui-pre = [
+    "dep:gpui",
+    "dep:gpui_platform",
+    "gpui-base/gpui-pre",
+    "gpui-fps/gpui-pre",
+    "gpui-component?/gpui-pre",
+    "gpui-kit/gpui-pre",
+]
 gpui-fast = [
     "dep:gpui-fast",
     "dep:gpui-fast-platform",
@@ -27,7 +36,7 @@ gpui-fast = [
     "gpui-kit/gpui-fast",
     "gpui-webview?/gpui-fast",
 ]
-default = ["quickjs", "components", "webview"]
+default = ["gpui-pre", "quickjs", "components", "webview"]
 # The `gpui-component` catalog (`gpui_shell::components`), which scripts import
 # as `"gpui-component"`. Without it the runtime binds `gpui-base` only and does
 # not depend on the styled component library at all.
@@ -49,9 +58,9 @@ quickjs = [
 ]
 
 [dependencies]
-gpui.workspace = true
+gpui = { workspace = true, optional = true }
 gpui-fast = { workspace = true, optional = true }
-gpui_platform.workspace = true
+gpui_platform = { workspace = true, optional = true }
 gpui-fast-platform = { workspace = true, optional = true }
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true

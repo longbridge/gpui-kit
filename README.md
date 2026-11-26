@@ -140,8 +140,16 @@ gpui-kit = { version = "0.7", features = ["gpui-fast"] }
 
 Keep the same imports, initialization, and test macros; no application `[patch]`
 or crate alias is needed. The default backend remains the pinned upstream GPUI
-snapshot. Cargo features are additive, so upstream packages still compile when
-Fast is selected. See [Getting Started](https://gpui-kit.com/docs/getting-started)
+snapshot, selected by the default `gpui-pre` feature. To build on Fast alone and
+skip compiling upstream GPUI, turn default features off and list the ones you use:
+
+```toml
+[dependencies]
+gpui-kit = { version = "0.12", default-features = false, features = ["gpui-fast", "component", "assets", "x11"] }
+```
+
+Upstream GPUI still compiles if any crate in your graph enables `gpui-pre`, for
+example by depending on a Kit crate with default features. See [Getting Started](https://gpui-kit.com/docs/getting-started)
 for feature combinations and comparison commands.
 
 ### Basic Example

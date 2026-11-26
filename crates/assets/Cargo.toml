@@ -19,7 +19,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-gpui.workspace = true
+gpui = { workspace = true, optional = true }
 gpui-fast = { workspace = true, optional = true }
 log.workspace = true
 
@@ -36,4 +36,8 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 
 [features]
+default = ["gpui-pre"]
+# The default engine, Zed's GPUI through the `gpui-pre` crates. Turn default
+# features off and enable `gpui-fast` instead to build without it.
+gpui-pre = ["dep:gpui"]
 gpui-fast = ["dep:gpui-fast"]
