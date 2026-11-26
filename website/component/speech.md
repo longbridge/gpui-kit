@@ -244,6 +244,18 @@ let speech = cx.new(|cx| SpeechState::new(cx).system_fallback(false));
 `.locale(...)` takes a BCP 47 tag such as `en-US` or `zh-CN`. A language the
 platform cannot recognize makes the recognizer unavailable.
 
+`.expected_phrases(...)` lists words and phrases the speaker is likely to say
+that a general vocabulary misses or spells as more common words: people's and
+product names, project terms, jargon. Recognition favors them, and other speech
+is recognized as before. On macOS they become the request's
+`contextualStrings` (Apple advises at most 100 phrases); on Windows, a list
+constraint beside dictation.
+
+```rust
+let recognizer = SystemRecognizer::new().expected_phrases(["GPUI", "Longbridge", "rustfmt"]);
+let speech = cx.new(|cx| SpeechState::new(cx).recognizer(recognizer));
+```
+
 ## Implement a recognizer
 
 Implement `SpeechRecognizer` to use any speech service. `start` opens a
