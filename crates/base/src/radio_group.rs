@@ -191,7 +191,9 @@ fn handle_key_down(
     window: &mut Window,
     cx: &mut App,
 ) {
-    if event.keystroke.modifiers.modified() {
+    // A parent that already handled the key (Questionnaire moves its own
+    // radio cards in the capture phase) owns it.
+    if event.keystroke.modifiers.modified() || window.default_prevented() {
         return;
     }
     let rtl = LayoutDirection::global(cx).is_rtl();
@@ -238,6 +240,7 @@ fn handle_key_down(
     };
 
     cx.stop_propagation();
+    window.prevent_default();
     window.focus(&target, cx);
     sync_tab_stop(registry, window);
     // Selection follows focus in a radio group. The handler runs after the
