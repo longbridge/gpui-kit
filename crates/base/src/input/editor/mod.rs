@@ -372,6 +372,10 @@ impl crate::input::InputExtras for super::EditorExtras {
         self.decorations.iter().collect()
     }
 
+    fn decorations_revision(&self) -> u64 {
+        self.decorations.revision()
+    }
+
     fn range_decorations(&self, ranges: &[std::ops::Range<usize>]) -> Vec<&super::RangeDecoration> {
         self.range_decorations.intersecting(ranges)
     }

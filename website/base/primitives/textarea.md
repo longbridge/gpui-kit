@@ -80,9 +80,9 @@ notes.update(cx, |state, cx| {
 
 Each call replaces the previous decorations. Like the Editor's decoration
 collections, ranges follow later edits, and a decoration whose text is deleted
-is dropped, so `set_value("")` clears them. Soft wrap measures lines with the
-base font, so a decoration that widens text, such as bold, can make a wrapped
-row overflow slightly.
+is dropped, so `set_value("")` clears them. Soft wrap measures text in the
+weight and style its decorations draw it in, so a bold or italic run wraps
+where it is drawn.
 
 ## Presentation
 
