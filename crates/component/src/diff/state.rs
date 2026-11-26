@@ -240,6 +240,15 @@ pub struct DiffState {
     layout: Option<LayoutKey>,
     content_width: Pixels,
     row_height: Option<Pixels>,
+    /// The pinned header bar's painted height; the header row's own height
+    /// also carries the file's annotation cards, which the bar does not.
+    pinned_bar: Option<Pixels>,
+    /// Where the pinned header overlay last placed, to re-render on a wheel
+    /// scroll only when the pin moves.
+    last_pin: (Option<usize>, Pixels),
+    /// Whether the rendering `Diff` pins file headers; off, scrolling to a
+    /// line must not clear a bar that is not there.
+    sticky_header: bool,
     /// The list width the row-height hint was last applied at.
     hinted_width: Option<Pixels>,
     annotations: HashSet<(Option<DiffLinePosition>, SharedString, ElementId)>,
@@ -340,6 +349,27 @@ impl DiffState {
             cx,
         );
         let files = files.into_iter().collect::<Vec<_>>();
+        // A wheel scroll moves the list without re-rendering the owner, but
+        // the pinned file header is placed from the scroll position at render
+        // time. Nudge observers once the wheel delta has been applied, and
+        // only when the pin would place differently: scrolling within a long
+        // file leaves the pin where it is and costs no render. The deferral
+        // also waits out the list's internal borrow. Every other scroll path
+        // (scrollbar, keyboard, scroll_to) notifies already.
+        let list = ListState::new(0, ListAlignment::Top, px(0.));
+        list.set_scroll_handler({
+            let weak = cx.entity().downgrade();
+            move |_, _, cx| {
+                let weak = weak.clone();
+                cx.defer(move |cx| {
+                    let _ = weak.update(cx, |state, cx| {
+                        if state.pin_placed_anew() {
+                            cx.notify();
+                        }
+                    });
+                });
+            }
+        });
         let mut state = Self {
             expanded: vec![Vec::new(); files.len()],
             presentations: vec![None; files.len()],
@@ -355,7 +385,7 @@ impl DiffState {
             header_rows: Vec::new(),
             rows: Rc::default(),
             change_rows: Vec::new(),
-            list: ListState::new(0, ListAlignment::Top, px(0.)),
+            list,
             horizontal_scroll: ScrollHandle::new(),
             focus,
             selection,
@@ -374,6 +404,9 @@ impl DiffState {
             layout: None,
             content_width: px(0.),
             row_height: None,
+            pinned_bar: None,
+            last_pin: (None, px(0.)),
+            sticky_header: true,
             hinted_width: None,
             annotations: HashSet::new(),
             window: None,
@@ -571,6 +604,10 @@ impl DiffState {
     pub(crate) fn rows(&self) -> &Rc<Vec<DisplayRow>> {
         &self.rows
     }
+    /// Each file's header row index in [`Self::rows`].
+    pub(crate) fn header_rows(&self) -> &[usize] {
+        &self.header_rows
+    }
     pub(crate) fn list(&self) -> &ListState {
         &self.list
     }
@@ -597,16 +634,54 @@ impl DiffState {
     pub(crate) fn set_content_width(&mut self, width: Pixels) {
         self.content_width = width;
     }
-    /// Records the painted body size and widest painted row. Returns whether
-    /// either changed, so the frame must be laid out again.
-    pub(crate) fn record_paint(&mut self, viewport: Size<Pixels>, painted_width: Pixels) -> bool {
+    /// Records the painted body size, widest painted row, and whether the
+    /// `Diff` pins file headers. Returns whether a size changed, so the frame
+    /// must be laid out again.
+    pub(crate) fn record_paint(
+        &mut self,
+        viewport: Size<Pixels>,
+        painted_width: Pixels,
+        sticky_header: bool,
+    ) -> bool {
         let wider = painted_width > self.content_width;
         if wider {
             self.content_width = painted_width;
         }
+        self.sticky_header = sticky_header;
         let resized = self.viewport != viewport;
         self.viewport = viewport;
         wider || resized
+    }
+
+    /// Records the pinned header bar's painted height.
+    pub(crate) fn record_pinned_bar(&mut self, height: Pixels) {
+        self.pinned_bar = Some(height);
+    }
+    pub(crate) fn pinned_bar_height(&self) -> Option<Pixels> {
+        self.pinned_bar
+    }
+
+    /// Whether the pinned header overlay would place differently than when
+    /// last checked: another file's bar, or a new slide position.
+    fn pin_placed_anew(&mut self) -> bool {
+        let file = super::pinned_file(
+            &self.rows,
+            &self.header_rows,
+            self.list.logical_scroll_top(),
+        );
+        let slide = file
+            .map(|file| {
+                super::pinned_slide(
+                    self.header_rows.get(file + 1).copied(),
+                    self.pinned_bar,
+                    &self.list,
+                )
+            })
+            .unwrap_or_default();
+        let placed = (file, slide);
+        let moved = self.last_pin != placed;
+        self.last_pin = placed;
+        moved
     }
 
     /// Replaces the files and resets expansion, selection and viewport.
@@ -865,7 +940,8 @@ impl DiffState {
     }
 
     /// Reveals and scrolls to a source line, expanding its file and hidden
-    /// context if needed.
+    /// context if needed. The line lands below the pinned file header, not
+    /// under it.
     pub fn scroll_to_line(&mut self, position: DiffLinePosition, cx: &mut Context<Self>) {
         if self.line_index(&position).is_none() {
             return;
@@ -875,6 +951,7 @@ impl DiffState {
         }
         if self.expand_line(&position).is_some() {
             self.reveal_line(&position);
+            self.clear_pinned_header();
             cx.notify();
         }
     }
@@ -884,6 +961,22 @@ impl DiffState {
     /// there to scroll to.
     pub fn has_line(&self, position: &DiffLinePosition) -> bool {
         self.line_index(position).is_some()
+    }
+
+    /// Scrolls up by the pinned header bar's height, so a line revealed at
+    /// the viewport top is readable rather than covered by the overlay. A
+    /// painted bar gives the height; before one was painted two code rows
+    /// stand in, over-clearing a little rather than leaving the line hidden.
+    /// [`reveal_line`](Self::reveal_line) stays exact for anchor restoration,
+    /// which must not drift per rebuild.
+    fn clear_pinned_header(&self) {
+        if !self.sticky_header {
+            return;
+        }
+        let measured = self.pinned_bar;
+        if let Some(clearance) = measured.or_else(|| self.row_height.map(|height| height * 2.)) {
+            self.list.scroll_by(-clearance);
+        }
     }
 
     /// Scrolls to the header of the file at `path`, a [`DiffFile::path`].
@@ -950,11 +1043,32 @@ impl DiffState {
         let path = self.files[file].path().clone();
         let collapsed = !self.collapsed.contains(&path);
         self.set_file_collapsed(&path, collapsed, cx);
+        if collapsed {
+            self.show_collapsed_header(file);
+        }
         cx.emit(if collapsed {
             DiffEvent::FileCollapsed(path)
         } else {
             DiffEvent::FileExpanded(path)
         });
+    }
+
+    /// A collapse from the pinned bar removes the rows the viewport showed,
+    /// leaving the collapsed file's header above the viewport and some other
+    /// file on screen. Scroll the header into view. A collapse from the
+    /// header row itself leaves the list where it is: the row sits at or
+    /// below the viewport top already.
+    fn show_collapsed_header(&mut self, file: usize) {
+        let Some(&header) = self.header_rows.get(file) else {
+            return;
+        };
+        let top = self.list.logical_scroll_top();
+        if top.item_ix > header || (top.item_ix == header && top.offset_in_item > px(0.)) {
+            self.list.scroll_to(ListOffset {
+                item_ix: header,
+                offset_in_item: px(0.),
+            });
+        }
     }
 
     /// Starts a line-number selection gesture, extending the current anchor in

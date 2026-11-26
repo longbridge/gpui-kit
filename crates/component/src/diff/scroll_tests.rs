@@ -3,7 +3,7 @@ use gpui::{
     ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
-use super::{Diff, DiffState, document::fixture};
+use super::{Diff, DiffLinePosition, DiffSide, DiffState, document::fixture};
 
 /// Every line changed, so the unified patch is two rows per line.
 const LINES: usize = 300;
@@ -81,6 +81,31 @@ fn the_wheel_scrolls_past_the_rows_rendered_so_far(cx: &mut TestAppContext) {
     let top = cx.update(|_, cx| state.read(cx).list().logical_scroll_top().item_ix);
     // 2000 px of wheel travel crosses far more than the first screen of rows.
     assert!(top > 40, "scrolled to row {top}");
+}
+
+#[gpui::test]
+fn a_revealed_line_lands_below_the_pinned_header(cx: &mut TestAppContext) {
+    let (state, cx) = long_patch(cx);
+    let position = DiffLinePosition::new("long.txt", DiffSide::Modified, 150);
+    state.update(cx, |state, cx| state.scroll_to_line(position.clone(), cx));
+    for _ in 0..3 {
+        draw(cx);
+    }
+    let (gap, row_height) = cx.update(|_, cx| {
+        let state = state.read(cx);
+        let row = state.source_row(&position).expect("line has a row");
+        let list = state.list();
+        let bounds = list.bounds_for_item(row).expect("target row is rendered");
+        (
+            bounds.top() - list.viewport_bounds().top(),
+            bounds.size.height,
+        )
+    });
+    // Flush to the top the line would sit under the pinned header overlay.
+    assert!(
+        gap >= row_height,
+        "line {gap:?} below the viewport top, rows {row_height:?} tall"
+    );
 }
 
 /// Wraps its lines, so rows are taller than the height the list estimates.
@@ -245,4 +270,80 @@ fn file_headers_stay_in_the_viewport_under_horizontal_scrolling(cx: &mut TestApp
         );
         assert_eq!(header(cx), before, "{mode:?}: the header stays in place");
     }
+}
+
+#[test]
+fn pinned_file_follows_the_viewport_top() {
+    use gpui::ListOffset;
+
+    use super::state::DisplayRow;
+    let code = |file| DisplayRow::Code {
+        file,
+        original: Some(0),
+        modified: Some(0),
+        changed: false,
+    };
+    let rows = [
+        DisplayRow::File(0),
+        code(0),
+        code(0),
+        DisplayRow::File(1),
+        code(1),
+    ];
+    let headers = [0, 3];
+    let at = |item_ix, offset: f32| ListOffset {
+        item_ix,
+        offset_in_item: px(offset),
+    };
+    // The list at rest shows file 0's own header row; nothing is pinned.
+    assert_eq!(super::pinned_file(&rows, &headers, at(0, 0.)), None);
+    // Any scroll into the file carries its header out; the pin takes over.
+    assert_eq!(super::pinned_file(&rows, &headers, at(0, 4.)), Some(0));
+    assert_eq!(super::pinned_file(&rows, &headers, at(2, 0.)), Some(0));
+    // The moment the next header reaches the top it stands inline, unpinned.
+    assert_eq!(super::pinned_file(&rows, &headers, at(3, 0.)), None);
+    assert_eq!(super::pinned_file(&rows, &headers, at(3, 2.)), Some(1));
+    // A stale offset past the rows pins nothing.
+    assert_eq!(super::pinned_file(&rows, &headers, at(9, 0.)), None);
+}
+
+#[gpui::test]
+fn collapsing_the_scrolled_file_shows_its_header(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let text = |tag: &str| {
+        (0..LINES)
+            .map(|ix| format!("{tag} {ix}\n"))
+            .collect::<String>()
+    };
+    let state = cx.new(|cx| {
+        DiffState::new(
+            [
+                fixture::modified("first.txt", &text("old"), &text("new")),
+                fixture::modified("second.txt", &text("older"), &text("newer")),
+            ],
+            cx,
+        )
+    });
+    let (_, cx) = cx.add_window_view({
+        let state = state.clone();
+        move |_, _| Host { state }
+    });
+    for _ in 0..3 {
+        draw(cx);
+    }
+    let position = DiffLinePosition::new("first.txt", DiffSide::Modified, 150);
+    state.update(cx, |state, cx| state.scroll_to_line(position, cx));
+    draw(cx);
+    // Collapsing from deep inside the file, where only the pinned bar shows
+    // its header, must not strand the viewport on the next file.
+    state.update(cx, |state, cx| state.toggle_file_collapsed(0, cx));
+    draw(cx);
+    let (top, header) = cx.update(|_, cx| {
+        let state = state.read(cx);
+        (
+            state.list().logical_scroll_top().item_ix,
+            state.header_rows()[0],
+        )
+    });
+    assert_eq!(top, header, "the collapsed file's header tops the viewport");
 }
