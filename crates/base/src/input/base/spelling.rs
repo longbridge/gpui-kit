@@ -224,7 +224,7 @@ mod tests {
         let (state, cx) = cx.add_window_view(|window, cx| {
             TextareaState::new(window, cx)
                 .spell_checker(checker)
-                .default_value("hello wrold zorp")
+                .default_value("hello wurld zorp")
         });
         let misspelled = |cx: &mut gpui::VisualTestContext| {
             state.read_with(cx, |state, cx| state.misspelled_words(cx).to_vec())
@@ -239,7 +239,7 @@ mod tests {
         let found = state.read_with(cx, |state, cx| state.misspelling_at(8, cx));
         assert_eq!(
             found.map(|m| (m.word, m.guesses)),
-            Some(("wrold".into(), vec!["world".into()]))
+            Some(("wurld".into(), vec!["world".into()]))
         );
 
         cx.update(|window, cx| {
