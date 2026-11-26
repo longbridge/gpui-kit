@@ -32,6 +32,7 @@ use windows::{
     core::{HRESULT, HSTRING, RuntimeType},
 };
 
+use super::SpeechLocale;
 use crate::speech::{AudioFormat, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink};
 
 /// `SPERR_SPEECH_PRIVACY_POLICY_NOT_ACCEPTED`: "Online speech recognition" is
@@ -327,6 +328,23 @@ fn phrase_separator(tag: &str) -> &'static str {
     } else {
         " "
     }
+}
+
+/// The dictation languages with a speech pack installed, as
+/// [`supported_language`] finds them.
+pub(super) fn supported_locales() -> Vec<SpeechLocale> {
+    let languages = WinSpeechRecognizer::SupportedTopicLanguages()
+        .inspect_err(|error| log::warn!("speech: no dictation languages: {error:#}"));
+    languages
+        .into_iter()
+        .flatten()
+        .filter_map(|language| {
+            Some(SpeechLocale::new(
+                language.LanguageTag().ok()?.to_string_lossy(),
+                language.DisplayName().ok()?.to_string_lossy(),
+            ))
+        })
+        .collect()
 }
 
 /// The language to dictate `locale` (or, without one, the system's speech

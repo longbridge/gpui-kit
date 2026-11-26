@@ -10,15 +10,15 @@ cargo run -p speech -- --check  # print the checks and exit
 ```
 
 `--check` prints the platform, the default input device, and whether the system
-recognizer is available for each language in the picker:
+recognizer is available for each language it supports on this machine
+(`SystemRecognizer::supported_locales`), which is also the list in the picker:
 
 ```text
 Platform       macOS
 Input device   MacBook Pro Microphone
 System recognizer, by language:
-  en-US   available    English (US)
-  zh-CN   available    简体中文
-  ja-JP   unavailable  日本語
+  en-US   available    English (United States)
+  zh-CN   available    Chinese (China mainland)
 ```
 
 ## Trying it
@@ -29,6 +29,7 @@ System recognizer, by language:
   included.
   Use it to check the capture, waveform, and event flow.
 - **System** uses the operating system's recognizer in the language you pick.
+  The picker lists the languages it can recognize on this machine.
   Under **Expected phrases**, list names and terms it should favor, one per
   line.
 - Click the microphone or press <kbd>⇧⌘D</kbd> (<kbd>Ctrl+Shift+D</kbd> on
@@ -41,8 +42,8 @@ System recognizer, by language:
 
 `build.rs` links `Info.plist` into the executable, so `cargo run` can ask for
 microphone and speech recognition access without an app bundle. The first
-session asks for both. Recognition stays on the Mac, so a language the Mac can't
-recognize offline shows **Unavailable**.
+session asks for both. Recognition stays on the Mac, so the picker lists only
+the languages the Mac can recognize offline.
 
 When you run from a terminal, macOS attributes privacy access to the terminal
 app and checks the terminal's usage descriptions, so a terminal that does not

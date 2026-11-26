@@ -15,6 +15,7 @@ use objc2_speech::{
 };
 use smol::channel::{Receiver, Sender, unbounded};
 
+use super::SpeechLocale;
 use crate::speech::{AudioFormat, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink};
 
 /// Without this `Info.plist` key, asking for speech recognition access
@@ -130,6 +131,29 @@ impl SpeechRecognizer for PlatformRecognizer {
             _task: task,
         }))
     }
+}
+
+/// The locales with a recognizer that works on the device, which is the only
+/// way [`PlatformRecognizer`] recognizes.
+pub(super) fn supported_locales() -> Vec<SpeechLocale> {
+    let current = NSLocale::currentLocale();
+    // SAFETY: a plain class property read; it never prompts.
+    let locales = unsafe { SFSpeechRecognizer::supportedLocales() };
+    locales
+        .iter()
+        .filter(|locale| {
+            // SAFETY: `locale` is a valid `NSLocale` and the property reads never
+            // prompt; the initializer returns nil for a locale without a
+            // recognizer.
+            unsafe { SFSpeechRecognizer::initWithLocale(SFSpeechRecognizer::alloc(), locale) }
+                .is_some_and(|recognizer| unsafe { recognizer.supportsOnDeviceRecognition() })
+        })
+        .map(|locale| {
+            let identifier = locale.localeIdentifier();
+            let name = current.localizedStringForLocaleIdentifier(&identifier);
+            SpeechLocale::new(identifier.to_string().replace('_', "-"), name.to_string())
+        })
+        .collect()
 }
 
 /// Whether the user or a policy denied this application the microphone.
