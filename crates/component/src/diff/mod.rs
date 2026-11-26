@@ -1407,6 +1407,7 @@ fn pinned_slide(next_header: Option<usize>, bar: Option<Pixels>, list: &ListStat
 
 /// The pinned copy of `file`'s header bar, without the file's annotation
 /// cards.
+#[allow(clippy::too_many_arguments)]
 fn render_pinned_header(
     file: usize,
     strip_width: Pixels,
