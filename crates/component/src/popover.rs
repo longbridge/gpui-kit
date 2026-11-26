@@ -110,6 +110,7 @@ pub struct Popover {
     style: StyleRefinement,
     anchor: Anchor,
     offset: Option<Pixels>,
+    boundary: Option<Bounds<Pixels>>,
     arrow: bool,
     default_open: bool,
     open: Option<bool>,
@@ -139,6 +140,7 @@ impl Popover {
             style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
             offset: None,
+            boundary: None,
             arrow: false,
             trigger: None,
             trigger_style: None,
@@ -168,6 +170,15 @@ impl Popover {
     /// Preserves the anchor and does not enable automatic flipping.
     pub fn offset(mut self, offset: impl Into<Pixels>) -> Self {
         self.offset = Some(offset.into());
+        self
+    }
+
+    /// Keep the popover inside `boundary`, in window coordinates, instead of
+    /// the whole window, such as the pane of a split view its trigger sits in.
+    /// It is clamped against the boundary's edges like it is against the
+    /// window's; the window's margin still applies where the two meet.
+    pub fn boundary(mut self, boundary: Bounds<Pixels>) -> Self {
+        self.boundary = Some(boundary);
         self
     }
 
@@ -344,6 +355,7 @@ impl RenderOnce for Popover {
         BasePopover::new(self.id)
             .anchor(self.anchor)
             .offset(offset)
+            .when_some(self.boundary, |this, boundary| this.boundary(boundary))
             .on_position(move |position, trigger| resolved.set(Some((position, trigger))))
             .mouse_button(self.mouse_button)
             .default_open(self.default_open)
