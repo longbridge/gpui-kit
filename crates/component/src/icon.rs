@@ -207,6 +207,11 @@ impl Icon {
         self.style == other.style && self.size == other.size
     }
 
+    /// Whether the icon was given a size, through [`Sizable`] or [`Styled`].
+    pub(crate) fn has_size(&self) -> bool {
+        self.size.is_some() || self.style.size.width.is_some() || self.style.size.height.is_some()
+    }
+
     /// Create a new view for the icon
     pub fn view(self, cx: &mut App) -> Entity<Icon> {
         cx.new(|_| self)

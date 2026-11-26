@@ -102,6 +102,14 @@ menu.menu_with_icon("Search", IconName::Search, Box::new(Search))
     .menu_with_icon("Help", IconName::Help, Box::new(ShowHelp))
 ```
 
+An icon is drawn small unless it was given a size of its own, which it keeps:
+
+```rust
+use gpui_kit::component::{Icon, Sizable as _, Size};
+
+menu.menu_with_icon("Search", Icon::new(IconName::Search).with_size(Size::Medium), Box::new(Search))
+```
+
 ### Disabled State
 
 Create disabled menu items that cannot be activated:

@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, IconName, Side, StyledExt,
+    ActiveTheme as _, Icon, IconName, Side, Sizable as _, Size, StyledExt,
     button::Button,
     h_flex,
     menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem},
@@ -160,6 +160,11 @@ impl Render for MenuStory {
                                     )
                                     .separator()
                                     .menu_with_icon("Search", IconName::Search, Box::new(SearchAll))
+                                    .menu_with_icon(
+                                        "Search (medium icon)",
+                                        Icon::new(IconName::Search).with_size(Size::Medium),
+                                        Box::new(SearchAll),
+                                    )
                                     .separator()
                                     .item(
                                         PopupMenuItem::element(|_, cx| {
