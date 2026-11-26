@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     Root,
     group_box::GroupBoxVariant,
-    setting::{SettingGroup, SettingItem},
+    setting::{SettingGroup, SettingItem, SettingSection},
 };
 use gpui::{
     Context, Focusable as _, KeyBinding, Render, ScrollDelta, ScrollEvent, TestAppContext,
@@ -537,20 +537,24 @@ fn sections_head_the_pages_after_them_and_hide_without_results(cx: &mut TestAppC
     let page = |keyword| SettingPage::new(keyword).group(SettingGroup::new().item(item(keyword)));
     let settings = Settings::new("sections-test")
         .page(page("general"))
-        .section("Editor")
-        .pages([page("font"), page("theme")])
-        .section("Empty")
-        .section("Network")
-        .page(page("proxy"));
+        .section(SettingSection::new("Editor").pages([page("font"), page("theme")]))
+        .section(SettingSection::new("Empty"))
+        .section(SettingSection::new("Network").page(page("proxy")))
+        .page(page("about"));
     let sections = |query: &str, cx: &mut TestAppContext| {
         cx.update(|cx| settings.sidebar_sections(&SettingsFilter::new(&settings.pages, query, cx)))
     };
 
-    // A page before the first section has no heading; an empty section is
-    // never shown.
+    // Pages outside a section have no heading; an empty section is never
+    // shown.
     assert_eq!(
         sections("", cx),
-        vec![(None, vec![0]), (Some(0), vec![1, 2]), (Some(2), vec![3])]
+        vec![
+            (None, vec![0]),
+            (Some(0), vec![1, 2]),
+            (Some(2), vec![3]),
+            (None, vec![4])
+        ]
     );
     // A heading stays while one of its pages matches, by its original index.
     assert_eq!(sections("theme", cx), vec![(Some(0), vec![2])]);

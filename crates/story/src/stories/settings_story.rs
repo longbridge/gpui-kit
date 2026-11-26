@@ -11,7 +11,7 @@ use gpui_kit::component::{
     label::Label,
     setting::{
         NumberFieldOptions, RenderOptions, SettingField, SettingFieldElement, SettingGroup,
-        SettingItem, SettingPage, Settings,
+        SettingItem, SettingPage, SettingSection, Settings,
     },
     text::markdown,
     v_flex,
@@ -522,9 +522,7 @@ impl Render for SettingsStory {
         Settings::new("app-settings")
             .with_size(self.size)
             .with_group_variant(self.group_variant)
-            .section("Preferences")
-            .pages(pages.by_ref().take(1))
-            .section("Application")
-            .pages(pages)
+            .section(SettingSection::new("Preferences").pages(pages.by_ref().take(1)))
+            .section(SettingSection::new("Application").pages(pages))
     }
 }

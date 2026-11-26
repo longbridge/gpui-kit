@@ -35,8 +35,8 @@ const STACKED_LAYOUT_MAX_WIDTH: Pixels = px(480.);
 pub struct Settings {
     id: ElementId,
     pages: Vec<SettingPage>,
-    /// The headings of the sidebar, each with the index of its first page.
-    sections: Vec<(usize, SharedString)>,
+    /// The headings of the sidebar, each with the range of its pages.
+    sections: Vec<(Range<usize>, SharedString)>,
     group_variant: GroupBoxVariant,
     size: Size,
     sidebar_width: Pixels,
@@ -87,13 +87,15 @@ impl Settings {
         self
     }
 
-    /// Start a section of the sidebar under the given heading.
+    /// Add a section of pages, listed in the sidebar under its heading.
     ///
-    /// The pages added after it, up to the next section, are listed under the
-    /// heading. Pages added before the first section are listed without one.
+    /// Pages added with [`Settings::page`] are listed without a heading.
     /// A heading is hidden while the search leaves none of its pages.
-    pub fn section(mut self, heading: impl Into<SharedString>) -> Self {
-        self.sections.push((self.pages.len(), heading.into()));
+    pub fn section(mut self, section: SettingSection) -> Self {
+        let start = self.pages.len();
+        self.pages.extend(section.pages);
+        self.sections
+            .push((start..self.pages.len(), section.heading));
         self
     }
 
@@ -282,13 +284,47 @@ impl Settings {
             let section = self
                 .sections
                 .iter()
-                .rposition(|&(first_page_ix, _)| first_page_ix <= page_ix);
+                .position(|(range, _)| range.contains(&page_ix));
             match sections.last_mut() {
                 Some((last, pages)) if *last == section => pages.push(page_ix),
                 _ => sections.push((section, vec![page_ix])),
             }
         }
         sections
+    }
+}
+
+/// A group of setting pages, listed in the sidebar under a heading.
+///
+/// ```ignore
+/// Settings::new("app-settings")
+///     .page(SettingPage::new("General"))
+///     .section(SettingSection::new("Editor").page(SettingPage::new("Font")))
+/// ```
+pub struct SettingSection {
+    heading: SharedString,
+    pages: Vec<SettingPage>,
+}
+
+impl SettingSection {
+    /// Create a new section with the given heading.
+    pub fn new(heading: impl Into<SharedString>) -> Self {
+        Self {
+            heading: heading.into(),
+            pages: vec![],
+        }
+    }
+
+    /// Add a page to the section.
+    pub fn page(mut self, page: SettingPage) -> Self {
+        self.pages.push(page);
+        self
+    }
+
+    /// Add pages to the section.
+    pub fn pages(mut self, pages: impl IntoIterator<Item = SettingPage>) -> Self {
+        self.pages.extend(pages);
+        self
     }
 }
 
