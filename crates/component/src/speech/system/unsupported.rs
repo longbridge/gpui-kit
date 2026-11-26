@@ -6,7 +6,7 @@ use crate::speech::{AudioFormat, RecognitionSession, SpeechError, SpeechRecogniz
 pub(super) struct PlatformRecognizer;
 
 impl PlatformRecognizer {
-    pub(super) fn new(_locale: Option<SharedString>) -> Self {
+    pub(super) fn new(_locale: Option<SharedString>, _expected_phrases: &[SharedString]) -> Self {
         Self
     }
 }

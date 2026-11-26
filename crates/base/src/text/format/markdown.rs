@@ -425,9 +425,67 @@ fn trim_leading_white_space(node: &mut InlineNode, count: usize) {
     });
 }
 
+/// Joins the lines of a text run at its soft breaks: each line ending
+/// becomes a space, or, with the spaces and tabs around it, nothing when the
+/// characters on both sides are East Asian wide (see
+/// [`is_east_asian_wide`]). Chinese and Japanese put no spaces between
+/// words, so a paragraph wrapped in the source must not gain one where it was
+/// wrapped. This is CSS Text 3's segment break transformation, which drops
+/// the break between two such characters; CommonMark leaves the choice to
+/// the renderer.
+fn join_soft_breaks(text: &str) -> String {
+    let mut joined = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(line_end) = rest.find(['\r', '\n']) {
+        let break_len = if rest[line_end..].starts_with("\r\n") {
+            2
+        } else {
+            1
+        };
+        joined.push_str(&rest[..line_end]);
+        rest = &rest[line_end + break_len..];
+
+        let line = joined.trim_end_matches([' ', '\t']);
+        let next = rest.trim_start_matches([' ', '\t']);
+        if line.chars().next_back().is_some_and(is_east_asian_wide)
+            && next.chars().next().is_some_and(is_east_asian_wide)
+        {
+            joined.truncate(line.len());
+            rest = next;
+        } else {
+            joined.push(' ');
+        }
+    }
+    joined.push_str(rest);
+    joined
+}
+
+/// Whether `c` belongs to a script written without spaces between words, as
+/// CSS Text 3 decides it for segment breaks: East Asian Width F, W or H in the
+/// Han, kana, Bopomofo and Yi blocks and in fullwidth and CJK punctuation.
+/// Hangul is excluded, because Korean puts spaces between words.
+fn is_east_asian_wide(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        0x2E80..=0x2FFF // CJK and Kangxi radicals, ideographic description
+            | 0x3000..=0x303E // CJK symbols and punctuation
+            | 0x3041..=0x312F // Hiragana, Katakana, Bopomofo
+            | 0x3190..=0x33FF // Kanbun to CJK compatibility
+            | 0x3400..=0x4DBF // CJK Unified Ideographs Extension A
+            | 0x4E00..=0xA4CF // CJK Unified Ideographs, Yi
+            | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+            | 0xFE30..=0xFE4F // CJK compatibility forms
+            | 0xFF01..=0xFF60 // Fullwidth forms
+            | 0xFF61..=0xFF9F // Halfwidth CJK punctuation and Katakana
+            | 0xFFE0..=0xFFE6 // Fullwidth signs
+            | 0x1AFF0..=0x1B2FF // Kana supplements and extensions
+            | 0x20000..=0x3FFFD // CJK Unified Ideographs Extensions B and later
+    )
+}
+
 /// Folds each run of spaces and tabs in drawn text to a single space, the
 /// way `white-space: normal` renders it (#3710). Line endings have already
-/// become spaces here; white space inside inline code never reaches this
+/// been joined here; white space inside inline code never reaches this
 /// path, and runs at a line break are dropped by
 /// `normalize_inline_boundaries`.
 fn collapse_white_space(text: &str) -> String {
@@ -956,8 +1014,10 @@ fn parse_paragraph(
             // line ending. The renderer treats a newline in a text run as a
             // line break, so a paragraph hard-wrapped in the source would
             // render one visual line per source line instead of reflowing to
-            // the available width. Collapse soft breaks to spaces; *hard*
-            // breaks never reach here, they arrive as their own Node::Break.
+            // the available width. Join the lines at soft breaks, with a space
+            // or, between CJK characters, without one (`join_soft_breaks`);
+            // *hard* breaks never reach here, they arrive as their own
+            // Node::Break.
             //
             // mdast hands the line ending over exactly as the source wrote it,
             // so a CRLF document still carries its carriage return here. Take
@@ -969,7 +1029,7 @@ fn parse_paragraph(
             // re-aligns over the folded bytes on its own. Leading runs at a
             // line break — after `<br>` or a hard break — are dropped by
             // `normalize_inline_boundaries`, which sees the nodes whole.
-            text = collapse_white_space(&val.value.replace("\r\n", " ").replace(['\n', '\r'], " "));
+            text = collapse_white_space(&join_soft_breaks(&val.value));
             paragraph.push(mapped_inline(source, text.clone(), node, cx))
         }
         Node::Emphasis(val) => {
@@ -2654,6 +2714,59 @@ mod tests {
             .map(|child| child.text.as_ref())
             .collect();
         assert_eq!(texts, ["a b", "\n", "c"]);
+    }
+
+    /// A soft break between two characters of a script written without
+    /// spaces joins the lines directly; a space would split a word. Between
+    /// anything else, Hangul included, it still reflows to a space.
+    #[test]
+    fn soft_break_between_cjk_characters_joins_without_a_space() {
+        for (source, expected) in [
+            ("第一行\n第二行", "第一行第二行"),
+            ("第一行\r\n第二行", "第一行第二行"),
+            ("第一行\r第二行", "第一行第二行"),
+            ("第一行 \n  第二行", "第一行第二行"),
+            ("日本語の\nテキスト", "日本語のテキスト"),
+            ("句子结束。\n下一句", "句子结束。下一句"),
+            ("（括号）\n继续", "（括号）继续"),
+            ("ｶﾀｶﾅ\nｶﾀｶﾅ", "ｶﾀｶﾅｶﾀｶﾅ"),
+            ("中文\nEnglish", "中文 English"),
+            ("English\n中文", "English 中文"),
+            ("中文,\n中文", "中文, 中文"),
+            ("한국어\n문장", "한국어 문장"),
+            ("one\ntwo", "one two"),
+        ] {
+            let mut cx = NodeContext::default();
+            let document = parse(source, &mut cx).unwrap();
+
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected paragraph");
+            };
+
+            assert_eq!(paragraph.children.len(), 1, "source: {source:?}");
+            assert_eq!(
+                paragraph.children[0].text.as_ref(),
+                expected,
+                "source: {source:?}"
+            );
+        }
+    }
+
+    /// The line ending dropped between CJK characters leaves no rendered
+    /// character, and the characters after it still map to their source.
+    #[test]
+    fn selected_source_range_maps_cjk_joined_across_a_soft_break() {
+        let source = "第一\n第二";
+        let first = "第一".len();
+        assert_eq!(selected_rendered_range(source, 0..first), Some(0..first));
+        assert_eq!(
+            selected_rendered_range(source, first..source.len() - 1),
+            Some(first + 1..source.len())
+        );
+        assert_eq!(
+            selected_rendered_range(source, 0..source.len() - 1),
+            Some(0..source.len())
+        );
     }
 
     /// A CommonMark hard break — two trailing spaces or a trailing backslash —

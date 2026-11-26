@@ -57,6 +57,37 @@ impl GutterColumn {
     }
 }
 
+/// What a point of an input is over, as it was last painted.
+///
+/// Returned by [`hit_test`](super::InputBaseState::hit_test).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputHit {
+    /// The part of the input the point is over.
+    pub area: InputHitArea,
+    /// The zero-based buffer row the point is beside.
+    ///
+    /// Over the text it is the row of the offset. In the gutter it is `None`
+    /// above the first laid-out row, below the last and beside the ghost lines
+    /// of an inline completion.
+    pub row: Option<usize>,
+    /// Whether the point is on a spacer row beside [`Self::row`] rather than on
+    /// the row itself.
+    pub spacer: bool,
+}
+
+/// The part of an input a point is over.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputHitArea {
+    /// The text, at the byte offset a click there places the caret at.
+    #[non_exhaustive]
+    Text { offset: usize },
+    /// The gutter, in one of its columns, or `None` in its margin or padding.
+    #[non_exhaustive]
+    Gutter { column: Option<GutterColumn> },
+}
+
 #[derive(Clone)]
 pub(super) struct LastLayout {
     pub(super) visible_range: Range<usize>,
@@ -144,6 +175,26 @@ impl LastLayout {
                 }
                 top += below;
                 extent
+            })
+    }
+
+    /// The buffer row at `y`, relative to the content origin, and whether `y`
+    /// is on one of its spacer rows. `None` above the first row, below the
+    /// last and on ghost lines.
+    pub(super) fn row_at(&self, y: Pixels) -> Option<(usize, bool)> {
+        self.row_extents()
+            .zip(&self.visible_buffer_lines)
+            .enumerate()
+            .find_map(|(ix, ((top, height), &row))| {
+                let (above, below) = self.spacers(ix);
+                let bottom = top + height;
+                let below_top = match self.ghost_lines {
+                    Some((ghost_row, ghost_height)) if ghost_row == row => bottom + ghost_height,
+                    _ => bottom,
+                };
+                let spacer =
+                    (y >= top - above && y < top) || (y >= below_top && y < below_top + below);
+                (spacer || (y >= top && y < bottom)).then_some((row, spacer))
             })
     }
 

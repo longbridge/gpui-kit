@@ -227,6 +227,22 @@ impl TextInputState {
         ))
     }
 
+    /// Clicks the search panel's Replace button. Returns `false` unless the
+    /// panel is open in replace mode.
+    pub(super) fn replace_next(&self, window: &mut Window, cx: &mut App) -> bool {
+        dispatch!(self, |state| super::overlay::replace_panel(state, cx)
+            .map(|panel| panel.update(cx, |panel, cx| panel.replace_next(window, cx)))
+            .is_some())
+    }
+
+    /// Clicks the search panel's Replace All button. Returns `false` unless
+    /// the panel is open in replace mode.
+    pub(super) fn replace_all(&self, window: &mut Window, cx: &mut App) -> bool {
+        dispatch!(self, |state| super::overlay::replace_panel(state, cx)
+            .map(|panel| panel.update(cx, |panel, cx| panel.replace_all(window, cx)))
+            .is_some())
+    }
+
     /// The text element itself, as a child to place in the frame.
     pub(crate) fn into_any_element(self) -> gpui::AnyElement {
         use gpui::IntoElement as _;
