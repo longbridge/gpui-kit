@@ -33,6 +33,7 @@ speech = [
     "dep:objc2-speech",
     "dep:objc2-avf-audio",
     "dep:objc2-av-foundation",
+    "objc2-foundation/NSArray",
     "objc2-foundation/NSBundle",
     "objc2-foundation/NSDictionary",
     "objc2-foundation/NSError",
@@ -40,6 +41,7 @@ speech = [
     "windows/Foundation_Collections",
     "windows/Globalization",
     "windows/Media_SpeechRecognition",
+    "windows/implement",
 ]
 
 # For syntax highlighting in Markdown and CodeEditor.

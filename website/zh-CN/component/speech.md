@@ -209,6 +209,13 @@ let locales: Vec<SpeechLocale> = SystemRecognizer::supported_locales();
 let recognizer = SystemRecognizer::new().locale(picked.tag().clone());
 ```
 
+`.expected_phrases(...)` 列出说话人可能说到、而通用词汇容易漏识或误写成常见词的词语：人名和产品名、项目术语、行业用语。识别会优先考虑这些词语，其他语音照常识别。在 macOS 上它们成为请求的 `contextualStrings`（Apple 建议不超过 100 条）；在 Windows 上，成为与听写并列的列表约束。
+
+```rust
+let recognizer = SystemRecognizer::new().expected_phrases(["GPUI", "Longbridge", "rustfmt"]);
+let speech = cx.new(|cx| SpeechState::new(cx).recognizer(recognizer));
+```
+
 ## 实现识别器
 
 实现 `SpeechRecognizer` 即可接入任意语音服务。`start` 打开一个 `RecognitionSession`，并通过收到的 `SpeechSink` 报告结果：

@@ -30,6 +30,8 @@ System recognizer, by language:
   Use it to check the capture, waveform, and event flow.
 - **System** uses the operating system's recognizer in the language you pick.
   The picker lists the languages it can recognize on this machine.
+  Under **Expected phrases**, list names and terms it should favor, one per
+  line.
 - Click the microphone or press <kbd>⇧⌘D</kbd> (<kbd>Ctrl+Shift+D</kbd> on
   Windows and Linux) to start, and again to stop. The text goes into the note
   at the cursor. **Discard** stops without inserting anything.
