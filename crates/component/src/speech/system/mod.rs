@@ -35,6 +35,7 @@ use unsupported as platform;
 /// one; create it directly to choose the language.
 pub struct SystemRecognizer {
     locale: Option<SharedString>,
+    expected_phrases: Vec<SharedString>,
     platform: OnceCell<Rc<platform::PlatformRecognizer>>,
 }
 
@@ -43,6 +44,7 @@ impl SystemRecognizer {
     pub fn new() -> Self {
         Self {
             locale: None,
+            expected_phrases: Vec::new(),
             platform: OnceCell::new(),
         }
     }
@@ -55,9 +57,30 @@ impl SystemRecognizer {
         self
     }
 
+    /// Words and phrases the speaker is likely to say, such as names, product
+    /// terms and jargon, that the recognizer would otherwise miss or spell as
+    /// more common words. Recognition favors them; other speech is recognized
+    /// as before.
+    ///
+    /// - **macOS**: the request's `contextualStrings`. Apple advises at most
+    ///   100 phrases.
+    /// - **Windows**: a list constraint beside the dictation topic.
+    pub fn expected_phrases(
+        mut self,
+        phrases: impl IntoIterator<Item = impl Into<SharedString>>,
+    ) -> Self {
+        self.expected_phrases = phrases.into_iter().map(Into::into).collect();
+        self.platform = OnceCell::new();
+        self
+    }
+
     fn platform(&self) -> &Rc<platform::PlatformRecognizer> {
-        self.platform
-            .get_or_init(|| Rc::new(platform::PlatformRecognizer::new(self.locale.clone())))
+        self.platform.get_or_init(|| {
+            Rc::new(platform::PlatformRecognizer::new(
+                self.locale.clone(),
+                &self.expected_phrases,
+            ))
+        })
     }
 }
 
