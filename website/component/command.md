@@ -136,6 +136,7 @@ window.open_dialog(cx, move |dialog, _, _| {
     dialog.close_button(false).p_0().content(move |content, _, _| {
         content.child(
             Command::new(&state)
+                .large()
                 .bordered(false)
                 .placeholder("Type a command or search...")
                 .items([
@@ -320,6 +321,11 @@ with precise pixel scrolling, such as a trackpad or Magic Mouse on macOS, as
 
 `Command` implements [`Styled`], so `w`, `max_w`, `bg`, and other styles apply
 to the palette frame.
+
+`Command` also implements [`Sizable`]: `xsmall`, `small`, `large` and
+`with_size` set the search field's height, text and icon, matching `Input`'s
+sizes. Default: `Size::Medium`. A palette opened on its own in a dialog is
+usually `large`.
 
 ## CommandItem
 
