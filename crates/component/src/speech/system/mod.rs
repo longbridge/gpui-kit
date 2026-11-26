@@ -90,6 +90,9 @@ pub struct SpeechLocale {
 }
 
 impl SpeechLocale {
+    /// Made by the platform recognizers that can list their languages; on
+    /// others `supported_locales` is empty and nothing makes one.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn new(tag: impl Into<SharedString>, name: impl Into<SharedString>) -> Self {
         Self {
             tag: tag.into(),
