@@ -132,9 +132,10 @@ fn main() {
    .key_context("Chat")
    .on_action(cx.listener(Self::on_send_message))
 
-   .on_click(cx.listener(|workspace, _, window, cx| {
-       workspace.focus.dispatch_action(&SendMessage, window, cx);
-   }))
+   .on_click({
+       let focus = self.focus.clone();
+       move |_, window, cx| focus.dispatch_action(&SendMessage, window, cx)
+   })
    ```
 
 4. 在 `main` 中调用 `gpui_kit::init(cx)` 后绑定 Enter，并让 `open_window` 闭包把窗口传入构造函数：

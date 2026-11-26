@@ -97,6 +97,14 @@ menu.menu_with_icon("Search", IconName::Search, Box::new(Search))
     .menu_with_icon("Help", IconName::Help, Box::new(ShowHelp))
 ```
 
+图标默认以小尺寸绘制；如果为图标单独设置了尺寸，则保留该尺寸：
+
+```rust
+use gpui_kit::component::{Icon, Sizable as _, Size};
+
+menu.menu_with_icon("Search", Icon::new(IconName::Search).with_size(Size::Medium), Box::new(Search))
+```
+
 ### 禁用状态
 
 ```rust

@@ -113,9 +113,11 @@ impl Editor {
     /// Replace the built-in context menu shown on right-click.
     ///
     /// The closure receives an empty menu and returns the one to show, so it
-    /// decides entirely what appears — the default items are not added. It
-    /// shows only while the state's context menu is enabled, which is the
-    /// default.
+    /// decides entirely what appears — the default items are not added, unless
+    /// it adds them with [`super::default_context_menu`]. It shows only while
+    /// the state's context menu is enabled, which is the default. Read the
+    /// state's `context_menu_hit()` to tell a right-click on the gutter from one
+    /// on the text.
     pub fn context_menu(
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
@@ -189,7 +191,9 @@ impl RenderOnce for Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::EditorState;
+    use crate::input::{
+        EditorState, GutterColumn, InputHit, InputHitArea, SelectAll, default_context_menu,
+    };
     use gpui::{
         AppContext as _, Context, InteractiveElement as _, ParentElement as _, Pixels, Render,
         TestAppContext, VisualTestContext, div, px, rems,
@@ -854,6 +858,92 @@ mod tests {
                 );
             }
         });
+    }
+
+    struct MenuHarness {
+        state: Entity<EditorState>,
+        opened: Rc<std::cell::RefCell<Vec<Vec<Option<SharedString>>>>>,
+    }
+
+    impl Render for MenuHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let state = self.state.clone();
+            let opened = self.opened.clone();
+            div()
+                .size_full()
+                .child(Editor::new(&self.state).context_menu(move |menu, _, cx| {
+                    let state = state.read(cx);
+                    let menu = match state.context_menu_hit() {
+                        Some(InputHit {
+                            area:
+                                InputHitArea::Gutter {
+                                    column: Some(GutterColumn::LineNumbers),
+                                    ..
+                                },
+                            row: Some(row),
+                            ..
+                        }) => menu
+                            .menu(format!("Line {row}"), Box::new(SelectAll))
+                            .separator(),
+                        _ => menu,
+                    };
+                    let menu = default_context_menu(menu, state.context_menu_capabilities());
+                    opened.borrow_mut().push(menu.labels());
+                    NativeMenu::new()
+                }))
+        }
+    }
+
+    #[gpui::test]
+    fn a_custom_context_menu_knows_the_line_number_it_was_opened_on(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let opened: Rc<std::cell::RefCell<Vec<_>>> = Default::default();
+        let mut editor = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| EditorState::new(window, cx).default_value("one\ntwo\nthree"));
+            editor = Some(state.clone());
+            MenuHarness {
+                state,
+                opened: opened.clone(),
+            }
+        });
+        let editor = editor.unwrap();
+        VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+        let (gutter, text) = cx.read(|cx| {
+            let state = editor.read(cx);
+            let y = state.row_bounds(1).unwrap().center().y;
+            let column = |x: &Pixels| {
+                matches!(
+                    state.hit_test(gpui::point(*x, y)).map(|hit| hit.area),
+                    Some(InputHitArea::Gutter {
+                        column: Some(GutterColumn::LineNumbers),
+                        ..
+                    })
+                )
+            };
+            let xs: Vec<Pixels> = (0..200).map(|x| px(x as f32)).collect();
+            let gutter = *xs.iter().find(|x| column(x)).expect("a line number");
+            let text = state.range_to_bounds(&(4..4)).unwrap().left() + px(2.);
+            (gpui::point(gutter, y), gpui::point(text, y))
+        });
+        for position in [gutter, text] {
+            cx.simulate_mouse_down(position, gpui::MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(position, gpui::MouseButton::Right, Default::default());
+            cx.run_until_parked();
+        }
+
+        let defaults = default_context_menu(
+            NativeMenu::new(),
+            cx.read(|cx| editor.read(cx).context_menu_capabilities()),
+        )
+        .labels();
+        assert!(defaults.contains(&Some("Copy".into())), "{defaults:?}");
+        let opened = opened.borrow();
+        assert_eq!(opened.len(), 2);
+        let mut on_line_number = vec![Some("Line 1".into()), None];
+        on_line_number.extend(defaults.iter().cloned());
+        assert_eq!(opened[0], on_line_number);
+        assert_eq!(opened[1], defaults);
     }
 
     #[gpui::test]

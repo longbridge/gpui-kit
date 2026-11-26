@@ -1272,7 +1272,7 @@ impl PopupMenu {
             Icon::empty()
         };
 
-        Some(icon.xsmall())
+        Some(item_icon(icon))
     }
 
     /// Calculate the anchor corner and left offset for child submenu
@@ -1677,9 +1677,26 @@ impl Render for PopupMenu {
     }
 }
 
+/// An item's icon at the size it was given, or the menu's small one.
+fn item_icon(icon: Icon) -> Icon {
+    if icon.has_size() { icon } else { icon.xsmall() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_item_icon_keeps_the_size_it_was_given() {
+        let given = Icon::new(IconName::Search).with_size(Size::Medium);
+        assert!(item_icon(given.clone()).same_layout(&given));
+
+        let styled = Icon::new(IconName::Search).size_5();
+        assert!(item_icon(styled.clone()).same_layout(&styled));
+
+        let unsized_icon = Icon::new(IconName::Search);
+        assert!(item_icon(unsized_icon).same_layout(&Icon::new(IconName::Search).xsmall()));
+    }
 
     #[gpui::test]
     fn custom_menu_item_preserves_mouse_event(cx: &mut gpui::TestAppContext) {

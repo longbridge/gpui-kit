@@ -468,6 +468,27 @@ if let Some(hit) = editor.read(cx).hit_test(event.position) {
 }
 ```
 
+自定义上下文菜单可以读取 `context_menu_hit()`（打开菜单的那次右键点击时 `hit_test` 的结果），为行号
+提供菜单项，再用 `default_context_menu` 在自己的菜单项之后加上内置菜单项。
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHit, InputHitArea, default_context_menu};
+
+let state = editor.clone();
+Editor::new(&editor).context_menu(move |menu, _, cx| {
+    let state = state.read(cx);
+    let menu = match state.context_menu_hit() {
+        Some(InputHit {
+            area: InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. },
+            row: Some(row),
+            ..
+        }) => menu.menu(format!("Copy line {}", row + 1), Box::new(CopyLine)).separator(),
+        _ => menu,
+    };
+    default_context_menu(menu, state.context_menu_capabilities())
+})
+```
+
 `EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
 `DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
 `gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、

@@ -10192,4 +10192,52 @@ mod tests {
             }
         });
     }
+    #[gpui::test]
+    fn a_right_click_on_the_gutter_tells_the_menu_its_row(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let opened: Rc<std::cell::RefCell<Vec<Option<InputHit>>>> = Default::default();
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                let input = cx.weak_entity();
+                let opened = opened.clone();
+                state.on_context_menu(Rc::new(move |_, _, _, _, cx| {
+                    let hit = input
+                        .upgrade()
+                        .and_then(|input| input.read(cx).context_menu_hit());
+                    opened.borrow_mut().push(hit);
+                }));
+            });
+            window.draw(cx).clear(cx);
+        });
+        let (gutter, text, rows) = cx.update(|_, cx| {
+            let state = editor.read(cx);
+            let gutter = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+            let text = state.last_gutter_bounds.unwrap().right() + px(10.);
+            let rows: Vec<Pixels> = (0..3)
+                .map(|row| state.row_bounds(row).unwrap().center().y)
+                .collect();
+            (gutter, text, rows)
+        });
+        let right_click = |cx: &mut VisualTestContext, position: Point<Pixels>| {
+            cx.simulate_mouse_down(position, MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(position, MouseButton::Right, Default::default());
+            cx.run_until_parked();
+            let hit = opened.borrow_mut().pop().expect("the menu opened");
+            let selected = cx.update(|_, cx| editor.read(cx).selected_range());
+            (hit.unwrap(), selected)
+        };
+
+        let (hit, selected) = right_click(&mut cx, point(gutter, rows[1]));
+        assert_eq!(hit_column(hit), Some(GutterColumn::LineNumbers));
+        assert_eq!(hit.row, Some(1));
+        assert_eq!(selected, 4..4);
+
+        let (hit, selected) = right_click(&mut cx, point(text, rows[2]));
+        assert_eq!(hit.row, Some(2));
+        let offset = hit_offset(hit).unwrap();
+        assert!(offset >= 8, "{hit:?}");
+        assert_eq!(selected, offset..offset);
+        cx.update(|_, cx| assert_eq!(editor.read(cx).context_menu_offset(), Some(offset)));
+    }
 }
