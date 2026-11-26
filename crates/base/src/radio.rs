@@ -8,9 +8,11 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StateStyle, StyledExt as _, TestSupportExt as _, a11y_disabled::A11yDisabledExt as _};
-
-type ChangeHandler = Rc<dyn Fn(bool, &ClickEvent, &mut Window, &mut App)>;
+use crate::{
+    StateStyle, StyledExt as _, TestSupportExt as _,
+    a11y_disabled::A11yDisabledExt as _,
+    radio_group::{ChangeHandler, RadioEntry, RadioRegistry},
+};
 
 /// An unstyled radio control that owns activation, focus, and accessibility behavior.
 ///
@@ -198,6 +200,23 @@ impl RenderOnce for Radio {
         let style = self.resolved_style();
         let on_change = self.on_change;
 
+        // Join the enclosing radio group, if any. The group owns the single
+        // tab stop and the arrow keys, so it overrides this radio's own
+        // tab order settings.
+        let (tab_index, tab_stop) = match RadioRegistry::current() {
+            Some(registry) => {
+                let mut registry = registry.borrow_mut();
+                registry.register(RadioEntry {
+                    focus_handle: focus_handle.clone(),
+                    checked,
+                    disabled,
+                    on_change: on_change.clone(),
+                });
+                (0, registry.is_stop(&focus_handle))
+            }
+            None => (self.tab_index, self.tab_stop),
+        };
+
         self.base
             .test_support()
             .role(Role::RadioButton)
@@ -222,8 +241,8 @@ impl RenderOnce for Radio {
             .when(!disabled || focus_handle.is_focused(window), |this| {
                 this.track_focus(
                     &focus_handle
-                        .tab_index(self.tab_index)
-                        .tab_stop(self.tab_stop && !disabled),
+                        .tab_index(tab_index)
+                        .tab_stop(tab_stop && !disabled),
                 )
             })
             .when_some(
