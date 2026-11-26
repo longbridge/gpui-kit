@@ -175,6 +175,7 @@ impl Render for MenuStory {
                                                     .child("This is sub-title"),
                                             )
                                         })
+                                        .accessibility_label("Custom Element")
                                         .on_click(
                                             window.listener_for(&view, |this, _, _, cx| {
                                                 this.message = "You have clicked on custom element"

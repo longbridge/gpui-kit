@@ -218,6 +218,18 @@ menu.menu_element(Box::new(CustomAction), |window, cx| {
     )
 ```
 
+自定义元素没有可供辅助技术朗读的标签。使用 `PopupMenuItem::element` 构建菜单项，并用 `accessibility_label` 为其命名，屏幕阅读器就不会把它读作一个没有名称的菜单项：
+
+```rust
+use gpui_kit::component::menu::PopupMenuItem;
+
+menu.item(
+    PopupMenuItem::element(|_, _| h_flex().gap_1().child("Status").child("✓ Connected"))
+        .accessibility_label("Status: Connected")
+        .action(Box::new(InfoAction)),
+)
+```
+
 ### 键盘快捷键
 
 ```rust
