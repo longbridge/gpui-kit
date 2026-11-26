@@ -93,6 +93,40 @@ Settings::new("app-settings")
 
 在搜索框中按 Escape 会清空非空查询；查询为空时，Escape 会继续传给外层的 Dialog 或窗口。
 
+### 由应用控制
+
+设置界面自己保存当前页面和搜索内容。若要在显示之后打开到某个页面（例如从菜单项或快捷键）、
+从命令发起搜索，或读取当前显示的页面，可以创建一个 [SettingsState] 并交给设置界面：
+
+```rust
+use gpui_kit::component::setting::{SelectIndex, Settings, SettingsState};
+
+// 创建 view 时。
+let settings = cx.new(|cx| SettingsState::new(window, cx));
+
+// 在 render 中。
+Settings::new("app-settings")
+    .state(&settings)
+    .pages(vec![...])
+
+// 打开第二个页面，并滚动到它的第三个分组。
+settings.update(cx, |state, cx| {
+    state.set_selected_index(SelectIndex { page_ix: 1, group_ix: Some(2) }, cx)
+});
+
+// 搜索，与在搜索框中输入相同。
+settings.update(cx, |state, cx| state.set_query("font", window, cx));
+
+// 当前显示的页面。
+let page_ix = settings.read(cx).selected_index().page_ix;
+
+// 把光标放进搜索框：state 的 focus handle 就是搜索框的。
+window.focus(&settings.focus_handle(cx), cx);
+```
+
+索引按页面和分组的添加顺序计算，与搜索结果无关。
+使用 state 时不会使用 `default_selected_index`，请改为在 state 上选择页面。
+
 ### 分组样式
 
 ```rust
@@ -477,6 +511,7 @@ SettingItem::new(
 ## API 参考
 
 - [Settings]
+- [SettingsState]
 - [SettingPage]
 - [SettingGroup]
 - [SettingItem]
@@ -582,6 +617,7 @@ Settings::new("app-settings")
 ```
 
 [Settings]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.Settings.html
+[SettingsState]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingsState.html
 [SettingPage]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingPage.html
 [SettingGroup]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingGroup.html
 [SettingItem]: https://docs.rs/gpui-component/latest/gpui_component/setting/struct.SettingItem.html

@@ -1,6 +1,6 @@
 use gpui_kit::{
     App, AppContext, Axis, Context, Element, Entity, FocusHandle, Focusable, Global, IntoElement,
-    ParentElement as _, Render, SharedString, Styled, Window, prelude::FluentBuilder, px,
+    ParentElement as _, Render, SharedString, Styled, Window, div, prelude::FluentBuilder, px,
 };
 
 use gpui_kit::component::{
@@ -10,8 +10,8 @@ use gpui_kit::component::{
     h_flex,
     label::Label,
     setting::{
-        NumberFieldOptions, RenderOptions, SettingField, SettingFieldElement, SettingGroup,
-        SettingItem, SettingPage, Settings,
+        NumberFieldOptions, RenderOptions, SelectIndex, SettingField, SettingFieldElement,
+        SettingGroup, SettingItem, SettingPage, Settings, SettingsState,
     },
     text::markdown,
     v_flex,
@@ -65,6 +65,7 @@ pub struct SettingsStory {
     focus_handle: FocusHandle,
     group_variant: GroupBoxVariant,
     size: Size,
+    settings: Entity<SettingsState>,
 }
 
 struct OpenURLSettingField {
@@ -118,13 +119,14 @@ impl SettingsStory {
         cx.new(|cx| Self::new(window, cx))
     }
 
-    fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.set_global::<AppSettings>(AppSettings::default());
 
         Self {
             focus_handle: cx.focus_handle(),
             group_variant: GroupBoxVariant::Outline,
             size: Size::default(),
+            settings: cx.new(|cx| SettingsState::new(window, cx)),
         }
     }
 
@@ -517,9 +519,59 @@ impl Focusable for SettingsStory {
 
 impl Render for SettingsStory {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        Settings::new("app-settings")
-            .with_size(self.size)
-            .with_group_variant(self.group_variant)
-            .pages(self.setting_pages(window, cx))
+        let pages = self.setting_pages(window, cx);
+        let shown = ["General", "Software Update", "About"]
+            [self.settings.read(cx).selected_index().page_ix];
+
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .p_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        Button::new("open-font")
+                            .small()
+                            .outline()
+                            .label("Open General › Font")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.settings.update(cx, |state, cx| {
+                                    state.set_selected_index(
+                                        SelectIndex {
+                                            page_ix: 0,
+                                            group_ix: Some(1),
+                                        },
+                                        cx,
+                                    )
+                                })
+                            })),
+                    )
+                    .child(
+                        Button::new("search-update")
+                            .small()
+                            .outline()
+                            .label("Search \"update\"")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.settings
+                                    .update(cx, |state, cx| state.set_query("update", window, cx))
+                            })),
+                    )
+                    .child(
+                        Label::new(format!("Showing: {shown}"))
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground),
+                    ),
+            )
+            .child(
+                div().flex_1().min_h_0().child(
+                    Settings::new("app-settings")
+                        .state(&self.settings)
+                        .with_size(self.size)
+                        .with_group_variant(self.group_variant)
+                        .pages(pages),
+                ),
+            )
     }
 }

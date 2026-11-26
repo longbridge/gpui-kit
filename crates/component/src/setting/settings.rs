@@ -11,9 +11,10 @@ use crate::{
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
-    prelude::FluentBuilder as _, px, relative,
+    App, AppContext as _, Axis, Context, ElementId, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, container_query, div, prelude::FluentBuilder as _, px,
+    relative,
 };
 use rust_i18n::t;
 
@@ -42,6 +43,7 @@ pub struct Settings {
     sidebar_style: StyleRefinement,
     default_selected_index: SelectIndex,
     header_style: StyleRefinement,
+    state: Option<Entity<SettingsState>>,
 }
 
 impl Settings {
@@ -57,6 +59,7 @@ impl Settings {
             sidebar_style: StyleRefinement::default(),
             default_selected_index: SelectIndex::default(),
             header_style: StyleRefinement::default(),
+            state: None,
         }
     }
 
@@ -99,6 +102,8 @@ impl Settings {
     }
 
     /// Set the default index of the page to be selected.
+    ///
+    /// Not used with [`Settings::state`]: select the page on the state instead.
     pub fn default_selected_index(mut self, index: SelectIndex) -> Self {
         self.default_selected_index = index;
         self
@@ -107,6 +112,15 @@ impl Settings {
     /// Set the style refinement for the header.
     pub fn header_style(mut self, style: &StyleRefinement) -> Self {
         self.header_style = style.clone();
+        self
+    }
+
+    /// Use a [`SettingsState`] owned by the application, to select a page or
+    /// search from outside the settings and to read the page on display.
+    ///
+    /// Without it, the settings keep their own state.
+    pub fn state(mut self, state: &Entity<SettingsState>) -> Self {
+        self.state = Some(state.clone());
         self
     }
 
@@ -208,12 +222,13 @@ impl Settings {
                             let state = state.clone();
                             move |_, _, cx| {
                                 state.update(cx, |state, cx| {
-                                    state.selected_index = SelectIndex {
-                                        page_ix,
-                                        ..Default::default()
-                                    };
-                                    state.deferred_scroll_group_ix = None;
-                                    cx.notify();
+                                    state.set_selected_index(
+                                        SelectIndex {
+                                            page_ix,
+                                            group_ix: None,
+                                        },
+                                        cx,
+                                    )
                                 })
                             }
                         })
@@ -233,12 +248,13 @@ impl Settings {
                                             let state = state.clone();
                                             move |_, _, cx| {
                                                 state.update(cx, |state, cx| {
-                                                    state.selected_index = SelectIndex {
-                                                        page_ix,
-                                                        group_ix: Some(group_ix),
-                                                    };
-                                                    state.deferred_scroll_group_ix = Some(group_ix);
-                                                    cx.notify();
+                                                    state.set_selected_index(
+                                                        SelectIndex {
+                                                            page_ix,
+                                                            group_ix: Some(group_ix),
+                                                        },
+                                                        cx,
+                                                    )
                                                 })
                                             }
                                         })
@@ -305,11 +321,77 @@ impl SettingsFilter {
     }
 }
 
-pub(super) struct SettingsState {
+/// The state of a [`Settings`]: the page on display and the search.
+///
+/// Create one to control the settings from outside, such as opening them at
+/// a page from a menu or searching them from a command, and hand it to
+/// [`Settings::state`]. Its focus handle is the search box's.
+pub struct SettingsState {
     pub(super) selected_index: SelectIndex,
     /// If set, defer scrolling to this group index after rendering.
     pub(super) deferred_scroll_group_ix: Option<usize>,
     pub(super) search_input: Entity<InputState>,
+}
+
+impl Focusable for SettingsState {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.search_input.focus_handle(cx)
+    }
+}
+
+impl SettingsState {
+    /// Create a state with the first page selected and an empty search.
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_selected_index(SelectIndex::default(), window, cx)
+    }
+
+    fn with_selected_index(
+        selected_index: SelectIndex,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("Settings.search_placeholder"))
+                .default_value("")
+        });
+
+        Self {
+            search_input,
+            selected_index,
+            deferred_scroll_group_ix: None,
+        }
+    }
+
+    /// The page on display, and the group the sidebar marks in it.
+    ///
+    /// Indices are those of the pages and groups as added, whatever the
+    /// search shows.
+    pub fn selected_index(&self) -> SelectIndex {
+        self.selected_index
+    }
+
+    /// Show a page, scrolled to the given group if any.
+    ///
+    /// While a search hides the page or the group, the first page that
+    /// matches is shown, as when the selected page stops matching.
+    pub fn set_selected_index(&mut self, index: SelectIndex, cx: &mut Context<Self>) {
+        self.selected_index = index;
+        self.deferred_scroll_group_ix = index.group_ix;
+        cx.notify();
+    }
+
+    /// Search the settings for the given text, as if typed in the search box.
+    pub fn set_query(
+        &mut self,
+        query: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let query = query.into();
+        self.search_input
+            .update(cx, |input, cx| input.set_value(query, window, cx));
+    }
 }
 
 /// Options for rendering setting item.
@@ -415,7 +497,9 @@ impl Default for RenderOptions {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+/// A page of the [`Settings`], and optionally a group in it, by the order
+/// they were added in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SelectIndex {
     pub page_ix: usize,
     pub group_ix: Option<usize>,
@@ -423,19 +507,12 @@ pub struct SelectIndex {
 
 impl RenderOnce for Settings {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {
-            let search_input = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder(t!("Settings.search_placeholder"))
-                    .default_value("")
-            });
-
-            SettingsState {
-                search_input,
-                selected_index: self.default_selected_index,
-                deferred_scroll_group_ix: None,
-            }
-        });
+        let state = match self.state.clone() {
+            Some(state) => state,
+            None => window.use_keyed_state(self.id.clone(), cx, |window, cx| {
+                SettingsState::with_selected_index(self.default_selected_index, window, cx)
+            }),
+        };
 
         // The placeholder is localized when the state is created, and rebuilding
         // the state would lose the selected page, so follow a runtime locale
@@ -452,10 +529,16 @@ impl RenderOnce for Settings {
         let filter = SettingsFilter::new(&self.pages, &query, cx);
         let previous = state.read(cx).selected_index;
         let selected = filter.selected_index(previous);
-        if selected.page_ix != previous.page_ix || selected.group_ix != previous.group_ix {
+        if selected != previous {
             state.update(cx, |state, _| {
                 state.selected_index = selected;
                 state.deferred_scroll_group_ix = None;
+            });
+            // A view that read the selection earlier in this frame shows the
+            // page the search moved to. Notifying is ignored while drawing.
+            window.defer(cx, {
+                let state = state.clone();
+                move |_, cx| state.update(cx, |_, cx| cx.notify())
             });
         }
         let options = RenderOptions::new()
