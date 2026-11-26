@@ -76,6 +76,13 @@ impl TextInputState {
             .install_token_hover_presentation(hover_listener)))
     }
 
+    pub(crate) fn context_menu_misspelling(
+        &self,
+        cx: &App,
+    ) -> Option<gpui_base::input::Misspelling> {
+        dispatch!(self, |state| state.read(cx).context_menu_misspelling(cx))
+    }
+
     pub(crate) fn entity_id(&self) -> gpui::EntityId {
         dispatch!(self, |state| state.entity_id())
     }

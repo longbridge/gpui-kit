@@ -3290,11 +3290,20 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                 ..
             } => (highlighter.borrow_mut(), diagnostics),
             _ => {
+                // The words misspelled, under every decoration the app set.
+                let style = diagnostic_highlight_style(
+                    crate::input::DiagnosticSeverity::Error,
+                    state.editor_style.diagnostics,
+                );
+                let misspelled: Vec<_> = (state.misspellings_shown(cx).into_iter())
+                    .map(|range| crate::input::TextDecoration::new(range, style))
+                    .collect();
                 return (!state.masked)
                     .then(|| {
                         compose_decoration_collections(
                             Vec::new(),
-                            state.extras.decoration_layers().into_iter(),
+                            (state.extras.decoration_layers().into_iter())
+                                .chain(std::iter::once(&misspelled[..])),
                             visible_byte_range,
                         )
                     })

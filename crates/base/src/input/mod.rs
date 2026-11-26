@@ -74,6 +74,8 @@ mod search;
 mod selection;
 #[path = "editor/spacers.rs"]
 mod spacers;
+#[path = "base/spelling.rs"]
+mod spelling;
 #[path = "base/state.rs"]
 mod state;
 #[path = "base/tab_stops.rs"]
@@ -138,5 +140,6 @@ pub use rope_ext::{InputEdit, Point, RopeExt, RopeLines};
 pub use ropey::Rope;
 pub use search::{SearchMatcher, SearchSession};
 pub use spacers::{Spacer, SpacerProvider};
+pub use spelling::{CorrectSpelling, LearnSpelling, Misspelling, SpellChecker};
 pub use state::*;
 pub use textarea::{Textarea, TextareaState};

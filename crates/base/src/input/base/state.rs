@@ -593,6 +593,9 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Diagnostic currently requested by pointer hover; applications render it.
     pub(super) diagnostic_popover: Option<Rc<crate::input::DiagnosticEntry>>,
 
+    /// What checks the spelling, when something does.
+    pub(super) spelling: Option<super::spelling::Spelling>,
+
     context_menu_handler: Option<
         Rc<dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App)>,
     >,
@@ -1102,6 +1105,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             accessibility: None,
             scrollbar_renderer: None,
             diagnostic_popover: None,
+            spelling: None,
             context_menu_handler: None,
             pending_context_menu: None,
             context_menu_offset: None,
@@ -5647,6 +5651,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                     .on_action(window.listener_for(&entity, InputBaseState::escape))
                     .on_action(window.listener_for(&entity, InputBaseState::paste))
                     .on_action(window.listener_for(&entity, InputBaseState::cut))
+                    .on_action(window.listener_for(&entity, InputBaseState::correct_spelling))
+                    .on_action(window.listener_for(&entity, InputBaseState::learn_spelling))
                     .on_action(window.listener_for(&entity, InputBaseState::undo))
                     .on_action(window.listener_for(&entity, InputBaseState::redo))
                     .when(self.is_multi_line(), |this| {
