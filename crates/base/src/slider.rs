@@ -1,5 +1,6 @@
 use crate::TestSupportExt as _;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui::{
     AccessibleAction, Along, AnyElement, App, AppContext as _, Axis, Bounds, Context, Div,
@@ -125,37 +126,14 @@ impl SliderValue {
     }
 }
 
-/// The scale mode of the slider.
+/// The two built-in scales; [`ValueMapping`] is the general mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SliderScale {
-    /// Linear scale where values change uniformly across the slider range.
-    /// This is the default mode.
+    /// Values change uniformly across the slider range.
     #[default]
     Linear,
-    /// Logarithmic scale where the distance between values increases exponentially.
-    ///
-    /// This is useful for parameters that have a large range of values where smaller
-    /// changes are more significant at lower values. Common examples include:
-    ///
-    /// - Volume controls (human hearing perception is logarithmic)
-    /// - Frequency controls (musical notes follow a logarithmic scale)
-    /// - Zoom levels
-    /// - Any parameter where you want finer control at lower values
-    ///
-    /// # For example
-    ///
-    /// ```
-    /// use gpui_base::slider::{SliderScale, SliderState};
-    ///
-    /// let slider = SliderState::new()
-    ///     .min(1.0)    // Must be > 0 for logarithmic scale
-    ///     .max(1000.0)
-    ///     .scale(SliderScale::Logarithmic);
-    /// ```
-    ///
-    /// - Moving the slider 1/3 of the way will yield ~10
-    /// - Moving it 2/3 of the way will yield ~100
-    /// - The full range covers 3 orders of magnitude evenly
+    /// The distance between values grows exponentially; `min` must be greater
+    /// than zero.
     Logarithmic,
 }
 
@@ -171,6 +149,76 @@ impl SliderScale {
     }
 }
 
+/// How a slider maps its position to a value.
+///
+/// [`SliderScale`] covers the two built-in scales; [`ValueMapping::Custom`]
+/// takes a pair of inverse functions when a parameter follows its own curve.
+///
+/// The functions must be monotonic and inverse to each other. The slider clamps
+/// their inputs to `0.0..=1.0` and `min..=max`, and falls back to the low end
+/// when a function returns a non-finite value.
+#[derive(Clone, Default)]
+pub enum ValueMapping {
+    /// Values change uniformly across the slider range.
+    #[default]
+    Linear,
+    /// The distance between values grows exponentially; `min` must be greater
+    /// than zero.
+    ///
+    /// This is useful for parameters with a large range where smaller changes
+    /// are more significant at lower values, such as volume, frequency, and
+    /// zoom.
+    ///
+    /// Moving the slider 1/3 of the way yields ~10, 2/3 yields ~100, and the
+    /// full range covers three orders of magnitude evenly.
+    Logarithmic,
+    /// A caller-supplied pair of inverse mappings between a value and its
+    /// fraction of the range.
+    Custom {
+        /// Maps a value inside `min..=max` to `0.0..=1.0`.
+        to_normalized: Rc<dyn Fn(f32) -> f32>,
+        /// Maps `0.0..=1.0` back to a value inside `min..=max`.
+        from_normalized: Rc<dyn Fn(f32) -> f32>,
+    },
+}
+
+impl ValueMapping {
+    /// Creates a custom mapping from a pair of inverse functions.
+    ///
+    /// `to_normalized` maps a value to its fraction of the range, and
+    /// `from_normalized` maps that fraction back to a value.
+    pub fn custom(
+        to_normalized: impl Fn(f32) -> f32 + 'static,
+        from_normalized: impl Fn(f32) -> f32 + 'static,
+    ) -> Self {
+        Self::Custom {
+            to_normalized: Rc::new(to_normalized),
+            from_normalized: Rc::new(from_normalized),
+        }
+    }
+
+    /// Whether this is the built-in linear mapping.
+    #[inline]
+    pub fn is_linear(&self) -> bool {
+        matches!(self, Self::Linear)
+    }
+
+    /// Whether this is the built-in logarithmic mapping.
+    #[inline]
+    pub fn is_logarithmic(&self) -> bool {
+        matches!(self, Self::Logarithmic)
+    }
+}
+
+impl From<SliderScale> for ValueMapping {
+    fn from(scale: SliderScale) -> Self {
+        match scale {
+            SliderScale::Linear => Self::Linear,
+            SliderScale::Logarithmic => Self::Logarithmic,
+        }
+    }
+}
+
 /// State of the [`Slider`].
 pub struct SliderState {
     min: f32,
@@ -181,7 +229,7 @@ pub struct SliderState {
     percentage: Range<f32>,
     /// The bounds of the slider after rendered.
     bounds: Bounds<Pixels>,
-    scale: SliderScale,
+    mapping: ValueMapping,
     /// Tracks whether the user is currently interacting with the slider so we
     /// only emit [`SliderEvent::Release`] after a real press/drag.
     dragging: bool,
@@ -208,7 +256,7 @@ impl SliderState {
             value: SliderValue::default(),
             percentage: (0.0..0.0),
             bounds: Bounds::default(),
-            scale: SliderScale::default(),
+            mapping: ValueMapping::default(),
             dragging: false,
             touch_drag: None,
         }
@@ -216,7 +264,7 @@ impl SliderState {
 
     /// Set the minimum value of the slider, default: 0.0
     pub fn min(mut self, min: f32) -> Self {
-        if self.scale.is_logarithmic() {
+        if self.mapping.is_logarithmic() {
             assert!(
                 min > 0.0,
                 "`min` must be greater than 0 for SliderScale::Logarithmic"
@@ -233,7 +281,7 @@ impl SliderState {
 
     /// Set the maximum value of the slider, default: 100.0
     pub fn max(mut self, max: f32) -> Self {
-        if self.scale.is_logarithmic() {
+        if self.mapping.is_logarithmic() {
             assert!(
                 max > self.min,
                 "`max` must be greater than `min` for Logarithmic scale"
@@ -250,9 +298,30 @@ impl SliderState {
         self
     }
 
-    /// Set the scale of the slider, default: [`SliderScale::Linear`].
-    pub fn scale(mut self, scale: SliderScale) -> Self {
-        if scale.is_logarithmic() {
+    /// Set how the slider maps its position to a value, default:
+    /// [`ValueMapping::Linear`].
+    ///
+    /// A logarithmic mapping asserts that `min` is greater than zero and below
+    /// `max`.
+    ///
+    /// # Example
+    ///
+    /// A frequency slider over 20 Hz to 20 kHz, even across three decades:
+    ///
+    /// ```
+    /// use gpui_base::slider::{SliderState, ValueMapping};
+    ///
+    /// let slider = SliderState::new()
+    ///     .min(20.0)
+    ///     .max(20_000.0)
+    ///     .mapping(ValueMapping::custom(
+    ///         |hz| (hz / 20.0).log(1000.0),
+    ///         |percentage| 20.0 * 1000.0_f32.powf(percentage),
+    ///     ));
+    /// ```
+    pub fn mapping(mut self, mapping: impl Into<ValueMapping>) -> Self {
+        let mapping = mapping.into();
+        if mapping.is_logarithmic() {
             assert!(
                 self.min > 0.0,
                 "`min` must be greater than 0 for Logarithmic scale"
@@ -262,9 +331,14 @@ impl SliderState {
                 "`max` must be greater than `min` for Logarithmic scale"
             );
         }
-        self.scale = scale;
+        self.mapping = mapping;
         self.update_thumb_pos();
         self
+    }
+
+    /// Set a built-in [`SliderScale`]; [`mapping`](Self::mapping) takes any mapping.
+    pub fn scale(self, scale: SliderScale) -> Self {
+        self.mapping(scale)
     }
 
     /// Set the default value of the slider, default: 0.0
@@ -318,25 +392,42 @@ impl SliderState {
     }
 
     /// Converts a value between 0.0 and 1.0 to a value between the minimum and maximum value,
-    /// depending on the chosen scale.
+    /// depending on the chosen mapping.
     fn percentage_to_value(&self, percentage: f32) -> f32 {
-        match self.scale {
-            SliderScale::Linear => self.min + (self.max - self.min) * percentage,
-            SliderScale::Logarithmic => {
+        match &self.mapping {
+            ValueMapping::Linear => self.min + (self.max - self.min) * percentage,
+            ValueMapping::Logarithmic => {
                 // when percentage is 0, this simplifies to (max/min)^0 * min = 1 * min = min
                 // when percentage is 1, this simplifies to (max/min)^1 * min = (max*min)/min = max
                 // we clamp just to make sure we don't have issue with floating point precision
                 let base = self.max / self.min;
                 (base.powf(percentage) * self.min).clamp(self.min, self.max)
             }
+            ValueMapping::Custom {
+                from_normalized, ..
+            } => {
+                let percentage = if percentage.is_finite() {
+                    percentage.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let value = from_normalized(percentage);
+                if value.is_finite() {
+                    // Not `clamp`: while a builder is between its `min` and `max`,
+                    // `min` can stand above `max`.
+                    value.min(self.max).max(self.min)
+                } else {
+                    self.min
+                }
+            }
         }
     }
 
     /// Converts a value between the minimum and maximum value to a value between 0.0 and 1.0,
-    /// depending on the chosen scale.
+    /// depending on the chosen mapping.
     fn value_to_percentage(&self, value: f32) -> f32 {
-        match self.scale {
-            SliderScale::Linear => {
+        match &self.mapping {
+            ValueMapping::Linear => {
                 let range = self.max - self.min;
                 if range <= 0.0 {
                     0.0
@@ -344,9 +435,24 @@ impl SliderState {
                     (value - self.min) / range
                 }
             }
-            SliderScale::Logarithmic => {
+            ValueMapping::Logarithmic => {
                 let base = self.max / self.min;
                 (value / self.min).log(base).clamp(0.0, 1.0)
+            }
+            ValueMapping::Custom { to_normalized, .. } => {
+                // Not `clamp`: while a builder is between its `min` and `max`,
+                // `min` can stand above `max`.
+                let value = if value.is_finite() {
+                    value.min(self.max).max(self.min)
+                } else {
+                    self.min
+                };
+                let percentage = to_normalized(value);
+                if percentage.is_finite() {
+                    percentage.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
             }
         }
     }
@@ -1130,6 +1236,84 @@ mod tests {
             .default_value(10.);
         let percentage = state.percentage().end;
         assert!((percentage - (1. / 3.)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn scale_and_mapping_set_the_same_value_mapping() {
+        let by_scale = SliderState::new()
+            .min(1.)
+            .max(1000.)
+            .scale(SliderScale::Logarithmic)
+            .default_value(10.);
+        let by_mapping = SliderState::new()
+            .min(1.)
+            .max(1000.)
+            .mapping(ValueMapping::Logarithmic)
+            .default_value(10.);
+
+        assert_eq!(by_scale.percentage(), by_mapping.percentage());
+        assert!((by_mapping.percentage().end - (1. / 3.)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn custom_mapping_round_trips_a_value_and_its_position() {
+        let state = SliderState::new()
+            .min(0.)
+            .max(100.)
+            .mapping(ValueMapping::custom(
+                |value| (value / 100.).sqrt(),
+                |percentage| percentage * percentage * 100.,
+            ))
+            .default_value(25.);
+
+        assert!((state.percentage().end - 0.5).abs() < 0.0001);
+        assert!((state.percentage_to_value(0.5) - 25.).abs() < 0.0001);
+    }
+
+    #[test]
+    fn custom_mapping_clamps_its_inputs_and_outputs() {
+        let state = SliderState::new()
+            .min(0.)
+            .max(10.)
+            .mapping(ValueMapping::custom(|_| 2., |_| 1000.))
+            .default_value(5.);
+
+        assert_eq!(state.percentage().end, 1.);
+        assert_eq!(state.percentage_to_value(0.5), 10.);
+    }
+
+    #[test]
+    fn custom_mapping_falls_back_from_non_finite_results() {
+        let state = SliderState::new()
+            .min(2.)
+            .max(8.)
+            .mapping(ValueMapping::custom(|_| f32::NAN, |_| f32::INFINITY))
+            .default_value(5.);
+
+        assert_eq!(state.percentage().end, 0.);
+        assert_eq!(state.percentage_to_value(0.5), 2.);
+    }
+
+    #[test]
+    fn custom_mapping_tolerates_builder_bounds_in_any_order() {
+        // The builder can stand between its `min` and `max`; the custom path
+        // must not call `f32::clamp`, which panics on an inverted range.
+        let state = SliderState::new()
+            .max(0.)
+            .min(10.)
+            .mapping(ValueMapping::custom(
+                |value| value / 10.,
+                |percentage| percentage * 10.,
+            ))
+            .default_value(5.);
+
+        assert!(state.percentage().end.is_finite());
+    }
+
+    #[test]
+    #[should_panic(expected = "`min` must be greater than 0")]
+    fn logarithmic_mapping_validation_is_preserved() {
+        let _ = SliderState::new().mapping(ValueMapping::Logarithmic);
     }
 
     #[gpui::test]
