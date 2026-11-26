@@ -1,6 +1,6 @@
 use crate::TestSupportExt as _;
+use crate::ValueMapping;
 use std::ops::Range;
-use std::rc::Rc;
 
 use gpui::{
     AccessibleAction, Along, AnyElement, App, AppContext as _, Axis, Bounds, Context, Div,
@@ -126,17 +126,17 @@ impl SliderValue {
     }
 }
 
-/// The two built-in scales; [`ValueMapping`] is the general mapping.
+/// Deprecated: use [`ValueMapping`] and [`SliderState::mapping`] instead.
+#[deprecated(note = "use `ValueMapping` with `SliderState::mapping`")]
+#[allow(deprecated)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SliderScale {
-    /// Values change uniformly across the slider range.
     #[default]
     Linear,
-    /// The distance between values grows exponentially; `min` must be greater
-    /// than zero.
     Logarithmic,
 }
 
+#[allow(deprecated)]
 impl SliderScale {
     #[inline]
     pub fn is_linear(&self) -> bool {
@@ -149,67 +149,7 @@ impl SliderScale {
     }
 }
 
-/// How a slider maps its position to a value.
-///
-/// [`SliderScale`] covers the two built-in scales; [`ValueMapping::Custom`]
-/// takes a pair of inverse functions when a parameter follows its own curve.
-///
-/// The functions must be monotonic and inverse to each other. The slider clamps
-/// their inputs to `0.0..=1.0` and `min..=max`, and falls back to the low end
-/// when a function returns a non-finite value.
-#[derive(Clone, Default)]
-pub enum ValueMapping {
-    /// Values change uniformly across the slider range.
-    #[default]
-    Linear,
-    /// The distance between values grows exponentially; `min` must be greater
-    /// than zero.
-    ///
-    /// This is useful for parameters with a large range where smaller changes
-    /// are more significant at lower values, such as volume, frequency, and
-    /// zoom.
-    ///
-    /// Moving the slider 1/3 of the way yields ~10, 2/3 yields ~100, and the
-    /// full range covers three orders of magnitude evenly.
-    Logarithmic,
-    /// A caller-supplied pair of inverse mappings between a value and its
-    /// fraction of the range.
-    Custom {
-        /// Maps a value inside `min..=max` to `0.0..=1.0`.
-        to_normalized: Rc<dyn Fn(f32) -> f32>,
-        /// Maps `0.0..=1.0` back to a value inside `min..=max`.
-        from_normalized: Rc<dyn Fn(f32) -> f32>,
-    },
-}
-
-impl ValueMapping {
-    /// Creates a custom mapping from a pair of inverse functions.
-    ///
-    /// `to_normalized` maps a value to its fraction of the range, and
-    /// `from_normalized` maps that fraction back to a value.
-    pub fn custom(
-        to_normalized: impl Fn(f32) -> f32 + 'static,
-        from_normalized: impl Fn(f32) -> f32 + 'static,
-    ) -> Self {
-        Self::Custom {
-            to_normalized: Rc::new(to_normalized),
-            from_normalized: Rc::new(from_normalized),
-        }
-    }
-
-    /// Whether this is the built-in linear mapping.
-    #[inline]
-    pub fn is_linear(&self) -> bool {
-        matches!(self, Self::Linear)
-    }
-
-    /// Whether this is the built-in logarithmic mapping.
-    #[inline]
-    pub fn is_logarithmic(&self) -> bool {
-        matches!(self, Self::Logarithmic)
-    }
-}
-
+#[allow(deprecated)]
 impl From<SliderScale> for ValueMapping {
     fn from(scale: SliderScale) -> Self {
         match scale {
@@ -267,11 +207,11 @@ impl SliderState {
         if self.mapping.is_logarithmic() {
             assert!(
                 min > 0.0,
-                "`min` must be greater than 0 for SliderScale::Logarithmic"
+                "`min` must be greater than 0 for a logarithmic mapping"
             );
             assert!(
                 min < self.max,
-                "`min` must be less than `max` for Logarithmic scale"
+                "`min` must be less than `max` for a logarithmic mapping"
             );
         }
         self.min = min;
@@ -284,7 +224,7 @@ impl SliderState {
         if self.mapping.is_logarithmic() {
             assert!(
                 max > self.min,
-                "`max` must be greater than `min` for Logarithmic scale"
+                "`max` must be greater than `min` for a logarithmic mapping"
             );
         }
         self.max = max;
@@ -309,7 +249,7 @@ impl SliderState {
     /// A frequency slider over 20 Hz to 20 kHz, even across three decades:
     ///
     /// ```
-    /// use gpui_base::slider::{SliderState, ValueMapping};
+    /// use gpui_base::{ValueMapping, slider::SliderState};
     ///
     /// let slider = SliderState::new()
     ///     .min(20.0)
@@ -324,11 +264,11 @@ impl SliderState {
         if mapping.is_logarithmic() {
             assert!(
                 self.min > 0.0,
-                "`min` must be greater than 0 for Logarithmic scale"
+                "`min` must be greater than 0 for a logarithmic mapping"
             );
             assert!(
                 self.max > self.min,
-                "`max` must be greater than `min` for Logarithmic scale"
+                "`max` must be greater than `min` for a logarithmic mapping"
             );
         }
         self.mapping = mapping;
@@ -336,7 +276,9 @@ impl SliderState {
         self
     }
 
-    /// Set a built-in [`SliderScale`]; [`mapping`](Self::mapping) takes any mapping.
+    /// Deprecated: use [`mapping`](Self::mapping) with [`ValueMapping`].
+    #[deprecated(note = "use `mapping` with `ValueMapping`")]
+    #[allow(deprecated)]
     pub fn scale(self, scale: SliderScale) -> Self {
         self.mapping(scale)
     }
@@ -1228,6 +1170,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn legacy_logarithmic_state_keeps_mapping() {
         let state = SliderState::new()
             .min(1.)
@@ -1239,6 +1182,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn scale_and_mapping_set_the_same_value_mapping() {
         let by_scale = SliderState::new()
             .min(1.)
@@ -1808,6 +1752,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "`min` must be greater than 0")]
+    #[allow(deprecated)]
     fn legacy_logarithmic_validation_is_preserved() {
         let _ = SliderState::new().scale(SliderScale::Logarithmic);
     }
