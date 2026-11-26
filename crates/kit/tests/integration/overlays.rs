@@ -508,3 +508,35 @@ async fn alert_dialog_default_buttons_reach_their_dialog_when_focus_was_stolen(
     })
     .await;
 }
+
+#[gpui_kit::test]
+async fn notification_close_button_reports_focus(cx: &mut TestAppContext) {
+    use gpui_kit::test::TestQueryExt;
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        cx.set_reduce_motion(true);
+    });
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
+        cx.new(|cx| Workspace {
+            saved: cx.new(|cx| InputState::new(window, cx)),
+            draft: cx.new(|cx| InputState::new(window, cx)),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.push_notification(Notification::info("Example").autohide(false), cx);
+        window.render_frame(cx);
+        let close = window
+            .elements()
+            .into_iter()
+            .find(|element| {
+                element.label() == Some("Close")
+                    && element
+                        .path()
+                        .last()
+                        .is_some_and(|id| id.to_string() == "close")
+            })
+            .expect("notification close button");
+        assert_eq!(close.focused(), Some(false));
+    })
+    .unwrap();
+}
