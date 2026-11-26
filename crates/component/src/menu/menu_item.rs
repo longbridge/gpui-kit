@@ -10,7 +10,11 @@ use smallvec::SmallVec;
 #[derive(IntoElement)]
 pub(crate) struct MenuItemElement {
     id: ElementId,
+    /// `None` leaves the row out of the accessibility tree.
+    role: Option<Role>,
     aria_label: Option<SharedString>,
+    /// The item's 1-based position among its menu's items, and their count.
+    position: Option<(usize, usize)>,
     style: StyleRefinement,
     disabled: bool,
     selected: bool,
@@ -26,7 +30,9 @@ impl MenuItemElement {
         let id: ElementId = id.into();
         Self {
             id,
+            role: Some(Role::MenuItem),
             aria_label: None,
+            position: None,
             style: StyleRefinement::default(),
             disabled: false,
             selected: false,
@@ -54,6 +60,20 @@ impl MenuItemElement {
     /// Set the accessible label for the menu item.
     pub(crate) fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.aria_label = Some(label.into());
+        self
+    }
+
+    /// Leave the row out of the accessibility tree, as for a separator, which
+    /// only draws a line.
+    pub(crate) fn presentational(mut self) -> Self {
+        self.role = None;
+        self
+    }
+
+    /// Set the item's 1-based position among its menu's items, and how many
+    /// there are, so assistive technology can say "2 of 5".
+    pub(crate) fn position_in_set(mut self, position: usize, size: usize) -> Self {
+        self.position = Some((position, size));
         self
     }
 
@@ -105,8 +125,11 @@ impl RenderOnce for MenuItemElement {
             .flex_row_dir(cx)
             .id(self.id)
             .test_support()
-            .role(Role::MenuItem)
+            .when_some(self.role, |this, role| this.role(role))
             .when_some(self.aria_label, |this, label| this.aria_label(label))
+            .when_some(self.position, |this, (position, size)| {
+                this.aria_position_in_set(position).aria_size_of_set(size)
+            })
             .aria_selected(self.selected)
             .when_some(self.checked, |this, checked| {
                 this.aria_toggled(if checked {

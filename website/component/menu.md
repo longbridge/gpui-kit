@@ -74,6 +74,20 @@ However, if you prefer not to use [Action]s, you can create custom menu items us
 There have a `on_click` callback to handle the click event directly.
 :::
 
+Name the menu with `accessibility_label`, usually after the button that opens
+it, so a screen reader says which menu it is in. A submenu is named after its
+item without this:
+
+```rust
+Button::new("sort")
+    .label("Sort")
+    .dropdown_menu(|menu, _, _| {
+        menu.accessibility_label("Sort")
+            .menu("Name", Box::new(SortByName))
+            .menu("Date", Box::new(SortByDate))
+    })
+```
+
 ### Anchor Position
 
 Control where the dropdown menu appears relative to the trigger:

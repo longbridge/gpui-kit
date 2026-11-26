@@ -299,6 +299,8 @@ pub struct PopupMenu {
     /// the very frame the menu opens. GPUI looks a handle up in the previously
     /// rendered frame, and the trigger was in it when the menu was not yet.
     pub(crate) trigger_focus_handle: Option<FocusHandle>,
+    /// The menu's name for assistive technology.
+    accessibility_label: Option<SharedString>,
     selected_index: Option<usize>,
     min_width: Option<Pixels>,
     max_width: Option<Pixels>,
@@ -349,6 +351,7 @@ impl PopupMenu {
             action_context: None,
             previous_focus_handle: None,
             trigger_focus_handle: None,
+            accessibility_label: None,
             parent_menu: None,
             menu_items: Vec::new(),
             selected_index: None,
@@ -439,6 +442,15 @@ impl PopupMenu {
                 });
             }
         }
+    }
+
+    /// Set the name assistive technology announces for the menu, usually the
+    /// label of the control that opens it.
+    ///
+    /// A submenu is named after its item unless this is set.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
+        self
     }
 
     /// Set min width of the popup menu, default is 8rem
@@ -730,12 +742,15 @@ impl PopupMenu {
         cx: &mut Context<Self>,
         f: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) -> Self {
+        let label = label.into();
         let submenu = PopupMenu::build(window, cx, f);
         let parent_menu = cx.entity().downgrade();
         let parent_priority = self.priority;
         submenu.update(cx, |view, _| {
             view.parent_menu = Some(parent_menu);
             view.priority = parent_priority + 1;
+            view.accessibility_label
+                .get_or_insert_with(|| label.clone());
         });
 
         self.menu_items.push(
@@ -1379,6 +1394,7 @@ impl PopupMenu {
 
         match item {
             PopupMenuItem::Separator => this
+                .presentational()
                 .h_auto()
                 .p_0()
                 .my_0p5()
@@ -1574,16 +1590,19 @@ impl Render for PopupMenu {
         // Submenus attached via the public `item()` + `PopupMenuItem::submenu()`
         // path (from contexts that only have the menu value, e.g. a table
         // delegate's `context_menu`) have no parent wired at construction time.
-        // Wire them here so the dismiss chain, click-outside checks and keyboard
-        // navigation treat them the same as `submenu()`-built children.
+        // Wire them here so the dismiss chain, click-outside checks, keyboard
+        // navigation and their accessible name treat them the same as
+        // `submenu()`-built children.
         let parent = cx.entity().downgrade();
         let parent_priority = self.priority;
         for item in &self.menu_items {
-            if let PopupMenuItem::Submenu { menu, .. } = item {
+            if let PopupMenuItem::Submenu { label, menu, .. } = item {
                 if menu.read(cx).parent_menu.is_none() {
                     menu.update(cx, |menu, _| {
                         menu.parent_menu = Some(parent.clone());
                         menu.priority = parent_priority + 1;
+                        menu.accessibility_label
+                            .get_or_insert_with(|| label.clone());
                     });
                 }
             }
@@ -1593,6 +1612,14 @@ impl Render for PopupMenu {
 
         let view = cx.entity();
         let items_count = self.menu_items.len();
+        // Separators stay out of the accessibility tree, so the items are
+        // numbered without them.
+        let set_size = self
+            .menu_items
+            .iter()
+            .filter(|item| !item.is_separator())
+            .count();
+        let mut position = 0;
 
         let max_height = self.max_height.unwrap_or_else(|| {
             let window_half_height = window.window_bounds().get_bounds().size.height * 0.5;
@@ -1614,6 +1641,9 @@ impl Render for PopupMenu {
             .id("popup-menu")
             .test_support()
             .role(Role::Menu)
+            .when_some(self.accessibility_label.clone(), |this, label| {
+                this.aria_label(label)
+            })
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::select_up))
@@ -1649,7 +1679,16 @@ impl Render for PopupMenu {
                             .enumerate()
                             // Ignore last separator
                             .filter(|(ix, item)| !(*ix + 1 == items_count && item.is_separator()))
-                            .map(|(ix, item)| self.render_item(ix, item, options, window, cx)),
+                            .map(|(ix, item)| {
+                                let is_separator = item.is_separator();
+                                if !is_separator {
+                                    position += 1;
+                                }
+                                self.render_item(ix, item, options, window, cx)
+                                    .when(!is_separator, |this| {
+                                        this.position_in_set(position, set_size)
+                                    })
+                            }),
                     ),
             )
             // Measure on this element, not on the scrolling `items` container:
