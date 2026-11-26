@@ -11,7 +11,7 @@ use gpui_kit::component::{
     label::Label,
     setting::{
         NumberFieldOptions, RenderOptions, SettingField, SettingFieldElement, SettingGroup,
-        SettingItem, SettingPage, Settings,
+        SettingItem, SettingPage, SettingSection, Settings,
     },
     text::markdown,
     v_flex,
@@ -517,9 +517,12 @@ impl Focusable for SettingsStory {
 
 impl Render for SettingsStory {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // General, then Software Update and About.
+        let mut pages = self.setting_pages(window, cx).into_iter();
         Settings::new("app-settings")
             .with_size(self.size)
             .with_group_variant(self.group_variant)
-            .pages(self.setting_pages(window, cx))
+            .section(SettingSection::new("Preferences").pages(pages.by_ref().take(1)))
+            .section(SettingSection::new("Application").pages(pages))
     }
 }

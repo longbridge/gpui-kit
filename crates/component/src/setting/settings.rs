@@ -1,19 +1,19 @@
 use std::ops::Range;
 
 use crate::{
-    Icon, IconName, Sizable, Size, StyledExt,
+    Collapsible, Icon, IconName, Sizable, Size, StyledExt,
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
     input::{Escape, Input, InputState},
     resizable_panel,
     setting::SettingPage,
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    sidebar::{Sidebar, SidebarGroup, SidebarItem, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
     App, AppContext as _, Axis, ElementId, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
-    prelude::FluentBuilder as _, px, relative,
+    ParentElement as _, Pixels, RenderOnce, SharedString, StyleRefinement, Styled, Window,
+    container_query, div, prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
 
@@ -35,6 +35,8 @@ const STACKED_LAYOUT_MAX_WIDTH: Pixels = px(480.);
 pub struct Settings {
     id: ElementId,
     pages: Vec<SettingPage>,
+    /// The headings of the sidebar, each with the range of its pages.
+    sections: Vec<(Range<usize>, SharedString)>,
     group_variant: GroupBoxVariant,
     size: Size,
     sidebar_width: Pixels,
@@ -50,6 +52,7 @@ impl Settings {
         Self {
             id: id.into(),
             pages: vec![],
+            sections: vec![],
             group_variant: GroupBoxVariant::default(),
             size: Size::default(),
             sidebar_width: px(250.0),
@@ -81,6 +84,18 @@ impl Settings {
     /// Add pages to the settings.
     pub fn pages(mut self, pages: impl IntoIterator<Item = SettingPage>) -> Self {
         self.pages.extend(pages);
+        self
+    }
+
+    /// Add a section of pages, listed in the sidebar under its heading.
+    ///
+    /// Pages added with [`Settings::page`] are listed without a heading.
+    /// A heading is hidden while the search leaves none of its pages.
+    pub fn section(mut self, section: SettingSection) -> Self {
+        let start = self.pages.len();
+        self.pages.extend(section.pages);
+        self.sections
+            .push((start..self.pages.len(), section.heading));
         self
     }
 
@@ -161,6 +176,63 @@ impl Settings {
         let selected_index = state.read(cx).selected_index;
         let search_input = state.read(cx).search_input.clone();
 
+        let page_item = |page_ix: usize| {
+            let page = &self.pages[page_ix];
+            let groups = &filter.groups[page_ix];
+            let is_page_active = selected_index.page_ix == page_ix
+                && (selected_index.group_ix.is_none() || groups.len() == 1);
+            // Going to a page opens its groups; clicking the title of
+            // the page on display again folds or unfolds them.
+            let is_page_shown = selected_index.page_ix == page_ix;
+            SidebarMenuItem::new(page.title.clone())
+                .click_to_open(!is_page_shown)
+                .click_to_toggle(is_page_shown)
+                .when_some(page.icon.clone(), |this, icon| this.icon(icon))
+                .default_open(page.default_open)
+                .active(is_page_active)
+                .on_click({
+                    let state = state.clone();
+                    move |_, _, cx| {
+                        state.update(cx, |state, cx| {
+                            state.selected_index = SelectIndex {
+                                page_ix,
+                                ..Default::default()
+                            };
+                            state.deferred_scroll_group_ix = None;
+                            cx.notify();
+                        })
+                    }
+                })
+                .when(groups.len() > 1, |this| {
+                    this.children(
+                        groups
+                            .iter()
+                            .copied()
+                            .filter(|&ix| page.groups[ix].title.is_some())
+                            .map(|group_ix| {
+                                let group = &page.groups[group_ix];
+                                let is_active = selected_index.page_ix == page_ix
+                                    && selected_index.group_ix == Some(group_ix);
+                                let title = group.title.clone().unwrap_or_default();
+
+                                SidebarMenuItem::new(title).active(is_active).on_click({
+                                    let state = state.clone();
+                                    move |_, _, cx| {
+                                        state.update(cx, |state, cx| {
+                                            state.selected_index = SelectIndex {
+                                                page_ix,
+                                                group_ix: Some(group_ix),
+                                            };
+                                            state.deferred_scroll_group_ix = Some(group_ix);
+                                            cx.notify();
+                                        })
+                                    }
+                                })
+                            }),
+                    )
+                })
+        };
+
         Sidebar::new("settings-sidebar")
             .w(relative(1.))
             .border_0()
@@ -189,64 +261,107 @@ impl Settings {
                     })
                     .child(Input::new(&search_input).prefix(IconName::Search)),
             )
-            .child(
-                SidebarMenu::new().children(filter.visible_pages().map(|page_ix| {
-                    let page = &self.pages[page_ix];
-                    let groups = &filter.groups[page_ix];
-                    let is_page_active = selected_index.page_ix == page_ix
-                        && (selected_index.group_ix.is_none() || groups.len() == 1);
-                    // Going to a page opens its groups; clicking the title of
-                    // the page on display again folds or unfolds them.
-                    let is_page_shown = selected_index.page_ix == page_ix;
-                    SidebarMenuItem::new(page.title.clone())
-                        .click_to_open(!is_page_shown)
-                        .click_to_toggle(is_page_shown)
-                        .when_some(page.icon.clone(), |this, icon| this.icon(icon))
-                        .default_open(page.default_open)
-                        .active(is_page_active)
-                        .on_click({
-                            let state = state.clone();
-                            move |_, _, cx| {
-                                state.update(cx, |state, cx| {
-                                    state.selected_index = SelectIndex {
-                                        page_ix,
-                                        ..Default::default()
-                                    };
-                                    state.deferred_scroll_group_ix = None;
-                                    cx.notify();
-                                })
-                            }
-                        })
-                        .when(groups.len() > 1, |this| {
-                            this.children(
-                                groups
-                                    .iter()
-                                    .copied()
-                                    .filter(|&ix| page.groups[ix].title.is_some())
-                                    .map(|group_ix| {
-                                        let group = &page.groups[group_ix];
-                                        let is_active = selected_index.page_ix == page_ix
-                                            && selected_index.group_ix == Some(group_ix);
-                                        let title = group.title.clone().unwrap_or_default();
-
-                                        SidebarMenuItem::new(title).active(is_active).on_click({
-                                            let state = state.clone();
-                                            move |_, _, cx| {
-                                                state.update(cx, |state, cx| {
-                                                    state.selected_index = SelectIndex {
-                                                        page_ix,
-                                                        group_ix: Some(group_ix),
-                                                    };
-                                                    state.deferred_scroll_group_ix = Some(group_ix);
-                                                    cx.notify();
-                                                })
-                                            }
-                                        })
-                                    }),
-                            )
-                        })
-                })),
+            .children(
+                self.sidebar_sections(filter)
+                    .into_iter()
+                    .map(|(section, pages)| {
+                        let menu = SidebarMenu::new().children(pages.into_iter().map(&page_item));
+                        SidebarSection {
+                            heading: section.map(|ix| self.sections[ix].1.clone()),
+                            menu,
+                        }
+                    }),
             )
+    }
+}
+
+impl Settings {
+    /// The visible pages, in runs that share a section of the sidebar: the
+    /// index of the section, if any, and its pages.
+    fn sidebar_sections(&self, filter: &SettingsFilter) -> Vec<(Option<usize>, Vec<usize>)> {
+        let mut sections: Vec<(Option<usize>, Vec<usize>)> = Vec::new();
+        for page_ix in filter.visible_pages() {
+            let section = self
+                .sections
+                .iter()
+                .position(|(range, _)| range.contains(&page_ix));
+            match sections.last_mut() {
+                Some((last, pages)) if *last == section => pages.push(page_ix),
+                _ => sections.push((section, vec![page_ix])),
+            }
+        }
+        sections
+    }
+}
+
+/// A group of setting pages, listed in the sidebar under a heading.
+///
+/// ```ignore
+/// Settings::new("app-settings")
+///     .page(SettingPage::new("General"))
+///     .section(SettingSection::new("Editor").page(SettingPage::new("Font")))
+/// ```
+pub struct SettingSection {
+    heading: SharedString,
+    pages: Vec<SettingPage>,
+}
+
+impl SettingSection {
+    /// Create a new section with the given heading.
+    pub fn new(heading: impl Into<SharedString>) -> Self {
+        Self {
+            heading: heading.into(),
+            pages: vec![],
+        }
+    }
+
+    /// Add a page to the section.
+    pub fn page(mut self, page: SettingPage) -> Self {
+        self.pages.push(page);
+        self
+    }
+
+    /// Add pages to the section.
+    pub fn pages(mut self, pages: impl IntoIterator<Item = SettingPage>) -> Self {
+        self.pages.extend(pages);
+        self
+    }
+}
+
+/// A run of pages in the sidebar, under a heading or not.
+#[derive(Clone)]
+struct SidebarSection {
+    heading: Option<SharedString>,
+    menu: SidebarMenu,
+}
+
+impl Collapsible for SidebarSection {
+    fn is_collapsed(&self) -> bool {
+        self.menu.is_collapsed()
+    }
+
+    fn collapsed(mut self, collapsed: bool) -> Self {
+        self.menu = self.menu.collapsed(collapsed);
+        self
+    }
+}
+
+impl SidebarItem for SidebarSection {
+    fn render(
+        self,
+        id: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> impl IntoElement {
+        let collapsed = self.menu.is_collapsed();
+        match self.heading {
+            Some(heading) => SidebarGroup::new(heading)
+                .child(self.menu)
+                .collapsed(collapsed)
+                .render(id, window, cx)
+                .into_any_element(),
+            None => self.menu.render(id, window, cx).into_any_element(),
+        }
     }
 }
 

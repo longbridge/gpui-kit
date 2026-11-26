@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     Root,
     group_box::GroupBoxVariant,
-    setting::{SettingGroup, SettingItem},
+    setting::{SettingGroup, SettingItem, SettingSection},
 };
 use gpui::{
     Context, Focusable as _, KeyBinding, Render, ScrollDelta, ScrollEvent, TestAppContext,
@@ -529,4 +529,34 @@ fn selecting_a_group_from_another_page_scrolls_to_it(cx: &mut TestAppContext) {
     select(1, Some(2), cx);
     let target = cx.debug_bounds("setting-1-2-1").unwrap();
     assert!(target.top() >= px(0.) && target.bottom() <= px(700.));
+}
+
+#[gpui::test]
+fn sections_head_the_pages_after_them_and_hide_without_results(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    let page = |keyword| SettingPage::new(keyword).group(SettingGroup::new().item(item(keyword)));
+    let settings = Settings::new("sections-test")
+        .page(page("general"))
+        .section(SettingSection::new("Editor").pages([page("font"), page("theme")]))
+        .section(SettingSection::new("Empty"))
+        .section(SettingSection::new("Network").page(page("proxy")))
+        .page(page("about"));
+    let sections = |query: &str, cx: &mut TestAppContext| {
+        cx.update(|cx| settings.sidebar_sections(&SettingsFilter::new(&settings.pages, query, cx)))
+    };
+
+    // Pages outside a section have no heading; an empty section is never
+    // shown.
+    assert_eq!(
+        sections("", cx),
+        vec![
+            (None, vec![0]),
+            (Some(0), vec![1, 2]),
+            (Some(2), vec![3]),
+            (None, vec![4])
+        ]
+    );
+    // A heading stays while one of its pages matches, by its original index.
+    assert_eq!(sections("theme", cx), vec![(Some(0), vec![2])]);
+    assert_eq!(sections("proxy", cx), vec![(Some(2), vec![3])]);
 }
