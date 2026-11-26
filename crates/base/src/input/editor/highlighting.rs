@@ -159,6 +159,12 @@ impl InputEditorStyle {
             border: or(self.border, colors.border),
             selection,
             caret: or(self.caret, foreground),
+            // A theme without an error colour still marks errors and
+            // misspelled words, in its destructive colour.
+            diagnostics: DiagnosticColors {
+                error: or(self.diagnostics.error, colors.destructive),
+                ..self.diagnostics
+            },
             ..self.clone()
         }
     }
