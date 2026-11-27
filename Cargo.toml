@@ -67,14 +67,14 @@ story = { path = "crates/story" }
 # every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
 # fails CI when a pin is not exact.
 gpui = { package = "gpui-pre", version = "=0.3.14" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", features = ["font-kit", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "=0.3.14" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.14", default-features = false, features = ["font-kit", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "=0.3.14", default-features = false }
 # Fast is optional; existing crates select it through their gpui-fast feature.
 # Explicit package fields make Cargo use these dependency keys as Rust crate names;
 # the packages declare the same library names as the pre backend.
 gpui-fast = { package = "gpui-fast", version = "0.1.19", features = ["windows-manifest-provided-by-host"] }
-gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.19", features = ["font-kit", "wayland", "runtime_shaders"] }
-gpui-fast-web = { package = "gpui-fast-web", version = "0.1.19" }
+gpui-fast-platform = { package = "gpui-fast-platform", version = "0.1.19", default-features = false, features = ["font-kit", "wayland", "runtime_shaders"] }
+gpui-fast-web = { package = "gpui-fast-web", version = "0.1.19", default-features = false }
 gpui_macros = { package = "gpui-pre-macros", version = "=0.3.14" }
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.14" }
 sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.14" }

@@ -16,12 +16,15 @@ edition.workspace = true
 workspace = true
 
 [features]
-default = ["gpui-pre", "component", "assets", "x11"]
+default = ["gpui-pre", "component", "assets", "x11", "web-threads"]
 # The default engine, Zed's GPUI through the `gpui-pre` crates. Turn default
 # features off and enable `gpui-fast` instead to build without it.
 gpui-pre = ["dep:gpui", "dep:gpui_platform", "dep:gpui_web", "gpui-base/gpui-pre", "gpui-component?/gpui-pre", "gpui-kit-assets?/gpui-pre"]
 # Linux and FreeBSD keep Wayland enabled when X11 is omitted.
 x11 = ["gpui_platform?/x11", "gpui-fast-platform?/x11"]
+# Run the browser platform on Web Workers. It needs a nightly toolchain with
+# `build-std` and atomics; leave it out to build for wasm32 on stable Rust.
+web-threads = ["gpui_platform?/multithreaded", "gpui_web?/multithreaded", "gpui-fast-platform?/multithreaded", "gpui-fast-web?/multithreaded"]
 # Select GPUI Fast across the core, platforms, and already-enabled layers.
 gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform", "dep:gpui-fast-web", "gpui-base/gpui-fast", "gpui-component?/gpui-fast", "gpui-kit-assets?/gpui-fast"]
 # The styled component library, `gpui_kit::component`. Initializes `gpui-base` too.

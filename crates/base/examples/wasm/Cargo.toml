@@ -11,8 +11,8 @@ crate-type = ["cdylib", "rlib"]
 gpui.workspace = true
 gpui-fast = { workspace = true, optional = true }
 gpui-base = { path = "../.." }
-gpui_platform.workspace = true
-gpui-fast-platform = { workspace = true, optional = true }
+gpui_platform = { workspace = true, features = ["multithreaded"] }
+gpui-fast-platform = { workspace = true, optional = true, features = ["multithreaded"] }
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 jiff = { version = "1.0", features = ["js"] }
