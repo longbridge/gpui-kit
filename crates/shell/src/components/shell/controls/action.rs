@@ -188,6 +188,7 @@ impl ComponentMaterializer for CheckboxMaterializer {
                 CommonOp::Size(size) => component.with_size(size),
                 CommonOp::Label(label) => component.label(label),
                 CommonOp::Tooltip(tooltip) => component.tooltip(tooltip),
+                CommonOp::AccessibilityLabel(label) => component.accessibility_label(label),
                 CommonOp::Checked(checked) => component.checked(checked),
                 CommonOp::Change(argument) => {
                     change = Some(request.resolve_callback(&argument)?);
@@ -227,6 +228,7 @@ impl ComponentMaterializer for SwitchMaterializer {
                 CommonOp::Size(size) => component.with_size(size),
                 CommonOp::Label(label) => component.label(label),
                 CommonOp::Tooltip(tooltip) => component.tooltip(tooltip),
+                CommonOp::AccessibilityLabel(label) => component.accessibility_label(label),
                 CommonOp::Checked(checked) => component.checked(checked),
                 CommonOp::Change(argument) => {
                     change = Some(request.resolve_callback(&argument)?);
@@ -266,6 +268,8 @@ impl ComponentMaterializer for ToggleMaterializer {
                 CommonOp::Size(size) => component.with_size(size),
                 CommonOp::Label(label) => component.label(label),
                 CommonOp::Tooltip(tooltip) => component.tooltip(tooltip),
+                // Toggle does not declare `accessibility_label`: its label is its name.
+                CommonOp::AccessibilityLabel(_) => component,
                 CommonOp::Checked(checked) => component.checked(checked),
                 CommonOp::Outline => component.outline(),
                 CommonOp::Change(argument) => {
@@ -359,6 +363,13 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
         let mut methods = state_methods(name);
         if name == "Toggle" {
             methods.push(support::outline_method());
+        } else {
+            methods.push(support::string_method(
+                name,
+                "accessibility_label",
+                "Sets the accessible name independently of the visible label.",
+                CommonOp::AccessibilityLabel,
+            ));
         }
         registry.register(ComponentDescriptor::new(name, materializer)
 .with_constructors(vec![id_constructor(name)])

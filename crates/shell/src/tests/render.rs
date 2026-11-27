@@ -4013,6 +4013,74 @@ fn the_bundled_example_application_loads_and_renders(cx: &mut TestAppContext) {
     assert!(tree.contains("text"), "example has no text: {tree}");
 }
 
+/// Components whose Rust builder takes an accessible name expose it to
+/// scripts too, instead of refusing `accessibility_label` as an unknown
+/// method (#3662).
+#[cfg(feature = "components")]
+#[gpui::test]
+fn component_accessible_names_reach_scripts(cx: &mut TestAppContext) {
+    let components = crate::components::components().expect("catalog");
+    for component in [
+        "Clipboard",
+        "Select",
+        "DataTable",
+        "SidebarMenuItem",
+        "SidebarToggleButton",
+        "NumberInput",
+        "Slider",
+        "Checkbox",
+        "Switch",
+    ] {
+        let descriptor = components
+            .descriptors()
+            .find(|descriptor| descriptor.name() == component)
+            .unwrap_or_else(|| panic!("{component} is registered"));
+        assert!(
+            descriptor
+                .methods()
+                .iter()
+                .any(|method| method.name() == "accessibility_label"),
+            "{component} must declare accessibility_label"
+        );
+    }
+
+    cx.update(crate::components::init);
+    let runtime = crate::components::new_isolated_runtime().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let source = r#"
+import { View, div } from "gpui-kit";
+import { Clipboard, Select, SidebarToggleButton } from "gpui-component";
+
+export default class Named extends View {
+  render(cx) {
+    return div()
+      .child(new Clipboard("token").value("abc").accessibility_label("Copy token"))
+      .child(new Select("country", () => [], (_row) => null, (_value, _cx) => {})
+        .accessibility_label("Country"))
+      .child(new SidebarToggleButton().accessibility_label("Toggle sidebar"));
+  }
+}
+"#;
+    let view_type = runtime.load_source("named", source).expect("load");
+    let window = cx.add_window(|_, _| Empty);
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    let object = context
+        .update(|window, cx| runtime.instantiate(&view_type, window, cx))
+        .expect("instantiate");
+    let tree = context
+        .update(|window, cx| runtime.render_to_spec(&object, None, window, cx))
+        .expect("accessibility_label is a declared method on each component");
+    // Registered component methods are recorded by name only.
+    for component in ["Clipboard", "Select", "SidebarToggleButton"] {
+        assert!(
+            tree.lines()
+                .any(|line| line.trim_start().starts_with(component)
+                    && line.contains(":accessibility_label(registered)")),
+            "{component} did not record accessibility_label: {tree}"
+        );
+    }
+}
+
 #[gpui::test]
 fn state_styles_reuse_the_ordinary_style_methods(cx: &mut TestAppContext) {
     cx.update(|cx| crate::init(cx));

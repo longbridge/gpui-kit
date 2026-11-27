@@ -16,6 +16,7 @@ struct ClipboardPayload {
 enum ClipboardOp {
     Value(String),
     Tooltip(String),
+    AccessibilityLabel(String),
 }
 struct ClipboardMaterializer;
 impl ClipboardMaterializer {
@@ -31,6 +32,9 @@ impl ClipboardMaterializer {
             |component, operation| match operation {
                 ClipboardOp::Value(value) => component.value(value.clone()),
                 ClipboardOp::Tooltip(text) => component.tooltip(text.clone()),
+                ClipboardOp::AccessibilityLabel(label) => {
+                    component.accessibility_label(label.clone())
+                }
             },
         ))
     }
@@ -86,6 +90,11 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                     "Sets the copy button tooltip.",
                     ClipboardOp::Tooltip,
                 ),
+                string_method(
+                    "accessibility_label",
+                    "Sets the accessible name of the icon-only copy button; the tooltip is a hint, not a name.",
+                    ClipboardOp::AccessibilityLabel,
+                ),
             ])
             .with_documentation(
                 "A button that copies a configured string to the system clipboard.",
@@ -105,6 +114,7 @@ mod tests {
                 &[
                     ClipboardOp::Value("value".into()),
                     ClipboardOp::Tooltip("Copy".into()),
+                    ClipboardOp::AccessibilityLabel("Copy token".into()),
                 ],
             )
             .unwrap()

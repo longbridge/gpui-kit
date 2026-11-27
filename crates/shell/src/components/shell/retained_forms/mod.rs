@@ -297,6 +297,7 @@ impl ComponentMaterializer for NumberInputMaterializer {
             input = match op {
                 FormOp::Disabled(value) => input.disabled(*value),
                 FormOp::Placeholder(value) => input.placeholder(value.clone()),
+                FormOp::AccessibilityLabel(value) => input.accessibility_label(value.clone()),
                 _ => input,
             };
         }
@@ -336,6 +337,7 @@ impl ComponentMaterializer for SliderMaterializer {
                 FormOp::Disabled(value) => slider.disabled(*value),
                 FormOp::Vertical => slider.vertical(),
                 FormOp::Reverse => slider.reverse(),
+                FormOp::AccessibilityLabel(value) => slider.accessibility_label(value.clone()),
                 _ => slider,
             };
         }
@@ -447,6 +449,21 @@ fn aria_label_method(owner: &'static str) -> MethodDescriptor {
         "aria_label",
         vec![ArgumentDescriptor::new("label", ArgumentSchema::String)],
         move |arguments| string_op(arguments, &format!("{owner}.aria_label"), FormOp::AriaLabel),
+    )
+    .with_documentation("Sets the name announced by accessibility clients.")
+}
+
+fn accessibility_label_method(owner: &'static str) -> MethodDescriptor {
+    MethodDescriptor::new(
+        "accessibility_label",
+        vec![ArgumentDescriptor::new("label", ArgumentSchema::String)],
+        move |arguments| {
+            string_op(
+                arguments,
+                &format!("{owner}.accessibility_label"),
+                FormOp::AccessibilityLabel,
+            )
+        },
     )
     .with_documentation("Sets the name announced by accessibility clients.")
 }
@@ -594,6 +611,7 @@ pub fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
         "InputState",
         vec![
             placeholder_method("NumberInput"),
+            accessibility_label_method("NumberInput"),
             disabled_method("NumberInput"),
         ],
         "A retained numeric text field with increment and decrement controls.",
@@ -629,6 +647,7 @@ pub fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
                 Ok(ComponentPayload::new(FormOp::Reverse))
             })
             .with_documentation("Reverses the filled side for a single-value slider."),
+            accessibility_label_method("Slider"),
             disabled_method("Slider"),
         ],
         "A retained numeric slider using SliderState defaults.",
