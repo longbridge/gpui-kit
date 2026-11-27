@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, ClickEvent, FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
-    Pixels, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
+    Pixels, RenderOnce, Role, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
     div,
 };
 use smallvec::SmallVec;
@@ -255,6 +255,16 @@ impl AlertDialog {
     #[doc(hidden)]
     pub fn layer(mut self, index: usize, topmost: bool) -> Self {
         self.0 = self.0.layer(index, topmost);
+        self
+    }
+    #[doc(hidden)]
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.0 = self.0.accessibility_label(label);
+        self
+    }
+    #[doc(hidden)]
+    pub fn accessibility_description(mut self, description: impl Into<SharedString>) -> Self {
+        self.0 = self.0.accessibility_description(description);
         self
     }
     #[doc(hidden)]

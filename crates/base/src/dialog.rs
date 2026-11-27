@@ -126,6 +126,7 @@ pub struct Dialog {
     focus: FocusHandle,
     role: Role,
     accessibility_label: Option<SharedString>,
+    accessibility_description: Option<SharedString>,
     layer: usize,
     keyboard: bool,
     overlay_closable: bool,
@@ -428,6 +429,7 @@ impl Dialog {
             focus: cx.focus_handle(),
             role: Role::Dialog,
             accessibility_label: None,
+            accessibility_description: None,
             layer: 0,
             keyboard: true,
             overlay_closable: true,
@@ -495,6 +497,12 @@ impl Dialog {
     /// Names the dialog for accessibility clients (its title, typically).
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
+        self
+    }
+    /// Describes the dialog for accessibility clients, read after its name.
+    #[doc(hidden)]
+    pub fn accessibility_description(mut self, description: impl Into<SharedString>) -> Self {
+        self.accessibility_description = Some(description.into());
         self
     }
     #[doc(hidden)]
@@ -570,6 +578,16 @@ impl RenderOnce for Dialog {
                     .role(self.role)
                     .when_some(self.accessibility_label.clone(), |this, label| {
                         this.aria_label(label)
+                    })
+                    .when_some(self.accessibility_description.clone(), |this, text| {
+                        this.aria_description(text)
+                    })
+                    // GPUI has no `aria_modal` setter. Modal tells assistive
+                    // technology that content outside the dialog is inert; only
+                    // the topmost dialog is, so a stacked alert also leaves the
+                    // dialog below it out of reach.
+                    .when(self.topmost, |this| {
+                        this.a11y_synthetic_children(|builder| builder.parent_node().set_modal())
                     })
                     .track_focus(&self.focus)
                     .focus_trap(format!("dialog-{}", self.layer), &self.focus)
