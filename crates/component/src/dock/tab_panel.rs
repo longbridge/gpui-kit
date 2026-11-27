@@ -389,6 +389,7 @@ impl TabGroupSkin {
         let drag = tab_drag(group, ix, cx);
 
         h_flex()
+            .id("tab-title")
             .flex_row_dir(cx)
             .justify_between()
             .h(px(30.))
@@ -442,6 +443,25 @@ impl TabGroupSkin {
                     .child(self.render_toolbar(group, window, cx))
                     .children(right_button),
             )
+            // The title row stands in for the tab strip, so a tab dropped on
+            // it joins the group, as it would on the group's content. Its own
+            // panel dropped back is ignored by base.
+            .when(group.is_droppable(), |this| {
+                this.drag_over::<DragPanel>(|this, _, _, cx| this.bg(cx.theme().tokens.drop_target))
+                    .on_drop({
+                        let group = group.clone();
+                        move |drag: &DragPanel, window, cx| {
+                            group.drop_panel(drag.clone(), None, true, window, cx);
+                        }
+                    })
+                    .drag_over::<AnyDrag>(|this, _, _, cx| this.bg(cx.theme().tokens.drop_target))
+                    .on_drop({
+                        let group = group.clone();
+                        move |item: &AnyDrag, window, cx| {
+                            group.drop_item(item.clone(), None, window, cx);
+                        }
+                    })
+            })
             .into_any_element()
     }
 
@@ -2036,6 +2056,60 @@ mod tests {
         assert!(
             cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_none(),
             "a collapsed group must not offer a close button"
+        );
+    }
+
+    /// #4197: a group showing one panel draws a title row instead of a tab
+    /// strip, and that row has to take a dropped tab like the strip does.
+    #[gpui::test]
+    fn a_tab_dropped_on_a_one_panel_title_row_joins_that_group(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(gpui::size(px(800.), px(600.)));
+
+        let (left, right) = cx.update(|window, cx| {
+            let left = panel_handle(Probe::new(cx));
+            let right = panel_handle(Probe::new(cx));
+            let ids = (left.panel_id(cx), right.panel_id(cx));
+            let layout = DockLayout::h_split()
+                .child(DockLayout::tabs().panel_view(left, cx), None)
+                .child(DockLayout::tabs().panel_view(right, cx), None);
+            area.update(cx, |area, cx| area.set_center(layout, window, cx));
+            ids
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| crate::test_redraw(window, cx));
+
+        let group_of = |cx: &mut VisualTestContext, panel| {
+            cx.update(|_, cx| {
+                area.read(cx)
+                    .layout(DockPlacement::Center)
+                    .and_then(|tree| tree.find_panel_node(panel))
+            })
+        };
+        assert_ne!(group_of(cx, left), group_of(cx, right));
+
+        // Each half is 400px wide; the title rows are the top 30px. Grab the
+        // left title near its start and release on the right title, clear of
+        // its toolbar.
+        let from = gpui::point(px(40.), px(15.));
+        let to = gpui::point(px(460.), px(15.));
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(
+            gpui::point(px(60.), px(15.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+
+        assert_eq!(
+            group_of(cx, left),
+            group_of(cx, right),
+            "the dragged panel joins the group whose title row it was dropped on"
         );
     }
 }
