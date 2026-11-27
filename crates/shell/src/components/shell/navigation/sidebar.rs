@@ -20,10 +20,11 @@ use super::{Carrier, take};
 #[derive(Clone)]
 struct Id(String);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum ToggleOp {
     Side(Side),
     Collapsed(bool),
+    AccessibilityLabel(String),
 }
 
 #[derive(Clone)]
@@ -32,6 +33,7 @@ enum ItemOp {
     ClickToOpen(bool),
     ClickToToggle(bool),
     Icon(IconName),
+    AccessibilityLabel(String),
 }
 
 #[derive(Clone, Copy)]
@@ -57,6 +59,24 @@ fn bool_method<T: 'static + Send + Sync>(
         move |arguments| match arguments {
             [ComponentArgument::Boolean(value)] => Ok(ComponentPayload::new(make(*value))),
             _ => Err(format!("{owner}.{name} expects one boolean")),
+        },
+    )
+    .with_documentation(docs)
+}
+
+fn accessibility_label_method<T: 'static + Send + Sync>(
+    owner: &'static str,
+    docs: &'static str,
+    make: fn(String) -> T,
+) -> MethodDescriptor {
+    MethodDescriptor::new(
+        "accessibility_label",
+        vec![ArgumentDescriptor::new("label", ArgumentSchema::String)],
+        move |arguments| match arguments {
+            [ComponentArgument::String(value)] => Ok(ComponentPayload::new(make(value.clone()))),
+            _ => Err(format!(
+                "{owner}.accessibility_label(label) expects a string"
+            )),
         },
     )
     .with_documentation(docs)
@@ -141,6 +161,7 @@ impl ComponentMaterializer for MenuItemMaterializer {
                 ItemOp::ClickToOpen(value) => item.click_to_open(*value),
                 ItemOp::ClickToToggle(value) => item.click_to_toggle(*value),
                 ItemOp::Icon(value) => item.icon(value.clone()),
+                ItemOp::AccessibilityLabel(value) => item.accessibility_label(value.clone()),
             };
         }
         item = item.active(request.selected()).disable(request.disabled());
@@ -251,6 +272,7 @@ impl ComponentMaterializer for ToggleMaterializer {
             toggle = match operation {
                 ToggleOp::Side(value) => toggle.side(*value),
                 ToggleOp::Collapsed(value) => toggle.collapsed(*value),
+                ToggleOp::AccessibilityLabel(value) => toggle.accessibility_label(value.clone()),
             };
         }
         if let Some(callback) = request.on_click() {
@@ -285,6 +307,11 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
 .with_constructors(vec![id_constructor("SidebarMenuItem", "label")])
 .with_methods(vec![
             on_click_method("SidebarMenuItem"),
+            accessibility_label_method(
+                "SidebarMenuItem",
+                "Sets the accessible name of the row; it defaults to the visible label.",
+                ItemOp::AccessibilityLabel,
+            ),
             bool_method(
                 "SidebarMenuItem",
                 "selected",
@@ -394,6 +421,11 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
 .with_constructors(vec![nullary("SidebarToggleButton")])
 .with_methods(vec![
             on_click_method("SidebarToggleButton"),
+            accessibility_label_method(
+                "SidebarToggleButton",
+                "Sets the accessible name of the icon-only toggle, which has none by default.",
+                ToggleOp::AccessibilityLabel,
+            ),
             side_method("SidebarToggleButton", ToggleOp::Side),
             bool_method(
                 "SidebarToggleButton",

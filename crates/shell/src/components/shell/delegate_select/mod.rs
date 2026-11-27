@@ -29,6 +29,7 @@ enum Op {
     Placeholder(String),
     MenuWidth(f32),
     Disabled(bool),
+    AccessibilityLabel(String),
 }
 
 #[derive(Clone)]
@@ -211,6 +212,7 @@ impl RenderOnce for BoundSelect {
                 Op::Placeholder(value) => select.placeholder(value),
                 Op::MenuWidth(value) => select.menu_width(gpui::px(value)),
                 Op::Disabled(value) => select.disabled(value),
+                Op::AccessibilityLabel(value) => select.accessibility_label(value),
             };
         }
         select.style().refine(&self.style);
@@ -296,6 +298,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             method("placeholder", "Sets the text shown while nothing is selected.", ArgumentSchema::String, |arg| match arg { ComponentArgument::String(value) => Some(Op::Placeholder(value.clone())), _ => None }),
             method("menu_width", "Sets the popup menu width in pixels.", ArgumentSchema::Number, |arg| match arg { ComponentArgument::Number(value) if value.is_finite() && *value > 0.0 && *value <= f32::MAX as f64 => Some(Op::MenuWidth(*value as f32)), _ => None }),
             method("disabled", "Disables the select.", ArgumentSchema::Boolean, |arg| match arg { ComponentArgument::Boolean(value) => Some(Op::Disabled(*value)), _ => None }),
+            method("accessibility_label", "Names the select for assistive technology; the placeholder and selected value describe its value, not the control.", ArgumentSchema::String, |arg| match arg { ComponentArgument::String(value) => Some(Op::AccessibilityLabel(value.clone())), _ => None }),
         ])
 .with_documentation("Native retained single-value Select backed by immutable `{id,label,disabled?}` snapshots and a lazy row renderer."))?;
     Ok(())

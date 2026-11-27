@@ -108,8 +108,9 @@ struct Payload {
     rows: ComponentArgument,
     cell: ComponentArgument,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Op {
+    AccessibilityLabel(String),
     Stripe(bool),
     Bordered(bool),
     Scrollbars(bool, bool),
@@ -140,7 +141,7 @@ impl ComponentMaterializer for Materializer {
         let cell = request.resolve_element_callback(&payload.cell)?;
         let ops = request
             .methods()
-            .filter_map(|m| m.payload().downcast_ref::<Op>().copied())
+            .filter_map(|m| m.payload().downcast_ref::<Op>().cloned())
             .collect::<Vec<_>>();
         let style = request.take_style();
         Ok(DataTableHost {
@@ -198,6 +199,7 @@ impl RenderOnce for DataTableHost {
                 Op::Stripe(value) => table.stripe(*value),
                 Op::Bordered(value) => table.bordered(*value),
                 Op::Scrollbars(value, h) => table.scrollbar_visible(*value, *h),
+                Op::AccessibilityLabel(label) => table.accessibility_label(label.clone()),
                 _ => table,
             };
         }
@@ -252,6 +254,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             ArgumentDescriptor::new("render_cell", ArgumentSchema::Callback("(row: unknown, column: string, cx: Context) => Element")),
         ], |args| match args { [state @ ComponentArgument::Entity { .. }, rows @ ComponentArgument::Callback(_), cell @ ComponentArgument::Callback(_)] => Ok(ComponentPayload::new(Payload { state: state.clone(), rows: rows.clone(), cell: cell.clone() })), _ => Err("DataTable expects DataTableState, rows callback and cell renderer".into()) })])
 .with_methods(vec![
+            MethodDescriptor::new("accessibility_label", vec![ArgumentDescriptor::new("label", ArgumentSchema::String)], |args| match args { [ComponentArgument::String(label)] => Ok(ComponentPayload::new(Op::AccessibilityLabel(label.clone()))), _ => Err("DataTable.accessibility_label(label) expects a string".into()) }).with_documentation("Names the table for assistive technology."),
             bool_method("DataTable", "stripe", "Sets native DataTable behavior.", Op::Stripe), bool_method("DataTable", "bordered", "Sets native DataTable behavior.", Op::Bordered),
             MethodDescriptor::new("scrollbar_visible", vec![ArgumentDescriptor::new("vertical", ArgumentSchema::Boolean), ArgumentDescriptor::new("horizontal", ArgumentSchema::Boolean)], |args| match args { [ComponentArgument::Boolean(value), ComponentArgument::Boolean(h)] => Ok(ComponentPayload::new(Op::Scrollbars(*value, *h))), _ => Err("DataTable.scrollbar_visible expects two booleans".into()) }).with_documentation("Chooses when the table shows its scrollbars."),
             bool_method("DataTable", "row_selectable", "Sets native DataTable behavior.", Op::RowSelectable), bool_method("DataTable", "column_selectable", "Sets native DataTable behavior.", Op::ColSelectable), bool_method("DataTable", "cell_selectable", "Sets native DataTable behavior.", Op::CellSelectable), bool_method("DataTable", "row_header", "Sets native DataTable behavior.", Op::RowHeader), bool_method("DataTable", "sortable", "Sets native DataTable behavior.", Op::Sortable), bool_method("DataTable", "column_resizable", "Sets native DataTable behavior.", Op::ColResizable), bool_method("DataTable", "column_movable", "Sets native DataTable behavior.", Op::ColMovable),

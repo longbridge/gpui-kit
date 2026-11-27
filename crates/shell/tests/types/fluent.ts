@@ -1,5 +1,6 @@
 import { div, View, Background, type Element, type NativeElement, type Context, type BoxShadowSpec } from 'gpui-kit';
 import { Button, Spinner, Separator, Skeleton, HForm, Field, type SpinnerElement } from 'gpui-component';
+import { Clipboard, SidebarToggleButton } from 'gpui-component';
 import { TextView } from 'gpui-base';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from 'gpui-component';
 import {
@@ -46,6 +47,8 @@ export default class FluentContracts extends View {
       Button.new('typed-action').label('Run').p(2)
         .accessibility_label('Run the primary action').primary()
         .on_click((_event, _cx) => {}),
+      new Clipboard('token').value('abc').accessibility_label('Copy token').p(2),
+      new SidebarToggleButton().accessibility_label('Toggle sidebar').p(2),
       div().rounded(10)
         .bg(Background.linear_gradient(180, Background.stop('#f7da74', 0), Background.stop('#fdcd12', 1)))
         .shadow(raised)

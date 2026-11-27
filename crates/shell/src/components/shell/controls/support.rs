@@ -12,6 +12,7 @@ pub(super) enum CommonOp {
     Size(Size),
     Label(String),
     Tooltip(String),
+    AccessibilityLabel(String),
     Checked(bool),
     Outline,
     Change(ComponentArgument),
