@@ -1228,8 +1228,7 @@ mod tests {
                     let mut nodes = nodes.borrow_mut();
                     nodes.clear();
                     for disabled in [false, true] {
-                        let mut node =
-                            gpui::accesskit::Node::new(gpui::accesskit::Role::Button);
+                        let mut node = gpui::accesskit::Node::new(gpui::accesskit::Role::Button);
                         CalendarItem::new(
                             "disabled-probe",
                             CalendarItemState::new(CalendarItemKind::Day).disabled(disabled),
