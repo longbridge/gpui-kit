@@ -4,7 +4,7 @@ use crate::{StyledExt, TextSelectionLayer};
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, ClipboardItem, Context, Div, Entity, Global,
     InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, Stateful, StyleRefinement,
-    Styled, Subscription, Window, actions, div,
+    Styled, Subscription, Window, actions, div, prelude::FluentBuilder as _,
 };
 use std::{any::TypeId, rc::Rc};
 
@@ -100,12 +100,25 @@ pub trait RootPlugin: Render + Sized {
     ) -> impl IntoElement {
         surface
     }
+
+    /// Whether this plugin's overlay currently presents anything, such as an
+    /// open dialog or a visible toast.
+    ///
+    /// While the GPUI Inspector is picking, every element is pickable, so an
+    /// empty full-window overlay would cover the application content. Root
+    /// collapses the overlay container of a plugin that returns `false` during
+    /// picking only; normal rendering and hit testing are unaffected. The
+    /// default keeps the overlay in place.
+    fn has_open_layers(&self, _cx: &App) -> bool {
+        true
+    }
 }
 
 type PluginFactory = Rc<dyn Fn(&mut Window, &mut Context<Root>) -> Plugin>;
 type Prepare = Rc<dyn Fn(&mut Window, &mut App)>;
 type SurfaceStyle = Rc<dyn Fn(&mut Stateful<Div>, &mut Window, &mut App)>;
 type Decorate = Rc<dyn Fn(AnyElement, &Root, &mut Window, &mut App) -> AnyElement>;
+type HasOpenLayers = Rc<dyn Fn(&App) -> bool>;
 #[derive(Default)]
 struct PluginRegistry(Vec<(TypeId, PluginFactory)>);
 impl Global for PluginRegistry {}
@@ -114,6 +127,7 @@ struct Plugin {
     prepare: Prepare,
     style: SurfaceStyle,
     decorate: Decorate,
+    has_open_layers: HasOpenLayers,
 }
 
 /// The window's content and overlay host, independent of any styled component library.
@@ -154,6 +168,7 @@ impl Root {
             let prepare = entity.clone();
             let style = entity.clone();
             let decorate = entity.clone();
+            let has_open_layers = entity.clone();
             Plugin {
                 view: entity.into(),
                 prepare: Rc::new(move |window, cx| {
@@ -167,6 +182,7 @@ impl Root {
                         state.decorate(surface, root, window, cx).into_any_element()
                     })
                 }),
+                has_open_layers: Rc::new(move |cx| has_open_layers.read(cx).has_open_layers(cx)),
             }
         });
         let plugins = &mut cx.global_mut::<PluginRegistry>().0;
@@ -280,6 +296,7 @@ impl Render for Root {
         for plugin in &self.plugins {
             (plugin.prepare)(window, cx);
         }
+        let picking = window.is_inspector_picking(cx);
         let mut content = div()
             .id("root")
             .key_context(CONTEXT)
@@ -290,12 +307,21 @@ impl Render for Root {
             .size_full()
             .child(TextSelectionLayer)
             .child(self.view.clone())
-            .child(
+            .children(self.plugins.iter().map(|plugin| {
+                // An idle overlay collapses while the Inspector picks, so the
+                // pick reaches application content rather than its container.
+                let collapse = picking && !(plugin.has_open_layers)(cx);
                 div()
                     .absolute()
-                    .inset_0()
-                    .children(self.plugins.iter().map(|plugin| plugin.view.clone())),
-            );
+                    .map(|this| {
+                        if collapse {
+                            this.size_0()
+                        } else {
+                            this.inset_0()
+                        }
+                    })
+                    .child(plugin.view.clone())
+            }));
         for plugin in &self.plugins {
             (plugin.style)(&mut content, window, cx);
         }
