@@ -1,4 +1,4 @@
-use crate::TestSupportExt as _;
+use crate::{A11yDisabledExt as _, TestSupportExt as _};
 use std::rc::Rc;
 
 use gpui::{
@@ -356,6 +356,7 @@ impl RenderOnce for AccordionTrigger {
             )
             .children(self.children)
             .refine_style(&self.style)
+            .a11y_disabled(self.disabled)
     }
 }
 
@@ -503,5 +504,47 @@ mod tests {
         let nodes = captured.borrow();
         assert_eq!(nodes[0].role(), Role::Heading);
         assert_eq!(nodes[1].role(), Role::Region);
+    }
+
+    struct DisabledProbe {
+        nodes: std::rc::Rc<std::cell::RefCell<Vec<(bool, accesskit::Node)>>>,
+    }
+
+    impl gpui::Render for DisabledProbe {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let nodes = self.nodes.clone();
+            canvas(
+                move |_, window, cx| {
+                    let mut nodes = nodes.borrow_mut();
+                    nodes.clear();
+                    for disabled in [false, true] {
+                        let mut node = accesskit::Node::new(Role::Button);
+                        AccordionTrigger::new("trigger")
+                            .disabled(disabled)
+                            .render(window, cx)
+                            .into_element()
+                            .write_a11y_info(&mut node);
+                        nodes.push((disabled, node));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_disabled_trigger_marks_its_node_disabled(cx: &mut gpui::TestAppContext) {
+        let nodes = std::rc::Rc::default();
+        let (_, view) = cx.add_window_view({
+            let nodes = std::rc::Rc::clone(&nodes);
+            move |_, _| DisabledProbe { nodes }
+        });
+        view.update(|window, cx| window.draw(cx).clear(cx));
+
+        let nodes = nodes.borrow();
+        assert_eq!(nodes.len(), 2);
+        for (disabled, node) in nodes.iter() {
+            assert_eq!(node.is_disabled(), *disabled, "disabled {disabled}");
+        }
     }
 }
