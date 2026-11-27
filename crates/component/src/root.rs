@@ -531,8 +531,10 @@ impl WindowState {
                         .iter()
                         .filter(|dialog| !dialog.closing)
                         .count();
-                    // Only restore focus if no new dialogs were opened during animation
-                    if current_open_dialogs == open_dialogs {
+                    // Only restore focus if no new dialogs were opened
+                    // during the animation, and nothing else has taken the
+                    // focus since the dialog blurred the window on close.
+                    if current_open_dialogs == open_dialogs && window.focused(cx).is_none() {
                         window.focus(&handle, cx);
                     }
                     this.pending_focus_restore = None;
