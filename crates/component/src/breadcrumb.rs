@@ -7,7 +7,7 @@ use gpui::{
 };
 
 use crate::{ActiveTheme, Icon, IconName, StyledExt, h_flex};
-use gpui_base::{LayoutDirection, LogicalStyledExt as _};
+use gpui_base::{A11yDisabledExt as _, LayoutDirection, LogicalStyledExt as _};
 
 /// A breadcrumb navigation element.
 #[derive(IntoElement)]
@@ -112,6 +112,7 @@ impl RenderOnce for BreadcrumbItem {
                     })
                 })
             })
+            .a11y_disabled(self.disabled)
     }
 }
 
@@ -181,5 +182,54 @@ impl RenderOnce for Breadcrumb {
             .text_color(cx.theme().muted_foreground)
             .refine_style(&self.style)
             .children(children)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::Element as _;
+
+    struct Probe {
+        nodes: std::rc::Rc<std::cell::RefCell<Vec<(bool, gpui::accesskit::Node)>>>,
+    }
+
+    impl gpui::Render for Probe {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let nodes = self.nodes.clone();
+            gpui::canvas(
+                move |_, window, cx| {
+                    let mut nodes = nodes.borrow_mut();
+                    nodes.clear();
+                    for disabled in [false, true] {
+                        let element = BreadcrumbItem::new("Crumb")
+                            .disabled(disabled)
+                            .render(window, cx)
+                            .into_element();
+                        let mut node = gpui::accesskit::Node::new(Role::Unknown);
+                        element.write_a11y_info(&mut node);
+                        nodes.push((disabled, node));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_disabled_breadcrumb_item_marks_its_node_disabled(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let nodes = std::rc::Rc::default();
+        let (_, cx) = cx.add_window_view({
+            let nodes = std::rc::Rc::clone(&nodes);
+            move |_, _| Probe { nodes }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let nodes = nodes.borrow();
+        assert_eq!(nodes.len(), 2);
+        for (disabled, node) in nodes.iter() {
+            assert_eq!(node.is_disabled(), *disabled, "disabled {disabled}");
+        }
     }
 }
