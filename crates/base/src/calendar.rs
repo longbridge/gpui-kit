@@ -176,9 +176,10 @@ pub struct CalendarState {
     current_month: u8,
     years: Vec<Vec<i32>>,
     year_page: i32,
-    today: civil::Date,
     number_of_months: usize,
     disabled_matcher: Option<Rc<Matcher>>,
+    /// Day the keyboard cursor sits on (single tab stop, ARIA grid style).
+    focused_day: Option<civil::Date>,
 }
 
 impl CalendarState {
@@ -192,9 +193,9 @@ impl CalendarState {
             current_month: today.month() as u8,
             years: vec![],
             year_page: 0,
-            today,
             number_of_months: 1,
             disabled_matcher: None,
+            focused_day: None,
         }
         .year_range((i32::from(today.year()) - 50, i32::from(today.year()) + 50))
     }
@@ -371,8 +372,10 @@ impl CalendarState {
     pub fn current_month(&self) -> u8 {
         self.current_month
     }
+    /// Today's date on the system clock, read on each call so that a
+    /// state kept open across midnight marks the new day.
     pub fn today(&self) -> civil::Date {
-        self.today
+        jiff::ZonedDateTime::now().date()
     }
     pub fn years_on_page(&self) -> &[i32] {
         self.years
@@ -389,6 +392,86 @@ impl CalendarState {
         self.view = CalendarView::Day;
     }
 }
+impl CalendarState {
+    /// The day the keyboard acts on: the moved-to day, else the selected
+    /// day, else today, else the first of the visible month.
+    fn keyboard_day(&self) -> civil::Date {
+        let first = civil::Date::new(self.current_year as i16, self.current_month as i8, 1)
+            .unwrap_or_else(|_| self.today());
+        let visible = |d: &civil::Date| {
+            let n = (d.year() as i32 - self.current_year) * 12 + d.month() as i32
+                - self.current_month as i32;
+            n >= 0 && (n as usize) < self.number_of_months.max(1)
+        };
+        self.focused_day
+            .or(self.date.start())
+            .or_else(|| Some(self.today()))
+            .filter(visible)
+            .unwrap_or(first)
+    }
+
+    /// Moves the keyboard day and pages the view so it stays visible.
+    fn focus_day(&mut self, day: civil::Date) {
+        self.focused_day = Some(day);
+        let n = (day.year() as i32 - self.current_year) * 12 + day.month() as i32
+            - self.current_month as i32;
+        if n < 0 || n as usize >= self.number_of_months.max(1) {
+            self.current_year = day.year().into();
+            self.current_month = day.month() as u8;
+        }
+    }
+
+    /// Handles the WAI-ARIA date picker keys in the day view. Returns
+    /// whether the key was consumed.
+    fn handle_key(
+        &mut self,
+        key: &str,
+        shift: bool,
+        first_day: Weekday,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.view.is_day() {
+            return false;
+        }
+        let day = self.keyboard_day();
+        let months = |n: i32| jiff::Span::new().months(n);
+        let target = match key {
+            "left" => day.yesterday().ok(),
+            "right" => day.tomorrow().ok(),
+            "up" => day.checked_sub(jiff::Span::new().days(7)).ok(),
+            "down" => day.checked_add(jiff::Span::new().days(7)).ok(),
+            "home" => {
+                let back = (day.weekday().to_sunday_zero_offset() as i64
+                    - first_day.to_sunday_zero_offset() as i64)
+                    .rem_euclid(7);
+                day.checked_sub(jiff::Span::new().days(back)).ok()
+            }
+            "end" => {
+                let back = (day.weekday().to_sunday_zero_offset() as i64
+                    - first_day.to_sunday_zero_offset() as i64)
+                    .rem_euclid(7);
+                day.checked_add(jiff::Span::new().days(6 - back)).ok()
+            }
+            "pageup" => day
+                .checked_sub(if shift { months(12) } else { months(1) })
+                .ok(),
+            "pagedown" => day
+                .checked_add(if shift { months(12) } else { months(1) })
+                .ok(),
+            "enter" | "space" => {
+                self.focused_day = Some(day);
+                self.activate_date(day, cx);
+                return true;
+            }
+            _ => return false,
+        };
+        let Some(target) = target else { return false };
+        self.focus_day(target);
+        cx.notify();
+        true
+    }
+}
+
 impl EventEmitter<CalendarEvent> for CalendarState {}
 impl Render for CalendarState {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -760,6 +843,7 @@ impl RenderOnce for Calendar {
                     ));
                 }
                 month = month.child(header_row);
+                let today = self.state.read(cx).today();
                 for (week_index, week) in weeks.iter().enumerate() {
                     let mut week_row = h_flex().flex_row_dir(cx);
                     for date in week {
@@ -774,7 +858,7 @@ impl RenderOnce for Calendar {
                                 .in_range(s.date().is_in_range(&date))
                                 .muted(date.month() as u32 != m || disabled)
                                 .disabled(disabled)
-                                .today(date == s.today())
+                                .today(date == today)
                         };
                         let mut item =
                             CalendarItem::new(format!("calendar-{date}-{offset}-{week_index}"), st)
@@ -826,9 +910,30 @@ impl RenderOnce for Calendar {
                 body = body.child((self.item)(item, st, window, cx));
             }
         }
+        let entity = self.state.clone();
+        let first_day = self.first_day_of_week;
         v_flex()
             .id(self.id)
             .track_focus(&self.state.read(cx).focus_handle)
+            .on_key_down(move |event, window, cx| {
+                let modifiers = event.keystroke.modifiers;
+                if window.default_prevented()
+                    || event.keystroke.is_ime_in_progress()
+                    || modifiers.control
+                    || modifiers.alt
+                    || modifiers.platform
+                {
+                    return;
+                }
+                let key = event.keystroke.key.clone();
+                let handled = entity.update(cx, |s, cx| {
+                    s.handle_key(&key, modifiers.shift, first_day, cx)
+                });
+                if handled {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            })
             .child(header)
             .child(body)
             .refine_style(&self.style)
@@ -859,6 +964,37 @@ mod tests {
     use gpui::{AppContext as _, Context, Entity, IntoElement, Render, Subscription, Window};
 
     use super::*;
+
+    #[gpui::test]
+    fn calendar_keyboard_moves_pages_and_selects(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = cx.add_window_view(|window, cx| CalendarState::new(window, cx));
+        cx.update(|_, cx| {
+            state.update(cx, |s, cx| {
+                s.apply_date(Date::Single(Some(civil::date(2026, 1, 30))));
+                let first = Weekday::Sunday;
+                assert!(s.handle_key("right", false, first, cx));
+                assert!(s.handle_key("right", false, first, cx));
+                assert_eq!(s.keyboard_day(), civil::date(2026, 2, 1));
+                assert_eq!((s.current_year(), s.current_month()), (2026, 2));
+                assert!(s.handle_key("up", false, first, cx));
+                assert_eq!(s.keyboard_day(), civil::date(2026, 1, 25));
+                assert!(s.handle_key("pagedown", false, first, cx));
+                assert_eq!(s.keyboard_day(), civil::date(2026, 2, 25));
+                assert!(s.handle_key("pageup", true, first, cx));
+                assert_eq!(s.keyboard_day(), civil::date(2025, 2, 25));
+                assert!(s.handle_key("home", false, first, cx));
+                assert_eq!(s.keyboard_day().weekday(), Weekday::Sunday);
+                assert!(s.handle_key("end", false, first, cx));
+                assert_eq!(s.keyboard_day().weekday(), Weekday::Saturday);
+                let day = s.keyboard_day();
+                assert!(s.handle_key("enter", false, first, cx));
+                assert_eq!(s.date(), Date::Single(Some(day)));
+                assert!(!s.handle_key("a", false, first, cx));
+                s.set_view(CalendarView::Month);
+                assert!(!s.handle_key("right", false, first, cx));
+            })
+        });
+    }
 
     #[gpui::test]
     fn calendar_items_expose_names_in_every_view(cx: &mut gpui::TestAppContext) {
@@ -940,6 +1076,17 @@ mod tests {
         });
         state
     }
+    #[gpui::test]
+    fn today_follows_the_system_clock(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = cx.add_window_view(CalendarState::new);
+        // `today` is read from the clock rather than stored when the state is
+        // created, so a calendar kept open past midnight marks the new day.
+        let before = jiff::ZonedDateTime::now().date();
+        let today = state.read_with(cx, |s, _| s.today());
+        let after = jiff::ZonedDateTime::now().date();
+        assert!(today == before || today == after);
+    }
+
     #[gpui::test]
     fn range_selection_restarts_and_completes(cx: &mut gpui::TestAppContext) {
         let s = state(cx, Date::Range(None, None));
