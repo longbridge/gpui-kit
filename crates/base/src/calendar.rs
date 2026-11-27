@@ -176,7 +176,6 @@ pub struct CalendarState {
     current_month: u8,
     years: Vec<Vec<i32>>,
     year_page: i32,
-    today: civil::Date,
     number_of_months: usize,
     disabled_matcher: Option<Rc<Matcher>>,
 }
@@ -192,7 +191,6 @@ impl CalendarState {
             current_month: today.month() as u8,
             years: vec![],
             year_page: 0,
-            today,
             number_of_months: 1,
             disabled_matcher: None,
         }
@@ -371,8 +369,10 @@ impl CalendarState {
     pub fn current_month(&self) -> u8 {
         self.current_month
     }
+    /// Today's date on the system clock, read on each call so that a
+    /// state kept open across midnight marks the new day.
     pub fn today(&self) -> civil::Date {
-        self.today
+        jiff::ZonedDateTime::now().date()
     }
     pub fn years_on_page(&self) -> &[i32] {
         self.years
@@ -760,6 +760,7 @@ impl RenderOnce for Calendar {
                     ));
                 }
                 month = month.child(header_row);
+                let today = self.state.read(cx).today();
                 for (week_index, week) in weeks.iter().enumerate() {
                     let mut week_row = h_flex().flex_row_dir(cx);
                     for date in week {
@@ -774,7 +775,7 @@ impl RenderOnce for Calendar {
                                 .in_range(s.date().is_in_range(&date))
                                 .muted(date.month() as u32 != m || disabled)
                                 .disabled(disabled)
-                                .today(date == s.today())
+                                .today(date == today)
                         };
                         let mut item =
                             CalendarItem::new(format!("calendar-{date}-{offset}-{week_index}"), st)
@@ -940,6 +941,17 @@ mod tests {
         });
         state
     }
+    #[gpui::test]
+    fn today_follows_the_system_clock(cx: &mut gpui::TestAppContext) {
+        let (state, cx) = cx.add_window_view(CalendarState::new);
+        // `today` is read from the clock rather than stored when the state is
+        // created, so a calendar kept open past midnight marks the new day.
+        let before = jiff::ZonedDateTime::now().date();
+        let today = state.read_with(cx, |s, _| s.today());
+        let after = jiff::ZonedDateTime::now().date();
+        assert!(today == before || today == after);
+    }
+
     #[gpui::test]
     fn range_selection_restarts_and_completes(cx: &mut gpui::TestAppContext) {
         let s = state(cx, Date::Range(None, None));
