@@ -24,7 +24,7 @@ where
 
 type RenderItem = dyn Fn(usize, &TreeEntry, bool, &mut Window, &mut App) -> ListItem;
 type ContextMenuBuilder =
-    dyn Fn(usize, &TreeEntry, PopupMenu, &mut Window, &mut Context<TreeState>) -> PopupMenu;
+    dyn Fn(usize, &TreeEntry, PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu;
 
 /// A styled tree view that preserves the legacy `gpui-component` API while
 /// delegating tree behavior and interaction state to `gpui-base`.
@@ -53,10 +53,14 @@ impl Tree {
         }
     }
 
-    /// Add a context menu to the tree.
+    /// Add a context menu to the tree's rows, built for the row right-clicked.
+    ///
+    /// The builder gets the menu's own context, as
+    /// [`ContextMenuExt::context_menu`](crate::menu::ContextMenuExt::context_menu)'s
+    /// does, so the menu can hold submenus ([`PopupMenu::submenu`]).
     pub fn context_menu<F>(mut self, f: F) -> Self
     where
-        F: Fn(usize, &TreeEntry, PopupMenu, &mut Window, &mut Context<TreeState>) -> PopupMenu
+        F: Fn(usize, &TreeEntry, PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu
             + 'static,
     {
         self.context_menu_builder = Some(Rc::new(f));
@@ -118,17 +122,16 @@ impl RenderOnce for Tree {
                             let Some(build) = context_menu_builder.as_ref() else {
                                 return menu;
                             };
-                            context_menu_state.update(cx, |state, cx| {
-                                let Some(entry) = state
-                                    .entry(ix)
-                                    .filter(|entry| entry.item().id == id)
-                                    .filter(|entry| !entry.is_disabled())
-                                    .cloned()
-                                else {
-                                    return menu;
-                                };
-                                build(ix, &entry, menu, window, cx)
-                            })
+                            let Some(entry) = context_menu_state
+                                .read(cx)
+                                .entry(ix)
+                                .filter(|entry| entry.item().id == id)
+                                .filter(|entry| !entry.is_disabled())
+                                .cloned()
+                            else {
+                                return menu;
+                            };
+                            build(ix, &entry, menu, window, cx)
                         });
                         if entry_state.is_selected() {
                             *row_menu.borrow_mut() = Some(row.keyboard_trigger());
@@ -152,10 +155,11 @@ impl RenderOnce for Tree {
 mod tests {
     use super::*;
     use crate::menu::PopupMenuItem;
-    use gpui::{AppContext as _, Render, TestAppContext, px};
+    use gpui::{AppContext as _, MouseButton, Render, TestAppContext, point, px};
     use std::cell::RefCell;
 
-    /// A tree with a menu on each row, noting each row whose menu ran.
+    /// A tree whose rows' menu holds a submenu, noting each row whose
+    /// submenu item ran.
     struct TreeRoot {
         tree: Entity<TreeState>,
         ran: Rc<RefCell<Vec<gpui::SharedString>>>,
@@ -170,15 +174,53 @@ mod tests {
                         .h(px(24.))
                         .child(entry.item().label.clone())
                 })
-                .context_menu(move |_, entry, menu, _, _| {
+                .context_menu(move |_, entry, menu, window, cx| {
                     let (ran, id) = (ran.clone(), entry.item().id.clone());
-                    menu.item(
-                        PopupMenuItem::new("Open")
-                            .on_click(move |_, _, _| ran.borrow_mut().push(id.clone())),
-                    )
+                    menu.submenu("Copy", window, cx, move |menu, _, _| {
+                        let (ran, id) = (ran.clone(), id.clone());
+                        menu.item(
+                            PopupMenuItem::new("Name")
+                                .on_click(move |_, _, _| ran.borrow_mut().push(id.clone())),
+                        )
+                    })
                 }),
             )
         }
+    }
+
+    #[gpui::test]
+    fn a_rows_menu_holds_a_submenu(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let ran = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let ran = ran.clone();
+            move |_, cx| {
+                let items = vec![TreeItem::new("a", "a"), TreeItem::new("b", "b")];
+                let tree = cx.new(|cx| TreeState::new(cx).items(items));
+                TreeRoot { tree, ran }
+            }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        // Right-click the second row, then go into its submenu and run it.
+        let press = point(px(10.), px(36.));
+        cx.simulate_mouse_down(press, MouseButton::Right, Default::default());
+        cx.simulate_mouse_up(press, MouseButton::Right, Default::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("down right");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        assert_eq!(ran.borrow().as_slice(), ["b"]);
     }
 
     #[gpui::test]
@@ -206,7 +248,12 @@ mod tests {
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
-        cx.simulate_keystrokes("down enter");
+        cx.simulate_keystrokes("down right");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("enter");
         cx.run_until_parked();
 
         assert_eq!(ran.borrow().as_slice(), ["b"]);

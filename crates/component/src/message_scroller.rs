@@ -2,7 +2,7 @@ use std::{ops::Range, time::Duration};
 
 use gpui::{
     AnyElement, App, Context, ElementId, Entity, FollowMode, Hsla, InteractiveElement as _,
-    IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, RenderOnce, Role,
+    IntoElement, ListAlignment, ListOffset, ListState, ParentElement as _, Pixels, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     linear_color_stop, linear_gradient, list, prelude::FluentBuilder as _, px, rems,
 };
@@ -22,6 +22,10 @@ const BOTTOM_FADE_TRANSITION: Duration = Duration::from_millis(200);
 /// [`MessageScroller::new`].
 pub struct MessageScrollerState {
     list_state: ListState,
+    uniform_item_height: Option<Pixels>,
+    /// The hint still has to reach the list. GPUI's list drops every height
+    /// hint on its first layout, so a hint is applied once it has laid out.
+    uniform_item_height_pending: bool,
 }
 
 impl MessageScrollerState {
@@ -43,7 +47,23 @@ impl MessageScrollerState {
             });
         });
 
-        Self { list_state }
+        Self {
+            list_state,
+            uniform_item_height: None,
+            uniform_item_height_pending: false,
+        }
+    }
+
+    /// Estimate every row not yet measured at `height`, so the scrollbar is
+    /// sized for the whole transcript before its rows are rendered.
+    ///
+    /// Measured heights replace the estimate as rows render. [`Self::reset`]
+    /// applies it to the new rows too. Use it when rows are close to one
+    /// height; `height` covers the row with its spacing.
+    pub fn with_uniform_item_height(mut self, height: Pixels) -> Self {
+        self.uniform_item_height = Some(height);
+        self.uniform_item_height_pending = true;
+        self
     }
 
     /// Return the current number of rows known by the virtual list.
@@ -76,7 +96,12 @@ impl MessageScrollerState {
 
     /// Reset the list to `item_count` rows.
     pub fn reset(&mut self, item_count: usize, cx: &mut Context<Self>) {
-        self.list_state.reset(item_count);
+        match self.uniform_item_height {
+            Some(height) if !self.uniform_item_height_pending => {
+                self.list_state.reset_with_uniform_height(item_count, height);
+            }
+            _ => self.list_state.reset(item_count),
+        }
         self.list_state.set_follow_mode(FollowMode::Tail);
         cx.notify();
     }
@@ -184,6 +209,26 @@ impl MessageScrollerState {
     pub fn scroll_to_end(&mut self, cx: &mut Context<Self>) {
         self.list_state.set_follow_mode(FollowMode::Tail);
         self.list_state.scroll_to_end();
+        cx.notify();
+    }
+
+    /// Hand the uniform height hint to the list once it has laid out.
+    ///
+    /// GPUI's list clears every hint whenever its width changes, and its first
+    /// layout counts as one, so a hint given earlier would be lost.
+    fn apply_pending_uniform_item_height(&mut self, cx: &mut Context<Self>) {
+        if !self.uniform_item_height_pending {
+            return;
+        }
+        let Some(height) = self.uniform_item_height else {
+            return;
+        };
+        if self.list_state.viewport_bounds().size.width <= px(0.) {
+            return;
+        }
+
+        self.uniform_item_height_pending = false;
+        let _ = self.list_state.clone().with_uniform_item_height(height);
         cx.notify();
     }
 
@@ -327,10 +372,21 @@ impl Styled for MessageScroller {
 impl RenderOnce for MessageScroller {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let root_id = self.id.clone();
-        let (list_state, scrolled_up) = {
+        let (list_state, scrolled_up, hint_pending) = {
             let state = self.state.read(cx);
-            (state.list_state.clone(), state.is_scrolled_up())
+            (
+                state.list_state.clone(),
+                state.is_scrolled_up(),
+                state.uniform_item_height_pending,
+            )
         };
+        if hint_pending {
+            // Runs after this frame's layout, which is the list's first one.
+            let state = self.state.clone();
+            window.defer(cx, move |_, cx| {
+                state.update(cx, |state, cx| state.apply_pending_uniform_item_height(cx));
+            });
+        }
         let show_jump_button = self.jump_button && scrolled_up;
         let jump_button_visibility = if self.jump_button {
             transition(
@@ -638,6 +694,53 @@ mod tests {
     /// content: the thumb's range is the list's scroll extent, and an extent
     /// that stops short of the end leaves the reader above the last row,
     /// with the tail-follow off and the jump button showing.
+    /// GPUI's list drops height hints on its first layout, so the state
+    /// hands its hint over after that layout. Without it, the scroll range
+    /// covers only the rows rendered so far.
+    #[gpui::test]
+    fn a_uniform_item_height_sizes_rows_not_yet_rendered(cx: &mut gpui::TestAppContext) {
+        const ROWS: usize = 1000;
+        const ROW_HEIGHT: f32 = 72.;
+        cx.update(crate::init);
+        let hinted = cx.new(|cx| {
+            MessageScrollerState::new(ROWS, cx).with_uniform_item_height(px(ROW_HEIGHT))
+        });
+        let plain = cx.new(|cx| MessageScrollerState::new(ROWS, cx));
+        let max_offset = |state: Entity<MessageScrollerState>, cx: &mut gpui::TestAppContext| {
+            let (_, cx) = cx.add_window_view({
+                let state = state.clone();
+                move |_, _| ScrollerHarness { state }
+            });
+            for _ in 0..2 {
+                cx.run_until_parked();
+                cx.update(|window, cx| {
+                    _ = window.draw(cx);
+                });
+            }
+            cx.update(|_, cx| state.read(cx).list_state.max_offset_for_scrollbar().y)
+        };
+
+        let hinted_offset = max_offset(hinted.clone(), cx);
+        let plain_offset = max_offset(plain, cx);
+        assert!(
+            hinted_offset > px(ROW_HEIGHT * (ROWS as f32 - 20.)),
+            "every row should count toward the scroll range, got {hinted_offset:?}"
+        );
+        assert!(
+            plain_offset < hinted_offset,
+            "without a hint only rendered rows count, got {plain_offset:?}"
+        );
+
+        cx.update(|cx| {
+            hinted.update(cx, |state, cx| state.reset(ROWS, cx));
+            let max = hinted.read(cx).list_state.max_offset_for_scrollbar().y;
+            assert!(
+                max > px(ROW_HEIGHT * (ROWS as f32 - 20.)),
+                "a reset should keep the hint for the new rows, got {max:?}"
+            );
+        });
+    }
+
     #[gpui::test]
     fn the_scrollbar_drag_range_reaches_the_end_of_the_content(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
