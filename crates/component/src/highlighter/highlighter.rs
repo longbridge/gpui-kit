@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use gpui::{HighlightStyle, SharedString};
 use gpui_base::input::RopeExt as _;
 use ropey::{ChunkCursor, Rope};
-use std::sync::{Arc, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -21,8 +21,17 @@ const MAX_INJECTION_RANGES: usize = 4096;
 const MAX_INJECTION_BYTES: usize = 512 * 1024;
 const MAX_INJECTION_LANGUAGE_BYTES: usize = 64;
 /// Parse attempts, not resulting layers: a failed parse still spends budget.
-/// Matches past it keep host highlighting but get no injected tokens.
+/// Matches past it are deferred and parsed once [`SyntaxHighlighter::styles`]
+/// asks for a range they cover.
 const MAX_NON_COMBINED_INJECTION_PARSES: usize = 512;
+/// Deferred matches kept per parse. Matches past it keep host highlighting
+/// but get no injected tokens.
+const MAX_DEFERRED_INJECTIONS: usize = 16 * 1024;
+/// Deferred layers one [`SyntaxHighlighter::styles`] call may parse.
+const MAX_DEFERRED_PARSES_PER_CALL: usize = 128;
+/// Time one [`SyntaxHighlighter::styles`] call may spend parsing deferred
+/// layers. A parse already running finishes within its own layer budget.
+const DEFERRED_PARSE_BUDGET: Duration = Duration::from_millis(4);
 /// Budget of one injection layer when the caller bounded the parse. A layer
 /// past it is dropped; an unbounded parse gives its layers no budget either.
 pub(crate) const INJECTION_PARSE_TIMEOUT: Duration = Duration::from_millis(20);
@@ -53,9 +62,39 @@ pub struct SyntaxHighlighter {
     /// The last parsed tree.
     tree: Option<Tree>,
 
-    /// Parsed injection trees.
+    /// Parsed injection trees, sorted by start byte.
     /// These are built once in update() and queried multiple times in match_styles().
-    injection_layers: Vec<InjectionLayer>,
+    /// `styles` adds deferred layers here once it parses them.
+    injection_layers: Mutex<Vec<InjectionLayer>>,
+    /// Injection matches past the parse budget, sorted by start byte, parsed
+    /// on demand by `styles`.
+    deferred_injections: Mutex<Vec<DeferredInjection>>,
+    /// Budget of one deferred layer, as for the layers parsed in `update`.
+    deferred_injection_timeout: Option<Duration>,
+}
+
+/// Lock `mutex`, ignoring poisoning: the data is a cache rebuilt by every parse.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+/// An injection match left unparsed because the parse budget ran out.
+pub(crate) struct DeferredInjection {
+    language_name: SharedString,
+    highlight_query: Arc<Query>,
+    ranges: Vec<tree_sitter::Range>,
+    byte_range: Range<usize>,
+    /// The tree of the same layer from an earlier parse, edited to match the text.
+    old_tree: Option<Tree>,
+}
+
+/// Injection layers computed from a host tree.
+#[derive(Default)]
+pub(crate) struct ComputedInjections {
+    pub(crate) layers: Vec<InjectionLayer>,
+    pub(crate) deferred: Vec<DeferredInjection>,
+    /// Budget of one deferred layer.
+    pub(crate) timeout: Option<Duration>,
 }
 
 /// A parsed injection layer.
@@ -411,7 +450,9 @@ impl SyntaxHighlighter {
             text: Rope::new(),
             parser: Parser::new(),
             tree: None,
-            injection_layers: Vec::new(),
+            injection_layers: Mutex::default(),
+            deferred_injections: Mutex::default(),
+            deferred_injection_timeout: None,
         }
     }
 
@@ -534,7 +575,9 @@ impl SyntaxHighlighter {
             text: Rope::new(),
             parser,
             tree: None,
-            injection_layers: Vec::new(),
+            injection_layers: Mutex::default(),
+            deferred_injections: Mutex::default(),
+            deferred_injection_timeout: None,
         })
     }
 
@@ -563,11 +606,22 @@ impl SyntaxHighlighter {
     /// layers no longer describe the text and are dropped.
     fn edit_injection_layers(&mut self, edit: Option<&InputEdit>) {
         let Some(edit) = edit else {
-            self.injection_layers.clear();
+            self.injection_layers
+                .get_mut()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+            self.deferred_injections
+                .get_mut()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
             return;
         };
 
-        for layer in &mut self.injection_layers {
+        let layers = self
+            .injection_layers
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner());
+        for layer in layers.iter_mut() {
             layer.tree.edit(edit);
             for range in &mut layer.ranges {
                 edit.edit_range(range);
@@ -576,6 +630,46 @@ impl SyntaxHighlighter {
                 layer.byte_range = byte_range;
             }
         }
+        let deferred = self
+            .deferred_injections
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner());
+        for entry in deferred.iter_mut() {
+            if let Some(tree) = &mut entry.old_tree {
+                tree.edit(edit);
+            }
+            for range in &mut entry.ranges {
+                edit.edit_range(range);
+            }
+            if let Some(byte_range) = bounding_byte_range(&entry.ranges) {
+                entry.byte_range = byte_range;
+            }
+        }
+    }
+
+    /// Every layer and deferred entry with a tree, to reuse in the next parse.
+    fn reusable_injection_layers(&self) -> Vec<ReusableInjectionLayer> {
+        let layers = lock(&self.injection_layers);
+        let deferred = lock(&self.deferred_injections);
+        layers
+            .iter()
+            .map(|layer| ReusableInjectionLayer {
+                language_name: layer.language_name.clone(),
+                highlight_query: layer.highlight_query.clone(),
+                ranges: layer.ranges.clone(),
+                tree: layer.tree.clone(),
+                combined: layer.combined,
+            })
+            .chain(deferred.iter().filter_map(|entry| {
+                Some(ReusableInjectionLayer {
+                    language_name: entry.language_name.clone(),
+                    highlight_query: entry.highlight_query.clone(),
+                    ranges: entry.ranges.clone(),
+                    tree: entry.old_tree.clone()?,
+                    combined: false,
+                })
+            }))
+            .collect()
     }
 
     /// Returns the language name for this highlighter.
@@ -699,17 +793,7 @@ impl SyntaxHighlighter {
             query,
             content_capture_index: self.injection_content_capture_index,
             language_capture_index: self.injection_language_capture_index,
-            old_layers: self
-                .injection_layers
-                .iter()
-                .map(|layer| ReusableInjectionLayer {
-                    language_name: layer.language_name.clone(),
-                    highlight_query: layer.highlight_query.clone(),
-                    ranges: layer.ranges.clone(),
-                    tree: layer.tree.clone(),
-                    combined: layer.combined,
-                })
-                .collect(),
+            old_layers: self.reusable_injection_layers(),
         })
     }
 
@@ -719,12 +803,15 @@ impl SyntaxHighlighter {
     ///
     /// `timeout` bounds the parse of each layer; a layer past it is dropped.
     /// `None` parses every layer to completion.
+    ///
+    /// Non-combined matches past [`MAX_NON_COMBINED_INJECTION_PARSES`] are
+    /// returned unparsed, for [`Self::styles`] to parse when it reaches them.
     pub(crate) fn compute_injection_layers(
         data: InjectionParseData,
         tree: &Tree,
         text: &Rope,
         timeout: Option<Duration>,
-    ) -> Vec<InjectionLayer> {
+    ) -> ComputedInjections {
         struct CombinedRanges {
             ranges: Vec<tree_sitter::Range>,
             byte_count: usize,
@@ -827,6 +914,7 @@ impl SyntaxHighlighter {
         let mut resolved_languages: HashMap<SharedString, Option<(SharedString, Arc<Query>)>> =
             HashMap::new();
         let mut new_layers = Vec::new();
+        let mut deferred = Vec::new();
         let mut non_combined_parses = 0usize;
         while let Some(query_match) = matches.next() {
             let mut language_name: Option<SharedString> = None;
@@ -845,7 +933,10 @@ impl SyntaxHighlighter {
             }
 
             // Skip rather than break, so later combined ranges are still collected.
-            if !combined && non_combined_parses >= MAX_NON_COMBINED_INJECTION_PARSES {
+            if !combined
+                && non_combined_parses >= MAX_NON_COMBINED_INJECTION_PARSES
+                && deferred.len() >= MAX_DEFERRED_INJECTIONS
+            {
                 continue;
             }
 
@@ -903,10 +994,23 @@ impl SyntaxHighlighter {
                     continue;
                 }
 
-                non_combined_parses += 1;
                 let old_tree = old_layer_trees
                     .get(&(language_name.clone(), ranges_cache_key(&ranges)))
                     .copied();
+                if non_combined_parses >= MAX_NON_COMBINED_INJECTION_PARSES {
+                    if let Some(byte_range) = bounding_byte_range(&ranges) {
+                        deferred.push(DeferredInjection {
+                            language_name,
+                            highlight_query,
+                            ranges,
+                            byte_range,
+                            old_tree: old_tree.cloned(),
+                        });
+                    }
+                    continue;
+                }
+
+                non_combined_parses += 1;
                 if let Some(layer) = Self::parse_injection_layer(
                     &language_name,
                     highlight_query,
@@ -948,7 +1052,12 @@ impl SyntaxHighlighter {
             }
         }
         new_layers.sort_by_key(|layer| layer.byte_range.start);
-        new_layers
+        deferred.sort_by_key(|entry| entry.byte_range.start);
+        ComputedInjections {
+            layers: new_layers,
+            deferred,
+            timeout,
+        }
     }
 
     /// Parse one injection layer over the given included ranges.
@@ -1010,7 +1119,7 @@ impl SyntaxHighlighter {
         &mut self,
         tree: Tree,
         text: &Rope,
-        injection_layers: Vec<InjectionLayer>,
+        injections: ComputedInjections,
     ) {
         // Only apply if the text still matches what was parsed.
         if !self.text.eq(text) {
@@ -1018,27 +1127,113 @@ impl SyntaxHighlighter {
         }
 
         self.tree = Some(tree);
-        self.injection_layers = injection_layers;
+        self.set_injections(injections);
+    }
+
+    fn set_injections(&mut self, injections: ComputedInjections) {
+        *self
+            .injection_layers
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner()) = injections.layers;
+        *self
+            .deferred_injections
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner()) = injections.deferred;
+        self.deferred_injection_timeout = injections.timeout;
     }
 
     /// Parse injection layers after the main tree is updated.
     /// pattern: parse once in update, query many times in render.
     fn parse_injection_layers(&mut self, tree: &Tree, timeout: Option<Duration>) {
         let Some(query) = self.injections_query.clone() else {
-            self.injection_layers.clear();
+            self.set_injections(ComputedInjections::default());
             return;
         };
         // The old layers are replaced below, so move them instead of cloning.
+        let old_layers = std::mem::take(
+            self.injection_layers
+                .get_mut()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
+        let old_deferred = std::mem::take(
+            self.deferred_injections
+                .get_mut()
+                .unwrap_or_else(|e| e.into_inner()),
+        );
         let data = InjectionParseData {
             query,
             content_capture_index: self.injection_content_capture_index,
             language_capture_index: self.injection_language_capture_index,
-            old_layers: std::mem::take(&mut self.injection_layers)
+            old_layers: old_layers
                 .into_iter()
                 .map(ReusableInjectionLayer::from)
+                .chain(old_deferred.into_iter().filter_map(|entry| {
+                    Some(ReusableInjectionLayer {
+                        language_name: entry.language_name,
+                        highlight_query: entry.highlight_query,
+                        ranges: entry.ranges,
+                        tree: entry.old_tree?,
+                        combined: false,
+                    })
+                }))
                 .collect(),
         };
-        self.injection_layers = Self::compute_injection_layers(data, tree, &self.text, timeout);
+        let injections = Self::compute_injection_layers(data, tree, &self.text, timeout);
+        self.set_injections(injections);
+    }
+
+    /// Parse the deferred injections that overlap `range`, at most
+    /// [`MAX_DEFERRED_PARSES_PER_CALL`] of them and only while the call is
+    /// within [`DEFERRED_PARSE_BUDGET`]. Returns how many were parsed.
+    fn parse_deferred_injections(&self, range: &Range<usize>) -> usize {
+        let mut deferred = lock(&self.deferred_injections);
+        let start = Instant::now();
+        let mut parsed = Vec::new();
+        let mut new_layers = Vec::new();
+        // Entries are sorted by start byte; a long one can start before `range`.
+        for (ix, entry) in deferred.iter().enumerate() {
+            if entry.byte_range.start >= range.end
+                || parsed.len() >= MAX_DEFERRED_PARSES_PER_CALL
+                || start.elapsed() >= DEFERRED_PARSE_BUDGET
+            {
+                break;
+            }
+            if entry.byte_range.end <= range.start {
+                continue;
+            }
+            parsed.push(ix);
+            // A layer past its budget is dropped, as in `update`.
+            if let Some(layer) = Self::parse_injection_layer(
+                &entry.language_name,
+                entry.highlight_query.clone(),
+                entry.ranges.clone(),
+                entry.old_tree.as_ref(),
+                false,
+                &self.text,
+                self.deferred_injection_timeout,
+            ) {
+                new_layers.push(layer);
+            }
+        }
+        if parsed.is_empty() {
+            return 0;
+        }
+        let mut ix = 0;
+        let mut parsed_ix = parsed.iter().copied().peekable();
+        deferred.retain(|_| {
+            let keep = parsed_ix.next_if_eq(&ix).is_none();
+            ix += 1;
+            keep
+        });
+        drop(deferred);
+
+        let mut layers = lock(&self.injection_layers);
+        for layer in new_layers {
+            let ix = layers
+                .partition_point(|existing| existing.byte_range.start <= layer.byte_range.start);
+            layers.insert(ix, layer);
+        }
+        parsed.len()
     }
 
     /// Match the visible ranges of nodes in the Tree for highlighting.
@@ -1058,7 +1253,8 @@ impl SyntaxHighlighter {
 
         // Query pre-parsed injection layers.
         let mut last_layer_start = 0;
-        for layer in &self.injection_layers {
+        let layers = lock(&self.injection_layers);
+        for layer in layers.iter() {
             debug_assert!(layer.byte_range.start >= last_layer_start);
             last_layer_start = layer.byte_range.start;
 
@@ -1162,7 +1358,7 @@ impl SyntaxHighlighter {
     pub(crate) fn capture_names(&mut self, text: &Rope) -> Vec<(Range<usize>, SharedString)> {
         self.tree = None;
         self.text = Rope::new();
-        self.injection_layers.clear();
+        self.edit_injection_layers(None);
         let injections_query = self.injections_query.take();
         self.update(None, text, None);
         self.injections_query = injections_query;
@@ -1204,6 +1400,7 @@ impl SyntaxHighlighter {
         let mut styles = vec![];
         let start_offset = range.start;
 
+        self.parse_deferred_injections(range);
         let highlights = self.match_styles(range.clone());
 
         // let mut iter_count = 0;
@@ -1252,8 +1449,20 @@ impl Drop for SyntaxHighlighter {
     /// Freeing the syntax trees of a large document takes tens of milliseconds, so they are
     /// freed off the thread that replaces the document.
     fn drop(&mut self) {
-        let trees = (self.tree.take(), std::mem::take(&mut self.injection_layers));
-        if trees.0.is_some() || !trees.1.is_empty() {
+        let trees = (
+            self.tree.take(),
+            std::mem::take(
+                self.injection_layers
+                    .get_mut()
+                    .unwrap_or_else(|e| e.into_inner()),
+            ),
+            std::mem::take(
+                self.deferred_injections
+                    .get_mut()
+                    .unwrap_or_else(|e| e.into_inner()),
+            ),
+        );
+        if trees.0.is_some() || !trees.1.is_empty() || !trees.2.is_empty() {
             drop_in_background(trees);
         }
     }
@@ -1646,8 +1855,8 @@ console.log(answer);
 
         assert!(highlighter.update(None, &rope, None));
 
-        let rust_layers = highlighter
-            .injection_layers
+        let layers = highlighter.injection_layers.lock().unwrap();
+        let rust_layers = layers
             .iter()
             .filter(|layer| layer.language_name.as_ref() == "rust")
             .collect::<Vec<_>>();
@@ -1659,6 +1868,7 @@ console.log(answer);
             ),
             "fences using the same canonical language should share one highlight query"
         );
+        drop(layers);
 
         let highlights = highlighter.match_styles(0..markdown.len());
         for function in ["first", "second"] {
@@ -1750,6 +1960,8 @@ console.log(answer);
         assert!(
             highlighter
                 .injection_layers
+                .lock()
+                .unwrap()
                 .iter()
                 .all(|layer| { layer.language_name.as_ref() != "not-a-registered-language" })
         );
@@ -1767,10 +1979,15 @@ console.log(answer);
         let mut highlighter = SyntaxHighlighter::new("markdown");
 
         assert!(highlighter.update(None, &rope, None));
-        assert_eq!(highlighter.injection_layers.len(), FENCE_COUNT);
+        assert_eq!(
+            highlighter.injection_layers.lock().unwrap().len(),
+            FENCE_COUNT
+        );
         assert!(
             highlighter
                 .injection_layers
+                .lock()
+                .unwrap()
                 .iter()
                 .all(|layer| layer.language_name.as_ref() == "rust")
         );
@@ -1803,6 +2020,8 @@ console.log(answer);
         assert_eq!(
             highlighter
                 .injection_layers
+                .lock()
+                .unwrap()
                 .iter()
                 .filter(|layer| layer.language_name.as_ref() == "rust")
                 .count(),
@@ -1811,6 +2030,8 @@ console.log(answer);
         assert!(
             highlighter
                 .injection_layers
+                .lock()
+                .unwrap()
                 .iter()
                 .any(|layer| layer.language_name.as_ref() == "markdown_inline"),
             "the non-combined budget should not starve combined injection layers"
@@ -1830,8 +2051,79 @@ console.log(answer);
                 &format!("function_{}", FENCE_COUNT - 1),
                 "function"
             ),
-            "fences past the budget keep host highlighting but get no injected tokens"
+            "fences past the budget are left unparsed until styles reaches them"
         );
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-languages")]
+    fn test_markdown_deferred_fences_highlight_when_styled() {
+        const DEFERRED: usize = MAX_DEFERRED_PARSES_PER_CALL + 64;
+        const FENCE_COUNT: usize = MAX_NON_COMBINED_INJECTION_PARSES + DEFERRED;
+        let markdown = (0..FENCE_COUNT)
+            .map(|i| format!("```rust\nfn function_{i}() {{}}\n```\n"))
+            .collect::<String>();
+        let rope = Rope::from_str(&markdown);
+        let mut highlighter = SyntaxHighlighter::new("markdown");
+        assert!(highlighter.update(None, &rope, None));
+        assert_eq!(
+            highlighter.deferred_injections.lock().unwrap().len(),
+            DEFERRED
+        );
+
+        let theme = HighlightTheme::default_dark();
+        let keyword_color = theme.style("keyword").and_then(|style| style.color);
+        let has_keyword_at = |styles: &[(Range<usize>, HighlightStyle)], offset: usize| {
+            styles.iter().any(|(range, style)| {
+                range.start <= offset && range.end >= offset + 2 && style.color == keyword_color
+            })
+        };
+
+        // The last fence is past the parse budget, and `styles` parses it.
+        let last = format!("fn function_{}", FENCE_COUNT - 1);
+        let last_start = markdown.find(&last).unwrap();
+        let tail = last_start..markdown.len();
+        let styles = highlighter.styles(&tail, theme.as_ref());
+        assert!(has_keyword_at(&styles, last_start));
+        assert_eq!(
+            highlighter.deferred_injections.lock().unwrap().len(),
+            DEFERRED - 1
+        );
+
+        // One call parses a bounded number of deferred layers.
+        let parsed = highlighter.parse_deferred_injections(&(0..markdown.len()));
+        assert!(parsed > 0 && parsed <= MAX_DEFERRED_PARSES_PER_CALL);
+        assert_eq!(
+            highlighter.deferred_injections.lock().unwrap().len(),
+            DEFERRED - 1 - parsed
+        );
+        let layers = highlighter.injection_layers.lock().unwrap();
+        assert!(
+            layers
+                .windows(2)
+                .all(|pair| pair[0].byte_range.start <= pair[1].byte_range.start)
+        );
+        drop(layers);
+
+        // An edit before every fence shifts the deferred ones, and the tail
+        // still highlights like a fresh parse.
+        let edit = InputEdit {
+            start_byte: 0,
+            old_end_byte: 0,
+            new_end_byte: 1,
+            start_position: Point::new(0, 0),
+            old_end_position: Point::new(0, 0),
+            new_end_position: Point::new(1, 0),
+        };
+        let markdown = format!("\n{markdown}");
+        let rope = Rope::from_str(&markdown);
+        assert!(highlighter.update(Some(edit), &rope, None));
+        let mut fresh = SyntaxHighlighter::new("markdown");
+        assert!(fresh.update(None, &rope, None));
+        let tail = (tail.start + 1)..markdown.len();
+        let styles = highlighter.styles(&tail, theme.as_ref());
+        assert!(has_keyword_at(&styles, tail.start));
+        assert_eq!(styles, fresh.styles(&tail, theme.as_ref()));
     }
 
     #[test]
@@ -1889,12 +2181,14 @@ $x = 1;
 
         assert!(highlighter.update(None, &rope, None));
         assert!(
-            highlighter.injection_layers.len() <= 1,
+            highlighter.injection_layers.lock().unwrap().len() <= 1,
             "markdown_inline should be combined instead of one layer per inline node"
         );
 
         if let Some(layer) = highlighter
             .injection_layers
+            .lock()
+            .unwrap()
             .iter()
             .find(|layer| layer.language_name.as_ref() == "markdown_inline")
         {
@@ -1912,6 +2206,8 @@ $x = 1;
         assert!(
             plain_highlighter
                 .injection_layers
+                .lock()
+                .unwrap()
                 .iter()
                 .all(|layer| layer.language_name.as_ref() != "markdown_inline"),
             "plain inline ranges should not create markdown_inline injection layers"
