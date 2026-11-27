@@ -460,6 +460,11 @@ impl Element for WebViewElement {
         }
         #[cfg(target_os = "linux")]
         parent.origin.set(bounds.origin);
+        // While a GPUI Fast scroll layer paints, the content mask also covers the overscan
+        // painted around its viewport; the native view must stay inside the viewport.
+        #[cfg(feature = "gpui-fast")]
+        let clip = window.surface_clip();
+        #[cfg(not(feature = "gpui-fast"))]
         let clip = window.content_mask().bounds;
         if let Err(error) = parent.set_geometry(bounds, clip) {
             if !parent.geometry_failed.replace(true) {
