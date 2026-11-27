@@ -1258,7 +1258,9 @@ pub(crate) mod tests {
             assert!(state.active_dialogs[0].closing);
             assert!(!state.active_dialogs[1].closing);
             assert!(
-                state.active_dialogs[1].focus_handle().is_focused(window),
+                state.active_dialogs[1]
+                    .focus_handle()
+                    .contains_focused(window, cx),
                 "the reopened dialog owns focus while the old one leaves"
             );
         });
@@ -1272,7 +1274,11 @@ pub(crate) mod tests {
             let state = WindowState::read(window, cx);
             assert_eq!(state.active_dialogs.len(), 1);
             assert!(!state.active_dialogs[0].closing);
-            assert!(state.active_dialogs[0].focus_handle().is_focused(window));
+            assert!(
+                state.active_dialogs[0]
+                    .focus_handle()
+                    .contains_focused(window, cx)
+            );
             assert!(window.has_active_dialog(cx));
         });
         assert_eq!(surface(cx, 0).top(), px(80.));
@@ -1555,6 +1561,119 @@ pub(crate) mod tests {
             cx.simulate_input("after");
             assert_eq!(input.read_with(cx, |input, _| input.value()), "before");
         }
+    }
+
+    /// Opening a dialog puts focus on its first control, so typing goes
+    /// straight into the form (#2068).
+    #[gpui::test]
+    fn opening_focuses_the_first_input(cx: &mut TestAppContext) {
+        use crate::input::{Input, InputState};
+        use gpui::Focusable as _;
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let field = input.clone();
+        open(cx, move |dialog, _, _| {
+            dialog
+                .title("Rename")
+                .child(Input::new(&field))
+                .footer(Button::new("save").label("Save"))
+        });
+        cx.update(|window, cx| assert!(input.focus_handle(cx).is_focused(window)));
+        cx.simulate_input("draft");
+        assert_eq!(input.read_with(cx, |input, _| input.value()), "draft");
+    }
+
+    /// Without a text field, the first button in the tab order takes focus;
+    /// the close button, painted last, does not.
+    #[gpui::test]
+    fn opening_focuses_the_first_button(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let (cancel, ok) = cx.update(|_, cx| (cx.focus_handle(), cx.focus_handle()));
+        let (first, second) = (cancel.clone(), ok.clone());
+        open(cx, move |dialog, _, _| {
+            dialog.title("Delete?").child("body").footer(
+                div()
+                    .child(Button::new("cancel").label("Cancel").track_focus(&first))
+                    .child(Button::new("ok").label("Delete").track_focus(&second)),
+            )
+        });
+        cx.update(|window, _| {
+            assert!(cancel.is_focused(window));
+            assert!(!ok.is_focused(window));
+        });
+    }
+
+    /// A control the application focuses while opening the dialog keeps
+    /// focus instead of being moved to the first one.
+    #[gpui::test]
+    fn opening_keeps_focus_the_application_chose(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let (first, chosen) = cx.update(|_, cx| (cx.focus_handle(), cx.focus_handle()));
+        let (first_button, chosen_button) = (first.clone(), chosen.clone());
+        let focus = chosen.clone();
+        cx.update(move |window, cx| {
+            window.open_dialog(cx, move |dialog, _, _| {
+                dialog.title("Choose").footer(
+                    div()
+                        .child(
+                            Button::new("first")
+                                .label("First")
+                                .track_focus(&first_button),
+                        )
+                        .child(
+                            Button::new("chosen")
+                                .label("Chosen")
+                                .track_focus(&chosen_button),
+                        ),
+                )
+            });
+            focus.focus(window, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| {
+            assert!(chosen.is_focused(window));
+            assert!(!first.is_focused(window));
+        });
+    }
+
+    /// A dialog with nothing focusable keeps focus on itself, so Escape and
+    /// the dialog's actions still reach it.
+    #[gpui::test]
+    fn opening_without_controls_keeps_the_dialog_focused(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        open(cx, |dialog, _, _| {
+            dialog.close_button(false).child("Read only")
+        });
+        cx.update(|window, cx| {
+            let state = WindowState::read(window, cx);
+            assert!(state.active_dialogs[0].focus_handle().is_focused(window));
+        });
+    }
+
+    /// Closing returns focus to what held it before the dialog opened, after
+    /// focus had moved to a control inside.
+    #[gpui::test]
+    fn closing_restores_focus_after_initial_focus(cx: &mut TestAppContext) {
+        use crate::input::{Input, InputState};
+        use gpui::Focusable as _;
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let background = cx.update(|_, cx| cx.focus_handle());
+        cx.update(|window, cx| background.focus(window, cx));
+        let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let field = input.clone();
+        open(cx, move |dialog, _, _| {
+            dialog.title("Rename").child(Input::new(&field))
+        });
+        cx.update(|window, cx| assert!(input.focus_handle(cx).is_focused(window)));
+
+        cx.update(|window, cx| window.close_dialog(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(background.is_focused(window)));
     }
 
     /// The most opaque background painted at the surface's current bounds.
