@@ -267,6 +267,18 @@ impl BaseDialogRoot {
     fn dismiss_below_y(self, value: Pixels) -> Self {
         map_base_root!(self, dismiss_below_y(value))
     }
+    fn accessibility_label(self, label: Option<SharedString>) -> Self {
+        match label {
+            Some(label) => map_base_root!(self, accessibility_label(label)),
+            None => self,
+        }
+    }
+    fn accessibility_description(self, description: Option<SharedString>) -> Self {
+        match description {
+            Some(description) => map_base_root!(self, accessibility_description(description)),
+            None => self,
+        }
+    }
     fn backdrop(self, element: impl IntoElement) -> Self {
         map_base_root!(self, backdrop(element))
     }
@@ -326,6 +338,10 @@ pub struct Dialog {
     children: Vec<AnyElement>,
     trigger: Option<AnyElement>,
     title: Option<AnyElement>,
+    /// The dialog's accessible name and description, taken from a plain-text
+    /// title and description.
+    pub(crate) accessible_title: Option<SharedString>,
+    pub(crate) accessible_description: Option<SharedString>,
     pub(crate) header: Option<AnyElement>,
     pub(crate) footer: Option<AnyElement>,
     pub(crate) content_builder: Option<ContentBuilderFn>,
@@ -341,6 +357,18 @@ pub struct Dialog {
     pub(crate) selection_scope: TextSelectionScopeId,
     pub(crate) motion: Option<DialogMotion>,
     pub(crate) id: usize,
+}
+
+/// The text of a plain-text element, for the dialog's accessible name. A
+/// composed element has no text to read before it renders, so it yields none.
+pub(crate) fn plain_text(value: &dyn std::any::Any) -> Option<SharedString> {
+    if let Some(text) = value.downcast_ref::<&'static str>() {
+        Some(SharedString::new_static(text))
+    } else if let Some(text) = value.downcast_ref::<String>() {
+        Some(text.clone().into())
+    } else {
+        value.downcast_ref::<SharedString>().cloned()
+    }
 }
 
 pub(crate) fn overlay_color(overlay: bool, cx: &App) -> Hsla {
@@ -379,6 +407,8 @@ impl Dialog {
             style: StyleRefinement::default(),
             trigger: None,
             title: None,
+            accessible_title: None,
+            accessible_description: None,
             header: None,
             footer: None,
             content_builder: None,
@@ -411,7 +441,11 @@ impl Dialog {
     }
 
     /// Sets the title of the dialog.
-    pub fn title(mut self, title: impl IntoElement) -> Self {
+    ///
+    /// A plain-text title (`&str`, `String` or `SharedString`) also names the
+    /// dialog for assistive technology.
+    pub fn title(mut self, title: impl IntoElement + 'static) -> Self {
+        self.accessible_title = plain_text(&title);
         self.title = Some(title.into_any_element());
         self
     }
@@ -753,6 +787,8 @@ impl RenderOnce for Dialog {
                             .w(view_size.width)
                             .h(view_size.height)
                             .focus_handle(self.focus_handle.clone())
+                            .accessibility_label(self.accessible_title.clone())
+                            .accessibility_description(self.accessible_description.clone())
                             .close_on_escape(self.props.keyboard && !closing)
                             .close_on_backdrop_press(self.props.overlay_closable && !closing)
                             .dismiss_below_y(TITLE_BAR_HEIGHT)
@@ -1014,6 +1050,74 @@ pub(crate) mod tests {
         // Mount the layer and paint the current animation sample.
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    /// The dialog nodes in the last frame, as their role, label and
+    /// description.
+    #[cfg(feature = "test-support")]
+    fn accessible_dialogs(window: &Window) -> Vec<(gpui::Role, Option<String>, Option<String>)> {
+        let mut dialogs: Vec<_> = gpui_base::test_support::snapshots(window)
+            .into_iter()
+            .filter_map(|node| {
+                let role = node.role()?;
+                matches!(role, gpui::Role::Dialog | gpui::Role::AlertDialog).then(|| {
+                    (
+                        role,
+                        node.label().map(str::to_owned),
+                        node.description().map(str::to_owned),
+                    )
+                })
+            })
+            .collect();
+        dialogs.sort_by_key(|(role, ..)| format!("{role:?}"));
+        dialogs
+    }
+
+    /// A screen reader announces a dialog by its title, and an alert dialog
+    /// with its description too, also when the alert is stacked on a dialog
+    /// (#3595).
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn a_dialog_is_named_by_its_title(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(900.), px(600.)));
+        open(cx, |dialog, _, _| {
+            dialog
+                .title("Rename file")
+                .child("Enter a new name for report.csv.")
+        });
+        cx.update(|window, cx| {
+            window.open_alert_dialog(cx, |alert, _, _| {
+                alert
+                    .title(String::from("Replace existing file?"))
+                    .description(SharedString::from("A file named report.csv already exists."))
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            cx.update(|window, _| accessible_dialogs(window)),
+            [
+                (
+                    gpui::Role::AlertDialog,
+                    some("Replace existing file?"),
+                    some("A file named report.csv already exists."),
+                ),
+                (gpui::Role::Dialog, some("Rename file"), None),
+            ]
+        );
+    }
+
+    /// A composed title has no text before it renders, so it does not name
+    /// the dialog.
+    #[test]
+    fn only_plain_text_names_a_dialog() {
+        assert_eq!(plain_text(&"Title").as_deref(), Some("Title"));
+        assert_eq!(plain_text(&String::from("Title")).as_deref(), Some("Title"));
+        assert_eq!(plain_text(&SharedString::from("Title")).as_deref(), Some("Title"));
+        assert_eq!(plain_text(&div().child("Title")), None);
     }
 
     /// Draws one frame, so an exit transition samples the clock at its
