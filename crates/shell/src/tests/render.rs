@@ -4070,10 +4070,13 @@ export default class Named extends View {
     let tree = context
         .update(|window, cx| runtime.render_to_spec(&object, None, window, cx))
         .expect("accessibility_label is a declared method on each component");
-    for label in ["Copy token", "Country", "Toggle sidebar"] {
+    // Registered component methods are recorded by name only.
+    for component in ["Clipboard", "Select", "SidebarToggleButton"] {
         assert!(
-            tree.contains(&format!(":accessibility_label[Str(\"{label}\")]")),
-            "missing {label}: {tree}"
+            tree.lines()
+                .any(|line| line.trim_start().starts_with(component)
+                    && line.contains(":accessibility_label(registered)")),
+            "{component} did not record accessibility_label: {tree}"
         );
     }
 }
