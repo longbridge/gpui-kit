@@ -1401,6 +1401,70 @@ pub(crate) mod tests {
         assert!(cx.debug_bounds("dialog-1").is_none());
     }
 
+    /// A dialog closed through its exit transition gives the focus back to
+    /// what had it before it opened, once the transition is over.
+    #[gpui::test]
+    fn a_deferred_close_restores_the_focus_it_remembered(cx: &mut TestAppContext) {
+        use crate::input::InputState;
+        use gpui::Focusable as _;
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        let background = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        cx.update(|window, cx| background.focus_handle(cx).focus(window, cx));
+
+        open(cx, |dialog, _, _| dialog.title("Closing").child("body"));
+        cx.background_executor.advance_clock(*ANIMATION_DURATION);
+        frame(cx);
+        cx.update(|window, cx| Dialog::defer_close_dialog(window, cx));
+        frame(cx);
+
+        cx.background_executor
+            .advance_clock(*ANIMATION_DURATION + Duration::from_millis(1));
+        frame(cx);
+        cx.update(|window, cx| {
+            assert!(
+                background.focus_handle(cx).is_focused(window),
+                "the focus went back to what had it before the dialog opened"
+            );
+        });
+    }
+
+    /// A dialog closed through its exit transition does not take the focus
+    /// back when the application has given it to its own content while the
+    /// transition was still running.
+    #[gpui::test]
+    fn a_deferred_close_keeps_a_focus_moved_during_the_exit(cx: &mut TestAppContext) {
+        use crate::input::InputState;
+        use gpui::Focusable as _;
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        let before = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let after = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        cx.update(|window, cx| before.focus_handle(cx).focus(window, cx));
+
+        open(cx, |dialog, _, _| dialog.title("Closing").child("body"));
+        cx.background_executor.advance_clock(*ANIMATION_DURATION);
+        frame(cx);
+        cx.update(|window, cx| Dialog::defer_close_dialog(window, cx));
+        frame(cx);
+        // The application focuses its own content while the dialog is still
+        // leaving.
+        cx.update(|window, cx| after.focus_handle(cx).focus(window, cx));
+        frame(cx);
+
+        cx.background_executor
+            .advance_clock(*ANIMATION_DURATION + Duration::from_millis(1));
+        frame(cx);
+        cx.update(|window, cx| {
+            assert!(
+                after.focus_handle(cx).is_focused(window),
+                "the focus stayed with what the application focused during the exit"
+            );
+        });
+    }
+
     /// A dialog opened while the previous one is leaving takes the place of a
     /// lone dialog, rather than stacking on the closing one and snapping into
     /// place when its exit ends.
