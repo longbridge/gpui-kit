@@ -37,6 +37,42 @@ div()
     })
 ```
 
+The builder runs once each time the menu opens, from a right click or from Shift+F10 while focus is inside the element. It runs after the triggering event has been dispatched, and an open menu is never rebuilt. If the builder adds no items, no menu opens.
+
+To track whether the menu is open, record it in the builder and subscribe to the menu's `DismissEvent`, which it emits when it closes. A right click while the menu is open replaces it and runs the builder again, so keep the subscription in a field that the next one replaces:
+
+```rust
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::{DismissEvent, Subscription};
+
+struct FileList {
+    menu_open: bool,
+    _menu_dismissed: Option<Subscription>,
+}
+
+impl Render for FileList {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        div()
+            .id("file-list")
+            .context_menu(move |menu, _, cx| {
+                let popup = cx.entity();
+                _ = view.update(cx, |this, cx| {
+                    this.menu_open = true;
+                    this._menu_dismissed =
+                        Some(cx.subscribe(&popup, |this, _, _: &DismissEvent, cx| {
+                            this.menu_open = false;
+                            cx.notify();
+                        }));
+                    cx.notify();
+                });
+                menu.menu("Rename", Box::new(Rename))
+                    .menu("Delete", Box::new(Delete))
+            })
+    }
+}
+```
+
 ### DropdownMenu
 
 Dropdown menus are triggered by buttons or other interactive elements:

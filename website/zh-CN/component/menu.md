@@ -37,6 +37,42 @@ div()
     })
 ```
 
+每次打开菜单时，builder 都只运行一次；右键点击，或 Focus 在元素内时按 Shift+F10，都会打开菜单。builder 在触发事件派发完之后运行，菜单打开期间不会重新构建。builder 没有添加任何菜单项时，不会打开菜单。
+
+要跟踪菜单是否打开，可以在 builder 中记录打开状态，并订阅菜单的 `DismissEvent`，菜单关闭时会发出这个事件。菜单打开时再次右键会替换当前菜单，并重新运行 builder，所以把订阅保存在字段里，让下一次的订阅替换它：
+
+```rust
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::{DismissEvent, Subscription};
+
+struct FileList {
+    menu_open: bool,
+    _menu_dismissed: Option<Subscription>,
+}
+
+impl Render for FileList {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        div()
+            .id("file-list")
+            .context_menu(move |menu, _, cx| {
+                let popup = cx.entity();
+                _ = view.update(cx, |this, cx| {
+                    this.menu_open = true;
+                    this._menu_dismissed =
+                        Some(cx.subscribe(&popup, |this, _, _: &DismissEvent, cx| {
+                            this.menu_open = false;
+                            cx.notify();
+                        }));
+                    cx.notify();
+                });
+                menu.menu("Rename", Box::new(Rename))
+                    .menu("Delete", Box::new(Delete))
+            })
+    }
+}
+```
+
 ### DropdownMenu
 
 下拉菜单通常由按钮或其它可交互元素触发：
