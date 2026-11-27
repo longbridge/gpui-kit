@@ -397,7 +397,7 @@ impl CalendarState {
     /// day, else today, else the first of the visible month.
     fn keyboard_day(&self) -> civil::Date {
         let first = civil::Date::new(self.current_year as i16, self.current_month as i8, 1)
-            .unwrap_or(self.today);
+            .unwrap_or_else(|_| self.today());
         let visible = |d: &civil::Date| {
             let n = (d.year() as i32 - self.current_year) * 12 + d.month() as i32
                 - self.current_month as i32;
@@ -405,7 +405,7 @@ impl CalendarState {
         };
         self.focused_day
             .or(self.date.start())
-            .or(Some(self.today))
+            .or_else(|| Some(self.today()))
             .filter(visible)
             .unwrap_or(first)
     }
