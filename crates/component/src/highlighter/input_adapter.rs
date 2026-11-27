@@ -106,14 +106,19 @@ impl TreeSitterInputHighlighter {
                     }
                     // `cancel` only reaches the host parse, so each injection layer
                     // keeps its fixed budget here, as before.
-                    let injections = injection_data.map_or_else(Default::default, |data| {
-                        SyntaxHighlighter::compute_injection_layers(
-                            data,
-                            &tree,
-                            &text,
-                            Some(INJECTION_PARSE_TIMEOUT),
-                        )
-                    });
+                    // The query is unbounded here: off the main thread it runs to
+                    // completion.
+                    let injections = injection_data
+                        .and_then(|data| {
+                            SyntaxHighlighter::compute_injection_layers(
+                                data,
+                                &tree,
+                                &text,
+                                Some(INJECTION_PARSE_TIMEOUT),
+                                None,
+                            )
+                        })
+                        .unwrap_or_default();
                     let folds = if folding {
                         extract_fold_ranges(&tree, &text)
                     } else {
