@@ -9,8 +9,8 @@ edition.workspace = true
 gpui.workspace = true
 gpui-fast = { workspace = true, optional = true }
 gpui-base = { path = "../.." }
-gpui_platform = { workspace = true, features = ["x11"] }
-gpui-fast-platform = { workspace = true, optional = true, features = ["x11"] }
+gpui_platform = { workspace = true, features = ["multithreaded", "x11"] }
+gpui-fast-platform = { workspace = true, optional = true, features = ["multithreaded", "x11"] }
 jiff = "1.0"
 reqwest_client.workspace = true
 syntect.workspace = true

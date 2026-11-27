@@ -60,8 +60,8 @@ quickjs = [
 [dependencies]
 gpui = { workspace = true, optional = true }
 gpui-fast = { workspace = true, optional = true }
-gpui_platform = { workspace = true, optional = true }
-gpui-fast-platform = { workspace = true, optional = true }
+gpui_platform = { workspace = true, optional = true, features = ["multithreaded"] }
+gpui-fast-platform = { workspace = true, optional = true, features = ["multithreaded"] }
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true
 gpui-component = { workspace = true, features = ["syntect"], optional = true }
