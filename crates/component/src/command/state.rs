@@ -1,3 +1,4 @@
+use gpui_base::A11yDisabledExt as _;
 use gpui_base::LogicalStyledExt as _;
 use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
@@ -896,6 +897,7 @@ impl CommandState {
                     ))
                 }),
             })
+            .a11y_disabled(disabled)
             .into_any_element()
     }
 
