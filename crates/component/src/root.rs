@@ -762,6 +762,12 @@ impl gpui_base::RootPlugin for WindowState {
     ) -> impl IntoElement {
         window_border().child(surface)
     }
+
+    fn has_open_layers(&self, cx: &App) -> bool {
+        self.active_sheet.is_some()
+            || !self.active_dialogs.is_empty()
+            || !self.notification.read(cx).notifications().is_empty()
+    }
 }
 
 impl Render for WindowState {
@@ -851,5 +857,55 @@ mod tests {
             viewport.height,
             "bar {bounds:?}, viewport {viewport:?}"
         );
+    }
+
+    struct PickTarget;
+
+    impl Render for PickTarget {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            use gpui::InteractiveElement as _;
+            div().id("pick-target").size_full()
+        }
+    }
+
+    /// #3056: with no dialog, sheet or toast open, the Inspector picks the
+    /// application content instead of the empty full-window overlay layers.
+    #[gpui::test]
+    fn inspector_picks_content_below_idle_layers(cx: &mut TestAppContext) {
+        let picked = Rc::new(std::cell::RefCell::new(None));
+        cx.update(|cx| {
+            crate::init(cx);
+            let picked = picked.clone();
+            cx.set_inspector_renderer(Box::new(move |inspector, _, _| {
+                *picked.borrow_mut() = inspector
+                    .active_element_id()
+                    .map(|id| format!("{:?}", id.path.global_id));
+                div().into_any_element()
+            }));
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| PickTarget);
+            crate::Root::new(view, window, cx)
+        });
+        cx.simulate_resize(size(px(800.), px(600.)));
+        cx.update(|window, cx| {
+            window.toggle_inspector(cx);
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_mouse_move(
+            gpui::point(px(100.), px(300.)),
+            None,
+            gpui::Modifiers::none(),
+        );
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(
+            gpui::point(px(100.), px(310.)),
+            None,
+            gpui::Modifiers::none(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let picked = picked.borrow().clone().expect("an element is picked");
+        assert!(picked.contains("pick-target"), "picked {picked}");
     }
 }
