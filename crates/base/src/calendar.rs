@@ -1,4 +1,4 @@
-use crate::TestSupportExt as _;
+use crate::{A11yDisabledExt as _, TestSupportExt as _};
 use std::rc::Rc;
 
 use crate::{LogicalStyledExt as _, h_flex, styled::StyledExt as _, v_flex};
@@ -630,7 +630,10 @@ impl InteractiveElement for CalendarItem {
 impl StatefulInteractiveElement for CalendarItem {}
 impl RenderOnce for CalendarItem {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        self.base.children(self.children).refine_style(&self.style)
+        self.base
+            .children(self.children)
+            .refine_style(&self.style)
+            .a11y_disabled(self.state.is_disabled())
     }
 }
 
@@ -961,7 +964,9 @@ fn days_in_month(year: i32, month: u32, first_day: Weekday) -> Vec<Vec<civil::Da
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use gpui::{AppContext as _, Context, Entity, IntoElement, Render, Subscription, Window};
+    use gpui::{
+        AppContext as _, Context, Element as _, Entity, IntoElement, Render, Subscription, Window,
+    };
 
     use super::*;
 
@@ -998,7 +1003,7 @@ mod tests {
 
     #[gpui::test]
     fn calendar_items_expose_names_in_every_view(cx: &mut gpui::TestAppContext) {
-        use gpui::{Element as _, accesskit};
+        use gpui::accesskit;
         struct Names {
             calendar: Entity<CalendarState>,
             labels: Rc<RefCell<Vec<(CalendarItemKind, String)>>>,
@@ -1209,5 +1214,50 @@ mod tests {
             harness.read_with(cx, |h, _| h.events.borrow().clone()),
             vec![Date::Range(Some(start), Some(end)), Date::Single(Some(end))]
         );
+    }
+
+    struct DisabledItemProbe {
+        nodes: std::rc::Rc<std::cell::RefCell<Vec<(bool, gpui::accesskit::Node)>>>,
+    }
+
+    impl gpui::Render for DisabledItemProbe {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let nodes = self.nodes.clone();
+            gpui::canvas(
+                move |_, window, cx| {
+                    let mut nodes = nodes.borrow_mut();
+                    nodes.clear();
+                    for disabled in [false, true] {
+                        let mut node =
+                            gpui::accesskit::Node::new(gpui::accesskit::Role::Button);
+                        CalendarItem::new(
+                            "disabled-probe",
+                            CalendarItemState::new(CalendarItemKind::Day).disabled(disabled),
+                        )
+                        .render(window, cx)
+                        .into_element()
+                        .write_a11y_info(&mut node);
+                        nodes.push((disabled, node));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_disabled_calendar_item_marks_its_node_disabled(cx: &mut gpui::TestAppContext) {
+        let nodes = std::rc::Rc::default();
+        let (_, view) = cx.add_window_view({
+            let nodes = std::rc::Rc::clone(&nodes);
+            move |_, _| DisabledItemProbe { nodes }
+        });
+        view.update(|window, cx| window.draw(cx).clear(cx));
+
+        let nodes = nodes.borrow();
+        assert_eq!(nodes.len(), 2);
+        for (disabled, node) in nodes.iter() {
+            assert_eq!(node.is_disabled(), *disabled, "disabled {disabled}");
+        }
     }
 }
