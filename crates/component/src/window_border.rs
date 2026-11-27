@@ -1,9 +1,9 @@
 // From:
 // https://github.com/zed-industries/zed/blob/56daba28d40301ee4c05546fadb691d070b7b2b6/crates/gpui/examples/window_shadow.rs
 use gpui::{
-    AnyElement, App, Corners, CursorStyle, Decorations, Edges, Hsla, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement, Pixels, Point, RenderOnce, ResizeEdge, Size,
-    Styled as _, Tiling, Window, div, point, prelude::FluentBuilder as _, px,
+    AnyElement, App, Bounds, BoxShadow, Corners, CursorStyle, Decorations, Edges, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderOnce,
+    ResizeEdge, Size, Styled as _, Tiling, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
 use crate::ActiveTheme;
@@ -239,6 +239,11 @@ impl RenderOnce for WindowBorder {
                 };
             })
             .size_full()
+            .when(!tiling.is_tiled(), |parent| {
+                let opacity = if is_window_active { 1.0 } else { 0.7 };
+                let insets = client_frame_insets(visual_shadow, &tiling);
+                parent.child(frame_shadow(window_size, insets, radii, opacity))
+            })
             .child(
                 div()
                     .cursor(CursorStyle::default())
@@ -255,42 +260,6 @@ impl RenderOnce for WindowBorder {
                     .when(!tiling.bottom, |div| div.border_b(BORDER_SIZE))
                     .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
                     .when(!tiling.right, |div| div.border_r(BORDER_SIZE))
-                    .when(!tiling.is_tiled(), |div| {
-                        let opacity = if is_window_active { 1.0 } else { 0.7 };
-                        div.shadow(vec![
-                            // Keep the effective outer reach below SHADOW_SIZE. GPUI
-                            // does not grow the paint bounds for blur, so a larger blur
-                            // or offset would be visibly cut off by the window surface.
-                            gpui::BoxShadow {
-                                color: Hsla {
-                                    h: 0.,
-                                    s: 0.,
-                                    l: 0.,
-                                    a: 0.18 * opacity,
-                                },
-                                // GNOME-style ambient shadow: horizontally centered
-                                // with only a slight downward bias.
-                                blur_radius: px(10.),
-                                spread_radius: px(-1.),
-                                offset: point(px(0.0), px(2.0)),
-                                inset: false,
-                            },
-                            // The contact layer adds definition without increasing the
-                            // space between the content and the outer window bounds.
-                            gpui::BoxShadow {
-                                color: Hsla {
-                                    h: 0.,
-                                    s: 0.,
-                                    l: 0.,
-                                    a: 0.18 * opacity,
-                                },
-                                blur_radius: px(3.),
-                                spread_radius: px(0.),
-                                offset: point(px(0.0), px(1.0)),
-                                inset: false,
-                            },
-                        ])
-                    })
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
                     })
@@ -307,6 +276,141 @@ impl RenderOnce for WindowBorder {
             })
             .into_any_element()
     }
+}
+
+/// The frame's drop shadow, cast only around the frame.
+///
+/// GPUI paints a box shadow under the whole box that casts it, so a shadow
+/// cast by the frame itself would show through a translucent window, darkening
+/// its content. A box the size of the frame casts the shadow instead, inside
+/// clips that cover only the space around the frame.
+fn frame_shadow(
+    window_size: Size<Pixels>,
+    insets: Edges<Pixels>,
+    radii: Corners<Pixels>,
+    opacity: f32,
+) -> AnyElement {
+    let frame = frame_bounds(window_size, insets);
+    // Laid out in the padded content box, like the resize hit zones.
+    let frame_origin = point(insets.left, insets.top);
+    let shadows = vec![
+        // Keep the effective outer reach below SHADOW_SIZE. GPUI
+        // does not grow the paint bounds for blur, so a larger blur
+        // or offset would be visibly cut off by the window surface.
+        BoxShadow {
+            color: Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.18 * opacity,
+            },
+            // GNOME-style ambient shadow: horizontally centered
+            // with only a slight downward bias.
+            blur_radius: px(10.),
+            spread_radius: px(-1.),
+            offset: point(px(0.0), px(2.0)),
+            inset: false,
+        },
+        // The contact layer adds definition without increasing the
+        // space between the content and the outer window bounds.
+        BoxShadow {
+            color: Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.18 * opacity,
+            },
+            blur_radius: px(3.),
+            spread_radius: px(0.),
+            offset: point(px(0.0), px(1.0)),
+            inset: false,
+        },
+    ];
+    div()
+        .absolute()
+        .size_full()
+        .children(
+            shadow_regions(window_size, insets, radii)
+                .into_iter()
+                .map(|region| {
+                    let origin = region.origin - frame_origin;
+                    let caster = frame.origin - region.origin;
+                    div()
+                        .absolute()
+                        .left(origin.x)
+                        .top(origin.y)
+                        .w(region.size.width)
+                        .h(region.size.height)
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .absolute()
+                                .left(caster.x)
+                                .top(caster.y)
+                                .w(frame.size.width)
+                                .h(frame.size.height)
+                                .rounded_tl(radii.top_left)
+                                .rounded_tr(radii.top_right)
+                                .rounded_bl(radii.bottom_left)
+                                .rounded_br(radii.bottom_right)
+                                .shadow(shadows.clone()),
+                        )
+                }),
+        )
+        .into_any_element()
+}
+
+fn frame_bounds(window_size: Size<Pixels>, insets: Edges<Pixels>) -> Bounds<Pixels> {
+    Bounds::from_corners(
+        point(insets.left, insets.top),
+        point(
+            window_size.width - insets.right,
+            window_size.height - insets.bottom,
+        ),
+    )
+}
+
+/// The parts of the window, in window coordinates, where the frame's shadow
+/// is painted: the bands around the frame, and a square at each rounded corner,
+/// which reaches outside the corner's curve. The frame's content covers the
+/// rest of each square.
+fn shadow_regions(
+    window_size: Size<Pixels>,
+    insets: Edges<Pixels>,
+    radii: Corners<Pixels>,
+) -> Vec<Bounds<Pixels>> {
+    let frame = frame_bounds(window_size, insets);
+    let (left, top, right, bottom) = (frame.left(), frame.top(), frame.right(), frame.bottom());
+    let (width, height) = (window_size.width, window_size.height);
+    let region = |x, y, w, h| Bounds::new(point(x, y), Size::new(w, h));
+    [
+        region(px(0.), px(0.), width, top),
+        region(px(0.), bottom, width, height - bottom),
+        region(px(0.), top, left, bottom - top),
+        region(right, top, width - right, bottom - top),
+        region(left, top, radii.top_left, radii.top_left),
+        region(
+            right - radii.top_right,
+            top,
+            radii.top_right,
+            radii.top_right,
+        ),
+        region(
+            left,
+            bottom - radii.bottom_left,
+            radii.bottom_left,
+            radii.bottom_left,
+        ),
+        region(
+            right - radii.bottom_right,
+            bottom - radii.bottom_right,
+            radii.bottom_right,
+            radii.bottom_right,
+        ),
+    ]
+    .into_iter()
+    .filter(|region| region.size.width > px(0.) && region.size.height > px(0.))
+    .collect()
 }
 
 fn uses_client_border(decorations: Decorations) -> bool {
@@ -359,6 +463,33 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn frame_shadow_stays_out_of_the_frame() {
+        // An untiled frame: the only kind that casts the shadow.
+        let window = Size::new(px(300.), px(200.));
+        let insets = Edges::all(px(20.));
+        let frame = frame_bounds(window, insets);
+        let area = |size: Size<Pixels>| f32::from(size.width) * f32::from(size.height);
+
+        // Square corners: the regions are exactly the window around the frame.
+        let regions = shadow_regions(window, insets, Corners::default());
+        assert!(regions.iter().all(|region| !region.intersects(&frame)));
+        let covered: f32 = regions.iter().map(|region| area(region.size)).sum();
+        assert_eq!(covered, area(window) - area(frame.size));
+
+        // Rounded corners: only the corner squares reach into the frame.
+        let radius = px(8.);
+        let rounded = shadow_regions(window, insets, Corners::all(radius));
+        let inside: Vec<_> = rounded
+            .iter()
+            .filter(|region| region.intersects(&frame))
+            .collect();
+        assert_eq!(inside.len(), 4);
+        assert!(inside.iter().all(|region| {
+            region.size == Size::new(radius, radius) && frame.intersect(region) == **region
+        }));
+    }
 
     #[test]
     fn only_client_decorated_windows_use_the_client_border() {
