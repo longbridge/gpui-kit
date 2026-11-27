@@ -1425,7 +1425,9 @@ mod rendering {
         let idle_link = idle.pixels_like(link);
         let idle_hover = idle.pixels_like(link_hover).len();
         // The first link-colored pixel lies in the first link's first glyph.
-        let &(x, y) = idle_link.first().expect("the links must paint in the link color");
+        let &(x, y) = idle_link
+            .first()
+            .expect("the links must paint in the link color");
         let pointer = gpui_kit::point(
             px(x as f32 / idle.scale() + 4.),
             px(y as f32 / idle.scale() + 2.),
