@@ -80,6 +80,25 @@ div()
     })
 ```
 
+### Wrap Long Content
+
+GPUI lays a tooltip out at its min-content size, where a run of text measures as one unwrapped line. Text wraps only against a width the layout already knows.
+
+With `Tooltip::new` or `Tooltip::element`, set `max_w` on the tooltip. Block and column content then wraps inside it, and short content keeps its own width. In a flex row, give the text's item `min_w_0()`, or it keeps its one-line width and runs past the background:
+
+```rust
+Tooltip::element(|_, _| {
+    h_flex()
+        .gap_x_1()
+        .child(IconName::Info)
+        .child(div().min_w_0().child("Shows every file changed since the last commit"))
+})
+.max_w(px(320.))
+.build(window, cx)
+```
+
+A tooltip view written without `Tooltip` needs a definite width from `w(...)` before its text wraps. `max_w` alone works only while the view's root is not a flex container, and text in a flex row still needs `min_w_0()`. To keep short text compact, derive the width from the text's measured width (`window.text_system().shape_line`) plus padding, and cap it.
+
 ### Tooltip with Manual Keybinding
 
 ```rust
