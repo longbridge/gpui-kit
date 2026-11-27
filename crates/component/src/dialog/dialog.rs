@@ -1604,13 +1604,16 @@ pub(crate) mod tests {
 
         let cx = window(cx, size(px(1000.), px(800.)));
         let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
-        let field = input.clone();
         open(cx, move |dialog, _, _| {
             dialog
                 .title("Rename")
-                .child(Input::new(&field))
+                .child(Input::new(&input))
                 .footer(Button::new("save").label("Save"))
         });
+        // Let the entrance finish so the surface is at its resting size.
+        cx.background_executor
+            .advance_clock(*ANIMATION_DURATION + Duration::from_millis(1));
+        frame(cx);
         let ring = cx
             .debug_bounds("focus-ring")
             .expect("the focused input draws its ring");
@@ -1619,24 +1622,25 @@ pub(crate) mod tests {
             f32::from(ring.top()) * scale,
             f32::from(ring.bottom()) * scale,
         );
-        let mask = cx.update(|window, _| {
+        // A rounded border is painted as several slices, each masked to its
+        // band; together they must reach the ring's top and bottom edges.
+        let (mask_top, mask_bottom) = cx.update(|window, _| {
             window
                 .painted_quads()
                 .into_iter()
-                .find(|quad| {
+                .filter(|quad| {
                     (quad.bounds.origin.y.0 - top).abs() < 1.0
                         && (quad.bounds.bottom().0 - bottom).abs() < 1.0
                         && quad.border_widths.top.0 > 0.0
                 })
-                .expect("the ring is painted")
-                .content_mask
-                .bounds
+                .map(|quad| quad.content_mask.bounds)
+                .fold((f32::MAX, f32::MIN), |(lo, hi), mask| {
+                    (lo.min(mask.origin.y.0), hi.max(mask.bottom().0))
+                })
         });
         assert!(
-            mask.origin.y.0 <= top + 0.5 && mask.bottom().0 >= bottom - 0.5,
-            "ring {top}..{bottom} is clipped to {}..{}",
-            mask.origin.y.0,
-            mask.bottom().0
+            mask_top <= top + 0.5 && mask_bottom >= bottom - 0.5,
+            "ring {top}..{bottom} is clipped to {mask_top}..{mask_bottom}"
         );
     }
 
