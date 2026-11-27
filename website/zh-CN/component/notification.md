@@ -211,6 +211,15 @@ Theme::update(cx, |theme| {
 Notification::error("Please correct the following errors before submitting.")
     .title("Validation Failed")
     .autohide(false)
+    .action(|_, _, cx| {
+        Button::new("review")
+            .outline()
+            .label("Review Form")
+            .on_click(cx.listener(|this, _, window, cx| {
+                // Navigate to form
+                this.dismiss(window, cx);
+            }))
+    })
 ```
 
 ### 文件上传进度
@@ -218,6 +227,7 @@ Notification::error("Please correct the following errors before submitting.")
 ```rust
 struct UploadNotification;
 
+// Start upload notification
 window.push_notification(
     Notification::info("Uploading file...")
         .id::<UploadNotification>()
@@ -225,4 +235,79 @@ window.push_notification(
         .autohide(false),
     cx,
 );
+
+// Update to success when complete
+window.push_notification(
+    Notification::success("File uploaded successfully!")
+        .id::<UploadNotification>()
+        .title("Upload Complete"),
+    cx,
+);
+```
+
+### 系统状态更新
+
+```rust
+// Warning about maintenance
+Notification::warning("System maintenance will begin in 30 minutes.")
+    .title("Scheduled Maintenance")
+    .autohide(false)
+    .action(|_, cx| {
+        Button::new("details")
+            .link()
+            .label("View Details")
+            .on_click(cx.listener(|this, _, window, cx| {
+                // Show maintenance details
+                this.dismiss(window, cx);
+            }))
+    })
+```
+
+### 批量操作结果
+
+```rust
+use gpui_kit::component::text::markdown;
+
+let results_content = r#"
+## Batch Operation Complete
+
+**Processed**: 150 items
+**Success**: 147 items
+**Failed**: 3 items
+
+[View failed items](/)
+"#;
+
+Notification::success("Batch operation completed with some failures.")
+    .title("Operation Results")
+    .content(|window, cx| {
+        markdown(results_content).into_any_element()
+    })
+    .autohide(false)
+```
+
+### 交互式确认
+
+```rust
+struct SaveConfirmation;
+
+Notification::new()
+    .id::<SaveConfirmation>()
+    .title("Unsaved Changes")
+    .message("You have unsaved changes. Save before leaving?")
+    .autohide(false)
+    .action(|_, cx| {
+        Button::new("save")
+            .primary()
+            .label("Save")
+            .on_click(cx.listener(|this, _, window, cx| {
+                // Perform save
+                println!("Saving changes...");
+                this.dismiss(window, cx);
+            }))
+    })
+    .on_click(cx.listener(|_, _, _, cx| {
+        println!("Save reminder clicked");
+        cx.notify();
+    }))
 ```
