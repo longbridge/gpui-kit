@@ -4,7 +4,7 @@ use gpui::{
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, accesskit::Toggled, prelude::FluentBuilder as _,
 };
-use gpui_base::{LogicalStyledExt as _, TestSupportExt as _};
+use gpui_base::{A11yDisabledExt as _, LogicalStyledExt as _, TestSupportExt as _};
 use smallvec::SmallVec;
 
 #[derive(IntoElement)]
@@ -173,17 +173,62 @@ impl RenderOnce for MenuItemElement {
                 this.text_color(cx.theme().muted_foreground)
             })
             .children(self.children)
+            .a11y_disabled(self.disabled)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::Element as _;
 
     #[gpui::test]
     fn aria_label_sets_accessible_name(_cx: &mut gpui::TestAppContext) {
         let item = MenuItemElement::new("open").aria_label("Open");
 
         assert_eq!(item.aria_label, Some("Open".into()));
+    }
+
+    struct Probe {
+        nodes: std::rc::Rc<std::cell::RefCell<Vec<(bool, gpui::accesskit::Node)>>>,
+    }
+
+    impl gpui::Render for Probe {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let nodes = self.nodes.clone();
+            gpui::canvas(
+                move |_, window, cx| {
+                    let mut nodes = nodes.borrow_mut();
+                    nodes.clear();
+                    for disabled in [false, true] {
+                        let element = MenuItemElement::new("open")
+                            .disabled(disabled)
+                            .render(window, cx)
+                            .into_element();
+                        let mut node = gpui::accesskit::Node::new(Role::Unknown);
+                        element.write_a11y_info(&mut node);
+                        nodes.push((disabled, node));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_disabled_item_marks_its_node_disabled(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let nodes = std::rc::Rc::default();
+        let (_, cx) = cx.add_window_view({
+            let nodes = std::rc::Rc::clone(&nodes);
+            move |_, _| Probe { nodes }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let nodes = nodes.borrow();
+        assert_eq!(nodes.len(), 2);
+        for (disabled, node) in nodes.iter() {
+            assert_eq!(node.is_disabled(), *disabled, "disabled {disabled}");
+        }
     }
 }

@@ -121,6 +121,10 @@ pub use dialog::{
     DialogPopup, DialogTitle, DialogTrigger,
 };
 pub use element_ext::ElementExt;
+// Shared with `gpui-component`'s rows (menu items, command palette); not a
+// public API.
+#[doc(hidden)]
+pub use a11y_disabled::A11yDisabledExt;
 pub use event::{InteractiveElementExt, OngoingScrollExt};
 pub use focus_trap::FocusTrapElement;
 #[doc(hidden)]
