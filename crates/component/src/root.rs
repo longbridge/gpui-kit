@@ -66,6 +66,9 @@ pub(crate) struct ActiveDialog {
     /// `DialogEntrance::None`, reduced motion, and a zero theme duration all
     /// close in a single frame.
     exit_enabled: Rc<Cell<bool>>,
+    /// Set until the first frame that shows the dialog has been drawn, when
+    /// focus moves from the dialog container to its first tab stop.
+    initial_focus_pending: Rc<Cell<bool>>,
     /// Retained after closing until its exit transition finishes.
     pub(crate) closing: bool,
 }
@@ -85,6 +88,7 @@ impl ActiveDialog {
             selection_scope,
             builder: Rc::new(builder),
             exit_enabled: Rc::new(Cell::new(false)),
+            initial_focus_pending: Rc::new(Cell::new(true)),
             closing: false,
         }
     }
@@ -293,6 +297,9 @@ impl WindowState {
                 visibility: sample.progress,
                 closing: active_dialog.closing,
             });
+            if !active_dialog.closing && active_dialog.initial_focus_pending.replace(false) {
+                Self::schedule_initial_focus(active_dialog.focus_handle.clone(), window, cx);
+            }
 
             rendered.push((index, dialog));
         }
@@ -362,6 +369,36 @@ impl WindowState {
                     })
                 }),
         )
+    }
+
+    /// Moves focus into a newly opened dialog once its first frame is drawn.
+    ///
+    /// `open_dialog` can only focus the container: the controls inside do not
+    /// exist until the builder runs and the tab order is painted. When the
+    /// container still holds focus after that frame, focus moves to its first
+    /// tab stop. A control the application focused itself, while opening or
+    /// while building the dialog, keeps focus.
+    fn schedule_initial_focus(container: FocusHandle, window: &mut Window, cx: &mut App) {
+        window.defer(cx, move |window, cx| {
+            if !container.is_focused(window) {
+                return;
+            }
+            // The container comes before its children in the tab order, so the
+            // next stop is normally its first control. Walk on in case a
+            // `tab_index` puts something outside first, and stay on the
+            // container when nothing inside is reachable.
+            let mut visited = Vec::new();
+            window.focus_next(cx);
+            while !container.contains_focused(window, cx) {
+                let focused = window.focused(cx);
+                if visited.contains(&focused) {
+                    container.focus(window, cx);
+                    break;
+                }
+                visited.push(focused);
+                window.focus_next(cx);
+            }
+        });
     }
 
     /// Unmounts a dialog once its exit transition has finished.

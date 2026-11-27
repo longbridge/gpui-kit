@@ -18,6 +18,7 @@ use crate::{
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::{DialogContent, DialogDispatchAnchor, DialogTitle},
     scroll::ScrollableElement as _,
+    styled::FOCUS_RING_WIDTH,
     v_flex,
 };
 
@@ -846,9 +847,15 @@ impl RenderOnce for Dialog {
                                         .when_some(self.props.max_width, |this, w| this.max_w(w))
                                         .max_h(max_height)
                                         .child(
+                                            // Both this and the body clip their content. The
+                                            // matching padding and negative margin leave room
+                                            // for a control's focus ring, which is painted
+                                            // outside its border, without moving anything.
                                             v_flex()
                                                 .flex_1()
                                                 .overflow_hidden()
+                                                .py(FOCUS_RING_WIDTH)
+                                                .my(-FOCUS_RING_WIDTH)
                                                 .gap_y_2()
                                                 .when_some(self.header, |this, header| {
                                                     this.child(
@@ -878,15 +885,20 @@ impl RenderOnce for Dialog {
                                                 })
                                                 .when(!self.children.is_empty(), |this| {
                                                     this.child(
-                                                        div().flex_1().overflow_hidden().child(
-                                                            // Body
-                                                            v_flex()
-                                                                .size_full()
-                                                                .overflow_y_scrollbar()
-                                                                .pl(paddings.left)
-                                                                .pr(paddings.right)
-                                                                .children(self.children),
-                                                        ),
+                                                        div()
+                                                            .flex_1()
+                                                            .overflow_hidden()
+                                                            .my(-FOCUS_RING_WIDTH)
+                                                            .child(
+                                                                // Body
+                                                                v_flex()
+                                                                    .size_full()
+                                                                    .overflow_y_scrollbar()
+                                                                    .py(FOCUS_RING_WIDTH)
+                                                                    .pl(paddings.left)
+                                                                    .pr(paddings.right)
+                                                                    .children(self.children),
+                                                            ),
                                                     )
                                                 }),
                                         )
@@ -1362,7 +1374,9 @@ pub(crate) mod tests {
             assert!(state.active_dialogs[0].closing);
             assert!(!state.active_dialogs[1].closing);
             assert!(
-                state.active_dialogs[1].focus_handle().is_focused(window),
+                state.active_dialogs[1]
+                    .focus_handle()
+                    .contains_focused(window, cx),
                 "the reopened dialog owns focus while the old one leaves"
             );
         });
@@ -1376,7 +1390,11 @@ pub(crate) mod tests {
             let state = WindowState::read(window, cx);
             assert_eq!(state.active_dialogs.len(), 1);
             assert!(!state.active_dialogs[0].closing);
-            assert!(state.active_dialogs[0].focus_handle().is_focused(window));
+            assert!(
+                state.active_dialogs[0]
+                    .focus_handle()
+                    .contains_focused(window, cx)
+            );
             assert!(window.has_active_dialog(cx));
         });
         assert_eq!(surface(cx, 0).top(), px(80.));
@@ -1659,6 +1677,167 @@ pub(crate) mod tests {
             cx.simulate_input("after");
             assert_eq!(input.read_with(cx, |input, _| input.value()), "before");
         }
+    }
+
+    /// Opening a dialog puts focus on its first control, so typing goes
+    /// straight into the form (#2068).
+    #[gpui::test]
+    fn opening_focuses_the_first_input(cx: &mut TestAppContext) {
+        use crate::input::{Input, InputState};
+        use gpui::Focusable as _;
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let field = input.clone();
+        open(cx, move |dialog, _, _| {
+            dialog
+                .title("Rename")
+                .child(Input::new(&field))
+                .footer(Button::new("save").label("Save"))
+        });
+        cx.update(|window, cx| assert!(input.focus_handle(cx).is_focused(window)));
+        cx.simulate_input("draft");
+        assert_eq!(input.read_with(cx, |input, _| input.value()), "draft");
+    }
+
+    /// The focused input's ring is painted outside its border; the dialog's
+    /// clipped body must leave room for it rather than cut its top and bottom.
+    #[gpui::test]
+    fn focus_ring_is_not_clipped_by_the_body(cx: &mut TestAppContext) {
+        use crate::input::{Input, InputState};
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        open(cx, move |dialog, _, _| {
+            dialog
+                .title("Rename")
+                .child(Input::new(&input))
+                .footer(Button::new("save").label("Save"))
+        });
+        // Let the entrance finish so the surface is at its resting size.
+        cx.background_executor
+            .advance_clock(*ANIMATION_DURATION + Duration::from_millis(1));
+        frame(cx);
+        let ring = cx
+            .debug_bounds("focus-ring")
+            .expect("the focused input draws its ring");
+        let scale = cx.update(|window, _| window.scale_factor());
+        let (top, bottom) = (
+            f32::from(ring.top()) * scale,
+            f32::from(ring.bottom()) * scale,
+        );
+        // A rounded border is painted as several slices, each masked to its
+        // band; together they must reach the ring's top and bottom edges.
+        let (mask_top, mask_bottom) = cx.update(|window, _| {
+            window
+                .painted_quads()
+                .into_iter()
+                .filter(|quad| {
+                    (quad.bounds.origin.y.0 - top).abs() < 1.0
+                        && (quad.bounds.bottom().0 - bottom).abs() < 1.0
+                        && quad.border_widths.top.0 > 0.0
+                })
+                .map(|quad| quad.content_mask.bounds)
+                .fold((f32::MAX, f32::MIN), |(lo, hi), mask| {
+                    (lo.min(mask.origin.y.0), hi.max(mask.bottom().0))
+                })
+        });
+        assert!(
+            mask_top <= top + 0.5 && mask_bottom >= bottom - 0.5,
+            "ring {top}..{bottom} is clipped to {mask_top}..{mask_bottom}"
+        );
+    }
+
+    /// Without a text field, the first button in the tab order takes focus;
+    /// the close button, painted last, does not.
+    #[gpui::test]
+    fn opening_focuses_the_first_button(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let (cancel, ok) = cx.update(|_, cx| (cx.focus_handle(), cx.focus_handle()));
+        let (first, second) = (cancel.clone(), ok.clone());
+        open(cx, move |dialog, _, _| {
+            dialog.title("Delete?").child("body").footer(
+                div()
+                    .child(Button::new("cancel").label("Cancel").track_focus(&first))
+                    .child(Button::new("ok").label("Delete").track_focus(&second)),
+            )
+        });
+        cx.update(|window, _| {
+            assert!(cancel.is_focused(window));
+            assert!(!ok.is_focused(window));
+        });
+    }
+
+    /// A control the application focuses while opening the dialog keeps
+    /// focus instead of being moved to the first one.
+    #[gpui::test]
+    fn opening_keeps_focus_the_application_chose(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let (first, chosen) = cx.update(|_, cx| (cx.focus_handle(), cx.focus_handle()));
+        let (first_button, chosen_button) = (first.clone(), chosen.clone());
+        let focus = chosen.clone();
+        cx.update(move |window, cx| {
+            window.open_dialog(cx, move |dialog, _, _| {
+                dialog.title("Choose").footer(
+                    div()
+                        .child(
+                            Button::new("first")
+                                .label("First")
+                                .track_focus(&first_button),
+                        )
+                        .child(
+                            Button::new("chosen")
+                                .label("Chosen")
+                                .track_focus(&chosen_button),
+                        ),
+                )
+            });
+            focus.focus(window, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| {
+            assert!(chosen.is_focused(window));
+            assert!(!first.is_focused(window));
+        });
+    }
+
+    /// A dialog with nothing focusable keeps focus on itself, so Escape and
+    /// the dialog's actions still reach it.
+    #[gpui::test]
+    fn opening_without_controls_keeps_the_dialog_focused(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        open(cx, |dialog, _, _| {
+            dialog.close_button(false).child("Read only")
+        });
+        cx.update(|window, cx| {
+            let state = WindowState::read(window, cx);
+            assert!(state.active_dialogs[0].focus_handle().is_focused(window));
+        });
+    }
+
+    /// Closing returns focus to what held it before the dialog opened, after
+    /// focus had moved to a control inside.
+    #[gpui::test]
+    fn closing_restores_focus_after_initial_focus(cx: &mut TestAppContext) {
+        use crate::input::{Input, InputState};
+        use gpui::Focusable as _;
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let background = cx.update(|_, cx| cx.focus_handle());
+        cx.update(|window, cx| background.focus(window, cx));
+        let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let field = input.clone();
+        open(cx, move |dialog, _, _| {
+            dialog.title("Rename").child(Input::new(&field))
+        });
+        cx.update(|window, cx| assert!(input.focus_handle(cx).is_focused(window)));
+
+        cx.update(|window, cx| window.close_dialog(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| assert!(background.is_focused(window)));
     }
 
     /// The most opaque background painted at the surface's current bounds.
