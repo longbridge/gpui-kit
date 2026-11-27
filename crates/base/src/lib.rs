@@ -4,6 +4,10 @@
 //! colors, sizing, and motion belong to applications or the
 //! `gpui-component` façade.
 
+#[cfg(not(any(feature = "gpui-pre", feature = "gpui-fast")))]
+compile_error!(
+    "gpui-base needs a GPUI engine: enable the `gpui-pre` feature (the default) or `gpui-fast`"
+);
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 #[cfg(all(feature = "gpui-fast", test))]

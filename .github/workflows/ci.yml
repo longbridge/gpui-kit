@@ -78,7 +78,7 @@ jobs:
       - name: Install system dependencies
         run: script/bootstrap
       - name: Check without default features (tree-sitter disabled)
-        run: cargo check -p gpui-component --no-default-features --locked
+        run: cargo check -p gpui-component --no-default-features --features gpui-pre --locked
       # Control callback, legacy alias, and Form contract tests on the same
       # feature set, so they reuse the build above.
       - name: Test without default features
@@ -252,7 +252,7 @@ jobs:
       # The `components` feature is the only edge to `gpui-component`; the
       # runtime must still build without it.
       - name: Check GPUI Shell without the component catalog
-        run: cargo check -p gpui-shell --no-default-features --features quickjs
+        run: cargo check -p gpui-shell --no-default-features --features gpui-pre,quickjs
 
   gpui-shell-components:
     name: GPUI Shell Components
