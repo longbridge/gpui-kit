@@ -44,6 +44,9 @@ use crate::{
 /// a really-drawn frame whether the control was offered.
 const ZOOM_CONTROL_SELECTOR: &str = "dock-tab-bar-zoom-control";
 
+/// Debug-bounds selector for the tab bar's ellipsis button, for tests.
+const OVERFLOW_MENU_SELECTOR: &str = "dock-tab-bar-overflow-menu";
+
 /// Debug-bounds selector for a tab's close (X) button, for tests.
 const CLOSE_BUTTON_SELECTOR: &str = "dock-tab-close-button";
 
@@ -304,6 +307,7 @@ impl TabGroupSkin {
         let menu_zoom = control.is_some_and(|control| control.menu_visible());
         let closable = group.is_closable();
         let buttons = handle.and_then(|handle| handle.toolbar_buttons(window, cx));
+        let show_menu = handle.is_none_or(|panel| panel.overflow_menu_visible(cx));
         let panel = handle.map(|handle| handle.panel());
 
         h_flex()
@@ -329,6 +333,7 @@ impl TabGroupSkin {
                             .xsmall()
                             .ghost()
                             .tab_stop(false)
+                            .accessibility_label(tooltip.clone())
                             .tooltip_with_action(tooltip, &ToggleZoom, None)
                             .selected(zoomed)
                             // Whether this button was drawn is the whole of
@@ -343,12 +348,13 @@ impl TabGroupSkin {
                     )
                 },
             )
-            .child(
+            .children(show_menu.then(|| {
                 Button::new("menu")
                     .icon(IconName::Ellipsis)
                     .xsmall()
                     .ghost()
                     .tab_stop(false)
+                    .debug_selector(|| OVERFLOW_MENU_SELECTOR.to_string())
                     .dropdown_menu(move |menu, window, cx| {
                         menu.when_some(panel.clone(), |menu, panel| {
                             panel.dropdown_menu(menu, window, cx)
@@ -367,8 +373,8 @@ impl TabGroupSkin {
                                 .menu(t!("Dock.Close"), Box::new(ClosePanel))
                         })
                     })
-                    .anchor(Anchor::TopRight),
-            )
+                    .anchor(Anchor::TopRight)
+            }))
     }
 
     /// The one-panel title bar: no tabs, just the title and the controls.
@@ -533,6 +539,7 @@ impl TabGroupSkin {
                                     this.suffix(
                                         Button::new(("close-tab", ix))
                                             .icon(IconName::Close)
+                                            .accessibility_label(t!("Dock.Close"))
                                             .xsmall()
                                             // The regular ghost hover matches the
                                             // inactive tab bar background in the
@@ -1039,6 +1046,10 @@ mod tests {
     }
 
     impl Panel for ToolbarZoomProbe {
+        fn overflow_menu_visible(&self, _: &App) -> bool {
+            false
+        }
+
         fn zoom_control(&self, _: &App) -> Option<PanelControl> {
             Some(PanelControl::Toolbar)
         }
@@ -1135,15 +1146,15 @@ mod tests {
     }
 
     /// Draw one panel through the real [`DockSkin`] and report whether its tab
-    /// bar offered a zoom control.
+    /// bar offered a zoom control and overflow menu.
     ///
     /// The real skin, not a recorder: the bug this guards is `render_toolbar`
     /// asking only half the question, so a test that calls `zoom_control`
     /// itself would pass with the bug in place.
-    fn drew_zoom_control(
+    fn drawn_toolbar_controls(
         cx: &mut TestAppContext,
         panel: impl FnOnce(&mut App) -> Arc<dyn gpui_base::dock::PanelView>,
-    ) -> bool {
+    ) -> (bool, bool) {
         cx.update(|cx| {
             crate::init(cx);
         });
@@ -1158,7 +1169,10 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|window, cx| crate::test_redraw(window, cx));
-        cx.debug_bounds(ZOOM_CONTROL_SELECTOR).is_some()
+        (
+            cx.debug_bounds(ZOOM_CONTROL_SELECTOR).is_some(),
+            cx.debug_bounds(OVERFLOW_MENU_SELECTOR).is_some(),
+        )
     }
 
     /// The two halves of the old `zoomable()` can now disagree, and base is
@@ -1166,29 +1180,32 @@ mod tests {
     /// pressing it does nothing.
     #[gpui::test]
     fn a_panel_base_will_not_zoom_gets_no_zoom_control(cx: &mut TestAppContext) {
-        let drew = drew_zoom_control(cx, |cx| {
+        let (zoom, overflow) = drawn_toolbar_controls(cx, |cx| {
             panel_handle(cx.new(|cx| UnzoomableProbe {
                 focus_handle: cx.focus_handle(),
             }))
         });
 
         assert!(
-            !drew,
+            !zoom,
             "the panel names a place for the control, but base refuses the zoom"
         );
+        assert!(overflow, "the overflow menu is visible by default");
     }
 
     /// The other half: a panel that allows zoom and asks for a toolbar control
     /// gets one drawn. Without this the test above would also pass a skin that
     /// never draws a zoom control at all.
     #[gpui::test]
-    fn a_zoomable_panel_gets_its_zoom_control(cx: &mut TestAppContext) {
-        let drew = drew_zoom_control(cx, |cx| panel_handle(ToolbarZoomProbe::new(cx)));
+    fn a_panel_can_keep_zoom_without_the_overflow_menu(cx: &mut TestAppContext) {
+        let (zoom, overflow) =
+            drawn_toolbar_controls(cx, |cx| panel_handle(ToolbarZoomProbe::new(cx)));
 
         assert!(
-            drew,
+            zoom,
             "a zoomable panel asking for a toolbar control gets one"
         );
+        assert!(!overflow, "the panel hides the overflow menu");
     }
 
     /// The centre and the bottom dock share the centre column, and both get
