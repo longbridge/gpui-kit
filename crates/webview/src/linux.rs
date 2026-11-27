@@ -97,15 +97,21 @@ pub(crate) fn device_bounds(bounds: Bounds<Pixels>, scale_factor: f32) -> wry::R
     }
 }
 
-/// Forward presses on the page to GPUI, which does not otherwise see them, so overlays that
-/// close on an outside click (popovers, menus) close when the page is clicked.
+/// Give the page the keyboard and GPUI focus when it is pressed, and forward the press to GPUI, which does not
+/// otherwise see it, so overlays that close on an outside click (popovers, menus) close when
+/// the page is clicked.
 pub(crate) fn forward_mouse_down(
     webview: &wry::WebView,
     origin: Rc<Cell<Point<Pixels>>>,
+    focus_handle: gpui::FocusHandle,
     window: &Window,
     cx: &App,
 ) {
-    use gtk::{gdk::EventType, glib::Propagation, prelude::WidgetExt as _};
+    use gtk::{
+        gdk::EventType,
+        glib::Propagation,
+        prelude::{Cast as _, WidgetExt as _},
+    };
     use wry::WebViewExtUnix as _;
 
     let handle = window.window_handle();
@@ -122,9 +128,11 @@ pub(crate) fn forward_mouse_down(
             if event.event_type() != EventType::ButtonPress {
                 return Propagation::Proceed;
             }
+            keyboard::focus(widget.upcast_ref());
             let (x, y) = event.position();
             let gdk_scale = widget.scale_factor() as f32;
             let origin = origin.get();
+            let focus_handle = focus_handle.clone();
             // GTK dispatches this from the GTK main loop; update GPUI once it is done.
             cx.spawn(async move |cx| {
                 handle.update(cx, |_, window, cx| {
@@ -149,6 +157,9 @@ pub(crate) fn forward_mouse_down(
                         }),
                         cx,
                     );
+                    // GPUI focus follows the X input focus into the page, so moving GPUI focus
+                    // elsewhere later gives the keyboard back to the GPUI window.
+                    window.focus(&focus_handle, cx);
                 })
             })
             .detach();
@@ -310,4 +321,205 @@ fn detach_from_surface(webview: &wry::WebView) {
     // Wait until the server has moved it, so GPUI's removal of the surface comes after.
     display.upcast_ref::<gtk::gdk::Display>().sync();
     display.error_trap_pop_ignored();
+}
+
+/// The X11 window of a GPUI window, which hosts its webviews.
+pub(crate) fn host_window(window: &Window) -> Option<std::ffi::c_ulong> {
+    X11Parent::new(window).ok().map(|parent| parent.0.window)
+}
+
+/// Keyboard focus between GPUI and the webviews' GTK windows.
+///
+/// A webview is an X11 child window of its GPUI window. X11 sends key events to the window
+/// with the input focus, but when that window is an ancestor of the window under the pointer,
+/// the window under the pointer gets them. GTK selects key events on its windows (through
+/// XInput2, so the event mask cannot be narrowed), so the keyboard followed the pointer: with
+/// a GPUI input focused, typing over the page went to the page, and after a click into the
+/// page, typing went to GPUI as soon as the pointer left it.
+///
+/// So a page takes the X input focus when it is clicked, and its GPUI window takes it back
+/// when GPUI focus moves elsewhere (a click on GPUI content, or focus moved from code), or the
+/// webview is hidden. Key events that reach a page without the X input focus are sent on to
+/// its GPUI window from the page's own key signals; GDK's process-wide event handler is left
+/// alone.
+pub(crate) mod keyboard {
+    use std::ffi::c_ulong;
+
+    use gdkx11::{X11Display, X11Window};
+    use gtk::{
+        gdk,
+        glib::{Propagation, translate::ToGlibPtr as _},
+        prelude::*,
+    };
+    use x11::xlib;
+
+    /// The GTK widget of `webview`'s page.
+    pub(crate) fn page(webview: &wry::WebView) -> gtk::Widget {
+        use wry::WebViewExtUnix as _;
+        webview.webview().upcast()
+    }
+
+    /// Send key events that reach `page` without the X input focus on to its GPUI window
+    /// `host`, so the pointer has no say in where they go.
+    pub(crate) fn register(page: &gtk::Widget, host: c_ulong) {
+        let forward = move |widget: &gtk::Widget, key: &gdk::EventKey| {
+            let Some(xid) = page_xid(widget) else {
+                return Propagation::Proceed;
+            };
+            let Some((display, xdisplay)) = display() else {
+                return Propagation::Proceed;
+            };
+            if input_focus(xdisplay) == xid {
+                return Propagation::Proceed;
+            }
+            let press = key.event_type() == gdk::EventType::KeyPress;
+            send_key(&display, xdisplay, host, key, press);
+            Propagation::Stop
+        };
+        page.connect_key_press_event(forward);
+        page.connect_key_release_event(forward);
+    }
+
+    /// Give `page` the X input focus.
+    pub(crate) fn focus(page: &gtk::Widget) {
+        if let Some(xid) = page_xid(page)
+            && let Some((display, xdisplay)) = display()
+        {
+            set_input_focus(&display, xdisplay, xid);
+        }
+    }
+
+    /// Give `page` the X input focus if its GPUI window `host`, or a window inside it, has it.
+    pub(crate) fn focus_if_active(page: &gtk::Widget, host: c_ulong) {
+        let Some(xid) = page_xid(page) else {
+            return;
+        };
+        let Some((display, xdisplay)) = display() else {
+            return;
+        };
+        let focused = input_focus(xdisplay);
+        if focused != xid && is_within(xdisplay, focused, host) {
+            set_input_focus(&display, xdisplay, xid);
+        }
+    }
+
+    /// Give the X input focus back to the GPUI window `host`, if `page` has it.
+    pub(crate) fn release(page: &gtk::Widget, host: c_ulong) {
+        let Some((display, xdisplay)) = display() else {
+            return;
+        };
+        if page_xid(page).is_some_and(|xid| input_focus(xdisplay) == xid) {
+            set_input_focus(&display, xdisplay, host);
+        }
+    }
+
+    /// Whether `window` is `ancestor` or inside it.
+    fn is_within(xdisplay: *mut xlib::Display, mut window: c_ulong, ancestor: c_ulong) -> bool {
+        // None (0) and PointerRoot (1) are not windows.
+        while window > 1 {
+            if window == ancestor {
+                return true;
+            }
+            let (mut root, mut parent) = (0, 0);
+            let mut children = std::ptr::null_mut();
+            let mut count = 0;
+            // SAFETY: A valid Xlib connection and out pointers; the child list is freed.
+            let ok = unsafe {
+                let ok = xlib::XQueryTree(
+                    xdisplay,
+                    window,
+                    &mut root,
+                    &mut parent,
+                    &mut children,
+                    &mut count,
+                );
+                if !children.is_null() {
+                    xlib::XFree(children.cast());
+                }
+                ok
+            };
+            if ok == 0 || parent == root {
+                return false;
+            }
+            window = parent;
+        }
+        false
+    }
+
+    /// The X11 window that receives the page's key events: GDK's toplevel window of the
+    /// widget. (Wry's container window above it is foreign to GDK, and key events sent to it
+    /// do not reach the page.)
+    fn page_xid(page: &gtk::Widget) -> Option<c_ulong> {
+        xid(&page.window()?.toplevel())
+    }
+
+    fn xid(window: &gdk::Window) -> Option<c_ulong> {
+        Some(window.downcast_ref::<X11Window>()?.xid())
+    }
+
+    fn display() -> Option<(X11Display, *mut xlib::Display)> {
+        let display = gdk::Display::default()?.downcast::<X11Display>().ok()?;
+        // SAFETY: `display` is a live GdkX11Display; its Xlib connection lives as long as it.
+        let xdisplay =
+            unsafe { gdkx11::ffi::gdk_x11_display_get_xdisplay(display.to_glib_none().0) };
+        Some((display, xdisplay))
+    }
+
+    fn input_focus(xdisplay: *mut xlib::Display) -> c_ulong {
+        let (mut window, mut revert_to) = (0, 0);
+        // SAFETY: A valid Xlib connection and out pointers.
+        unsafe { xlib::XGetInputFocus(xdisplay, &mut window, &mut revert_to) };
+        window
+    }
+
+    /// Set the X input focus on GTK's connection, after GTK's own pending requests.
+    fn set_input_focus(display: &X11Display, xdisplay: *mut xlib::Display, xid: c_ulong) {
+        display.error_trap_push();
+        // SAFETY: A valid Xlib connection; errors (an unmapped window cannot take the focus)
+        // are caught by the trap.
+        unsafe { xlib::XSetInputFocus(xdisplay, xid, xlib::RevertToParent, xlib::CurrentTime) };
+        display.error_trap_pop_ignored();
+    }
+
+    /// Send a key event that GTK received to the GPUI window `host` as a core X11 key event.
+    fn send_key(
+        display: &X11Display,
+        xdisplay: *mut xlib::Display,
+        host: c_ulong,
+        key: &gdk::EventKey,
+        press: bool,
+    ) {
+        // Modifier and button bits are the same in GDK and X11; XKB adds the group.
+        let state = (key.state().bits() & 0x1fff) | (u32::from(key.group() & 3) << 13);
+        let mut event = xlib::XEvent::from(xlib::XKeyEvent {
+            type_: if press {
+                xlib::KeyPress
+            } else {
+                xlib::KeyRelease
+            },
+            serial: 0,
+            send_event: xlib::True,
+            display: xdisplay,
+            window: host,
+            // SAFETY: A valid Xlib connection.
+            root: unsafe { xlib::XDefaultRootWindow(xdisplay) },
+            subwindow: 0,
+            time: xlib::Time::from(key.time()),
+            x: 0,
+            y: 0,
+            x_root: 0,
+            y_root: 0,
+            state,
+            keycode: u32::from(key.hardware_keycode()),
+            same_screen: xlib::True,
+        });
+        display.error_trap_push();
+        // SAFETY: A valid Xlib connection and key event; errors (the window is gone) are caught
+        // by the trap.
+        unsafe {
+            xlib::XSendEvent(xdisplay, host, xlib::False, xlib::NoEventMask, &mut event);
+            xlib::XFlush(xdisplay);
+        }
+        display.error_trap_pop_ignored();
+    }
 }

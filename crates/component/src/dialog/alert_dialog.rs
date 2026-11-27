@@ -167,16 +167,24 @@ impl AlertDialog {
 
     /// Sets the title of the alert dialog.
     #[track_caller]
-    pub fn title(mut self, title: impl IntoElement) -> Self {
+    ///
+    /// A plain-text title (`&str`, `String` or `SharedString`) also names the
+    /// alert dialog for assistive technology.
+    pub fn title(mut self, title: impl IntoElement + 'static) -> Self {
         self.debug_assert_no_trigger();
+        self.base.accessible_title = super::dialog::plain_text(&title);
         self.title = Some(title.into_any_element());
         self
     }
 
     /// Sets the description of the alert dialog.
     #[track_caller]
-    pub fn description(mut self, description: impl IntoElement) -> Self {
+    ///
+    /// A plain-text description also describes the alert dialog for assistive
+    /// technology.
+    pub fn description(mut self, description: impl IntoElement + 'static) -> Self {
         self.debug_assert_no_trigger();
+        self.base.accessible_description = super::dialog::plain_text(&description);
         self.description = Some(description.into_any_element());
         self
     }

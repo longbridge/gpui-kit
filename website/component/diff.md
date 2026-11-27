@@ -230,7 +230,8 @@ self.diff.update(cx, |state, cx| {
 ```
 
 `scroll_to_line` reveals supplied context and expands a collapsed file when
-needed; it cannot reveal lines absent from the patch — `has_line` says whether
+needed, and lands the line below the pinned file header rather than under it;
+it cannot reveal lines absent from the patch — `has_line` says whether
 the patch carries a line, so the application can decide where a navigation
 lands before scrolling. `scroll_to_file` shows a
 file's header, including a file without source rows, for example from a file
@@ -392,6 +393,12 @@ Diff::new(&self.diff)
     .h(rems(24.))
 ```
 
+While a file's content scrolls, its header stays pinned over the list, so long
+files keep their name and controls in view; the next file's header pushes it
+out. The pinned bar repeats the header without the file's annotation cards.
+`sticky_header(false)` turns the pinning off, and headers scroll away with
+their files.
+
 Each callback receives `&DiffFile`, `&mut Window` and `&mut App`, and returns an
 `IntoElement`. `header_visible(false)` hides headers. Callbacks implement `Fn`
 and retain their captures for `'static`; they receive an `App`, rather than the
@@ -506,6 +513,22 @@ shows above it. Without `with_background`, the fill is a translucent warning
 color; `with_foreground` sets the text color over a strong fill. A fully
 transparent background leaves whatever the line shows beneath the span, and
 `with_underline` underlines the span in its text color — the way a link reads.
+
+To find text, read each file's `source_lines()`: the lines the patch supplies
+in the order a unified diff shows them (an unchanged line once, at its modified
+side; a change's deleted lines before its added ones), each with its position
+and its text. A match becomes a span highlight, and `scroll_to_line` brings it
+into view:
+
+```rust
+let hits: Vec<DiffSpanHighlight> = self.diff.read(cx).files().iter()
+    .flat_map(|file| file.source_lines().flat_map(|(at, text)| {
+        text.match_indices(words)
+            .map(move |(start, _)| DiffSpanHighlight::new(at.clone(), start..start + words.len()))
+            .collect::<Vec<_>>()
+    }))
+    .collect();
+```
 
 Like annotations, decorations, markers and span highlights are supplied on
 every render, so the current builder call is their only source.

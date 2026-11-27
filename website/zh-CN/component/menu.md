@@ -37,6 +37,42 @@ div()
     })
 ```
 
+每次打开菜单时，builder 都只运行一次；右键点击，或 Focus 在元素内时按 Shift+F10，都会打开菜单。builder 在触发事件派发完之后运行，菜单打开期间不会重新构建。builder 没有添加任何菜单项时，不会打开菜单。
+
+要跟踪菜单是否打开，可以在 builder 中记录打开状态，并订阅菜单的 `DismissEvent`，菜单关闭时会发出这个事件。菜单打开时再次右键会替换当前菜单，并重新运行 builder，所以把订阅保存在字段里，让下一次的订阅替换它：
+
+```rust
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::{DismissEvent, Subscription};
+
+struct FileList {
+    menu_open: bool,
+    _menu_dismissed: Option<Subscription>,
+}
+
+impl Render for FileList {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        div()
+            .id("file-list")
+            .context_menu(move |menu, _, cx| {
+                let popup = cx.entity();
+                _ = view.update(cx, |this, cx| {
+                    this.menu_open = true;
+                    this._menu_dismissed =
+                        Some(cx.subscribe(&popup, |this, _, _: &DismissEvent, cx| {
+                            this.menu_open = false;
+                            cx.notify();
+                        }));
+                    cx.notify();
+                });
+                menu.menu("Rename", Box::new(Rename))
+                    .menu("Delete", Box::new(Delete))
+            })
+    }
+}
+```
+
 ### DropdownMenu
 
 下拉菜单通常由按钮或其它可交互元素触发：
@@ -71,6 +107,18 @@ Button::new("menu-btn")
 如果你不想使用 [Action]，也可以通过 `item` 方法配合 [PopupMenuItem] 创建自定义菜单项，并使用 `on_click` 直接处理点击事件。
 :::
 
+用 `accessibility_label` 为菜单设置无障碍名称，通常与打开它的按钮同名，这样屏幕阅读器能说出当前是哪个菜单。子菜单无需设置，会自动使用对应菜单项的名称：
+
+```rust
+Button::new("sort")
+    .label("Sort")
+    .dropdown_menu(|menu, _, _| {
+        menu.accessibility_label("Sort")
+            .menu("Name", Box::new(SortByName))
+            .menu("Date", Box::new(SortByDate))
+    })
+```
+
 ### 锚点位置
 
 控制下拉菜单相对触发器的显示位置：
@@ -95,6 +143,14 @@ menu.menu_with_icon("Search", IconName::Search, Box::new(Search))
     .menu_with_icon("Settings", IconName::Settings, Box::new(OpenSettings))
     .separator()
     .menu_with_icon("Help", IconName::Help, Box::new(ShowHelp))
+```
+
+图标默认以小尺寸绘制；如果为图标单独设置了尺寸，则保留该尺寸：
+
+```rust
+use gpui_kit::component::{Icon, Sizable as _, Size};
+
+menu.menu_with_icon("Search", Icon::new(IconName::Search).with_size(Size::Medium), Box::new(Search))
 ```
 
 ### 禁用状态
@@ -196,6 +252,18 @@ menu.menu_element(Box::new(CustomAction), |window, cx| {
                 )
         }
     )
+```
+
+自定义元素没有可供辅助技术朗读的标签。使用 `PopupMenuItem::element` 构建菜单项，并用 `accessibility_label` 为其命名，屏幕阅读器就不会把它读作一个没有名称的菜单项：
+
+```rust
+use gpui_kit::component::menu::PopupMenuItem;
+
+menu.item(
+    PopupMenuItem::element(|_, _| h_flex().gap_1().child("Status").child("✓ Connected"))
+        .accessibility_label("Status: Connected")
+        .action(Box::new(InfoAction)),
+)
 ```
 
 ### 键盘快捷键

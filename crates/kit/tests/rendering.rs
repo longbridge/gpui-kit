@@ -1376,6 +1376,81 @@ mod rendering {
         }
     }
 
+    struct Links;
+    impl Render for Links {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .p_4()
+                .child(TextView::markdown(
+                    "links",
+                    "GPUI Kit is a set of [UI components](https://github.com/longbridge/gpui-kit) \
+                    for building desktop apps with [GPUI](https://gpui.rs). Read the \
+                    [documentation](https://longbridge.github.io/gpui-kit) to get started.",
+                ))
+        }
+    }
+
+    impl Capture {
+        /// Device pixels painted close to `color`, in reading order.
+        fn pixels_like(&self, color: Rgba) -> Vec<(i32, i32)> {
+            let target = [color.r, color.g, color.b].map(|c| (c * 255.).round() as i32);
+            (0..self.height as i32)
+                .flat_map(|y| (0..self.width as i32).map(move |x| (x, y)))
+                .filter(|&(x, y)| distance(self.get_pixel(x, y), target) < 12)
+                .collect()
+        }
+    }
+
+    /// Pointing at a link lays it out in the theme's `link_hover` color, and
+    /// only that link: the others keep the link color.
+    fn hovering_a_link_takes_the_link_hover_color(mode: ThemeMode) {
+        let mut cx = context(Arc::new(Assets));
+        // Colors far apart from each other and from the text, so antialiased
+        // glyph edges cannot be mistaken for either.
+        let (link, link_hover) = (hsla(0.6, 0.9, 0.45, 1.), hsla(0., 0.9, 0.5, 1.));
+        cx.update(|cx| {
+            Theme::change(mode, None, cx);
+            Theme::update(cx, |theme| {
+                theme.link = link;
+                theme.link_hover = link_hover;
+            });
+            Theme::sync_base(cx);
+        });
+        let (link, link_hover) = (Rgba::from(link), Rgba::from(link_hover));
+        let handle = open_window(&mut cx, (560., 120.), |_, _| Links);
+        let idle = Capture::take(&mut cx, handle);
+        let idle_link = idle.pixels_like(link);
+        let idle_hover = idle.pixels_like(link_hover).len();
+        // The first link-colored pixel lies in the first link's first glyph.
+        let &(x, y) = idle_link
+            .first()
+            .expect("the links must paint in the link color");
+        let pointer = gpui_kit::point(
+            px(x as f32 / idle.scale() + 4.),
+            px(y as f32 / idle.scale() + 2.),
+        );
+        cx.update_window(handle, |_, window, cx| {
+            window.pointer_move(pointer, None, cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        let hovered = Capture::take(&mut cx, handle);
+        let hovered_link = hovered.pixels_like(link).len();
+        assert!(
+            hovered.pixels_like(link_hover).len() > idle_hover,
+            "the link under the pointer must take the hover color ({mode:?})"
+        );
+        assert!(
+            hovered_link < idle_link.len() && hovered_link > 0,
+            "only the hovered link leaves the link color: {} of {} pixels remain ({mode:?})",
+            hovered_link,
+            idle_link.len()
+        );
+    }
+
     pub fn run() {
         println!("running gutter_lane_contains_digits_wider_than_plus");
         gutter_lane_contains_digits_wider_than_plus();
@@ -1397,6 +1472,11 @@ mod rendering {
         println!("running pixels_detect_missing_input_text_even_when_value_is_correct");
         pixels_detect_missing_input_text_even_when_value_is_correct();
         println!("passed pixels_detect_missing_input_text_even_when_value_is_correct");
+        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+            println!("running hovering_a_link_takes_the_link_hover_color ({mode:?})");
+            hovering_a_link_takes_the_link_hover_color(mode);
+            println!("passed hovering_a_link_takes_the_link_hover_color ({mode:?})");
+        }
         println!("running wrapped_cjk_with_inline_code_stays_within_the_wrap_width");
         wrapped_cjk_with_inline_code_stays_within_the_wrap_width();
         println!("passed wrapped_cjk_with_inline_code_stays_within_the_wrap_width");

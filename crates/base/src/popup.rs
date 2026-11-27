@@ -32,6 +32,7 @@ pub struct Popup {
     style: StyleRefinement,
     anchor: Anchor,
     offset: Pixels,
+    boundary: Option<Bounds<Pixels>>,
     on_position: Option<Box<dyn Fn(ResolvedPosition, Bounds<Pixels>)>>,
     trigger: AnyElement,
     content: Option<AnyElement>,
@@ -46,6 +47,7 @@ impl Popup {
             style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
             offset: px(0.),
+            boundary: None,
             on_position: None,
             trigger: trigger.into_any_element(),
             content: None,
@@ -60,6 +62,13 @@ impl Popup {
     /// Gap from the trigger along the anchor's outward direction, zero by default.
     pub fn offset(mut self, offset: Pixels) -> Self {
         self.offset = offset;
+        self
+    }
+
+    /// Keep the popup inside `boundary`, in window coordinates, rather than
+    /// the whole window. See [`Positioner::boundary`].
+    pub fn boundary(mut self, boundary: Bounds<Pixels>) -> Self {
+        self.boundary = Some(boundary);
         self
     }
 
@@ -204,6 +213,10 @@ impl RenderOnce for Popup {
 
         let positioner =
             Positioner::corner(anchor, position.get()).tracked_corner_position(position);
+        let positioner = match self.boundary {
+            Some(boundary) => positioner.boundary(boundary),
+            None => positioner,
+        };
         let positioner = if let Some(callback) = self.on_position {
             positioner.on_position(move |position| callback(position, trigger_bounds.get()))
         } else {

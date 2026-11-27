@@ -15,6 +15,9 @@ version = "0.11.0"
 workspace = true
 
 [features]
+default = ["gpui-pre"]
+# Builds on upstream GPUI through the Kit. Without it, enable `gpui-fast`.
+gpui-pre = ["gpui-kit/gpui-pre"]
 # Hosts the native view in GPUI Fast's window composition, so GPUI overlays render above the
 # page on macOS and Linux. `gpui-kit/gpui-fast` selects the backend; enable both together, a
 # mismatch fails to compile. Without either, the native view covers GPUI content in its bounds.

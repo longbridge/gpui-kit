@@ -79,6 +79,25 @@ div()
     })
 ```
 
+### 长内容换行
+
+GPUI 按 min-content 尺寸布局 Tooltip，此时一段文本会按不换行的单行测量。只有布局已经确定了宽度，文本才会在这个宽度内换行。
+
+使用 `Tooltip::new` 或 `Tooltip::element` 时，在 Tooltip 上设置 `max_w`。块级内容和纵向排列的内容会在其中换行，短内容保持自身宽度。在横向 flex 行中，要给文本所在的子项加上 `min_w_0()`，否则它会保持单行宽度，超出背景：
+
+```rust
+Tooltip::element(|_, _| {
+    h_flex()
+        .gap_x_1()
+        .child(IconName::Info)
+        .child(div().min_w_0().child("Shows every file changed since the last commit"))
+})
+.max_w(px(320.))
+.build(window, cx)
+```
+
+不使用 `Tooltip`、自行编写的提示 view，需要先用 `w(...)` 给出确定宽度，文本才会换行。只设置 `max_w` 时，仅当 view 的根元素不是 flex 容器才有效；横向 flex 行中的文本同样需要 `min_w_0()`。若希望短文本保持紧凑，可以用测量出的文本宽度（`window.text_system().shape_line`）加上内边距作为宽度，再设置上限。
+
 ### 手动指定快捷键
 
 ```rust

@@ -74,9 +74,10 @@ impl Render for Counter {
             .child(
                 Button::new("increment")
                     .label("Increment")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.focus.dispatch_action(&Increment, window, cx);
-                    })),
+                    .on_click({
+                        let focus = self.focus.clone();
+                        move |_, window, cx| focus.dispatch_action(&Increment, window, cx)
+                    }),
             )
     }
 }
@@ -99,7 +100,7 @@ Run it from the repository root:
 cargo run -p hello_world --bin hello_world
 ```
 
-The window starts at `Count: 0`. Press **Enter** while the counter region has Focus, or click **Increment**; each operation increases the displayed count by one. The counter's `FocusHandle` is retained in its Entity and attached to the rendered container. `cx.bind_keys` maps Enter to `Increment` only on a path containing `Counter`. The container's `.on_action` calls `on_increment`, which changes retained state and calls `cx.notify()` so the new count renders. The button sends the *same* Action to that container through its saved handle, even if clicking the button moves Focus.
+The window starts at `Count: 0`. Press **Enter** while the counter region has Focus, or click **Increment**; each operation increases the displayed count by one. The counter's `FocusHandle` is retained in its Entity and attached to the rendered container. `cx.bind_keys` maps Enter to `Increment` only on a path containing `Counter`. The container's `.on_action` calls `on_increment`, which changes retained state and calls `cx.notify()` so the new count renders. The button sends the *same* Action to that container through a clone of its saved handle, even if clicking the button moves Focus. Its callback is a plain closure, not `cx.listener`: `focus_handle.dispatch_action` runs `on_increment` before it returns, and a listener would still be updating `Counter` at that point, so the second update panics.
 
 Check each link in the route with two small experiments, then restore the original source. First, remove `.key_context("Counter")`: Enter no longer selects this binding, while the button still works because direct dispatch does not consult Key Context. Next, restore the context and remove `.on_action(...)`: neither input changes the count because the route has no handler. If a handler runs but the label stays stale, check whether it mutates retained state and calls `cx.notify()`. Restore `examples/hello_world/src/main.rs` when finished.
 
@@ -269,7 +270,7 @@ To inspect a command without consuming it, a capture listener can observe it and
 | Call | Target | When to use it |
 | --- | --- | --- |
 | `window.dispatch_action(Box::new(action), cx)` | Current focus in this window, captured at call time | A menu or button command for the focused region. Dispatch is deferred. |
-| `focus_handle.dispatch_action(&action, window, cx)` | The element that rendered this handle in the current frame | A command for a specific rendered region, even if another control now has focus. No rendered handle means no dispatch. |
+| `focus_handle.dispatch_action(&action, window, cx)` | The element that rendered this handle in the current frame | A command for a specific rendered region, even if another control now has focus. No rendered handle means no dispatch. Dispatch is immediate, so do not call it while the handling entity is being updated. |
 | `cx.dispatch_action(&action)` | Active window, or global handlers without one | An application-level command when the caller has an `App` context. |
 
 None of these calls evaluates a Key Context predicate. Key Context participates when a **keystroke** selects an Action from the keymap. The dispatched Action still needs a handler reachable from its chosen target.

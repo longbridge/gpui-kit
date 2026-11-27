@@ -77,6 +77,7 @@ pub struct Positioner {
     corner_position: Option<Rc<Cell<Point<Pixels>>>>,
     on_position: Option<Box<dyn Fn(ResolvedPosition)>>,
     margin: Pixels,
+    boundary: Option<Bounds<Pixels>>,
     occlude: bool,
     children: Vec<AnyElement>,
 }
@@ -99,6 +100,7 @@ impl Positioner {
             corner_position: None,
             on_position: None,
             margin: px(4.),
+            boundary: None,
             occlude: false,
             children: Vec::new(),
         }
@@ -115,6 +117,7 @@ impl Positioner {
             corner_position: None,
             on_position: None,
             margin: px(4.),
+            boundary: None,
             occlude: false,
             children: Vec::new(),
         }
@@ -190,6 +193,29 @@ impl Positioner {
     pub fn margin(mut self, margin: Pixels) -> Self {
         self.margin = margin;
         self
+    }
+
+    /// Keeps the popup inside `boundary`, in window coordinates, instead of
+    /// the whole viewport: it flips and clamps against the boundary's edges.
+    /// The viewport's margin still applies where the boundary reaches it.
+    pub fn boundary(mut self, boundary: Bounds<Pixels>) -> Self {
+        self.boundary = Some(boundary);
+        self
+    }
+}
+
+/// `margin` grown so that it also keeps clear of what lies outside
+/// `boundary`.
+fn boundary_margin(
+    margin: Edges<Pixels>,
+    boundary: Bounds<Pixels>,
+    viewport_size: Size<Pixels>,
+) -> Edges<Pixels> {
+    Edges {
+        top: margin.top.max(boundary.top()),
+        right: margin.right.max(viewport_size.width - boundary.right()),
+        bottom: margin.bottom.max(viewport_size.height - boundary.bottom()),
+        left: margin.left.max(boundary.left()),
     }
 }
 
@@ -438,11 +464,16 @@ impl Element for Positioner {
         {
             *position = tracked.get();
         }
+        let viewport_size = window.viewport_size();
+        let margin = frame.map(|inset| *inset + self.margin);
         let position = resolve_in(
             strategy,
             popup_size,
-            window.viewport_size(),
-            frame.map(|inset| *inset + self.margin),
+            viewport_size,
+            match self.boundary {
+                Some(boundary) => boundary_margin(margin, boundary, viewport_size),
+                None => margin,
+            },
             LayoutDirection::global(cx),
         );
         if let Some(callback) = &self.on_position {
@@ -644,6 +675,48 @@ mod tests {
         assert_eq!(position.placement, None);
         assert_eq!(position.bounds.right(), viewport().width - MARGIN);
         assert_eq!(position.bounds.bottom(), viewport().height - MARGIN);
+    }
+
+    /// A popup wider than the room beside its anchor is clamped into the
+    /// boundary, not merely into the window.
+    #[test]
+    fn a_boundary_keeps_the_popup_inside_it() {
+        let boundary = trigger(100., 0., 300., 400.);
+        let margin = boundary_margin(Edges::all(MARGIN), boundary, viewport());
+        let corner = |x| Strategy::Corner {
+            anchor: Anchor::TopRight,
+            position: point(px(x), px(100.)),
+        };
+        let popup = Size::new(px(200.), px(30.));
+
+        let window_only = resolve(corner(250.), popup, viewport(), Edges::all(MARGIN));
+        assert_eq!(window_only.bounds.left(), px(50.));
+
+        let bounded = resolve(corner(250.), popup, viewport(), margin);
+        assert_eq!(bounded.bounds.left(), px(100.));
+
+        let side = resolve(
+            Strategy::Side {
+                trigger_bounds: trigger(360., 200., 30., 20.),
+                placement: Some(Placement::Right),
+                align: Align::Center,
+                offset: px(0.),
+            },
+            Size::new(px(80.), px(30.)),
+            viewport(),
+            margin,
+        );
+        assert_eq!(side.placement, Some(Placement::Left));
+        assert!(side.bounds.right() <= px(400.));
+    }
+
+    #[test]
+    fn a_boundary_past_the_window_edge_keeps_the_window_margin() {
+        let boundary = trigger(-50., -50., 600., 500.);
+        assert_eq!(
+            boundary_margin(Edges::all(MARGIN), boundary, viewport()),
+            Edges::all(MARGIN)
+        );
     }
 
     #[test]

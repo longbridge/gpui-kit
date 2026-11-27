@@ -662,6 +662,21 @@ mod tests {
         PieChart::new([1., 2.])
     }
 
+    #[test]
+    fn a_labelled_chart_is_an_image_named_by_its_label() {
+        use gpui::{Element as _, IntoElement as _, Role, accesskit};
+
+        assert_eq!(chart().into_element().a11y_role(), None);
+
+        let named = chart()
+            .accessibility_label("Sales by region")
+            .into_element();
+        assert_eq!(named.a11y_role(), Some(Role::Image));
+        let mut node = accesskit::Node::new(Role::Image);
+        named.write_a11y_info(&mut node);
+        assert_eq!(node.label(), Some("Sales by region"));
+    }
+
     /// The whole point of the default: a chart nobody gave an id to is still
     /// interactive, because every caller forgot to ask for it.
     #[test]

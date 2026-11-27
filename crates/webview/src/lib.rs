@@ -81,6 +81,11 @@ pub struct WebView {
     /// The window-relative origin that page clicks are forwarded to GPUI from.
     #[cfg(target_os = "linux")]
     origin: Rc<Cell<gpui::Point<Pixels>>>,
+    /// The X11 window of the GPUI window, which takes the keyboard back from the page.
+    #[cfg(target_os = "linux")]
+    host: Option<std::ffi::c_ulong>,
+    #[cfg(target_os = "linux")]
+    _release_keyboard: Option<gpui::Subscription>,
 }
 
 impl Drop for WebView {
@@ -108,15 +113,33 @@ impl WebView {
         };
         #[cfg(target_os = "linux")]
         let origin = Rc::new(Cell::new(gpui::Point::default()));
+        let focus_handle = cx.focus_handle();
         #[cfg(target_os = "linux")]
-        linux::forward_mouse_down(&webview, origin.clone(), window, cx);
+        linux::forward_mouse_down(&webview, origin.clone(), focus_handle.clone(), window, cx);
         #[cfg(target_os = "linux")]
         linux::match_scale_factor(&webview, window.scale_factor(), 1.0);
+        #[cfg(target_os = "linux")]
+        let host = linux::host_window(window);
+        #[cfg(target_os = "linux")]
+        if let Some(host) = host {
+            linux::keyboard::register(&linux::keyboard::page(&webview), host);
+        }
+        // Give the keyboard back to the GPUI window when GPUI focus leaves the page, including
+        // focus moved from code, which the page cannot see.
+        #[cfg(target_os = "linux")]
+        let _release_keyboard = host.map(|host| {
+            let page = gtk::prelude::ObjectExt::downgrade(&linux::keyboard::page(&webview));
+            window.on_focus_out(&focus_handle, cx, move |_, _, _| {
+                if let Some(page) = page.upgrade() {
+                    linux::keyboard::release(&page, host);
+                }
+            })
+        });
         #[cfg(not(any(all(feature = "gpui-fast", target_os = "macos"), target_os = "linux")))]
         let _ = window;
 
         Self {
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             visible: Cell::new(true),
             bounds: Bounds::default(),
             zoom: Cell::new(1.0),
@@ -132,6 +155,10 @@ impl WebView {
             scale_factor: Cell::new(window.scale_factor()),
             #[cfg(target_os = "linux")]
             origin,
+            #[cfg(target_os = "linux")]
+            host,
+            #[cfg(target_os = "linux")]
+            _release_keyboard,
         }
     }
 
@@ -257,6 +284,12 @@ impl WebView {
     pub fn set_visible(&self, visible: bool) -> wry::Result<()> {
         // A focus error must not leave a closing native view covering the window.
         let focus_result = if !visible && self.visible.get() {
+            #[cfg(target_os = "linux")]
+            {
+                self.release_keyboard();
+                Ok(())
+            }
+            #[cfg(not(target_os = "linux"))]
             self.webview.focus_parent()
         } else {
             Ok(())
@@ -264,6 +297,28 @@ impl WebView {
         self.set_native_visible(visible)?;
         self.visible.set(visible);
         focus_result
+    }
+
+    /// Give the page keyboard focus.
+    ///
+    /// On Linux this also gives the page the X11 input focus while its window has it, so typing
+    /// reaches the page wherever the pointer is. Wry's `focus` only moves focus within GTK.
+    pub fn focus(&self) -> wry::Result<()> {
+        self.webview.focus()?;
+        #[cfg(target_os = "linux")]
+        if let Some(host) = self.host {
+            linux::keyboard::focus_if_active(&linux::keyboard::page(&self.webview), host);
+        }
+        Ok(())
+    }
+
+    /// Give the X11 input focus back to the GPUI window, if the page has it. On Linux, Wry's
+    /// `focus_parent` only focuses GTK's own window.
+    #[cfg(target_os = "linux")]
+    fn release_keyboard(&self) {
+        if let Some(host) = self.host {
+            linux::keyboard::release(&linux::keyboard::page(&self.webview), host);
+        }
     }
 
     /// Show the webview.
@@ -460,6 +515,11 @@ impl Element for WebViewElement {
         }
         #[cfg(target_os = "linux")]
         parent.origin.set(bounds.origin);
+        // While a GPUI Fast scroll layer paints, the content mask also covers the overscan
+        // painted around its viewport; the native view must stay inside the viewport.
+        #[cfg(feature = "gpui-fast")]
+        let clip = window.surface_clip();
+        #[cfg(not(feature = "gpui-fast"))]
         let clip = window.content_mask().bounds;
         if let Err(error) = parent.set_geometry(bounds, clip) {
             if !parent.geometry_failed.replace(true) {
@@ -486,14 +546,23 @@ impl Element for WebViewElement {
         _: &mut Self::RequestLayoutState,
         hitbox: &mut Self::PrepaintState,
         window: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) {
         let bounds = hitbox.clone().map(|h| h.bounds).unwrap_or(bounds);
+        #[cfg(target_os = "linux")]
+        let host = self.parent.read(cx).host;
+        #[cfg(not(target_os = "linux"))]
+        let _ = cx;
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             let webview = self.view.clone();
             window.on_mouse_event(move |event: &MouseDownEvent, _, _, _| {
                 if !bounds.contains(&event.position) {
                     // Click white space to blur the input focus
+                    #[cfg(target_os = "linux")]
+                    if let Some(host) = host {
+                        linux::keyboard::release(&linux::keyboard::page(&webview), host);
+                    }
+                    #[cfg(not(target_os = "linux"))]
                     let _ = webview.focus_parent();
                 }
             });

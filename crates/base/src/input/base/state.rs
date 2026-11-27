@@ -457,6 +457,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) replaying_history: bool,
     pub(super) validated_token_edit: bool,
     pub(super) document_revision: u64,
+    /// The document and decorations revisions, and whether masked, that soft wrap's font
+    /// spans were last worked out from. See `sync_font_spans`.
+    pub(super) font_spans_key: Option<(u64, u64, bool)>,
     pub(super) token_presentation: super::InlineTokenPresentation,
     pub(super) token_layout_cache: Option<Box<super::token_presentation::TokenLayoutCache>>,
     /// Real per-frame bounds of the placed token elements, keyed by token
@@ -592,6 +595,9 @@ pub struct InputBaseState<M: InputModeKind> {
 
     /// Diagnostic currently requested by pointer hover; applications render it.
     pub(super) diagnostic_popover: Option<Rc<crate::input::DiagnosticEntry>>,
+
+    /// What checks the spelling, when something does.
+    pub(super) spelling: Option<super::spelling::Spelling>,
 
     context_menu_handler: Option<
         Rc<dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App)>,
@@ -852,6 +858,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             .on_layout_changed(self.soft_wrap.then_some(wrap_width), cx);
         self.display_map
             .set_wrapping_indent(self.wrapping_indent, cx);
+        self.sync_font_spans(cx);
         self.display_map.ensure_text_prepared(&self.text, cx);
     }
 
@@ -1036,6 +1043,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             replaying_history: false,
             validated_token_edit: false,
             document_revision: 0,
+            font_spans_key: None,
             token_presentation: Default::default(),
             token_bounds: Default::default(),
             hovered_token: None,
@@ -1102,6 +1110,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             accessibility: None,
             scrollbar_renderer: None,
             diagnostic_popover: None,
+            spelling: None,
             context_menu_handler: None,
             pending_context_menu: None,
             context_menu_offset: None,
@@ -5647,6 +5656,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                     .on_action(window.listener_for(&entity, InputBaseState::escape))
                     .on_action(window.listener_for(&entity, InputBaseState::paste))
                     .on_action(window.listener_for(&entity, InputBaseState::cut))
+                    .on_action(window.listener_for(&entity, InputBaseState::correct_spelling))
+                    .on_action(window.listener_for(&entity, InputBaseState::learn_spelling))
                     .on_action(window.listener_for(&entity, InputBaseState::undo))
                     .on_action(window.listener_for(&entity, InputBaseState::redo))
                     .when(self.is_multi_line(), |this| {

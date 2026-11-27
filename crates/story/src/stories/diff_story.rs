@@ -4,9 +4,11 @@ use gpui_kit::component::{
     diff::{
         Diff, DiffAnnotation, DiffChangeIndicator, DiffDecoration, DiffFile, DiffGutterMarker,
         DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange,
-        DiffMode, DiffSide, DiffState,
+        DiffMode, DiffSide, DiffSpanHighlight, DiffState,
     },
-    h_flex, v_flex,
+    h_flex,
+    input::{Input, InputEvent, InputState},
+    v_flex,
 };
 use gpui_kit::{
     Action, App, AppContext as _, Context, ElementId, Entity, InteractiveElement, IntoElement,
@@ -80,7 +82,9 @@ pub struct DiffStory {
     background: bool,
     hover: bool,
     wrap: bool,
+    find: Entity<InputState>,
     _subscription: Subscription,
+    _find_subscription: Subscription,
 }
 
 impl super::Story for DiffStory {
@@ -98,10 +102,13 @@ impl super::Story for DiffStory {
 }
 
 impl DiffStory {
-    pub fn view(_window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn view(window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
             let state = cx.new(|cx| DiffState::new(example_files(0), cx));
+            let find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in the diff"));
             Self {
+                _find_subscription: cx.subscribe(&find, |_, _, _: &InputEvent, cx| cx.notify()),
+                find,
                 _subscription: cx.observe(&state, |_, _, cx| cx.notify()),
                 state,
                 example: 0,
@@ -249,6 +256,7 @@ impl DiffStory {
                     ),
             )
             .child(div().flex_1())
+            .child(div().w(rems(14.)).child(Input::new(&self.find).small()))
             .child(story_toolbar_group().w_auto().dropdown_child(
                 Button::new("diff-options").label("Options"),
                 move |menu, window, cx| {
@@ -359,6 +367,32 @@ impl Render for DiffStory {
                 .map(|comment| (comment.id.clone(), comment.body.clone(), comment.resolved))
                 .collect::<Vec<_>>(),
         );
+        // Each match of the words found, across every file's source lines.
+        let words = self.find.read(cx).value().to_lowercase();
+        let found = self
+            .state
+            .read(cx)
+            .files()
+            .iter()
+            .flat_map(|file| {
+                file.source_lines()
+                    .flat_map(|(at, text)| {
+                        let lower = text.to_lowercase();
+                        let ranges: Vec<_> = if words.is_empty() || lower.len() != text.len() {
+                            Vec::new()
+                        } else {
+                            lower
+                                .match_indices(words.as_str())
+                                .map(|(start, hit)| start..start + hit.len())
+                                .collect()
+                        };
+                        ranges
+                            .into_iter()
+                            .map(move |span| DiffSpanHighlight::new(at.clone(), span))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
         let story = cx.entity().downgrade();
         let add_story = story.clone();
         v_flex()
@@ -384,6 +418,7 @@ impl Render for DiffStory {
                                 DiffHoverHighlight::None
                             })
                             .soft_wrap(self.wrap)
+                            .span_highlights(found)
                             .when(self.example == 0, |diff| {
                                 // A diagnostic marks its line in place; the
                                 // marker opens application-owned details.

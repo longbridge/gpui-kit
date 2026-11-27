@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui_base::LogicalStyledExt as _;
+use gpui_base::{LayoutDirection, LogicalStyledExt as _};
 
 use crate::{
     ActiveTheme, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt, h_flex,
@@ -8,8 +8,8 @@ use crate::{
 #[cfg(target_os = "linux")]
 use gpui::Subscription;
 use gpui::{
-    AnyElement, App, Background, ClickEvent, Context, Decorations, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Pixels, Render, RenderOnce, Rgba,
+    AnyElement, App, Background, ClickEvent, Context, Corners, Decorations, DefiniteLength, Hsla,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Render, RenderOnce, Rgba,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TitlebarOptions, Window,
     WindowButton, WindowButtonLayout, WindowControlArea, WindowOptions, div, linear_color_stop,
     linear_gradient, prelude::FluentBuilder as _, px, rems,
@@ -112,7 +112,7 @@ impl TitleBar {
 //
 // We don't need implementation the click event for the control buttons.
 // If user clicked in the bounds, the window event will be triggered.
-#[derive(IntoElement, Clone)]
+#[derive(Clone)]
 enum ControlIcon {
     Minimize,
     Restore,
@@ -232,21 +232,32 @@ impl ControlIcon {
     }
 }
 
-impl RenderOnce for ControlIcon {
+/// One window control button.
+#[derive(IntoElement)]
+struct WindowControl {
+    icon: ControlIcon,
+    /// The share of a rounded window corner this button covers. GPUI clips
+    /// children to a rectangle, so the title bar's rounding does not reach
+    /// the hover and active backgrounds.
+    corner_radii: Corners<Pixels>,
+}
+
+impl RenderOnce for WindowControl {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_linux = cfg!(target_os = "linux");
         let is_windows = cfg!(target_os = "windows");
-        let hover_fg = self.hover_fg(cx);
-        let hover_bg = self.hover_bg(cx);
-        let active_bg = self.active_bg(cx);
-        let icon = self.clone();
-        let on_close_window = match &self {
+        let icon = self.icon;
+        let hover_fg = icon.hover_fg(cx);
+        let hover_bg = icon.hover_bg(cx);
+        let active_bg = icon.active_bg(cx);
+        let clicked = icon.clone();
+        let on_close_window = match &icon {
             ControlIcon::Close { on_close_window } => on_close_window.clone(),
             _ => None,
         };
 
         div()
-            .id(self.id())
+            .id(icon.id())
             .test_support()
             .flex()
             .w(TITLE_BAR_HEIGHT)
@@ -255,11 +266,13 @@ impl RenderOnce for ControlIcon {
             .justify_center()
             .content_center()
             .items_center()
+            .rounded_tl(self.corner_radii.top_left)
+            .rounded_tr(self.corner_radii.top_right)
             .text_color(cx.theme().foreground)
             .hover(|style| style.bg(hover_bg).text_color(hover_fg))
             .active(|style| style.bg(active_bg).text_color(hover_fg))
             .when(is_windows, |this| {
-                this.window_control_area(self.window_control_area())
+                this.window_control_area(icon.window_control_area())
             })
             .when(is_linux, |this| {
                 this.on_mouse_down(MouseButton::Left, move |_, window, cx| {
@@ -268,10 +281,10 @@ impl RenderOnce for ControlIcon {
                 })
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
-                    match icon {
-                        Self::Minimize => window.minimize_window(),
-                        Self::Restore | Self::Maximize => window.zoom_window(),
-                        Self::Close { .. } => {
+                    match clicked {
+                        ControlIcon::Minimize => window.minimize_window(),
+                        ControlIcon::Restore | ControlIcon::Maximize => window.zoom_window(),
+                        ControlIcon::Close { .. } => {
                             if let Some(f) = on_close_window.clone() {
                                 f(&ClickEvent::default(), window, cx);
                             } else {
@@ -281,7 +294,33 @@ impl RenderOnce for ControlIcon {
                     }
                 })
             })
-            .child(Icon::new(self.icon()).small())
+            .child(Icon::new(icon.icon()).small())
+    }
+}
+
+/// The corner radii of the button at `ix` of `count` in a group whose outer
+/// corners are `corner_radii`: only the outermost buttons meet the window's
+/// corner.
+fn control_corner_radii(
+    ix: usize,
+    count: usize,
+    corner_radii: Corners<Pixels>,
+    rtl: bool,
+) -> Corners<Pixels> {
+    // The group is a `flex_row_dir` row, laid out from the right in RTL.
+    let (leftmost, rightmost) = if rtl { (count - 1, 0) } else { (0, count - 1) };
+    Corners {
+        top_left: if ix == leftmost {
+            corner_radii.top_left
+        } else {
+            px(0.)
+        },
+        top_right: if ix == rightmost {
+            corner_radii.top_right
+        } else {
+            px(0.)
+        },
+        ..Default::default()
     }
 }
 
@@ -289,6 +328,9 @@ impl RenderOnce for ControlIcon {
 struct WindowControls {
     id: &'static str,
     buttons: [Option<WindowButton>; gpui::MAX_BUTTONS_PER_SIDE],
+    /// The window corner this group sits in: its top-left radius at the left
+    /// edge of the title bar, its top-right radius at the right edge.
+    corner_radii: Corners<Pixels>,
     on_close_window: Option<Rc<Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>>>,
 }
 
@@ -314,7 +356,9 @@ impl RenderOnce for WindowControls {
 
         // The window manager declares which controls it can honor; a tiling
         // compositor may support neither minimize nor maximize.
-        let supported = window.window_controls();
+        let buttons = supported_buttons(self.buttons, window.window_controls());
+        let count = buttons.len();
+        let rtl = LayoutDirection::global(cx).is_rtl();
 
         // In RTL the controls sit on the start (left) edge, close outermost.
         h_flex()
@@ -325,13 +369,19 @@ impl RenderOnce for WindowControls {
             .flex_shrink_0()
             .h_full()
             .children(
-                supported_buttons(self.buttons, supported)
+                buttons
                     .into_iter()
-                    .map(|button| match button {
-                        WindowButton::Minimize => ControlIcon::minimize(),
-                        WindowButton::Maximize if window.is_maximized() => ControlIcon::restore(),
-                        WindowButton::Maximize => ControlIcon::maximize(),
-                        WindowButton::Close => ControlIcon::close(self.on_close_window.clone()),
+                    .enumerate()
+                    .map(|(ix, button)| WindowControl {
+                        icon: match button {
+                            WindowButton::Minimize => ControlIcon::minimize(),
+                            WindowButton::Maximize if window.is_maximized() => {
+                                ControlIcon::restore()
+                            }
+                            WindowButton::Maximize => ControlIcon::maximize(),
+                            WindowButton::Close => ControlIcon::close(self.on_close_window.clone()),
+                        },
+                        corner_radii: control_corner_radii(ix, count, self.corner_radii, rtl),
                     }),
             )
     }
@@ -378,6 +428,30 @@ impl RenderOnce for TitleBar {
         });
         let radii = crate::window_corner_radii(window, cx);
         let button_layout = window_button_layout(cx);
+        // The start controls (Linux only) sit after the bar's left padding,
+        // so they round concentrically with the window corner. An absolute
+        // padding the application sets moves them with it.
+        let start_inset = match self.style.padding.left {
+            Some(DefiniteLength::Absolute(length)) => length.to_pixels(window.rem_size()),
+            _ => TITLE_BAR_LEFT_PADDING,
+        };
+        let start_corner = Corners {
+            top_left: (radii.top_left - start_inset).max(px(0.)),
+            ..Default::default()
+        };
+        // The end controls are flush with the end edge, which Linux keeps on
+        // the right whatever the direction.
+        let end_corner = if is_linux || !LayoutDirection::global(cx).is_rtl() {
+            Corners {
+                top_right: radii.top_right,
+                ..Default::default()
+            }
+        } else {
+            Corners {
+                top_left: radii.top_left,
+                ..Default::default()
+            }
+        };
 
         div().flex_shrink_0().child(
             div()
@@ -456,6 +530,7 @@ impl RenderOnce for TitleBar {
                     this.child(WindowControls {
                         id: "window-controls-start",
                         buttons: button_layout.left,
+                        corner_radii: start_corner,
                         on_close_window: self.on_close_window.clone(),
                     })
                 })
@@ -491,6 +566,7 @@ impl RenderOnce for TitleBar {
                 .child(WindowControls {
                     id: "window-controls",
                     buttons: button_layout.right,
+                    corner_radii: end_corner,
                     on_close_window: self.on_close_window,
                 }),
         )

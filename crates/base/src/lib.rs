@@ -4,6 +4,10 @@
 //! colors, sizing, and motion belong to applications or the
 //! `gpui-component` façade.
 
+#[cfg(not(any(feature = "gpui-pre", feature = "gpui-fast")))]
+compile_error!(
+    "gpui-base needs a GPUI engine: enable the `gpui-pre` feature (the default) or `gpui-fast`"
+);
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 #[cfg(all(feature = "gpui-fast", test))]
@@ -88,6 +92,7 @@ mod tooltip;
 mod touch_selection;
 mod tree;
 mod undo_history;
+mod value_mapping;
 mod virtual_list;
 
 pub use accordion::{Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger};
@@ -116,6 +121,10 @@ pub use dialog::{
     DialogPopup, DialogTitle, DialogTrigger,
 };
 pub use element_ext::ElementExt;
+// Shared with `gpui-component`'s rows (menu items, command palette); not a
+// public API.
+#[doc(hidden)]
+pub use a11y_disabled::A11yDisabledExt;
 pub use event::{InteractiveElementExt, OngoingScrollExt};
 pub use focus_trap::FocusTrapElement;
 #[doc(hidden)]
@@ -229,6 +238,7 @@ pub use tree::{Tree, TreeEntry, TreeEntryState, TreeEvent, TreeItem, TreeState};
 #[doc(hidden)]
 pub use tree::{init as init_tree, key_context as tree_key_context};
 pub use undo_history::UndoHistory;
+pub use value_mapping::ValueMapping;
 #[doc(hidden)]
 pub use virtual_list::virtual_list;
 pub use virtual_list::{VirtualList, VirtualListScrollHandle, h_virtual_list, v_virtual_list};

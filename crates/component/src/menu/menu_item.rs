@@ -4,13 +4,17 @@ use gpui::{
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, accesskit::Toggled, prelude::FluentBuilder as _,
 };
-use gpui_base::{LogicalStyledExt as _, TestSupportExt as _};
+use gpui_base::{A11yDisabledExt as _, LogicalStyledExt as _, TestSupportExt as _};
 use smallvec::SmallVec;
 
 #[derive(IntoElement)]
 pub(crate) struct MenuItemElement {
     id: ElementId,
+    /// `None` leaves the row out of the accessibility tree.
+    role: Option<Role>,
     aria_label: Option<SharedString>,
+    /// The item's 1-based position among its menu's items, and their count.
+    position: Option<(usize, usize)>,
     style: StyleRefinement,
     disabled: bool,
     selected: bool,
@@ -26,7 +30,9 @@ impl MenuItemElement {
         let id: ElementId = id.into();
         Self {
             id,
+            role: Some(Role::MenuItem),
             aria_label: None,
+            position: None,
             style: StyleRefinement::default(),
             disabled: false,
             selected: false,
@@ -54,6 +60,20 @@ impl MenuItemElement {
     /// Set the accessible label for the menu item.
     pub(crate) fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.aria_label = Some(label.into());
+        self
+    }
+
+    /// Leave the row out of the accessibility tree, as for a separator, which
+    /// only draws a line.
+    pub(crate) fn presentational(mut self) -> Self {
+        self.role = None;
+        self
+    }
+
+    /// Set the item's 1-based position among its menu's items, and how many
+    /// there are, so assistive technology can say "2 of 5".
+    pub(crate) fn position_in_set(mut self, position: usize, size: usize) -> Self {
+        self.position = Some((position, size));
         self
     }
 
@@ -105,8 +125,11 @@ impl RenderOnce for MenuItemElement {
             .flex_row_dir(cx)
             .id(self.id)
             .test_support()
-            .role(Role::MenuItem)
+            .when_some(self.role, |this, role| this.role(role))
             .when_some(self.aria_label, |this, label| this.aria_label(label))
+            .when_some(self.position, |this, (position, size)| {
+                this.aria_position_in_set(position).aria_size_of_set(size)
+            })
             .aria_selected(self.selected)
             .when_some(self.checked, |this, checked| {
                 this.aria_toggled(if checked {
@@ -150,17 +173,62 @@ impl RenderOnce for MenuItemElement {
                 this.text_color(cx.theme().muted_foreground)
             })
             .children(self.children)
+            .a11y_disabled(self.disabled)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::Element as _;
 
     #[gpui::test]
     fn aria_label_sets_accessible_name(_cx: &mut gpui::TestAppContext) {
         let item = MenuItemElement::new("open").aria_label("Open");
 
         assert_eq!(item.aria_label, Some("Open".into()));
+    }
+
+    struct Probe {
+        nodes: std::rc::Rc<std::cell::RefCell<Vec<(bool, gpui::accesskit::Node)>>>,
+    }
+
+    impl gpui::Render for Probe {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let nodes = self.nodes.clone();
+            gpui::canvas(
+                move |_, window, cx| {
+                    let mut nodes = nodes.borrow_mut();
+                    nodes.clear();
+                    for disabled in [false, true] {
+                        let element = MenuItemElement::new("open")
+                            .disabled(disabled)
+                            .render(window, cx)
+                            .into_element();
+                        let mut node = gpui::accesskit::Node::new(Role::Unknown);
+                        element.write_a11y_info(&mut node);
+                        nodes.push((disabled, node));
+                    }
+                },
+                |_, _, _, _| {},
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_disabled_item_marks_its_node_disabled(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let nodes = std::rc::Rc::default();
+        let (_, cx) = cx.add_window_view({
+            let nodes = std::rc::Rc::clone(&nodes);
+            move |_, _| Probe { nodes }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let nodes = nodes.borrow();
+        assert_eq!(nodes.len(), 2);
+        for (disabled, node) in nodes.iter() {
+            assert_eq!(node.is_disabled(), *disabled, "disabled {disabled}");
+        }
     }
 }

@@ -96,20 +96,15 @@ impl SelectItem for Language {
     }
 }
 
+/// The languages the system recognizer supports on this machine.
 fn languages() -> Vec<Language> {
-    [
-        ("en-US", "English (US)"),
-        ("en-GB", "English (UK)"),
-        ("zh-CN", "简体中文"),
-        ("zh-HK", "中文（香港）"),
-        ("ja-JP", "日本語"),
-    ]
-    .into_iter()
-    .map(|(tag, name)| Language {
-        tag: tag.into(),
-        name: name.into(),
-    })
-    .collect()
+    SystemRecognizer::supported_locales()
+        .into_iter()
+        .map(|locale| Language {
+            tag: locale.tag().clone(),
+            name: locale.name().clone(),
+        })
+        .collect()
 }
 
 /// One line of the session log.
@@ -193,7 +188,13 @@ struct SpeechApp {
 impl SpeechApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let engine = Engine::System;
-        let language = SharedString::from("en-US");
+        // US English if the recognizer has it, otherwise its first language.
+        let languages = languages();
+        let selected = languages
+            .iter()
+            .position(|language| language.tag == "en-US")
+            .or((!languages.is_empty()).then_some(0));
+        let language = selected.map_or("en-US".into(), |ix| languages[ix].tag.clone());
         let speech = new_speech(engine, &language, Vec::new(), cx);
         let _speech_subscription = Self::subscribe_speech(&speech, window, cx);
 
@@ -203,8 +204,8 @@ impl SpeechApp {
         });
         let language_select = cx.new(|cx| {
             SelectState::new(
-                SearchableVec::new(languages()),
-                Some(IndexPath::default()),
+                SearchableVec::new(languages),
+                selected.map(|ix| IndexPath::default().row(ix)),
                 window,
                 cx,
             )

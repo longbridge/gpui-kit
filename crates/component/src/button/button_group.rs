@@ -60,7 +60,7 @@ impl ButtonGroup {
 
     /// Adds a button as a child to the ButtonGroup.
     pub fn child(mut self, child: Button) -> Self {
-        self.children.push(child.disabled(self.disabled));
+        self.children.push(child);
         self
     }
 
@@ -163,6 +163,7 @@ impl RenderOnce for ButtonGroup {
         }
 
         let vertical = self.layout == Axis::Vertical;
+        let group_disabled = self.disabled;
 
         div()
             .id(self.id)
@@ -179,7 +180,11 @@ impl RenderOnce for ButtonGroup {
                         // The group as a whole is a toggle control, so every
                         // child advertises its pressed state.
                         let selected = child.selected;
-                        let child = child.toggled(selected);
+                        // A disabled group disables every child, however it was
+                        // added; an enabled group keeps each child's own state.
+                        let child = child
+                            .toggled(selected)
+                            .when(group_disabled, |this| this.disabled(true));
                         let child = if children_len == 1 {
                             child
                         } else if child_index == 0 {
@@ -380,33 +385,45 @@ mod tests {
     }
 
     #[gpui::test]
-    fn legacy_disabled_state_depends_on_builder_order(cx: &mut TestAppContext) {
+    fn disabled_group_disables_children_in_any_builder_order(cx: &mut TestAppContext) {
         struct DisabledOrderHarness(Rc<Cell<usize>>);
 
         impl Render for DisabledOrderHarness {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-                let first = self.0.clone();
-                let second = self.0.clone();
+                let button = |id: &'static str, clicks: Rc<Cell<usize>>| {
+                    Button::new(id)
+                        .label("Button")
+                        .on_click(move |_, _, _| clicks.set(clicks.get() + 1))
+                };
                 crate::v_flex()
                     .child(
                         ButtonGroup::new("disabled-before-child")
                             .size(px(120.))
                             .disabled(true)
-                            .child(
-                                Button::new("first")
-                                    .label("First")
-                                    .on_click(move |_, _, _| first.set(first.get() + 1)),
-                            ),
+                            .child(button("first", self.0.clone())),
                     )
                     .child(
                         ButtonGroup::new("disabled-after-child")
                             .size(px(120.))
-                            .child(
-                                Button::new("second")
-                                    .label("Second")
-                                    .on_click(move |_, _, _| second.set(second.get() + 1)),
-                            )
+                            .child(button("second", self.0.clone()))
                             .disabled(true),
+                    )
+                    .child(
+                        ButtonGroup::new("disabled-children")
+                            .size(px(120.))
+                            .disabled(true)
+                            .children([button("third", self.0.clone())]),
+                    )
+                    .child(
+                        ButtonGroup::new("enabled-group")
+                            .size(px(120.))
+                            .child(button("fourth", self.0.clone()).disabled(true)),
+                    )
+                    // Control: proves the click points land on the buttons.
+                    .child(
+                        ButtonGroup::new("enabled-control")
+                            .size(px(120.))
+                            .child(button("fifth", self.0.clone())),
                     )
             }
         }
@@ -418,9 +435,11 @@ mod tests {
             move |_, _| DisabledOrderHarness(clicks)
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.simulate_click(point(px(10.), px(60.)), Modifiers::default());
+        for y in [60., 180., 300., 420.] {
+            cx.simulate_click(point(px(10.), px(y)), Modifiers::default());
+        }
         assert_eq!(clicks.get(), 0);
-        cx.simulate_click(point(px(10.), px(180.)), Modifiers::default());
+        cx.simulate_click(point(px(10.), px(540.)), Modifiers::default());
         assert_eq!(clicks.get(), 1);
     }
 

@@ -13,7 +13,7 @@ use super::fold_map::FoldMap;
 use super::folding::FoldRange;
 use super::spacer_map::{DisplayRow, SpacerMap};
 pub use super::text_wrapper::WrappingIndent;
-use super::text_wrapper::{LineItem, WrapDisplayPoint};
+use super::text_wrapper::{FontSpan, LineItem, WrapDisplayPoint};
 use super::wrap_map::WrapMap;
 use super::{BufferPoint, DisplayPoint};
 use crate::input::Point as TreeSitterPoint;
@@ -414,6 +414,13 @@ impl DisplayMap {
         cx: &mut App,
     ) {
         self.wrap_map.set_inline_metrics(metrics, cx);
+        self.rebuild_fold_projection();
+    }
+
+    /// Set the ranges drawn in another weight or style than the font, sorted and disjoint,
+    /// so soft wrap measures them as drawn.
+    pub(crate) fn set_font_spans(&mut self, spans: std::rc::Rc<[FontSpan]>, cx: &mut App) {
+        self.wrap_map.set_font_spans(spans, cx);
         self.rebuild_fold_projection();
     }
 

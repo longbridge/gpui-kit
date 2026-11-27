@@ -5,8 +5,8 @@ use crate::{
     setting::{SettingGroup, SettingItem, SettingSection},
 };
 use gpui::{
-    Context, Focusable as _, KeyBinding, Render, ScrollDelta, ScrollEvent, TestAppContext,
-    VisualTestContext, actions, point, size,
+    Context, KeyBinding, Render, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
+    actions, point, size,
 };
 
 actions!(settings_test, [Dismiss]);
@@ -516,9 +516,7 @@ fn selecting_a_group_from_another_page_scrolls_to_it(cx: &mut TestAppContext) {
         cx.update(|_, cx| {
             let state = host.read(cx).state.clone().unwrap();
             state.update(cx, |state, cx| {
-                state.selected_index = SelectIndex { page_ix, group_ix };
-                state.deferred_scroll_group_ix = group_ix;
-                cx.notify();
+                state.set_selected_index(SelectIndex { page_ix, group_ix }, cx)
             });
         });
         draw(cx);
@@ -529,6 +527,93 @@ fn selecting_a_group_from_another_page_scrolls_to_it(cx: &mut TestAppContext) {
     select(1, Some(2), cx);
     let target = cx.debug_bounds("setting-1-2-1").unwrap();
     assert!(target.top() >= px(0.) && target.bottom() <= px(700.));
+}
+
+/// Settings driven by a state the host owns, as an application would.
+struct StateHost {
+    pages: Vec<SettingPage>,
+    state: Entity<SettingsState>,
+}
+
+impl Render for StateHost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            Settings::new("state-test")
+                .state(&self.state)
+                .pages(self.pages.clone()),
+        )
+    }
+}
+
+#[gpui::test]
+fn an_application_state_selects_searches_and_reads_the_page(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        crate::init(cx);
+        crate::Theme::global_mut(cx).font_size = px(16.);
+    });
+    let pages = vec![
+        SettingPage::new("General").group(SettingGroup::new().item(item("language"))),
+        SettingPage::new("Appearance").groups([
+            SettingGroup::new().item(item_with_height("unrelated", 900.)),
+            SettingGroup::new().title("Fonts").item(item("theme font")),
+        ]),
+        SettingPage::new("Editor").group(SettingGroup::new().item(item("theme editor"))),
+    ];
+    let mut state = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let settings = cx.new(|cx| SettingsState::new(window, cx));
+        state = Some(settings.clone());
+        let view = cx.new(|_| StateHost {
+            pages,
+            state: settings,
+        });
+        Root::new(view, window, cx)
+    });
+    let state = state.unwrap();
+    cx.simulate_resize(size(px(1000.), px(700.)));
+    draw(cx);
+    let selected = |cx: &mut VisualTestContext| cx.update(|_, cx| state.read(cx).selected_index());
+    assert_eq!(selected(cx), SelectIndex::default());
+    assert!(cx.debug_bounds("setting-0-0-0").is_some());
+
+    // Open a page at a group below the fold, after the settings were shown.
+    cx.update(|_, cx| {
+        state.update(cx, |state, cx| {
+            state.set_selected_index(
+                SelectIndex {
+                    page_ix: 1,
+                    group_ix: Some(1),
+                },
+                cx,
+            )
+        })
+    });
+    draw(cx);
+    let fonts = cx.debug_bounds("setting-1-1-0").unwrap();
+    assert!(fonts.top() >= px(0.) && fonts.bottom() <= px(700.));
+
+    // A search from outside filters as typing would, and the page on display
+    // is read back from the state.
+    cx.update(|window, cx| state.update(cx, |state, cx| state.set_query("editor", window, cx)));
+    draw(cx);
+    assert!(cx.debug_bounds("setting-2-0-0").is_some());
+    assert_eq!(
+        selected(cx),
+        SelectIndex {
+            page_ix: 2,
+            group_ix: None,
+        }
+    );
+    let query = cx.update(|_, cx| state.read(cx).search_input.read(cx).value());
+    assert_eq!(query, "editor");
+
+    // Its focus handle is the search box's, to type in it at once.
+    cx.update(|window, cx| {
+        let handle = state.focus_handle(cx);
+        window.focus(&handle, cx);
+        let input = state.read(cx).search_input.read(cx).focus_handle(cx);
+        assert!(input.is_focused(window));
+    });
 }
 
 #[gpui::test]

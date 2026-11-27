@@ -4337,6 +4337,7 @@ dependencies = [
  "gpui-pre-web",
  "jiff",
  "lsp-types 0.97.0",
+ "serde_json",
 ]
 
 [[package]]

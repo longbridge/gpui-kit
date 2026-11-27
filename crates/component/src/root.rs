@@ -66,6 +66,9 @@ pub(crate) struct ActiveDialog {
     /// `DialogEntrance::None`, reduced motion, and a zero theme duration all
     /// close in a single frame.
     exit_enabled: Rc<Cell<bool>>,
+    /// Set until the first frame that shows the dialog has been drawn, when
+    /// focus moves from the dialog container to its first tab stop.
+    initial_focus_pending: Rc<Cell<bool>>,
     /// Retained after closing until its exit transition finishes.
     pub(crate) closing: bool,
 }
@@ -85,6 +88,7 @@ impl ActiveDialog {
             selection_scope,
             builder: Rc::new(builder),
             exit_enabled: Rc::new(Cell::new(false)),
+            initial_focus_pending: Rc::new(Cell::new(true)),
             closing: false,
         }
     }
@@ -293,6 +297,9 @@ impl WindowState {
                 visibility: sample.progress,
                 closing: active_dialog.closing,
             });
+            if !active_dialog.closing && active_dialog.initial_focus_pending.replace(false) {
+                Self::schedule_initial_focus(active_dialog.focus_handle.clone(), window, cx);
+            }
 
             rendered.push((index, dialog));
         }
@@ -362,6 +369,36 @@ impl WindowState {
                     })
                 }),
         )
+    }
+
+    /// Moves focus into a newly opened dialog once its first frame is drawn.
+    ///
+    /// `open_dialog` can only focus the container: the controls inside do not
+    /// exist until the builder runs and the tab order is painted. When the
+    /// container still holds focus after that frame, focus moves to its first
+    /// tab stop. A control the application focused itself, while opening or
+    /// while building the dialog, keeps focus.
+    fn schedule_initial_focus(container: FocusHandle, window: &mut Window, cx: &mut App) {
+        window.defer(cx, move |window, cx| {
+            if !container.is_focused(window) {
+                return;
+            }
+            // The container comes before its children in the tab order, so the
+            // next stop is normally its first control. Walk on in case a
+            // `tab_index` puts something outside first, and stay on the
+            // container when nothing inside is reachable.
+            let mut visited = Vec::new();
+            window.focus_next(cx);
+            while !container.contains_focused(window, cx) {
+                let focused = window.focused(cx);
+                if visited.contains(&focused) {
+                    container.focus(window, cx);
+                    break;
+                }
+                visited.push(focused);
+                window.focus_next(cx);
+            }
+        });
     }
 
     /// Unmounts a dialog once its exit transition has finished.
@@ -762,6 +799,12 @@ impl gpui_base::RootPlugin for WindowState {
     ) -> impl IntoElement {
         window_border().child(surface)
     }
+
+    fn has_open_layers(&self, cx: &App) -> bool {
+        self.active_sheet.is_some()
+            || !self.active_dialogs.is_empty()
+            || !self.notification.read(cx).notifications().is_empty()
+    }
 }
 
 impl Render for WindowState {
@@ -851,5 +894,55 @@ mod tests {
             viewport.height,
             "bar {bounds:?}, viewport {viewport:?}"
         );
+    }
+
+    struct PickTarget;
+
+    impl Render for PickTarget {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            use gpui::InteractiveElement as _;
+            div().id("pick-target").size_full()
+        }
+    }
+
+    /// #3056: with no dialog, sheet or toast open, the Inspector picks the
+    /// application content instead of the empty full-window overlay layers.
+    #[gpui::test]
+    fn inspector_picks_content_below_idle_layers(cx: &mut TestAppContext) {
+        let picked = Rc::new(std::cell::RefCell::new(None));
+        cx.update(|cx| {
+            crate::init(cx);
+            let picked = picked.clone();
+            cx.set_inspector_renderer(Box::new(move |inspector, _, _| {
+                *picked.borrow_mut() = inspector
+                    .active_element_id()
+                    .map(|id| format!("{:?}", id.path.global_id));
+                div().into_any_element()
+            }));
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| PickTarget);
+            crate::Root::new(view, window, cx)
+        });
+        cx.simulate_resize(size(px(800.), px(600.)));
+        cx.update(|window, cx| {
+            window.toggle_inspector(cx);
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_mouse_move(
+            gpui::point(px(100.), px(300.)),
+            None,
+            gpui::Modifiers::none(),
+        );
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(
+            gpui::point(px(100.), px(310.)),
+            None,
+            gpui::Modifiers::none(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let picked = picked.borrow().clone().expect("an element is picked");
+        assert!(picked.contains("pick-target"), "picked {picked}");
     }
 }

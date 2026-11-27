@@ -127,5 +127,9 @@ const jsonLd = JSON.stringify(structuredData ?? defaultStructuredData).replace(/
   </head>
   <body>
     <slot />
+    <script>
+      import { startAnalytics } from '../lib/analytics';
+      startAnalytics();
+    </script>
   </body>
 </html>

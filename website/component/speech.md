@@ -244,6 +244,22 @@ let speech = cx.new(|cx| SpeechState::new(cx).system_fallback(false));
 `.locale(...)` takes a BCP 47 tag such as `en-US` or `zh-CN`. A language the
 platform cannot recognize makes the recognizer unavailable.
 
+To let the user choose the language, offer the ones this machine can recognize.
+`SystemRecognizer::supported_locales()` lists them, sorted by name: on macOS
+the languages the Mac can recognize offline, on Windows those with a speech
+pack installed, elsewhere none. Each `SpeechLocale` has the `tag()` to pass to
+`.locale(...)` and a `name()` in the user's language for the picker. The list
+changes as the user installs languages, so read it when the picker is shown.
+
+```rust
+use gpui_kit::component::speech::{SpeechLocale, SystemRecognizer};
+
+let locales: Vec<SpeechLocale> = SystemRecognizer::supported_locales();
+// Show `locale.name()`, such as "English (United States)", in a `Select`, then
+// recognize the one the user picks:
+let recognizer = SystemRecognizer::new().locale(picked.tag().clone());
+```
+
 `.expected_phrases(...)` lists words and phrases the speaker is likely to say
 that a general vocabulary misses or spells as more common words: people's and
 product names, project terms, jargon. Recognition favors them, and other speech
@@ -438,6 +454,7 @@ application recognizer; without one, `SpeechButton` renders nothing. The
 - [AudioInput], [AudioSink] and [AudioFormat] — the audio seam
 - [SpeechError]
 - [SystemRecognizer] and [Microphone] — the `speech` feature's defaults
+- [SpeechLocale] — a language from `SystemRecognizer::supported_locales`
 
 [SpeechState]: https://docs.rs/gpui-component/latest/gpui_component/speech/struct.SpeechState.html
 [SpeechEvent]: https://docs.rs/gpui-component/latest/gpui_component/speech/enum.SpeechEvent.html
@@ -452,4 +469,5 @@ application recognizer; without one, `SpeechButton` renders nothing. The
 [AudioFormat]: https://docs.rs/gpui-component/latest/gpui_component/speech/struct.AudioFormat.html
 [SpeechError]: https://docs.rs/gpui-component/latest/gpui_component/speech/enum.SpeechError.html
 [SystemRecognizer]: https://docs.rs/gpui-component/latest/gpui_component/speech/struct.SystemRecognizer.html
+[SpeechLocale]: https://docs.rs/gpui-component/latest/gpui_component/speech/struct.SpeechLocale.html
 [Microphone]: https://docs.rs/gpui-component/latest/gpui_component/speech/struct.Microphone.html

@@ -15,10 +15,14 @@ edition.workspace = true
 doctest = false
 
 [features]
+default = ["gpui-pre"]
+# The default engine, Zed's GPUI through the `gpui-pre` crates. Turn default
+# features off and enable `gpui-fast` instead to build without it.
+gpui-pre = ["dep:gpui", "gpui-base/gpui-pre", "gpui-kit-assets/gpui-pre"]
 gpui-fast = ["dep:gpui-fast", "gpui-base/gpui-fast", "gpui-kit-assets/gpui-fast"]
-test-support = ["gpui/test-support", "gpui-base/test-support", "gpui-fast?/test-support"]
+test-support = ["gpui?/test-support", "gpui-base/test-support", "gpui-fast?/test-support"]
 decimal = ["gpui-base/decimal"]
-inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector", "gpui-fast?/inspector"]
+inspector = ["gpui_macros/inspector", "gpui?/inspector", "gpui-base/inspector", "gpui-fast?/inspector"]
 tree-sitter = ["dep:tree-sitter", "dep:tree-sitter-json"]
 # Syntax highlighting for Markdown, Input and Diff from syntect and bat's
 # syntax collection: about 200 languages for a few megabytes, against tens for
@@ -125,7 +129,7 @@ unicode-segmentation = "1"
 similar = { version = "2.7", features = ["unicode"] }
 regex = "1"
 anyhow.workspace = true
-gpui = { workspace = true }
+gpui = { workspace = true, optional = true }
 gpui-fast = { workspace = true, optional = true }
 gpui_macros.workspace = true
 gpui-base.workspace = true

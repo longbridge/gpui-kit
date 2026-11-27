@@ -495,7 +495,13 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
             value: node.value().map(|value| value.to_owned().into()),
             bounds,
             visible: false,
-            focused: None,
+            // Read focus here as well as in `paint`: a hidden ancestor (for
+            // example a close button revealed on hover) skips painting its
+            // children, yet the element keeps its focus binding.
+            focused: self
+                .focus
+                .as_ref()
+                .map(|focus| focus.contains_focused(window, cx)),
             focus_action: node.supports_action(gpui::accesskit::Action::Focus),
             disabled: node.is_disabled().then_some(true),
             label: node.label().map(|label| label.to_owned().into()),

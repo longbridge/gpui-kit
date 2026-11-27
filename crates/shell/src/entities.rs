@@ -25,12 +25,13 @@ use std::{
 };
 
 use gpui::{App, AppContext as _, Entity, EntityId, FocusHandle, Subscription, Window};
+use gpui_base::ValueMapping;
 use gpui_base::VirtualListScrollHandle;
 use gpui_base::dock::{DockArea, DockEvent};
 use gpui_base::input::{
     InputBaseState, InputEditorStyle, InputEvent, InputModeKind, InputState, TextareaState,
 };
-use gpui_base::slider::{SliderEvent, SliderScale, SliderState, SliderValue};
+use gpui_base::slider::{SliderEvent, SliderState, SliderValue};
 use gpui_base::{CalendarEvent, CalendarState, OtpEvent, OtpState};
 
 use crate::{
@@ -405,7 +406,7 @@ impl EntityStore {
     /// Creates a slider state and returns its handle.
     ///
     /// Everything is set at construction because base's own builders take
-    /// `self` by value, and their order matters: `scale` asserts against the
+    /// `self` by value, and their order matters: `mapping` asserts against the
     /// bounds already set, and the defaults it would otherwise check —
     /// `0..100` — are not bounds a logarithmic slider can have. The caller has
     /// already refused anything these would assert on; reaching one of them
@@ -424,7 +425,7 @@ impl EntityStore {
         min: f32,
         max: f32,
         step: f32,
-        scale: SliderScale,
+        mapping: ValueMapping,
         value: SliderValue,
         application: Option<Rc<ApplicationGeneration>>,
         cx: &mut App,
@@ -435,7 +436,7 @@ impl EntityStore {
                 .min(min)
                 .max(max)
                 .step(step)
-                .scale(scale)
+                .mapping(mapping)
                 .default_value(value)
         });
 

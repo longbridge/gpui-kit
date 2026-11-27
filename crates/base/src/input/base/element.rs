@@ -22,7 +22,11 @@ use std::{collections::BTreeSet, ops::Range, rc::Rc};
 
 use crate::{
     Scrollbar, ScrollbarPlacement, Side,
-    input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
+    input::{
+        RopeExt as _,
+        blink_cursor::CURSOR_WIDTH,
+        display_map::{FontSpan, LineLayout},
+    },
 };
 
 use super::{
@@ -199,6 +203,71 @@ fn compose_decoration_collections<'a>(
     }
 
     (!styles.is_empty()).then_some(styles)
+}
+
+impl<M: InputModeKind> InputBaseState<M> {
+    /// Give soft wrap the ranges that decorations draw in another weight or style than the
+    /// font, so that a bold run wraps where it is drawn instead of running past the edge.
+    /// Worked out again only when the text or the decorations changed.
+    pub(super) fn sync_font_spans(&mut self, cx: &mut gpui::Context<Self>) {
+        let key = (
+            self.document_revision,
+            self.extras.decorations_revision(),
+            self.masked,
+        );
+        if self.font_spans_key == Some(key) {
+            return;
+        }
+        self.font_spans_key = Some(key);
+        let changes_font =
+            |d: &&TextDecoration| d.style.font_weight.is_some() || d.style.font_style.is_some();
+        // A masked input draws no decorations.
+        let layers: Vec<Vec<TextDecoration>> = if self.masked {
+            Vec::new()
+        } else {
+            self.extras
+                .decoration_layers()
+                .into_iter()
+                .map(|layer| layer.iter().filter(changes_font).cloned().collect())
+                .collect()
+        };
+        let mut spans: Vec<FontSpan> = Vec::new();
+        if layers.iter().any(|layer| !layer.is_empty()) {
+            let styles = compose_decoration_collections(
+                Vec::new(),
+                layers.iter().map(Vec::as_slice),
+                0..self.text.len(),
+            );
+            for (range, style) in styles.unwrap_or_default() {
+                let (weight, font_style) = (style.font_weight, style.font_style);
+                if weight.is_none() && font_style.is_none() {
+                    continue;
+                }
+                match spans.last_mut() {
+                    Some(last)
+                        if last.range.end == range.start
+                            && last.weight == weight
+                            && last.style == font_style =>
+                    {
+                        last.range.end = range.end;
+                    }
+                    _ => spans.push(FontSpan {
+                        range,
+                        weight,
+                        style: font_style,
+                    }),
+                }
+            }
+        }
+        let rows = self.display_map.wrap_row_count();
+        self.display_map.set_font_spans(spans.into(), cx);
+        // This frame's height was set from the rows before; an auto-growing field takes the
+        // new count on the next.
+        if self.mode.is_auto_grow() && self.display_map.wrap_row_count() != rows {
+            self.mode.update_auto_grow(&self.display_map);
+            cx.notify();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3290,11 +3359,20 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> TextElement<M, R> {
                 ..
             } => (highlighter.borrow_mut(), diagnostics),
             _ => {
+                // The words misspelled, under every decoration the app set.
+                let style = diagnostic_highlight_style(
+                    crate::input::DiagnosticSeverity::Error,
+                    state.editor_style.diagnostics,
+                );
+                let misspelled: Vec<_> = (state.misspellings_shown(cx).into_iter())
+                    .map(|range| crate::input::TextDecoration::new(range, style))
+                    .collect();
                 return (!state.masked)
                     .then(|| {
                         compose_decoration_collections(
                             Vec::new(),
-                            state.extras.decoration_layers().into_iter(),
+                            (state.extras.decoration_layers().into_iter())
+                                .chain(std::iter::once(&misspelled[..])),
                             visible_byte_range,
                         )
                     })
@@ -3693,6 +3771,7 @@ impl<M: InputModeKind, R: EditorLineNumberRenderer> Element for TextElement<M, R
             state.display_map.set_font(font, text_size, cx);
             let tab_size = state.mode.tab_size().tab_size;
             state.display_map.set_tab_size(tab_size, cx);
+            state.sync_font_spans(cx);
             state.display_map.ensure_text_prepared(&state.text, cx);
             if cx.reduce_motion() {
                 state.overscroll.reset();

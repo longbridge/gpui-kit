@@ -492,6 +492,22 @@ Input:
     zh-CN: 全选
     zh-HK: 全選
     zh-TW: 全選
+  No Guesses Found:
+    en: No Guesses Found
+    ja: "候補が見つかりません"
+    pt-BR: "Nenhuma sugestão encontrada"
+    ru: "Нет вариантов"
+    zh-CN: 未找到建议
+    zh-HK: 找不到建議
+    zh-TW: 找不到建議
+  Learn Spelling:
+    en: Learn Spelling
+    ja: "スペルを学習"
+    pt-BR: "Aprender ortografia"
+    ru: "Запомнить написание"
+    zh-CN: 学习拼写
+    zh-HK: 學習拼字
+    zh-TW: 學習拼字
   Go to Definition:
     en: Go to Definition
     ja: "定義へ移動"

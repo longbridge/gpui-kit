@@ -10,7 +10,7 @@ A slider component for selecting numeric values within a specified range. Suppor
 ## Import
 
 ```rust
-use gpui_kit::component::slider::{Slider, SliderState, SliderEvent, SliderValue};
+use gpui_kit::component::slider::{Slider, SliderState, SliderEvent, SliderValue, ValueMapping};
 ```
 
 ## Usage
@@ -171,23 +171,23 @@ Slider::new(&slider_state)
     .rounded(px(4.))
 ```
 
-### Scale
+### Mapping
 
-There have 2 types of scale for the slider:
+There are two built-in mappings for the slider:
 
-- `Linear` (default)
-- `Logarithmic`
+- `ValueMapping::Linear` (default)
+- `ValueMapping::Logarithmic`
 
-The logarithmic scale is useful when the range of values is large and you want to give more precision to smaller values.
+The logarithmic mapping is useful when the range of values is large and you want to give more precision to smaller values.
 
 ```rust
 let log_slider = cx.new(|_| {
     SliderState::new()
-        .min(1.0) // min must be greater than 0 for log scale
+        .min(1.0) // min must be greater than 0 for a logarithmic mapping
         .max(1000.0)
         .default_value(10.0)
         .step(1.0)
-        .scale(SliderScale::Logarithmic)
+        .mapping(ValueMapping::Logarithmic)
 });
 ```
 

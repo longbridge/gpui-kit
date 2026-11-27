@@ -52,8 +52,11 @@ features to skip the styled layers:
 
 ```toml
 [dependencies]
-gpui-kit = { version = "0.7", default-features = false }
+gpui-kit = { version = "0.12", default-features = false, features = ["gpui-pre"] }
 ```
+
+With default features off, enable one GPUI engine: `gpui-pre` (upstream GPUI)
+or `gpui-fast`.
 
 If Cargo reports incompatible GPUI types, check whether your application pulls
 GPUI in from somewhere other than `gpui-kit`.

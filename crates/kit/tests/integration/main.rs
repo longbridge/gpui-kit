@@ -56,6 +56,8 @@ mod lifecycle;
 mod live_region;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod menu;
+#[cfg(all(feature = "test-support", feature = "gpui-fast", feature = "component"))]
+mod menu_a11y;
 #[cfg(all(feature = "test-support", feature = "component"))]
 mod overlays;
 #[cfg(all(feature = "test-support", feature = "component"))]

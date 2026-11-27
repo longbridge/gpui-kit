@@ -10,7 +10,7 @@ use gpui::{App, Font, Pixels};
 use ropey::Rope;
 
 use super::fold_map::FoldMap;
-use super::text_wrapper::{LineItem, TextWrapper, WrapDisplayPoint, WrappingIndent};
+use super::text_wrapper::{FontSpan, LineItem, TextWrapper, WrapDisplayPoint, WrappingIndent};
 use super::{BufferPoint, WrapPoint};
 use crate::input::RopeExt;
 
@@ -108,6 +108,7 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.adjust_inline_metrics(range, new_text.len());
+        self.wrapper.adjust_font_spans(range, new_text.len());
         // Before the first layout the font is still the window default; layout shapes it all.
         if !self.wrapper.is_prepared() {
             self.wrapper.set_default_text(changed_text);
@@ -123,6 +124,10 @@ impl WrapMap {
         cx: &mut App,
     ) {
         self.wrapper.set_inline_metrics(metrics, cx);
+    }
+
+    pub(super) fn set_font_spans(&mut self, spans: std::rc::Rc<[FontSpan]>, cx: &mut App) {
+        self.wrapper.set_font_spans(spans, cx);
     }
 
     pub(super) fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {

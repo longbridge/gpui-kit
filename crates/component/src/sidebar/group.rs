@@ -2,10 +2,10 @@ use std::rc::Rc;
 
 use crate::{ActiveTheme, Collapsible, h_flex, sidebar::SidebarItem, v_flex};
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ParentElement, SharedString, Styled as _, Window, div,
-    prelude::FluentBuilder as _,
+    AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, Role,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
-use gpui_base::LogicalStyledExt as _;
+use gpui_base::{LogicalStyledExt as _, TestSupportExt as _};
 
 /// A group of items in the [`super::Sidebar`].
 #[derive(Clone)]
@@ -79,6 +79,12 @@ impl<E: SidebarItem> SidebarItem for SidebarGroup<E> {
         let id = id.into();
 
         v_flex()
+            .id(id.clone())
+            .test_support()
+            // Names the menus inside for assistive technology, also while
+            // the collapsed sidebar hides the visible label.
+            .role(Role::Group)
+            .aria_label(self.label.clone())
             .relative()
             .when(!self.collapsed, |this| {
                 this.child(
@@ -129,7 +135,7 @@ impl<E: SidebarItem> SidebarItem for SidebarGroup<E> {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Context, InteractiveElement as _, Render, TestAppContext, px};
+    use gpui::{Context, Render, TestAppContext, px};
 
     use super::*;
     use crate::sidebar::SidebarMenu;
@@ -172,5 +178,24 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
 
         assert!(cx.debug_bounds("group-suffix").is_none());
+    }
+
+    /// The group label names the menus inside it, also when the collapsed
+    /// sidebar hides the label (#2968).
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn the_group_label_names_its_menus(cx: &mut TestAppContext) {
+        use gpui_base::test_support::find;
+
+        cx.update(crate::init);
+        for collapsed in [false, true] {
+            let (_, cx) = cx.add_window_view(|_, _| GroupHarness { collapsed });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, _| {
+                let group = find(window, &[], &"group".into()).expect("group is drawn");
+                assert_eq!(group.role(), Some(Role::Group));
+                assert_eq!(group.label(), Some("A project name long enough to shorten"));
+            });
+        }
     }
 }

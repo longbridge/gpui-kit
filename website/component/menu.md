@@ -37,6 +37,42 @@ div()
     })
 ```
 
+The builder runs once each time the menu opens, from a right click or from Shift+F10 while focus is inside the element. It runs after the triggering event has been dispatched, and an open menu is never rebuilt. If the builder adds no items, no menu opens.
+
+To track whether the menu is open, record it in the builder and subscribe to the menu's `DismissEvent`, which it emits when it closes. A right click while the menu is open replaces it and runs the builder again, so keep the subscription in a field that the next one replaces:
+
+```rust
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::{DismissEvent, Subscription};
+
+struct FileList {
+    menu_open: bool,
+    _menu_dismissed: Option<Subscription>,
+}
+
+impl Render for FileList {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        div()
+            .id("file-list")
+            .context_menu(move |menu, _, cx| {
+                let popup = cx.entity();
+                _ = view.update(cx, |this, cx| {
+                    this.menu_open = true;
+                    this._menu_dismissed =
+                        Some(cx.subscribe(&popup, |this, _, _: &DismissEvent, cx| {
+                            this.menu_open = false;
+                            cx.notify();
+                        }));
+                    cx.notify();
+                });
+                menu.menu("Rename", Box::new(Rename))
+                    .menu("Delete", Box::new(Delete))
+            })
+    }
+}
+```
+
 ### DropdownMenu
 
 Dropdown menus are triggered by buttons or other interactive elements:
@@ -74,6 +110,20 @@ However, if you prefer not to use [Action]s, you can create custom menu items us
 There have a `on_click` callback to handle the click event directly.
 :::
 
+Name the menu with `accessibility_label`, usually after the button that opens
+it, so a screen reader says which menu it is in. A submenu is named after its
+item without this:
+
+```rust
+Button::new("sort")
+    .label("Sort")
+    .dropdown_menu(|menu, _, _| {
+        menu.accessibility_label("Sort")
+            .menu("Name", Box::new(SortByName))
+            .menu("Date", Box::new(SortByDate))
+    })
+```
+
 ### Anchor Position
 
 Control where the dropdown menu appears relative to the trigger:
@@ -100,6 +150,14 @@ menu.menu_with_icon("Search", IconName::Search, Box::new(Search))
     .menu_with_icon("Settings", IconName::Settings, Box::new(OpenSettings))
     .separator()
     .menu_with_icon("Help", IconName::Help, Box::new(ShowHelp))
+```
+
+An icon is drawn small unless it was given a size of its own, which it keeps:
+
+```rust
+use gpui_kit::component::{Icon, Sizable as _, Size};
+
+menu.menu_with_icon("Search", Icon::new(IconName::Search).with_size(Size::Medium), Box::new(Search))
 ```
 
 ### Disabled State
@@ -213,6 +271,20 @@ menu.menu_element(Box::new(CustomAction), |window, cx| {
                 )
         }
     )
+```
+
+A custom element has no label for assistive technology to read. Build the item
+with `PopupMenuItem::element` and name it with `accessibility_label`, so a
+screen reader does not announce an unnamed menu item:
+
+```rust
+use gpui_kit::component::menu::PopupMenuItem;
+
+menu.item(
+    PopupMenuItem::element(|_, _| h_flex().gap_1().child("Status").child("✓ Connected"))
+        .accessibility_label("Status: Connected")
+        .action(Box::new(InfoAction)),
+)
 ```
 
 ### Keyboard Shortcuts
