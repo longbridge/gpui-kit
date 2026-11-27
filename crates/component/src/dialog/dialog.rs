@@ -18,6 +18,7 @@ use crate::{
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::{DialogContent, DialogDispatchAnchor, DialogTitle},
     scroll::ScrollableElement as _,
+    styled::FOCUS_RING_WIDTH,
     v_flex,
 };
 
@@ -810,9 +811,15 @@ impl RenderOnce for Dialog {
                                         .when_some(self.props.max_width, |this, w| this.max_w(w))
                                         .max_h(max_height)
                                         .child(
+                                            // Both this and the body clip their content. The
+                                            // matching padding and negative margin leave room
+                                            // for a control's focus ring, which is painted
+                                            // outside its border, without moving anything.
                                             v_flex()
                                                 .flex_1()
                                                 .overflow_hidden()
+                                                .py(FOCUS_RING_WIDTH)
+                                                .my(-FOCUS_RING_WIDTH)
                                                 .gap_y_2()
                                                 .when_some(self.header, |this, header| {
                                                     this.child(
@@ -842,15 +849,20 @@ impl RenderOnce for Dialog {
                                                 })
                                                 .when(!self.children.is_empty(), |this| {
                                                     this.child(
-                                                        div().flex_1().overflow_hidden().child(
-                                                            // Body
-                                                            v_flex()
-                                                                .size_full()
-                                                                .overflow_y_scrollbar()
-                                                                .pl(paddings.left)
-                                                                .pr(paddings.right)
-                                                                .children(self.children),
-                                                        ),
+                                                        div()
+                                                            .flex_1()
+                                                            .overflow_hidden()
+                                                            .my(-FOCUS_RING_WIDTH)
+                                                            .child(
+                                                                // Body
+                                                                v_flex()
+                                                                    .size_full()
+                                                                    .overflow_y_scrollbar()
+                                                                    .py(FOCUS_RING_WIDTH)
+                                                                    .pl(paddings.left)
+                                                                    .pr(paddings.right)
+                                                                    .children(self.children),
+                                                            ),
                                                     )
                                                 }),
                                         )
@@ -1582,6 +1594,50 @@ pub(crate) mod tests {
         cx.update(|window, cx| assert!(input.focus_handle(cx).is_focused(window)));
         cx.simulate_input("draft");
         assert_eq!(input.read_with(cx, |input, _| input.value()), "draft");
+    }
+
+    /// The focused input's ring is painted outside its border; the dialog's
+    /// clipped body must leave room for it rather than cut its top and bottom.
+    #[gpui::test]
+    fn focus_ring_is_not_clipped_by_the_body(cx: &mut TestAppContext) {
+        use crate::input::{Input, InputState};
+
+        let cx = window(cx, size(px(1000.), px(800.)));
+        let input = cx.update(|window, cx| cx.new(|cx| InputState::new(window, cx)));
+        let field = input.clone();
+        open(cx, move |dialog, _, _| {
+            dialog
+                .title("Rename")
+                .child(Input::new(&field))
+                .footer(Button::new("save").label("Save"))
+        });
+        let ring = cx
+            .debug_bounds("focus-ring")
+            .expect("the focused input draws its ring");
+        let scale = cx.update(|window, _| window.scale_factor());
+        let (top, bottom) = (
+            f32::from(ring.top()) * scale,
+            f32::from(ring.bottom()) * scale,
+        );
+        let mask = cx.update(|window, _| {
+            window
+                .painted_quads()
+                .into_iter()
+                .find(|quad| {
+                    (quad.bounds.origin.y.0 - top).abs() < 1.0
+                        && (quad.bounds.bottom().0 - bottom).abs() < 1.0
+                        && quad.border_widths.top.0 > 0.0
+                })
+                .expect("the ring is painted")
+                .content_mask
+                .bounds
+        });
+        assert!(
+            mask.origin.y.0 <= top + 0.5 && mask.bottom().0 >= bottom - 0.5,
+            "ring {top}..{bottom} is clipped to {}..{}",
+            mask.origin.y.0,
+            mask.bottom().0
+        );
     }
 
     /// Without a text field, the first button in the tab order takes focus;
