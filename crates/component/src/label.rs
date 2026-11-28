@@ -125,13 +125,12 @@ impl Label {
         }
     }
 
-    fn highlight_ranges(&self, total_length: usize) -> Vec<Range<usize>> {
+    fn highlight_ranges(&self, full_text: &str) -> Vec<Range<usize>> {
         let mut ranges = Vec::new();
-        let full_text = self.full_text();
 
         if self.secondary.is_some() {
             ranges.push(0..self.label.len());
-            ranges.push(self.label.len()..total_length);
+            ranges.push(self.label.len()..full_text.len());
         }
 
         if let Some(matched) = &self.highlights_text {
@@ -176,14 +175,14 @@ impl Label {
 
     fn measure_highlights(
         &self,
-        length: usize,
+        text: &str,
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
         if self.masked {
             return None;
         }
 
-        let ranges = self.highlight_ranges(length);
+        let ranges = self.highlight_ranges(text);
         if ranges.is_empty() {
             return None;
         }
@@ -226,13 +225,12 @@ impl Styled for Label {
 impl RenderOnce for Label {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let mut text = self.full_text();
-        let chars_count = text.chars().count();
 
         if self.masked {
-            text = SharedString::from(MASKED.repeat(chars_count))
+            text = SharedString::from(MASKED.repeat(text.chars().count()))
         };
 
-        let highlights = self.measure_highlights(text.len(), cx);
+        let highlights = self.measure_highlights(&text, cx);
         // Plain text is not in the accessibility tree, so the label carries
         // it. A masked label keeps its text out of the tree.
         let accessible_text = (!self.masked && !text.is_empty()).then(|| text.clone());
@@ -359,11 +357,7 @@ mod tests {
                 .secondary("世界")
                 .highlights("🙂 世")
                 .masked(true);
-            assert!(
-                label
-                    .measure_highlights(label.full_text().len(), cx)
-                    .is_none()
-            );
+            assert!(label.measure_highlights(&label.full_text(), cx).is_none());
         });
         let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
         cx.update(|window, cx| crate::test_redraw(window, cx));
@@ -381,6 +375,14 @@ mod tests {
                     .id("box")
                     .child(Label::new("Hello"))
                     .child(Label::new("secret").masked(true))
+                    .child(Label::new("é🙂").secondary("世界").highlights("🙂 世"))
+                    .child(
+                        Label::new("é🙂")
+                            .secondary("世界")
+                            .highlights("🙂 世")
+                            .masked(true),
+                    )
+                    .child(Label::new("").masked(true))
             }
         }
         cx.update(crate::init);
@@ -398,8 +400,19 @@ mod tests {
                     text.text().to_owned()
                 })
                 .collect();
-            assert_eq!(texts, ["Hello", "••••••"]);
+            assert_eq!(texts, ["Hello", "••••••", "é🙂 世界", "•••••", ""]);
         });
+    }
+
+    #[test]
+    fn highlights_use_byte_ranges_in_composed_unicode_text() {
+        let label = Label::new("é🙂").secondary("世界").highlights("🙂 世");
+        let text = label.full_text();
+        assert_eq!(text, "é🙂 世界");
+        assert_eq!(label.highlight_ranges(&text), vec![0..6, 6..13, 2..10]);
+
+        let label = label.highlights(HighlightsMatch::Prefix("É".into()));
+        assert_eq!(label.highlight_ranges(&text), vec![0..6, 6..13, 0..2]);
     }
 
     #[test]
@@ -408,13 +421,12 @@ mod tests {
 
         // No highlights
         let label = Label::new("Hello World");
-        let result = label.highlight_ranges("Hello World".len());
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result, Vec::<Range<usize>>::new());
 
         // Secondary text ranges only
         let label = Label::new("Hello").secondary("World");
-        let total_length = "Hello World".len();
-        let result = label.highlight_ranges(total_length);
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], 0..5); // "Hello"
         assert_eq!(result[1], 5..11); // " World"
@@ -423,13 +435,13 @@ mod tests {
 
         // Single match with case insensitive
         let label = Label::new("Hello World").highlights("WORLD");
-        let result = label.highlight_ranges("Hello World".len());
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], 6..11); // "World"
 
         // Multiple matches
         let label = Label::new("Hello Hello Hello").highlights("Hello");
-        let result = label.highlight_ranges("Hello Hello Hello".len());
+        let result = label.highlight_ranges("Hello Hello Hello");
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], 0..5); // First "Hello"
         assert_eq!(result[1], 6..11); // Second "Hello"
@@ -437,19 +449,18 @@ mod tests {
 
         // No match and empty search
         let label = Label::new("Hello World").highlights("xyz");
-        let result = label.highlight_ranges("Hello World".len());
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result, Vec::<Range<usize>>::new());
 
         let label = Label::new("Hello World").highlights("");
-        let result = label.highlight_ranges("Hello World".len());
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result, Vec::<Range<usize>>::new());
 
         // Combined functionality
 
         // Secondary + highlights in main text
         let label = Label::new("Hello").secondary("World").highlights("llo");
-        let total_length = "Hello World".len();
-        let result = label.highlight_ranges(total_length);
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], 0..5); // Main text range
         assert_eq!(result[1], 5..11); // Secondary text range
@@ -457,8 +468,7 @@ mod tests {
 
         // Highlight in secondary text
         let label = Label::new("Hello").secondary("World").highlights("World");
-        let total_length = "Hello World".len();
-        let result = label.highlight_ranges(total_length);
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], 0..5); // Main text range
         assert_eq!(result[1], 5..11); // Secondary text range
@@ -466,8 +476,7 @@ mod tests {
 
         // Cross-boundary highlight
         let label = Label::new("Hello").secondary("World").highlights("o W");
-        let total_length = "Hello World".len();
-        let result = label.highlight_ranges(total_length);
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], 0..5); // Main text range
         assert_eq!(result[1], 5..11); // Secondary text range
@@ -477,14 +486,14 @@ mod tests {
 
         // Overlapping matches
         let label = Label::new("aaaa").highlights("aa");
-        let result = label.highlight_ranges("aaaa".len());
+        let result = label.highlight_ranges("aaaa");
         assert!(result.len() >= 2);
         assert_eq!(result[0], 0..2); // First "aa"
         assert_eq!(result[1], 1..3); // Overlapping "aa"
 
         // Unicode text
         let label = Label::new("你好世界，Hello World").highlights("世界");
-        let result = label.highlight_ranges("你好世界，Hello World".len());
+        let result = label.highlight_ranges("你好世界，Hello World");
         assert_eq!(result.len(), 1);
         let text = "你好世界，Hello World";
         let start = text.find("世界").unwrap();
@@ -496,45 +505,44 @@ mod tests {
     fn test_highlight_ranges_prefix() {
         // Test prefix match - should only match the first occurrence
         let label = Label::new("aaaa").highlights(HighlightsMatch::Prefix("aa".into()));
-        let result = label.highlight_ranges("aaaa".len());
+        let result = label.highlight_ranges("aaaa");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], 0..2); // Only first "aa"
 
         // Test prefix vs full match behavior
         let label_full =
             Label::new("Hello Hello").highlights(HighlightsMatch::Full("Hello".into()));
-        let result_full = label_full.highlight_ranges("Hello Hello".len());
+        let result_full = label_full.highlight_ranges("Hello Hello");
         assert_eq!(result_full.len(), 2); // Both "Hello" matches
 
         let label_prefix =
             Label::new("Hello Hello").highlights(HighlightsMatch::Prefix("Hello".into()));
-        let result_prefix = label_prefix.highlight_ranges("Hello Hello".len());
+        let result_prefix = label_prefix.highlight_ranges("Hello Hello");
         assert_eq!(result_prefix.len(), 1); // Only first "Hello"
         assert_eq!(result_prefix[0], 0..5);
 
         // Test prefix with case insensitive matching
         let label =
             Label::new("Hello hello HELLO").highlights(HighlightsMatch::Prefix("hello".into()));
-        let result = label.highlight_ranges("Hello hello HELLO".len());
+        let result = label.highlight_ranges("Hello hello HELLO");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], 0..5); // First "Hello" (case insensitive)
 
         // Test prefix with no match
         let label = Label::new("Hello World").highlights(HighlightsMatch::Prefix("xyz".into()));
-        let result = label.highlight_ranges("Hello World".len());
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 0);
 
         // Test prefix with empty string
         let label = Label::new("Hello World").highlights(HighlightsMatch::Prefix("".into()));
-        let result = label.highlight_ranges("Hello World".len());
+        let result = label.highlight_ranges("Hello World");
         assert_eq!(result.len(), 0);
 
         // Test prefix with secondary text - match in main text
         let label = Label::new("Hello")
             .secondary("Hello World")
             .highlights(HighlightsMatch::Prefix("Hello".into()));
-        let total_length = "Hello Hello World".len();
-        let result = label.highlight_ranges(total_length);
+        let result = label.highlight_ranges("Hello Hello World");
         assert_eq!(result.len(), 3); // 2 for secondary + 1 for prefix match
         assert_eq!(result[0], 0..5); // Main text range
         assert_eq!(result[1], 5..17); // Secondary text range
@@ -544,8 +552,7 @@ mod tests {
         let label = Label::new("abc")
             .secondary("def abc def")
             .highlights(HighlightsMatch::Prefix("abc".into()));
-        let total_length = "abc def abc def".len();
-        let result = label.highlight_ranges(total_length);
+        let result = label.highlight_ranges("abc def abc def");
         assert_eq!(result.len(), 3); // 2 for secondary + 1 for prefix match
         assert_eq!(result[0], 0..3); // Main text range
         assert_eq!(result[1], 3..15); // Secondary text range
@@ -553,20 +560,20 @@ mod tests {
 
         // Test prefix with Unicode characters
         let label = Label::new("你好世界你好").highlights(HighlightsMatch::Prefix("你好".into()));
-        let result = label.highlight_ranges("你好世界你好".len());
+        let result = label.highlight_ranges("你好世界你好");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], 0..6); // First "你好" (6 bytes in UTF-8)
 
         // Test prefix with overlapping pattern
         let label = Label::new("abababab").highlights(HighlightsMatch::Prefix("abab".into()));
-        let result = label.highlight_ranges("abababab".len());
+        let result = label.highlight_ranges("abababab");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], 0..4); // First "abab" only
 
         // Test prefix match at different positions (now no match since "Hello" is not at start)
         let label =
             Label::new("xyz Hello abc Hello").highlights(HighlightsMatch::Prefix("Hello".into()));
-        let result = label.highlight_ranges("xyz Hello abc Hello".len());
+        let result = label.highlight_ranges("xyz Hello abc Hello");
         assert_eq!(result.len(), 0); // No match since "Hello" is not at the beginning
 
         // Test is_prefix method
