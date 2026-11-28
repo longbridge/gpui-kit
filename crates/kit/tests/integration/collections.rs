@@ -467,6 +467,18 @@ fn resizing_a_column_in_a_scrolled_table_follows_the_pointer(cx: &mut TestAppCon
         window.render_frame(cx);
 
         assert_eq!(table.read(cx).col_width(2), Some(px(200.)));
+        // Shrinking at the right edge clamps the scroll offset and keeps
+        // visible body cells aligned with their column headers.
+        assert!(scroll.offset().x >= -scroll.max_offset().x);
+        for col_ix in [2usize, 3] {
+            let header = window.find(("col-header", col_ix)).bounds();
+            let cell = window.find(table_cell_id(0, col_ix)).bounds();
+            assert_eq!(cell.left(), header.left(), "col {col_ix} left mismatch");
+            assert_eq!(
+                cell.size.width, header.size.width,
+                "col {col_ix} width mismatch"
+            );
+        }
     })
     .unwrap();
 }
@@ -1103,6 +1115,114 @@ fn table_pins_right_fixed_columns_while_scrolling(cx: &mut TestAppContext) {
             "reported a fixed column: {ranges:?}"
         );
         assert_eq!(ranges.last().map(|range| range.end), Some(6));
+    })
+    .unwrap();
+}
+
+/// Reordering columns of differing widths and switching to RTL keeps scrolled
+/// body cells aligned with their column headers alongside fixed columns.
+#[gpui_kit::test]
+fn table_aligns_body_cells_with_headers_after_reorder_and_rtl(cx: &mut TestAppContext) {
+    use gpui_kit::InputEvent as _;
+
+    let delegate = TableProbe {
+        columns_count: 8,
+        left_columns_count: 1,
+        right_columns_count: 1,
+        ..TableProbe::new(3)
+    };
+    let (handle, table) = open_table_probe_with_delegate(cx, delegate, false);
+    cx.update_window(handle, |_, window, cx| {
+        let assert_aligned = |window: &mut Window, cols: &[usize]| {
+            for &col_ix in cols {
+                let header = window.find(("col-header", col_ix)).bounds();
+                let cell = window.find(table_cell_id(0, col_ix)).bounds();
+                assert_eq!(cell.left(), header.left(), "col {col_ix} left mismatch");
+                assert_eq!(
+                    cell.size.width, header.size.width,
+                    "col {col_ix} width mismatch"
+                );
+            }
+        };
+        let drag = |window: &mut Window,
+                    start: gpui_kit::Point<gpui_kit::Pixels>,
+                    end: gpui_kit::Point<gpui_kit::Pixels>,
+                    cx: &mut App| {
+            let mouse_move = |position, pressed_button| gpui_kit::MouseMoveEvent {
+                position,
+                pressed_button,
+                modifiers: Default::default(),
+            };
+            window.dispatch_event(mouse_move(start, None).to_platform_input(), cx);
+            window.render_frame(cx);
+            window.dispatch_event(
+                gpui_kit::MouseDownEvent {
+                    button: gpui_kit::MouseButton::Left,
+                    position: start,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            for step in 1..=6 {
+                let t = step as f32 / 6.;
+                let pos = point(start.x + (end.x - start.x) * t, start.y);
+                window.dispatch_event(
+                    mouse_move(pos, Some(gpui_kit::MouseButton::Left)).to_platform_input(),
+                    cx,
+                );
+                window.render_frame(cx);
+            }
+            window.dispatch_event(
+                gpui_kit::MouseUpEvent {
+                    button: gpui_kit::MouseButton::Left,
+                    position: end,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        };
+
+        window.render_frame(cx);
+        // Resize column 1 narrower so reordering changes `col_origins` offsets.
+        let col1 = window.find(("col-header", 1usize)).bounds();
+        let handle_start = point(col1.right() - px(1.), col1.center().y);
+        drag(
+            window,
+            handle_start,
+            handle_start - point(px(60.), px(0.)),
+            cx,
+        );
+        assert_eq!(table.read(cx).col_width(1), Some(px(120.)));
+
+        // Drag column 1 past column 2's center (staying left of the right-fixed
+        // column) to reorder within the scrollable region.
+        let col1_center = window.find(("col-header", 1usize)).bounds().center();
+        let col2_drop_x = window.find(("col-header", 2usize)).bounds().center().x + px(20.);
+        drag(window, col1_center, point(col2_drop_x, col1_center.y), cx);
+        assert_eq!(table.read(cx).col_width(2), Some(px(120.)));
+        assert_aligned(window, &[0, 1, 2, 7]);
+
+        // Scroll horizontally after reorder and check alignment.
+        table.update(cx, |table, cx| table.scroll_to_col(6, cx));
+        window.render_frame(cx);
+        assert_aligned(window, &[0, 5, 6, 7]);
+
+        // Switch global layout direction to RTL and verify header/cell alignment.
+        gpui_kit::base::LayoutDirection::set_global(gpui_kit::base::LayoutDirection::Rtl, cx);
+        window.render_frame(cx);
+        assert_aligned(window, &[0, 5, 6, 7]);
+
+        table.update(cx, |table, cx| table.scroll_to_col(1, cx));
+        window.render_frame(cx);
+        assert_aligned(window, &[0, 1, 2, 7]);
+
+        gpui_kit::base::LayoutDirection::set_global(gpui_kit::base::LayoutDirection::Ltr, cx);
     })
     .unwrap();
 }

@@ -1,5 +1,5 @@
 use gpui_base::TestSupportExt as _;
-use std::{ops::Range, rc::Rc, time::Duration};
+use std::{ops::Range, time::Duration};
 
 use crate::{
     ActiveTheme, ElementExt, Icon, IconName, StyleSized as _, StyledExt, VirtualListScrollHandle,
@@ -13,13 +13,15 @@ use crate::{
     v_flex,
 };
 use gpui::{
-    AppContext, Axis, Bounds, ClickEvent, Context, Div, DragMoveEvent, ElementId, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton,
+    AnyElement, AppContext, AvailableSpace, Axis, Bounds, ClickEvent, ContentMask, Context, Div,
+    DragMoveEvent, Element, ElementId, Entity, EventEmitter, FocusHandle, Focusable,
+    GlobalElementId, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton,
     MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled, Task, TextAlign, UniformListScrollHandle, Window, div,
-    prelude::FluentBuilder, px, uniform_list,
+    point, prelude::FluentBuilder, px, size, uniform_list,
 };
 use rust_i18n::t;
+use smallvec::SmallVec;
 
 use super::*;
 
@@ -164,6 +166,169 @@ struct ResizeOrigin {
     width: Pixels,
 }
 
+/// Shared horizontal body column virtualization state computed once per frame
+/// inside the body `uniform_list` callback and reused by every visible row.
+#[derive(Clone)]
+struct VisibleBodyCols {
+    /// Absolute index range of all scrollable columns (`left_fixed..total - right_fixed`).
+    scrollable: Range<usize>,
+    /// Absolute index range of the currently visible scrollable columns to render.
+    visible: Range<usize>,
+    /// Horizontal scroll offset (`<= 0`) shared with the header.
+    scroll_offset_x: Pixels,
+}
+
+/// Lightweight element that lays out and paints one row's precomputed visible
+/// scrollable cells directly against the shared horizontal offset.
+///
+/// Compared to nesting a `VirtualList` in every row, this avoids per-row
+/// `ItemSizeLayout` element state, prefix-sum comparisons, binary searches,
+/// boxed closures, and `VirtualListScrollHandle` allocations. Compared to
+/// placing cells inside a flex container with a dynamic margin, it keeps each
+/// row's Taffy subtree to a single leaf node (so `uniform_list::measure_item`
+/// builds zero cells) and shifts cells via `prepaint_at` without mutating
+/// Taffy styles during horizontal scroll (preserving GPUI Fast's layout cache).
+struct TableRowCells<D: TableDelegate> {
+    view: Entity<TableState<D>>,
+    row_ix: usize,
+    visible_cols: VisibleBodyCols,
+}
+
+impl<D: TableDelegate> Element for TableRowCells<D> {
+    type RequestLayoutState = SmallVec<[AnyElement; 32]>;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.row_ix.into())
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, Self::RequestLayoutState) {
+        let mut style = gpui::Style::default();
+        style.size.width = gpui::relative(1.).into();
+        style.size.height = gpui::relative(1.).into();
+        (window.request_layout(style, None, cx), SmallVec::new())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        items: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        if self.visible_cols.visible.is_empty() {
+            return;
+        }
+
+        // Build cell elements inside `view.update`, then release the entity
+        // lease before laying out and prepainting cells so nested elements can
+        // safely read `TableState` and `gpui-fast` tracks layout outside the
+        // entity update scope.
+        let mut pending: SmallVec<[(AnyElement, Pixels, Pixels); 32]> = SmallVec::new();
+        self.view.update(cx, |table, cx| {
+            let base_origin = table
+                .col_origins
+                .get(self.visible_cols.scrollable.start)
+                .copied()
+                .unwrap_or(px(0.));
+
+            for col_ix in self.visible_cols.visible.clone() {
+                let Some(&col_origin) = table.col_origins.get(col_ix) else {
+                    continue;
+                };
+                let Some(col_width) = table.col_groups.get(col_ix).map(|col| col.width) else {
+                    continue;
+                };
+
+                let cell = table.render_scrollable_cell(self.row_ix, col_ix, window, cx);
+                pending.push((cell, col_origin - base_origin, col_width));
+            }
+        });
+
+        let scroll_offset_x = self.visible_cols.scroll_offset_x;
+        let content_mask = ContentMask { bounds };
+        window.with_content_mask(Some(content_mask), |window| {
+            for (mut cell, rel_origin, col_width) in pending {
+                let item_origin = bounds.origin + point(rel_origin + scroll_offset_x, px(0.));
+                let available_space = size(
+                    AvailableSpace::Definite(col_width),
+                    AvailableSpace::Definite(bounds.size.height),
+                );
+
+                cell.layout_as_root(available_space, window, cx);
+                cell.prepaint_at(item_origin, window, cx);
+                items.push(cell);
+            }
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        items: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        // The enclosing scrollable row container (`overflow_hidden`) already
+        // installs the paint content mask.
+        for item in items.iter_mut() {
+            item.paint(window, cx);
+        }
+    }
+}
+
+/// Compute the visible column range within `0..scrollable_cols.len()` for
+/// `scroll_x..(scroll_x + viewport_width)`, matching `VirtualList::visible_range`
+/// semantics (binary search on column end offsets with one column of trailing overdraw).
+///
+/// `col_origins` holds prefix sums of column widths for all columns (`len == total_cols + 1`).
+fn visible_scrollable_col_range(
+    col_origins: &[Pixels],
+    scrollable_cols: Range<usize>,
+    scroll_x: Pixels,
+    viewport_width: Pixels,
+) -> Range<usize> {
+    let count = scrollable_cols.len();
+    if count == 0 || viewport_width <= px(0.) {
+        return 0..0;
+    }
+
+    let Some(&base) = col_origins.get(scrollable_cols.start) else {
+        return 0..0;
+    };
+    let Some(rel_ends) = col_origins.get(scrollable_cols.start + 1..=scrollable_cols.end) else {
+        return 0..0;
+    };
+
+    // Column ends grow monotonically with index, so the first column ending
+    // past `edge` is a partition point over the scrollable column ends.
+    let ends_before = |edge: Pixels| rel_ends.partition_point(|&end| end <= base + edge);
+
+    let first = ends_before(scroll_x);
+    let past_end = ends_before(scroll_x + viewport_width);
+    let last = if past_end == count {
+        count
+    } else {
+        (past_end + 2).min(count)
+    };
+    first..last.max(first)
+}
+
 /// The state for [`DataTable`].
 ///
 /// # Selection Modes
@@ -235,6 +400,8 @@ pub struct TableState<D: TableDelegate> {
     fixed_right_head_cols_bounds: Bounds<Pixels>,
 
     col_groups: Vec<ColGroup>,
+    /// Prefix sums of `col_groups` widths (`len == col_groups.len() + 1`, starting at `0px`).
+    col_origins: Vec<Pixels>,
     header_layout: Vec<Vec<HeaderCell>>,
 
     /// Whether the table can loop selection, default is true.
@@ -311,6 +478,9 @@ pub struct TableState<D: TableDelegate> {
 
     /// The visible range of the rows and columns.
     visible_range: TableVisibleRange,
+    /// Relative scrollable column index queued by [`Self::scroll_to_col`] before
+    /// the first layout when the horizontal viewport width is still unknown.
+    pending_scroll_to_col: Option<usize>,
 
     _measure: Vec<Duration>,
     _load_more_task: Task<()>,
@@ -327,6 +497,7 @@ where
             options: TableOptions::default(),
             delegate,
             col_groups: Vec::new(),
+            col_origins: vec![px(0.)],
             header_layout: Vec::new(),
             horizontal_scroll_handle: VirtualListScrollHandle::new(),
             vertical_scroll_handle: UniformListScrollHandle::new(),
@@ -344,6 +515,7 @@ where
             fixed_head_cols_bounds: Bounds::default(),
             fixed_right_head_cols_bounds: Bounds::default(),
             visible_range: TableVisibleRange::default(),
+            pending_scroll_to_col: None,
             loop_selection: true,
             col_selectable: true,
             row_selectable: true,
@@ -469,28 +641,26 @@ where
         let scrollable_cols = self.scrollable_cols();
         // Right-fixed columns are always in view.
         if col_ix >= scrollable_cols.end {
+            self.pending_scroll_to_col = None;
             return;
         }
         let col_ix = col_ix.saturating_sub(scrollable_cols.start);
 
-        // Resolve the offset here instead of deferring it to the virtual list.
-        //
-        // The header and the rows share `horizontal_scroll_handle`, but only
-        // the rows are a `VirtualList`, and a deferred `scroll_to_item` is
-        // applied during that list's prepaint — which runs *after* the header
-        // has already been rendered and prepainted with the old offset. The
-        // header would therefore stay one frame behind the rows.
+        // Resolve the offset immediately when the viewport width is known so
+        // the header and body both render at the new offset on the very next
+        // frame. Before the first layout the viewport width is still zero, so
+        // defer resolution until `prepare_visible_body_cols` runs after header
+        // prepaint populates `horizontal_scroll_handle.bounds()`.
         match self.horizontal_offset_for_col(col_ix) {
             Some(offset_x) => {
+                self.pending_scroll_to_col = None;
                 let mut offset = self.horizontal_scroll_handle.offset();
                 offset.x = offset_x;
                 self.horizontal_scroll_handle.set_offset(offset);
             }
-            // Before the first layout the viewport size is unknown, let the
-            // virtual list resolve the offset once it has been laid out.
-            None => self
-                .horizontal_scroll_handle
-                .scroll_to_item(col_ix, ScrollStrategy::Top),
+            None => {
+                self.pending_scroll_to_col = Some(col_ix);
+            }
         }
 
         cx.notify();
@@ -509,13 +679,23 @@ where
     /// is out of range.
     fn horizontal_offset_for_col(&self, col_ix: usize) -> Option<Pixels> {
         let viewport_width = self.horizontal_scroll_handle.bounds().size.width;
-        if viewport_width <= px(0.) {
+        self.horizontal_offset_for_col_in(col_ix, self.scrollable_cols(), viewport_width)
+    }
+
+    fn horizontal_offset_for_col_in(
+        &self,
+        col_ix: usize,
+        scrollable_cols: Range<usize>,
+        viewport_width: Pixels,
+    ) -> Option<Pixels> {
+        if viewport_width <= px(0.) || col_ix >= scrollable_cols.len() {
             return None;
         }
 
-        let cols = self.col_groups.get(self.scrollable_cols())?;
-        let col_left: Pixels = cols.get(..col_ix)?.iter().map(|col| col.width).sum();
-        let col_right = col_left + cols.get(col_ix)?.width;
+        let base = *self.col_origins.get(scrollable_cols.start)?;
+        let abs_col_ix = scrollable_cols.start + col_ix;
+        let col_left = *self.col_origins.get(abs_col_ix)? - base;
+        let col_right = *self.col_origins.get(abs_col_ix + 1)? - base;
         let offset_x = self.horizontal_scroll_handle.offset().x;
 
         Some(if col_left + offset_x < px(0.) {
@@ -767,6 +947,17 @@ where
         cx.notify();
     }
 
+    fn rebuild_col_origins(&mut self) {
+        self.col_origins.clear();
+        self.col_origins.reserve(self.col_groups.len() + 1);
+        let mut cumulative = px(0.);
+        self.col_origins.push(cumulative);
+        for col in &self.col_groups {
+            cumulative += col.width;
+            self.col_origins.push(cumulative);
+        }
+    }
+
     fn prepare_col_groups(&mut self, cx: &mut Context<Self>) {
         self.col_groups = (0..self.delegate.columns_count(cx))
             .map(|col_ix| {
@@ -780,6 +971,7 @@ where
             })
             .collect();
 
+        self.rebuild_col_origins();
         self.update_header_layout(cx);
     }
 
@@ -1413,6 +1605,7 @@ where
         }
 
         if changed {
+            self.rebuild_col_origins();
             self.update_header_layout(cx);
             cx.notify();
         }
@@ -1465,6 +1658,7 @@ where
         self.delegate.move_column(col_ix, to_ix, window, cx);
         let col_group = self.col_groups.remove(col_ix);
         self.col_groups.insert(to_ix, col_group);
+        self.rebuild_col_origins();
 
         cx.emit(TableEvent::MoveColumn(col_ix, to_ix));
         cx.notify();
@@ -1666,7 +1860,7 @@ where
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
-        let el = h_flex().h_full();
+        let el = h_flex().h_full().flex_shrink_0();
         let selectable = self.col_selectable
             && self
                 .col_groups
@@ -2278,11 +2472,9 @@ where
                                             }
                                         }))
                                         .when(visible_col_range.end < right_columns_start, |r| {
-                                            let right_spacer: Pixels = self.col_groups
-                                                [visible_col_range.end..right_columns_start]
-                                                .iter()
-                                                .map(|g| g.width)
-                                                .sum();
+                                            let right_spacer = self.col_origins
+                                                [right_columns_start]
+                                                - self.col_origins[visible_col_range.end];
                                             r.child(div().w(right_spacer).h_full().flex_shrink_0())
                                         })
                                         .child(self.delegate.render_last_empty_col(window, cx))
@@ -2402,13 +2594,168 @@ where
             })
     }
 
+    /// Compute the visible scrollable columns and horizontal positioning once
+    /// per frame for all visible body rows.
+    fn prepare_visible_body_cols(
+        &mut self,
+        scrollable_cols: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> VisibleBodyCols {
+        let head_width = self.horizontal_scroll_handle.bounds().size.width;
+        let viewport_width = if head_width > px(0.) {
+            head_width
+        } else {
+            let fixed_width = self.fixed_head_cols_bounds.size.width
+                + self.fixed_right_head_cols_bounds.size.width;
+            (self.bounds.size.width - fixed_width).max(px(0.))
+        };
+
+        if viewport_width <= px(0.) {
+            if scrollable_cols.is_empty() {
+                self.update_visible_range_if_need(0..0, 0, Axis::Horizontal, window, cx);
+            }
+            return VisibleBodyCols {
+                visible: scrollable_cols.start..scrollable_cols.start,
+                scrollable: scrollable_cols,
+                scroll_offset_x: px(0.),
+            };
+        }
+
+        if let Some(pending_col_ix) = self.pending_scroll_to_col.take() {
+            if let Some(offset_x) = self.horizontal_offset_for_col_in(
+                pending_col_ix,
+                scrollable_cols.clone(),
+                viewport_width,
+            ) {
+                let mut offset = self.horizontal_scroll_handle.offset();
+                if offset.x != offset_x {
+                    offset.x = offset_x;
+                    self.horizontal_scroll_handle.set_offset(offset);
+                    // `table-head` already prepainted at the old offset on this
+                    // frame; notify so the header syncs on the next frame.
+                    cx.notify();
+                }
+            }
+        }
+
+        let base_origin = self
+            .col_origins
+            .get(scrollable_cols.start)
+            .copied()
+            .unwrap_or(px(0.));
+        let end_origin = self
+            .col_origins
+            .get(scrollable_cols.end)
+            .copied()
+            .unwrap_or(base_origin);
+        let total_scrollable_width = (end_origin - base_origin).max(px(0.));
+
+        // Clamp horizontal scroll offset when columns shrink or the viewport
+        // widens. Respect `table-head`'s `max_offset().x` so we never fight the
+        // trailing `render_last_empty_col` clearance when scrolled to the right end.
+        let max_scroll_x = self
+            .horizontal_scroll_handle
+            .max_offset()
+            .x
+            .max((total_scrollable_width - viewport_width).max(px(0.)));
+        let mut offset = self.horizontal_scroll_handle.offset();
+        let clamped_x = offset.x.clamp(-max_scroll_x, px(0.));
+        if clamped_x != offset.x {
+            offset.x = clamped_x;
+            self.horizontal_scroll_handle.set_offset(offset);
+        }
+
+        let scroll_x = (-offset.x).max(px(0.));
+        let visible_rel_range = visible_scrollable_col_range(
+            &self.col_origins,
+            scrollable_cols.clone(),
+            scroll_x,
+            viewport_width,
+        );
+
+        self.update_visible_range_if_need(
+            visible_rel_range.clone(),
+            scrollable_cols.len(),
+            Axis::Horizontal,
+            window,
+            cx,
+        );
+
+        let visible = (scrollable_cols.start + visible_rel_range.start)
+            ..(scrollable_cols.start + visible_rel_range.end);
+
+        VisibleBodyCols {
+            scrollable: scrollable_cols,
+            visible,
+            scroll_offset_x: offset.x,
+        }
+    }
+
+    fn render_scrollable_cell(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_cell_selected = self.selected_cell() == Some((row_ix, col_ix));
+        let is_cell_right_clicked = self.right_clicked_cell == Some((row_ix, col_ix));
+
+        self.render_col_wrap(Some(row_ix), col_ix, window, cx)
+            .child(
+                self.a11y_cell(
+                    self.render_cell(Some(row_ix), col_ix, window, cx)
+                        .id(table_cell_id(row_ix, col_ix))
+                        .test_support(),
+                    row_ix,
+                    col_ix,
+                    window,
+                    cx,
+                )
+                .relative()
+                .child(self.measure_render_td(row_ix, col_ix, window, cx))
+                .when(is_cell_selected, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .bg(cx.theme().tokens.table_active)
+                            .border_1()
+                            .border_color(cx.theme().table_active_border),
+                    )
+                })
+                .when(is_cell_right_clicked && !is_cell_selected, |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .border_1()
+                            .border_color(cx.theme().table_active_border.opacity(0.5)),
+                    )
+                })
+                .when(self.cell_selectable, |this| {
+                    this.on_click(cx.listener(move |table, e, window, cx| {
+                        cx.stop_propagation();
+                        table.on_cell_click(e, row_ix, col_ix, window, cx);
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |table, e, window, cx| {
+                            table.on_cell_right_click(e, row_ix, col_ix, window, cx);
+                        }),
+                    )
+                }),
+            )
+            .into_any_element()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn render_table_row(
         &mut self,
         row_ix: usize,
         rows_count: usize,
-        scrollable_cols: Range<usize>,
-        col_sizes: Rc<Vec<gpui::Size<Pixels>>>,
+        visible_cols: &VisibleBodyCols,
         columns_count: usize,
         is_filled: bool,
         window: &mut Window,
@@ -2418,7 +2765,6 @@ where
         // `selected_row()` is `None` outside row mode, so a selected cell or
         // column never highlights its row.
         let is_selected = self.selected_row() == Some(row_ix);
-        let view = cx.entity();
         let row_height = self.options.size.table_row_height();
 
         if row_ix < rows_count {
@@ -2464,10 +2810,10 @@ where
                 .when(self.cell_selectable && self.row_header, |this| {
                     this.child(self.render_row_header_cell(row_ix, false, cx))
                 })
-                .when(scrollable_cols.start > 0, |this| {
+                .when(visible_cols.scrollable.start > 0, |this| {
                     this.child(self.render_fixed_cells(
                         row_ix,
-                        0..scrollable_cols.start,
+                        0..visible_cols.scrollable.start,
                         ColumnFixed::Left,
                         window,
                         cx,
@@ -2479,134 +2825,25 @@ where
                         .h_full()
                         .overflow_hidden()
                         .relative()
-                        .child(
-                            crate::virtual_list::virtual_list(
-                                view,
-                                row_ix,
-                                Axis::Horizontal,
-                                col_sizes,
-                                {
-                                    let scrollable_cols = scrollable_cols.clone();
-                                    move |table, visible_range: Range<usize>, window, cx| {
-                                        table.update_visible_range_if_need(
-                                            visible_range.clone(),
-                                            scrollable_cols.len(),
-                                            Axis::Horizontal,
-                                            window,
-                                            cx,
-                                        );
-
-                                        let mut items = Vec::with_capacity(
-                                            visible_range.end - visible_range.start,
-                                        );
-
-                                        visible_range.for_each(|col_ix| {
-                                            let col_ix = col_ix + scrollable_cols.start;
-                                            let is_cell_selected =
-                                                table.selected_cell() == Some((row_ix, col_ix));
-                                            let is_cell_right_clicked =
-                                                table.right_clicked_cell == Some((row_ix, col_ix));
-
-                                            let el = table
-                                                .render_col_wrap(Some(row_ix), col_ix, window, cx)
-                                                .child(
-                                                    table
-                                                        .a11y_cell(
-                                                            table
-                                                                .render_cell(
-                                                                    Some(row_ix),
-                                                                    col_ix,
-                                                                    window,
-                                                                    cx,
-                                                                )
-                                                                .id(table_cell_id(row_ix, col_ix))
-                                                                .test_support(),
-                                                            row_ix,
-                                                            col_ix,
-                                                            window,
-                                                            cx,
-                                                        )
-                                                        .relative()
-                                                        .child(table.measure_render_td(
-                                                            row_ix, col_ix, window, cx,
-                                                        ))
-                                                        .when(is_cell_selected, |this| {
-                                                            this.child(
-                                                                div()
-                                                                    .absolute()
-                                                                    .inset_0()
-                                                                    .bg(cx
-                                                                        .theme()
-                                                                        .tokens
-                                                                        .table_active)
-                                                                    .border_1()
-                                                                    .border_color(
-                                                                        cx.theme()
-                                                                            .table_active_border,
-                                                                    ),
-                                                            )
-                                                        })
-                                                        .when(
-                                                            is_cell_right_clicked
-                                                                && !is_cell_selected,
-                                                            |this| {
-                                                                this.child(
-                                                                    div()
-                                                                        .absolute()
-                                                                        .inset_0()
-                                                                        .border_1()
-                                                                        .border_color(
-                                                                            cx.theme()
-                                                                                .table_active_border
-                                                                                .opacity(0.5),
-                                                                        ),
-                                                                )
-                                                            },
-                                                        )
-                                                        .when(table.cell_selectable, |this| {
-                                                            this.on_click(cx.listener(
-                                                                move |table, e, window, cx| {
-                                                                    cx.stop_propagation();
-                                                                    table.on_cell_click(
-                                                                        e, row_ix, col_ix, window,
-                                                                        cx,
-                                                                    );
-                                                                },
-                                                            ))
-                                                            .on_mouse_down(
-                                                                MouseButton::Right,
-                                                                cx.listener(
-                                                                    move |table, e, window, cx| {
-                                                                        table.on_cell_right_click(
-                                                                            e, row_ix, col_ix,
-                                                                            window, cx,
-                                                                        );
-                                                                    },
-                                                                ),
-                                                            )
-                                                        }),
-                                                );
-
-                                            items.push(el);
-                                        });
-
-                                        items
-                                    }
-                                },
-                            )
-                            .with_scroll_handle(&self.horizontal_scroll_handle),
-                        )
+                        .child(TableRowCells {
+                            view: cx.entity(),
+                            row_ix,
+                            visible_cols: visible_cols.clone(),
+                        })
                         .child(self.delegate.render_last_empty_col(window, cx)),
                 )
-                .when(scrollable_cols.end < self.col_groups.len(), |this| {
-                    this.child(self.render_fixed_cells(
-                        row_ix,
-                        scrollable_cols.end..self.col_groups.len(),
-                        ColumnFixed::Right,
-                        window,
-                        cx,
-                    ))
-                })
+                .when(
+                    visible_cols.scrollable.end < self.col_groups.len(),
+                    |this| {
+                        this.child(self.render_fixed_cells(
+                            row_ix,
+                            visible_cols.scrollable.end..self.col_groups.len(),
+                            ColumnFixed::Right,
+                            window,
+                            cx,
+                        ))
+                    },
+                )
                 // Row selected style
                 .when(is_selected, |this| {
                     let bg = if cx.theme().list.active_highlight {
@@ -2640,12 +2877,11 @@ where
                 }))
                 .into_any_element()
         } else {
-            let cols_width: Pixels = self
-                .col_groups
-                .iter()
-                .take(columns_count)
-                .map(|col_group| col_group.width)
-                .sum();
+            let cols_width = self
+                .col_origins
+                .get(columns_count.min(self.col_groups.len()))
+                .copied()
+                .unwrap_or(px(0.));
 
             // Render fake rows to fill the rest table space
             self.delegate
@@ -2956,20 +3192,10 @@ where
                                 render_rows_count,
                                 cx.processor(
                                     move |table, visible_range: Range<usize>, window, cx| {
-                                        // Use `col.width` (always up-to-date) rather than
-                                        // `col.bounds.size.width`, which is only set after
-                                        // prepaint and is therefore zero on the first frame.
-                                        let col_sizes: Rc<Vec<gpui::Size<Pixels>>> = Rc::new(
-                                            table
-                                                .col_groups
-                                                .get(scrollable_cols.clone())
-                                                .unwrap_or_default()
-                                                .iter()
-                                                .map(|col| gpui::Size {
-                                                    width: col.width,
-                                                    height: px(0.),
-                                                })
-                                                .collect(),
+                                        let visible_cols = table.prepare_visible_body_cols(
+                                            scrollable_cols.clone(),
+                                            window,
+                                            cx,
                                         );
 
                                         table.load_more_if_need(
@@ -3000,8 +3226,7 @@ where
                                             items.push(table.render_table_row(
                                                 row_ix,
                                                 rows_count,
-                                                scrollable_cols.clone(),
-                                                col_sizes.clone(),
+                                                &visible_cols,
                                                 columns_count,
                                                 is_filled,
                                                 window,
@@ -3422,5 +3647,138 @@ mod tests {
             );
             assert_ne!(table_cell_id(big, 0), table_cell_id(0, big));
         }
+    }
+
+    #[test]
+    fn visible_scrollable_col_range_handles_empty_single_scrolled_and_zero_viewport() {
+        let origins_from_widths = |widths: &[f32]| -> Vec<Pixels> {
+            let mut origins = Vec::with_capacity(widths.len() + 1);
+            let mut acc = px(0.);
+            origins.push(acc);
+            for &w in widths {
+                acc += px(w);
+                origins.push(acc);
+            }
+            origins
+        };
+
+        // Empty columns.
+        assert_eq!(
+            visible_scrollable_col_range(&[px(0.)], 0..0, px(0.), px(400.)),
+            0..0
+        );
+
+        // Zero or negative viewport renders nothing instead of all columns.
+        let ten_cols = origins_from_widths(&[100.; 10]);
+        assert_eq!(
+            visible_scrollable_col_range(&ten_cols, 0..10, px(0.), px(0.)),
+            0..0
+        );
+        assert_eq!(
+            visible_scrollable_col_range(&ten_cols, 0..10, px(0.), px(-20.)),
+            0..0
+        );
+
+        // Single scrollable column fitting inside viewport (with and without fixed prefix).
+        let one_col = origins_from_widths(&[180.]);
+        assert_eq!(
+            visible_scrollable_col_range(&one_col, 0..1, px(0.), px(640.)),
+            0..1
+        );
+        let fixed_plus_one = origins_from_widths(&[180., 180.]);
+        assert_eq!(
+            visible_scrollable_col_range(&fixed_plus_one, 1..2, px(0.), px(460.)),
+            0..1
+        );
+
+        // Unscrolled: viewport 0..300 reaches the end of col 2 (`past_end = 3`),
+        // matching `VirtualList::visible_range`'s `(past_end + 2).min(count)` = 5.
+        assert_eq!(
+            visible_scrollable_col_range(&ten_cols, 0..10, px(0.), px(300.)),
+            0..5
+        );
+
+        // Scrolled mid-way with 1 left-fixed and 1 right-fixed column (8 scrollable cols).
+        // Scrollable widths are 100px each; viewport 250..550 spans rel cols 2..=5 + 1 overdraw -> 2..7.
+        assert_eq!(
+            visible_scrollable_col_range(&ten_cols, 1..9, px(250.), px(300.)),
+            2..7
+        );
+
+        // Scrolled to end: clamps cleanly to scrollable count.
+        assert_eq!(
+            visible_scrollable_col_range(&ten_cols, 1..9, px(500.), px(300.)),
+            5..8
+        );
+    }
+
+    struct WideScrollDelegate;
+
+    impl TableDelegate for WideScrollDelegate {
+        fn columns_count(&self, _: &App) -> usize {
+            10
+        }
+
+        fn rows_count(&self, _: &App) -> usize {
+            3
+        }
+
+        fn column(&self, col_ix: usize, _: &App) -> Column {
+            Column::new(format!("col-{col_ix}"), format!("Col {col_ix}")).width(px(100.))
+        }
+
+        fn render_td(
+            &mut self,
+            row: usize,
+            col: usize,
+            _: &mut Window,
+            _: &mut Context<TableState<Self>>,
+        ) -> impl IntoElement {
+            div().child(format!("{row}:{col}"))
+        }
+    }
+
+    struct WideScrollTable(Entity<TableState<WideScrollDelegate>>);
+
+    impl Render for WideScrollTable {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(320.)).h(px(200.)).child(DataTable::new(&self.0))
+        }
+    }
+
+    #[gpui::test]
+    fn deferred_scroll_to_col_applies_on_first_layout(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let table = cx.new(|cx| TableState::new(WideScrollDelegate, window, cx));
+            // Call `scroll_to_col` before the first frame has laid out the viewport.
+            table.update(cx, |table, cx| table.scroll_to_col(8, cx));
+            assert_eq!(table.read(cx).pending_scroll_to_col, Some(8));
+            assert_eq!(table.read(cx).horizontal_scroll_handle.offset().x, px(0.));
+            WideScrollTable(table)
+        });
+        let table = view.read_with(cx, |view, _| view.0.clone());
+
+        // Ensure a frame has laid out the viewport and consumed `pending_scroll_to_col`.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert_eq!(
+            table.read_with(cx, |state, _| state.pending_scroll_to_col),
+            None
+        );
+        let (offset_x, visible_cols) = table.read_with(cx, |state, _| {
+            (
+                state.horizontal_scroll_handle.offset().x,
+                state.visible_range().cols().clone(),
+            )
+        });
+        assert!(
+            offset_x < px(0.),
+            "expected negative offset, got {offset_x:?}"
+        );
+        assert!(
+            visible_cols.contains(&8),
+            "expected column 8 in visible range, got {visible_cols:?}"
+        );
     }
 }
