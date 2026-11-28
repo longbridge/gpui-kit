@@ -219,6 +219,7 @@ pub struct Button {
     dropdown_caret: bool,
     hover_group: Option<SharedString>,
     hover_group_held: bool,
+    active_style: Option<StyleRefinement>,
     size: Size,
     content_style: StyleRefinement,
     icon_size: Option<Size>,
@@ -291,6 +292,7 @@ impl Button {
             dropdown_caret: false,
             hover_group: None,
             hover_group_held: false,
+            active_style: None,
             tab_index: 0,
             tab_stop: true,
         }
@@ -523,6 +525,18 @@ impl Button {
         self
     }
 
+    /// Set the style applied while the button is pressed, on top of the
+    /// variant's own pressed colors, such as
+    /// `.active(|this| this.shadow(pressed_shadow))`.
+    ///
+    /// GPUI gives an element a single active style, and the button uses it for
+    /// the variant, so this extends that style instead of replacing it. It
+    /// never applies while the button is disabled or loading.
+    pub fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.active_style = Some(f(StyleRefinement::default()));
+        self
+    }
+
     /// Set to show a dropdown caret icon at the end of the button.
     pub fn dropdown_caret(mut self, dropdown_caret: bool) -> Self {
         self.dropdown_caret = dropdown_caret;
@@ -752,9 +766,14 @@ impl RenderOnce for Button {
                     .when(interactive, |this| {
                         this.active(|this| {
                             let active_style = style.active(self.outline, cx);
-                            this.bg(active_style.bg)
+                            let this = this
+                                .bg(active_style.bg)
                                 .border_color(active_style.border)
-                                .text_color(active_style.fg)
+                                .text_color(active_style.fg);
+                            match &self.active_style {
+                                Some(caller_style) => this.refine_style(caller_style),
+                                None => this,
+                            }
                         })
                         .when_some(hover_group, |this, group| {
                             let idle_bg = style.hovered(self.outline, cx).bg.opacity(0.5);
@@ -1632,6 +1651,77 @@ mod tests {
             });
         }
         assert_eq!(parent_presses.get(), 2);
+    }
+
+    /// A caller's active style adds to the variant's while the button is held,
+    /// and never applies to a disabled button.
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn caller_active_style_applies_only_while_pressed(cx: &mut gpui::TestAppContext) {
+        use gpui::{Context, Modifiers, MouseDownEvent, MouseUpEvent, Render, point};
+
+        const IDLE: f32 = 40.;
+        const PRESSED: f32 = 60.;
+
+        struct Harness {
+            disabled: bool,
+        }
+
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size(px(100.)).child(
+                    Button::new("press")
+                        .label("Press")
+                        .w(px(IDLE))
+                        .disabled(self.disabled)
+                        .active(|this| this.w(px(PRESSED))),
+                )
+            }
+        }
+
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, _| Harness { disabled: false });
+        let width = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                gpui_base::test_support::find(window, &[], &ElementId::from("press"))
+                    .expect("button is painted")
+                    .bounds()
+                    .size
+                    .width
+            })
+        };
+        let press = |cx: &mut gpui::VisualTestContext| {
+            cx.simulate_event(MouseDownEvent {
+                button: MouseButton::Left,
+                position: point(px(10.), px(10.)),
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            })
+        };
+        let release = |cx: &mut gpui::VisualTestContext| {
+            cx.simulate_event(MouseUpEvent {
+                button: MouseButton::Left,
+                position: point(px(10.), px(10.)),
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            })
+        };
+
+        assert_eq!(width(cx), px(IDLE));
+        press(cx);
+        assert_eq!(width(cx), px(PRESSED));
+        release(cx);
+        assert_eq!(width(cx), px(IDLE));
+
+        view.update(cx, |harness, cx| {
+            harness.disabled = true;
+            cx.notify();
+        });
+        press(cx);
+        assert_eq!(width(cx), px(IDLE));
+        release(cx);
     }
 
     /// A button keeps the application's focus handle, so focus the application
