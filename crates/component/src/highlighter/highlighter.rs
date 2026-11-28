@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use gpui::{HighlightStyle, SharedString};
 use gpui_base::input::RopeExt as _;
 use ropey::{ChunkCursor, Rope};
+use std::cell::Cell;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 use std::{
@@ -14,7 +15,8 @@ use std::{
 };
 use sum_tree::Bias;
 use tree_sitter::{
-    InputEdit, ParseOptions, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
+    InputEdit, ParseOptions, Parser, Point, Query, QueryCursor, QueryCursorOptions,
+    QueryCursorState, StreamingIterator, Tree,
 };
 
 const MAX_INJECTION_RANGES: usize = 4096;
@@ -688,7 +690,9 @@ impl SyntaxHighlighter {
     /// When `timeout` is `Some`, aborts if parsing exceeds the given duration
     /// and returns `false`. On timeout the old tree is preserved so highlighting
     /// still works with stale data, but `self.text` is updated so that the
-    /// caller can send the current text to a background parse.
+    /// caller can send the current text to a background parse. The injections
+    /// query gets the same budget: past it the new tree is kept, the edited
+    /// injection layers stay in place and `false` asks for the background parse.
     /// When `timeout` is `None`, parsing runs to completion and always returns `true`;
     /// this includes the injection layers, which otherwise each get a fixed budget.
     pub fn update(
@@ -781,8 +785,7 @@ impl SyntaxHighlighter {
         // A bounded parse keeps the fixed per-layer budget; an unbounded one
         // lets every layer run to completion like the host grammar.
         let injection_timeout = timeout.map(|_| INJECTION_PARSE_TIMEOUT);
-        self.parse_injection_layers(&new_tree, injection_timeout);
-        true
+        self.parse_injection_layers(&new_tree, injection_timeout, timeout)
     }
 
     /// Returns the data needed to compute injection layers on a background thread.
@@ -804,6 +807,10 @@ impl SyntaxHighlighter {
     /// `timeout` bounds the parse of each layer; a layer past it is dropped.
     /// `None` parses every layer to completion.
     ///
+    /// `query_budget` bounds the time spent running the injections query, which
+    /// walks the whole tree, not counting the layer parses. Past it this returns
+    /// `None`. `None` runs the query to completion.
+    ///
     /// Non-combined matches past [`MAX_NON_COMBINED_INJECTION_PARSES`] are
     /// returned unparsed, for [`Self::styles`] to parse when it reaches them.
     pub(crate) fn compute_injection_layers(
@@ -811,7 +818,8 @@ impl SyntaxHighlighter {
         tree: &Tree,
         text: &Rope,
         timeout: Option<Duration>,
-    ) -> ComputedInjections {
+        query_budget: Option<Duration>,
+    ) -> Option<ComputedInjections> {
         struct CombinedRanges {
             ranges: Vec<tree_sitter::Range>,
             byte_count: usize,
@@ -875,8 +883,26 @@ impl SyntaxHighlighter {
         }
 
         let root_node = tree.root_node();
+        let query_start = Instant::now();
+        // Layers parse between matches; only the query itself spends the budget.
+        let layer_parse_time = Cell::new(Duration::ZERO);
+        let query_timed_out = Cell::new(false);
+        let mut query_progress = |_: &QueryCursorState| -> ControlFlow<()> {
+            if let Some(budget) = query_budget
+                && query_start.elapsed().saturating_sub(layer_parse_time.get()) > budget
+            {
+                query_timed_out.set(true);
+                return ControlFlow::Break(());
+            }
+            ControlFlow::Continue(())
+        };
         let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&data.query, root_node, TextProvider(text));
+        let mut matches = cursor.matches_with_options(
+            &data.query,
+            root_node,
+            TextProvider(text),
+            QueryCursorOptions::new().progress_callback(&mut query_progress),
+        );
 
         let mut combined_ranges: HashMap<SharedString, CombinedRanges> = HashMap::new();
         // Old layers were edited along with the text, so a non-combined layer
@@ -1011,7 +1037,8 @@ impl SyntaxHighlighter {
                 }
 
                 non_combined_parses += 1;
-                if let Some(layer) = Self::parse_injection_layer(
+                let parse_start = Instant::now();
+                let layer = Self::parse_injection_layer(
                     &language_name,
                     highlight_query,
                     ranges,
@@ -1019,10 +1046,16 @@ impl SyntaxHighlighter {
                     false,
                     text,
                     timeout,
-                ) {
+                );
+                layer_parse_time.set(layer_parse_time.get() + parse_start.elapsed());
+                if let Some(layer) = layer {
                     new_layers.push(layer);
                 }
             }
+        }
+        drop(matches);
+        if query_timed_out.get() {
+            return None;
         }
 
         for (language_name, combined) in combined_ranges {
@@ -1053,11 +1086,11 @@ impl SyntaxHighlighter {
         }
         new_layers.sort_by_key(|layer| layer.byte_range.start);
         deferred.sort_by_key(|entry| entry.byte_range.start);
-        ComputedInjections {
+        Some(ComputedInjections {
             layers: new_layers,
             deferred,
             timeout,
-        }
+        })
     }
 
     /// Parse one injection layer over the given included ranges.
@@ -1144,42 +1177,28 @@ impl SyntaxHighlighter {
 
     /// Parse injection layers after the main tree is updated.
     /// pattern: parse once in update, query many times in render.
-    fn parse_injection_layers(&mut self, tree: &Tree, timeout: Option<Duration>) {
-        let Some(query) = self.injections_query.clone() else {
+    ///
+    /// Returns `false` when the injections query ran past `query_budget`; the
+    /// current layers, already edited along with the tree, are left in place.
+    fn parse_injection_layers(
+        &mut self,
+        tree: &Tree,
+        timeout: Option<Duration>,
+        query_budget: Option<Duration>,
+    ) -> bool {
+        // Reuse copies of the current layers, so they stay in place when the
+        // query runs past its budget.
+        let Some(data) = self.injection_parse_data() else {
             self.set_injections(ComputedInjections::default());
-            return;
+            return true;
         };
-        // The old layers are replaced below, so move them instead of cloning.
-        let old_layers = std::mem::take(
-            self.injection_layers
-                .get_mut()
-                .unwrap_or_else(|e| e.into_inner()),
-        );
-        let old_deferred = std::mem::take(
-            self.deferred_injections
-                .get_mut()
-                .unwrap_or_else(|e| e.into_inner()),
-        );
-        let data = InjectionParseData {
-            query,
-            content_capture_index: self.injection_content_capture_index,
-            language_capture_index: self.injection_language_capture_index,
-            old_layers: old_layers
-                .into_iter()
-                .map(ReusableInjectionLayer::from)
-                .chain(old_deferred.into_iter().filter_map(|entry| {
-                    Some(ReusableInjectionLayer {
-                        language_name: entry.language_name,
-                        highlight_query: entry.highlight_query,
-                        ranges: entry.ranges,
-                        tree: entry.old_tree?,
-                        combined: false,
-                    })
-                }))
-                .collect(),
+        let Some(injections) =
+            Self::compute_injection_layers(data, tree, &self.text, timeout, query_budget)
+        else {
+            return false;
         };
-        let injections = Self::compute_injection_layers(data, tree, &self.text, timeout);
         self.set_injections(injections);
+        true
     }
 
     /// Parse the deferred injections that overlap `range`, at most
@@ -1947,6 +1966,35 @@ console.log(answer);
                 "styles differ after replacing {target:?} with {replacement:?}"
             );
         }
+    }
+
+    /// The injections query walks the whole tree. Past its budget the pass
+    /// gives up, keeps the current layers and reports an incomplete update,
+    /// so the caller moves the work to the background parse.
+    #[test]
+    #[cfg(feature = "tree-sitter-languages")]
+    fn test_injection_query_past_budget_keeps_layers() {
+        let source = (0..500)
+            .map(|i| format!("fn f{i}() {{ println!(\"{{}}\", {i}); }}\n"))
+            .collect::<String>();
+        let rope = Rope::from_str(&source);
+        let mut highlighter = SyntaxHighlighter::new("rust");
+        assert!(highlighter.update(None, &rope, None));
+        let layer_count = highlighter.injection_layers.lock().unwrap().len();
+        assert!(layer_count > 0, "every macro should inject a layer");
+
+        let tree = highlighter.tree().cloned().unwrap();
+        assert!(!highlighter.parse_injection_layers(&tree, None, Some(Duration::ZERO)));
+        assert_eq!(
+            highlighter.injection_layers.lock().unwrap().len(),
+            layer_count
+        );
+
+        let data = highlighter.injection_parse_data().unwrap();
+        let injections =
+            SyntaxHighlighter::compute_injection_layers(data, &tree, &rope, None, None)
+                .expect("an unbounded query completes");
+        assert_eq!(injections.layers.len(), layer_count);
     }
 
     #[test]
