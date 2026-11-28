@@ -1,4 +1,4 @@
-use std::{hash::Hash, rc::Rc};
+use std::{cell::OnceCell, hash::Hash, rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Window,
@@ -30,6 +30,10 @@ where
 {
     data: Vec<T>,
     x: Option<Rc<dyn Fn(&T) -> X>>,
+    /// This frame's x scale and the width it was prepared for, laid out on
+    /// first read. `prepaint` starts it, so the hit test, the highlight band
+    /// and the candles of one frame share it; `paint` takes it.
+    frame_x_scale: Option<(Pixels, OnceCell<ScaleBand<X>>)>,
     open: Option<Rc<dyn Fn(&T) -> Y>>,
     high: Option<Rc<dyn Fn(&T) -> Y>>,
     low: Option<Rc<dyn Fn(&T) -> Y>>,
@@ -61,6 +65,7 @@ where
         Self {
             data: data.into_iter().collect(),
             x: None,
+            frame_x_scale: None,
             open: None,
             high: None,
             low: None,
@@ -280,6 +285,24 @@ where
         )
     }
 
+    /// Read the x scale for `bounds`: this frame's, laid out on first read,
+    /// when `prepaint` prepared one at the same width, or else a fresh one.
+    fn with_x_scale<R>(
+        &self,
+        bounds: Bounds<Pixels>,
+        read: impl FnOnce(&ScaleBand<X>) -> R,
+    ) -> Option<R> {
+        match &self.frame_x_scale {
+            Some((width, scale)) if *width == bounds.size.width => {
+                if scale.get().is_none() {
+                    let _ = scale.set(self.x_scale(bounds)?);
+                }
+                scale.get().map(read)
+            }
+            _ => self.x_scale(bounds).map(|x| read(&x)),
+        }
+    }
+
     /// The height of the plot area above the x-axis labels.
     fn plot_height(&self, bounds: Bounds<Pixels>) -> f32 {
         bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. }
@@ -291,7 +314,20 @@ where
     X: Eq + Hash + Into<SharedString> + 'static,
     Y: PlotValue,
 {
+    fn prepaint(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Vec<AnyElement> {
+        // Lay the scale out only when read: a frame without hover leaves it to
+        // `paint`, and a prepaint that is retried does not traverse the data.
+        self.frame_x_scale = Some((bounds.size.width, OnceCell::new()));
+        vec![]
+    }
+
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let frame_x_scale = self.frame_x_scale.take();
         let (Some(x_fn), Some(open_fn), Some(high_fn), Some(low_fn), Some(close_fn)) = (
             self.x.as_ref(),
             self.open.as_ref(),
@@ -304,8 +340,12 @@ where
 
         let height = self.plot_height(bounds);
 
-        // X scale
-        let Some(x) = self.x_scale(bounds) else {
+        // X scale: the one hover laid out this frame, if it did.
+        let Some(x) = frame_x_scale
+            .filter(|(width, _)| *width == bounds.size.width)
+            .and_then(|(_, x)| x.into_inner())
+            .or_else(|| self.x_scale(bounds))
+        else {
             return;
         };
         let band_width = x.band_width();
@@ -442,22 +482,23 @@ where
         _cx: &App,
     ) -> Option<TooltipState> {
         let x_fn = self.x.as_ref()?;
-        let x = self.x_scale(bounds)?;
 
         // Ignore the x-axis label gutter so hovering the labels doesn't show a tooltip.
         if position.y.as_f32() > self.plot_height(bounds) {
             return None;
         }
 
-        let index = x.nearest_index(position.x.as_f32());
-        let d = self.data.get(index)?;
-        let center = x.tick(&x_fn(d))? + x.band_width() / 2.;
+        self.with_x_scale(bounds, |x| {
+            let index = x.nearest_index(position.x.as_f32());
+            let d = self.data.get(index)?;
+            let center = x.tick(&x_fn(d))? + x.band_width() / 2.;
 
-        Some(TooltipState::new(
-            index,
-            point(px(center), position.y),
-            vec![],
-        ))
+            Some(TooltipState::new(
+                index,
+                point(px(center), position.y),
+                vec![],
+            ))
+        })?
     }
 
     fn tooltip(
@@ -483,7 +524,7 @@ where
         // Highlight the hovered candle with a translucent band the width of its
         // slot, which glides between candles, confined to the plot area above the
         // axis labels.
-        let band_width = self.x_scale(bounds)?.band_width();
+        let band_width = self.with_x_scale(bounds, ScaleBand::band_width)?;
         let cross_line = CrossLine::new(state.cross_line)
             .span(0., self.plot_height(bounds))
             .band(px(band_width));
