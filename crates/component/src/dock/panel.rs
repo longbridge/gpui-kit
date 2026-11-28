@@ -106,6 +106,14 @@ pub trait Panel: gpui_base::dock::Panel {
         None
     }
 
+    /// Whether to show the title bar's ellipsis menu for this panel. Defaults to true.
+    ///
+    /// Hide it only when all actions in it are available elsewhere. This does
+    /// not affect tab close buttons, toolbar buttons, or keyboard actions.
+    fn overflow_menu_visible(&self, cx: &App) -> bool {
+        true
+    }
+
     /// Entries the panel adds to the title bar's ellipsis menu.
     fn dropdown_menu(
         &mut self,
@@ -156,6 +164,10 @@ pub trait PanelView: gpui_base::dock::PanelView {
     fn title_style(&self, cx: &App) -> Option<TitleStyle>;
     fn title_suffix(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement>;
     fn toolbar_buttons(&self, window: &mut Window, cx: &mut App) -> Option<Vec<Button>>;
+    /// Object-safe counterpart of [`Panel::overflow_menu_visible`].
+    fn overflow_menu_visible(&self, _cx: &App) -> bool {
+        true
+    }
     fn dropdown_menu(&self, menu: PopupMenu, window: &mut Window, cx: &mut App) -> PopupMenu;
     fn zoom_control(&self, cx: &App) -> Option<PanelControl>;
     fn inner_padding(&self, cx: &App) -> bool;
@@ -184,6 +196,10 @@ impl<T: Panel> PanelView for Entity<T> {
 
     fn toolbar_buttons(&self, window: &mut Window, cx: &mut App) -> Option<Vec<Button>> {
         self.update(cx, |this, cx| this.toolbar_buttons(window, cx))
+    }
+
+    fn overflow_menu_visible(&self, cx: &App) -> bool {
+        self.read(cx).overflow_menu_visible(cx)
     }
 
     fn dropdown_menu(&self, menu: PopupMenu, window: &mut Window, cx: &mut App) -> PopupMenu {
