@@ -2112,4 +2112,61 @@ mod tests {
             "the dragged panel joins the group whose title row it was dropped on"
         );
     }
+
+    #[gpui::test]
+    fn a_tab_dropped_on_the_empty_part_of_a_tab_strip_joins_that_group(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(gpui::size(px(800.), px(600.)));
+
+        let (left, right) = cx.update(|window, cx| {
+            let left = panel_handle(Probe::new(cx));
+            let left_2 = panel_handle(Probe::new(cx));
+            let right = panel_handle(Probe::new(cx));
+            let ids = (left.panel_id(cx), right.panel_id(cx));
+            let layout = DockLayout::h_split()
+                .child(
+                    DockLayout::tabs()
+                        .panel_view(left, cx)
+                        .panel_view(left_2, cx),
+                    None,
+                )
+                .child(DockLayout::tabs().panel_view(right, cx), None);
+            area.update(cx, |area, cx| area.set_center(layout, window, cx));
+            ids
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| crate::test_redraw(window, cx));
+
+        let group_of = |cx: &mut VisualTestContext, panel| {
+            cx.update(|_, cx| {
+                area.read(cx)
+                    .layout(DockPlacement::Center)
+                    .and_then(|tree| tree.find_panel_node(panel))
+            })
+        };
+        assert_ne!(group_of(cx, left), group_of(cx, right));
+
+        // Grab the right group's one-panel title and release on the left
+        // strip past its two tabs, clear of its toolbar.
+        let from = gpui::point(px(440.), px(15.));
+        let to = gpui::point(px(300.), px(15.));
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(
+            gpui::point(px(420.), px(15.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+        cx.run_until_parked();
+
+        assert_eq!(
+            group_of(cx, left),
+            group_of(cx, right),
+            "the dragged panel joins the group whose empty strip it was dropped on"
+        );
+    }
 }
