@@ -521,6 +521,12 @@ DataTable::new(&state)
     .scrollbar_mode(ScrollbarMode::Always)
 ```
 
+For mixed-height body rows (for example, compact group labels among regular
+records), implement `TableDelegate::row_sizes`. Supply one positive height per
+row in display order and reuse the returned `Rc` until the geometry changes.
+Widths are ignored. The virtualized body uses these heights for both layout
+and navigation; use `TableState::scroll_to_row` to reveal a row.
+
 ## Examples
 
 ### Financial Data Table
