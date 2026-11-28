@@ -353,7 +353,7 @@ where
 
         // The candles draw in from the left under a mask.
         let reveal = reveal_mask(bounds, 0., self.appear.get().progress());
-        window.with_content_mask(reveal, |window| {
+        let candles = |window: &mut Window| {
             for d in &self.data {
                 let x_tick = x.tick(&x_fn(d));
                 let Some(x_tick) = x_tick else {
@@ -412,6 +412,14 @@ where
 
                 window.paint_quad(fill(body_bounds, color));
             }
+        };
+        // In one layer the candles share a draw order, so GPUI does not look
+        // one up for each of their quads.
+        window.with_content_mask(reveal, |window| {
+            #[cfg(feature = "gpui-fast")]
+            window.paint_layer(bounds, candles);
+            #[cfg(not(feature = "gpui-fast"))]
+            window.paint_layer(candles);
         });
     }
 
