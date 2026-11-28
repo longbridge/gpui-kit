@@ -7,9 +7,9 @@ use std::{
 };
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, EventEmitter, FocusHandle, Focusable, HighlightStyle,
-    ListAlignment, ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size, Subscription,
-    Task, Window, WindowId, point, px,
+    App, Context, ElementId, EventEmitter, FocusHandle, Focusable, HighlightStyle, ListAlignment,
+    ListOffset, ListState, Pixels, ScrollHandle, SharedString, Size, Subscription, Task, Window,
+    WindowId, point, px,
 };
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
@@ -1620,17 +1620,20 @@ impl DiffState {
             for (ix, file) in pending {
                 let mut moved = highlighters.take();
                 let custom = custom.clone();
-                let (presentation, returned) = cx
-                    .background_spawn(async move {
-                        let presentation = FilePresentation::prepare(
-                            &file,
-                            options,
-                            moved.get_or_insert_default(),
-                            custom.as_ref(),
-                        );
-                        (presentation, moved)
-                    })
-                    .await;
+                let prepare = async move {
+                    let presentation = FilePresentation::prepare(
+                        &file,
+                        options,
+                        moved.get_or_insert_default(),
+                        custom.as_ref(),
+                    );
+                    (presentation, moved)
+                };
+                #[cfg(all(target_family = "wasm", feature = "tree-sitter"))]
+                let prepared = cx.foreground_executor().spawn(prepare);
+                #[cfg(not(all(target_family = "wasm", feature = "tree-sitter")))]
+                let prepared = cx.background_executor().spawn(prepare);
+                let (presentation, returned) = prepared.await;
                 highlighters = returned;
                 let current = this.update(cx, |state, cx| {
                     if state.presentation_generation != generation {

@@ -79,6 +79,35 @@ cx.refresh_windows();
 
 使用 GPUI Web `examples/hello_web/dynamic_fonts.rs` 所示的原始 TTF 等受支持字体文件，不要把字体服务的 CSS 响应直接传给文本系统；CSS 可能引用 WOFF2 子集。该示例通过 `cx.on_missing_glyphs(...) -> Subscription` 在缺字时请求字体，保留订阅与下载 task，检查 HTTP 状态是否成功、响应体是否非空，再调用 `add_fonts` 与 `refresh_windows`。字体是否能解析由 `add_fonts` 检查；仅有 HTTP 200 不能证明响应是可用字体。缺字报告会去重，队列有长度限制；报告丢弃后不会自动安排重试。当前画廊**没有**按需下载字体，而是打包子集并使用 Canvas 回退。GPUI Web 先应用 Canvas 回退，再报告缺字；成功由 Canvas 绘制的中日韩文字**不会**触发 `on_missing_glyphs`。如果需要准确的中日韩排版，应根据内容或语言选择决定要下载哪种字体，提供加载和失败状态，并在安装后检查布局。跨域字体下载还必须符合对方服务器的 CORS 策略。
 
+## 语法高亮
+
+[编辑器](../component/editor.md)的两种高亮引擎都可以构建到浏览器中。`syntect` 除 Rust 目标外不需要其他工具。`tree-sitter` 系列 feature 使用与原生构建相同的 grammar 和高亮查询，因此两端对代码的标记一致。grammar 用 C 编写，为 `wasm32-unknown-unknown` 构建时需要：
+
+- 支持 WebAssembly 目标的 clang：macOS 上来自 Xcode Command Line Tools，Linux 上来自 `clang` 软件包；
+- `llvm-ar`，通过 `rustup component add llvm-tools` 安装。macOS 系统自带的 `ar` 生成的归档文件，WebAssembly 链接器无法读取；
+- `tree-sitter-language` crate 为 WebAssembly 提供的 libc 头文件。大多数 grammar crate 不会自行添加这些头文件。
+
+[`script/wasm-cc-env`](https://github.com/longbridge/gpui-kit/blob/main/script/wasm-cc-env) 会设置 `cc` crate 针对该目标读取的三个变量：`CC_wasm32_unknown_unknown`、`AR_wasm32_unknown_unknown` 和 `CFLAGS_wasm32_unknown_unknown`；已经设置的变量保持不变。请在要构建的 workspace 内 `source` 它，使头文件与该 workspace 的 `Cargo.lock` 一致：
+
+```sh
+source script/wasm-cc-env
+cargo build --target wasm32-unknown-unknown --release
+```
+
+如需在画廊中试用，在 `crates/story-web` 中启用它的 `tree-sitter` feature 构建：`FEATURES=tree-sitter make dev`。已发布的画廊仍使用 `syntect` 高亮。
+
+有八种语言目前无法在 WebAssembly 上使用，原因是它们的 grammar crate 无法为该目标构建。在 WebAssembly 上可以启用这些 feature，但不会添加对应语言，所以 `tree-sitter-languages` 仍能构建；这些语言的文本显示为无高亮的纯文本。
+
+| Feature | grammar 无法为 WebAssembly 构建的原因 |
+| --- | --- |
+| `tree-sitter-c`、`tree-sitter-csharp`、`tree-sitter-cmake`、`tree-sitter-lua`、`tree-sitter-sql` | crate 的构建脚本会编译 libc 桩文件，而 `tree-sitter-language` 已把这些文件改为面向 tree-sitter 0.26 的 `#error`。 |
+| `tree-sitter-bash`、`tree-sitter-swift` | 扫描器调用了 `isdigit` 或 `exit`，tree-sitter 在 WebAssembly 上不向扫描器提供这些函数。 |
+| `tree-sitter-cpp` | 扫描器需要 `wchar_t` 和 `static_assert`，而 WebAssembly 头文件在它包含的位置没有声明这两者。 |
+
+在 WebAssembly 上，tree-sitter 语言属于创建它的线程，因此 `LanguageRegistry::singleton()` 返回当前线程的注册表。请在执行高亮的线程上注册自定义语言；像画廊这样的单线程构建只有一个线程。无论使用哪种高亮引擎，浏览器中都不支持代码折叠。
+
+每个 grammar 都会把自己的解析表加入模块。在画廊的 release 构建中，与 `syntect` 相比，可为 WebAssembly 构建的 27 种语言使 `.wasm` 文件增大 21.7 MB，gzip 后增大 1.9 MB：前者为 51.5 MB（gzip 后 10.9 MB），后者为 29.8 MB（gzip 后 9.0 MB）。应用应只启用需要的语言，而不是 `tree-sitter-languages`。
+
 ## 更小的 GPUI Base 示例
 
 [GPUI Base WASM 示例](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/wasm)与原生示例共用同一套[展示视图](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/showcase)。从仓库根目录单独运行时，如果尚未安装匹配版本的 `wasm-bindgen-cli`，请一并安装：

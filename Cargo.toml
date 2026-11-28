@@ -195,3 +195,6 @@ consts = "consts"
 
 [workspace.metadata.cargo-machete]
 ignored = ["log", "anyhow", "serde"]
+
+[patch.crates-io]
+tree-sitter-navi = { git = "https://github.com/glani/tree-sitter-navi", branch = "tree-sitter-0.27" }

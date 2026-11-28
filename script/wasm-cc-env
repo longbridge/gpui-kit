@@ -1,0 +1,55 @@
+wasm_cc_env() {
+    if [ -z "${CC_wasm32_unknown_unknown:-}" ]; then
+        if ! command -v clang >/dev/null 2>&1; then
+            echo "wasm-cc-env: clang not found (Xcode Command Line Tools on macOS, the clang package on Linux)" >&2
+            return 1
+        fi
+        if ! clang --print-targets 2>/dev/null | grep -q wasm32; then
+            echo "wasm-cc-env: $(command -v clang) has no wasm32 target" >&2
+            return 1
+        fi
+        export CC_wasm32_unknown_unknown=clang
+    fi
+
+    if [ -z "${AR_wasm32_unknown_unknown:-}" ]; then
+        local host llvm_ar
+        host=$(rustc -vV | sed -n 's/^host: //p')
+        llvm_ar="$(rustc --print sysroot)/lib/rustlib/$host/bin/llvm-ar"
+        if [ ! -x "$llvm_ar" ]; then
+            llvm_ar=$(command -v llvm-ar 2>/dev/null)
+        fi
+        if [ -z "$llvm_ar" ]; then
+            echo "wasm-cc-env: llvm-ar not found; run \`rustup component add llvm-tools\`" >&2
+            return 1
+        fi
+        export AR_wasm32_unknown_unknown="$llvm_ar"
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "wasm-cc-env: jq not found" >&2
+        return 1
+    fi
+    local metadata manifest headers
+    metadata=$(cargo metadata --format-version 1 --locked --filter-platform wasm32-unknown-unknown) || {
+        echo "wasm-cc-env: \`cargo metadata --locked\` failed; run it from the workspace, with Cargo.lock up to date" >&2
+        return 1
+    }
+    manifest=$(printf '%s' "$metadata" |
+        jq -r 'first(.packages[] | select(.name == "tree-sitter-language") | .manifest_path) // empty')
+    if [ -z "$manifest" ]; then
+        echo "wasm-cc-env: tree-sitter-language is not a dependency of this workspace on wasm32-unknown-unknown" >&2
+        return 1
+    fi
+    headers="${manifest%/Cargo.toml}/wasm/include"
+    case " ${CFLAGS_wasm32_unknown_unknown:-} " in
+    *" -I$headers "*) ;;
+    *) export CFLAGS_wasm32_unknown_unknown="${CFLAGS_wasm32_unknown_unknown:+$CFLAGS_wasm32_unknown_unknown }-I$headers" ;;
+    esac
+}
+
+if wasm_cc_env; then
+    unset -f wasm_cc_env
+else
+    unset -f wasm_cc_env
+    return 1
+fi

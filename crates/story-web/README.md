@@ -36,6 +36,18 @@ This will:
 2. Generate JavaScript bindings
 3. Start Vite dev server on http://localhost:3000
 
+### Highlight with tree-sitter
+
+The Editor story highlights with `syntect` in the browser. To build the gallery with the
+tree-sitter grammars instead, pass the `tree-sitter` feature:
+
+```bash
+FEATURES=tree-sitter make dev
+```
+
+The grammars are C, so this needs a clang that targets wasm32 and `llvm-ar`; see
+`script/wasm-cc-env` and the WebAssembly guide.
+
 ## Production Build
 
 ### Build for Production
