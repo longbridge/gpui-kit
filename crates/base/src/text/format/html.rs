@@ -468,6 +468,30 @@ fn parse_node(
     paragraph: &mut HtmlParagraph,
     cx: &mut NodeContext,
 ) -> Option<BlockNode> {
+    // Custom HTML block parsers get first claim on every element, before the
+    // built-in tag handling; the first Some() wins and the element never
+    // reaches the local_name match below. Inline-only elements folded into
+    // paragraphs by parse_paragraph do not pass through here.
+    if let NodeData::Element { .. } = node.data {
+        if let Some(custom) = cx.markdown_extensions.parse_html_block(node) {
+            let mut children = vec![];
+            consume_paragraph(&mut children, paragraph);
+            let custom = BlockNode::Custom {
+                node: custom,
+                state: node::BlockState::default(),
+            };
+            return if children.is_empty() {
+                Some(custom)
+            } else {
+                children.push(custom);
+                Some(BlockNode::Root {
+                    children,
+                    span: None,
+                })
+            };
+        }
+    }
+
     match node.data {
         NodeData::Text { ref contents } => {
             let text = contents.borrow().to_string();

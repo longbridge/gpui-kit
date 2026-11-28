@@ -198,8 +198,31 @@ impl TextViewState {
         Self::new(TextViewFormat::Html, text, cx)
     }
 
+    /// Create a HTML TextViewState with extensions registered before the
+    /// initial parse — custom HTML block parsers claim their elements on the
+    /// first parse, with no element-driven re-parse afterwards.
+    pub fn html_with_extensions(
+        text: &str,
+        markdown_extensions: Arc<MarkdownExtensions>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_extensions(TextViewFormat::Html, text, Some(markdown_extensions), cx)
+    }
+
     /// Create a new TextViewState.
     fn new(format: TextViewFormat, text: &str, cx: &mut Context<Self>) -> Self {
+        Self::new_with_extensions(format, text, None, cx)
+    }
+
+    /// [`Self::new`] with extensions registered before the initial parse, so
+    /// custom HTML block parsers apply to the first parse instead of forcing
+    /// a re-parse once the element registers them.
+    fn new_with_extensions(
+        format: TextViewFormat,
+        text: &str,
+        markdown_extensions: Option<Arc<MarkdownExtensions>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let focus_handle = cx.focus_handle();
         let selection_adapter = TextViewSelectionAdapter::new(cx.entity().downgrade(), cx);
 
@@ -260,7 +283,7 @@ impl TextViewState {
             link_tooltip_target: None,
             task_toggle_handler: None,
             image_source: None,
-            markdown_extensions: Arc::default(),
+            markdown_extensions: markdown_extensions.unwrap_or_default(),
             is_selecting: false,
             preserve_inline_selection: false,
             auto_scroll: AutoScroll::default(),
@@ -420,8 +443,14 @@ impl TextViewState {
         let parser_configuration_changed = !self
             .markdown_extensions
             .has_same_parser_configuration(&markdown_extensions);
+        let html_block_parsers_changed = self.format == TextViewFormat::Html
+            && !self
+                .markdown_extensions
+                .has_same_html_block_parsers(&markdown_extensions);
         self.markdown_extensions = markdown_extensions;
-        if parser_configuration_changed && self.format == TextViewFormat::Markdown {
+        if (parser_configuration_changed && self.format == TextViewFormat::Markdown)
+            || html_block_parsers_changed
+        {
             let text = self.text.clone();
             self.increment_update(&text, false, cx);
         }

@@ -32,6 +32,15 @@ pub type MarkdownBlockParserFn =
 pub type MarkdownBlockRenderFn =
     dyn Fn(&MarkdownNode, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
+/// Type for a custom HTML block parser.
+///
+/// Parsers run on the parsed DOM during HTML conversion, on the same thread as
+/// [`super::format::html`]. They must not depend on [`Window`] or [`App`];
+/// return parsed, reusable data in a [`MarkdownNode`] and render it later with
+/// a block renderer registered under the same name.
+pub type HtmlBlockParserFn =
+    dyn Fn(&markup5ever_rcdom::Node) -> Option<MarkdownNode> + Send + Sync;
+
 /// Builds the container of a [block surface](MarkdownExtensions::block_surface).
 pub type BlockSurfaceRenderFn = dyn Fn(&mut Window, &mut App) -> Div + Send + Sync;
 
@@ -255,6 +264,7 @@ pub struct MarkdownExtensions {
     inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
     inline_renderers: HashMap<SharedString, Arc<MarkdownInlineRenderFn>>,
     block_surfaces: HashMap<SharedString, Arc<BlockSurfaceRenderFn>>,
+    html_block_parsers: Vec<Arc<HtmlBlockParserFn>>,
     revision: u64,
     parser_revision: u64,
 }
@@ -455,6 +465,37 @@ impl MarkdownExtensions {
     {
         self.block_parsers.push(Arc::new(parser));
         self.bump_revision();
+    }
+
+    /// Register a custom HTML block parser.
+    ///
+    /// During HTML parsing the parser sees every element node before the
+    /// built-in tag handling; returning a [`MarkdownNode`] claims the element
+    /// as a custom block, rendered later with a block renderer registered
+    /// under the same name (see [`Self::block_renderer`]). Returning `None`
+    /// leaves the element to the built-in handling.
+    pub fn push_html_block_parser<F>(&mut self, parser: F)
+    where
+        F: Fn(&markup5ever_rcdom::Node) -> Option<MarkdownNode> + Send + Sync + 'static,
+    {
+        self.html_block_parsers.push(Arc::new(parser));
+        self.bump_revision();
+    }
+
+    /// Whether the HTML block parsers match, so an HTML document need not be
+    /// reparsed when render handles are refreshed.
+    ///
+    /// Length-only, mirroring the Markdown block-parser shape check: render
+    /// methods commonly rebuild equivalent parser closures every frame, and
+    /// fresh `Arc`s must not read as a configuration change.
+    pub(crate) fn has_same_html_block_parsers(&self, other: &Self) -> bool {
+        self.html_block_parsers.len() == other.html_block_parsers.len()
+    }
+
+    /// Offer an element to the custom HTML block parsers; the first
+    /// `Some` claims it.
+    pub(crate) fn parse_html_block(&self, node: &markup5ever_rcdom::Node) -> Option<MarkdownNode> {
+        self.html_block_parsers.iter().find_map(|p| p(node))
     }
 
     pub(crate) fn push_block_renderer<F, E>(&mut self, name: impl Into<SharedString>, renderer: F)
