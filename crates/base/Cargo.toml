@@ -46,7 +46,7 @@ gpui-fast = { workspace = true, optional = true }
 image = { version = "0.25", default-features = false, optional = true }
 gpui_macros.workspace = true
 instant.workspace = true
-itertools = "0.13.0"
+itertools = "0.14.0"
 jiff = "1.0"
 lsp-types.workspace = true
 markdown = { version = "1.0.0", features = ["serde"] }
