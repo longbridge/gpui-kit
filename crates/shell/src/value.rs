@@ -226,9 +226,9 @@ fn parse_hex(hex: &str) -> Option<Hsla> {
     Some(rgba(rgba_value).into())
 }
 
-/// Reads the positional arguments of a bound method.
-pub fn arg(args: &[Bridged], index: usize, method: &str) -> ShellResult<Bridged> {
-    args.get(index).cloned().ok_or_else(|| {
+/// Borrows a positional argument of a bound method from its recorded values.
+pub fn arg<'a>(args: &'a [Bridged], index: usize, method: &str) -> ShellResult<&'a Bridged> {
+    args.get(index).ok_or_else(|| {
         ShellError::runtime(format!(
             "`{method}` expects at least {} argument(s), got {}",
             index + 1,

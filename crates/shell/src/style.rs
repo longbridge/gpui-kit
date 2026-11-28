@@ -438,19 +438,19 @@ pub fn apply_param(
     /// Reads argument 0 as a `Length` (`"auto"` allowed).
     macro_rules! length {
         () => {
-            length(&arg(args, 0, name)?, name)?
+            length(arg(args, 0, name)?, name)?
         };
     }
     /// Reads argument 0 as a `DefiniteLength` (`"auto"` rejected).
     macro_rules! definite {
         () => {
-            definite_length(&arg(args, 0, name)?, name)?
+            definite_length(arg(args, 0, name)?, name)?
         };
     }
     /// Reads argument 0 as an `AbsoluteLength` (percentages rejected).
     macro_rules! absolute {
         () => {
-            absolute_length(&arg(args, 0, name)?, name)?
+            absolute_length(arg(args, 0, name)?, name)?
         };
     }
     /// Reads argument 0 as a color, via token name or `#rrggbb`.
@@ -517,7 +517,7 @@ pub fn apply_param(
         // pixels: `line_height(1.45)` means 1.45x the font size everywhere else
         // in the industry, and 1.45px is never what anyone meant. A string
         // (`"18px"`, `"120%"`) still goes through the ordinary grammar.
-        "line_height" => refinement.line_height(line_height(&arg(args, 0, name)?, name)?),
+        "line_height" => refinement.line_height(line_height(arg(args, 0, name)?, name)?),
         "opacity" => refinement.opacity(number!()),
 
         "border" => refinement.border(absolute!()),
