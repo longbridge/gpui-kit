@@ -266,6 +266,8 @@ pub(crate) struct ColGroup {
     pub(crate) width: Pixels,
     /// The bounds of the column in the table after it renders.
     pub(crate) bounds: Bounds<Pixels>,
+    /// Cached hover group name for this column's resize handle.
+    pub(crate) resize_handle_group: SharedString,
 }
 
 impl ColGroup {

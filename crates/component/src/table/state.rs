@@ -30,6 +30,17 @@ use super::*;
 /// `crates/base/src/resizable/resize_handle.rs`.
 const HANDLE_PADDING: Pixels = px(4.);
 
+/// Build a stable `ElementId` for a body cell without heap allocation in the common case.
+#[inline]
+fn table_cell_id(row_ix: usize, col_ix: usize) -> ElementId {
+    match (u32::try_from(row_ix), u32::try_from(col_ix)) {
+        (Ok(row), Ok(col)) => {
+            ElementId::from(("table-cell", (u64::from(row) << 32) | u64::from(col)))
+        }
+        _ => format!("table-cell-{}:{}", row_ix, col_ix).into(),
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum SelectionMode {
     Column,
@@ -764,6 +775,7 @@ where
                     width: column.width,
                     bounds: Bounds::default(),
                     column,
+                    resize_handle_group: SharedString::from(format!("resizable-handle:{}", col_ix)),
                 }
             })
             .collect();
@@ -1723,7 +1735,7 @@ where
             return div().into_any_element();
         }
 
-        let group_id = SharedString::from(format!("resizable-handle:{}", ix));
+        let group_id = &self.col_groups[ix].resize_handle_group;
 
         self.resize_handle_band(ix, ("resizable-handle", ix).into(), cx)
             .group(group_id.clone())
@@ -1737,7 +1749,7 @@ where
                     .h_full()
                     .justify_center()
                     .bg(cx.theme().table_row_border)
-                    .group_hover(&group_id, |this| this.bg(cx.theme().border).h_full())
+                    .group_hover(group_id, |this| this.bg(cx.theme().border).h_full())
                     .w(px(1.)),
             )
             .into_any_element()
@@ -2507,10 +2519,7 @@ where
                                                                     window,
                                                                     cx,
                                                                 )
-                                                                .id(format!(
-                                                                    "table-cell-{}:{}",
-                                                                    row_ix, col_ix
-                                                                ))
+                                                                .id(table_cell_id(row_ix, col_ix))
                                                                 .test_support(),
                                                             row_ix,
                                                             col_ix,
@@ -2684,7 +2693,7 @@ where
                     .child(
                         self.a11y_cell(
                             self.render_cell(Some(row_ix), col_ix, window, cx)
-                                .id(format!("table-cell:{}:{}", row_ix, col_ix))
+                                .id(table_cell_id(row_ix, col_ix))
                                 .test_support(),
                             row_ix,
                             col_ix,
@@ -3388,5 +3397,30 @@ mod tests {
                 );
             })
             .unwrap();
+    }
+
+    #[test]
+    fn table_cell_id_packs_row_and_col_without_collisions() {
+        assert_eq!(table_cell_id(0, 0), ElementId::from(("table-cell", 0u64)));
+        assert_eq!(
+            table_cell_id(3, 1),
+            ElementId::from(("table-cell", (3u64 << 32) | 1u64))
+        );
+        assert_ne!(table_cell_id(1, 2), table_cell_id(2, 1));
+        assert_ne!(table_cell_id(0, 1), table_cell_id(1, 0));
+        assert_ne!(table_cell_id(2, 0), table_cell_id(2, 1));
+        assert_eq!(
+            table_cell_id(u32::MAX as usize, u32::MAX as usize),
+            ElementId::from(("table-cell", u64::MAX))
+        );
+        #[cfg(target_pointer_width = "64")]
+        {
+            let big = (u32::MAX as usize) + 1;
+            assert_eq!(
+                table_cell_id(big, 0),
+                ElementId::from(format!("table-cell-{}:0", big))
+            );
+            assert_ne!(table_cell_id(big, 0), table_cell_id(0, big));
+        }
     }
 }

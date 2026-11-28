@@ -60,6 +60,10 @@ fn tree_pointer_and_keyboard_expand_collapse_and_select_nodes(cx: &mut TestAppCo
     .unwrap();
 }
 
+fn table_cell_id(row_ix: usize, col_ix: usize) -> gpui_kit::ElementId {
+    gpui_kit::ElementId::from(("table-cell", ((row_ix as u64) << 32) | (col_ix as u64)))
+}
+
 struct Rows;
 impl TableDelegate for Rows {
     fn columns_count(&self, _: &App) -> usize {
@@ -222,7 +226,7 @@ fn table_exposes_its_header_and_cells_to_assistive_technology(cx: &mut TestAppCo
             assert_eq!(header.role(), Some(gpui_kit::Role::ColumnHeader));
             assert_eq!(header.label(), Some(name));
         }
-        let cell = window.find("table-cell-3:1");
+        let cell = window.find(table_cell_id(3, 1));
         assert_eq!(cell.role(), Some(gpui_kit::Role::Cell));
         assert_eq!(cell.label(), Some("3:1"));
     })
@@ -554,10 +558,10 @@ fn selectable_cells_report_their_selection(cx: &mut TestAppContext) {
         let table = content.read(cx).table.clone();
         table.update(cx, |table, cx| table.set_selected_cell(2, 1, cx));
         window.render_frame(cx);
-        let selected = window.find("table-cell-2:1");
+        let selected = window.find(table_cell_id(2, 1));
         assert_eq!(selected.role(), Some(gpui_kit::Role::GridCell));
         assert_eq!(selected.selected(), Some(true));
-        assert_eq!(window.find("table-cell-2:0").selected(), Some(false));
+        assert_eq!(window.find(table_cell_id(2, 0)).selected(), Some(false));
     })
     .unwrap();
 }
@@ -1067,8 +1071,8 @@ fn table_pins_right_fixed_columns_while_scrolling(cx: &mut TestAppContext) {
     let (handle, table) = open_table_probe_with_delegate(cx, delegate, false);
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        let left_cell = window.find("table-cell:0:0").bounds();
-        let right_cell = window.find("table-cell:0:7").bounds();
+        let left_cell = window.find(table_cell_id(0, 0)).bounds();
+        let right_cell = window.find(table_cell_id(0, 7)).bounds();
         let right_header = window.find(("col-header", 7usize)).bounds();
         assert_eq!(right_header.left(), right_cell.left());
         assert!(
@@ -1084,8 +1088,8 @@ fn table_pins_right_fixed_columns_while_scrolling(cx: &mut TestAppContext) {
         table.update(cx, |table, cx| table.scroll_to_col(6, cx));
         window.render_frame(cx);
         assert!(table.read(cx).horizontal_scroll_handle.offset().x < px(0.));
-        assert_eq!(window.find("table-cell:0:0").bounds(), left_cell);
-        assert_eq!(window.find("table-cell:0:7").bounds(), right_cell);
+        assert_eq!(window.find(table_cell_id(0, 0)).bounds(), left_cell);
+        assert_eq!(window.find(table_cell_id(0, 7)).bounds(), right_cell);
         assert_eq!(
             window.find(("col-header", 7usize)).bounds().left(),
             right_cell.left()
