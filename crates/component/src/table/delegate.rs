@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _, Pixels,
@@ -19,6 +19,16 @@ pub trait TableDelegate: Sized + 'static {
 
     /// Return the number of rows in the table.
     fn rows_count(&self, cx: &App) -> usize;
+
+    /// Opt into variable body-row heights. Return one positive, finite height
+    /// per row in display order. Return the same `Rc` until the heights change.
+    /// `None` or a length different from `rows_count` uses uniform heights.
+    ///
+    /// These heights override the height styles set by `render_tr`. Use
+    /// [`TableState::scroll_to_row`] to reveal a row in either layout.
+    fn row_heights(&self, cx: &App) -> Option<Rc<Vec<Pixels>>> {
+        None
+    }
 
     /// Returns the table column at the given index.
     ///

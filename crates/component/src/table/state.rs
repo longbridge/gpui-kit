@@ -10,7 +10,7 @@ use crate::{
     h_flex,
     menu::{ContextMenuExt, PopupMenu},
     scroll::{ScrollableMask, Scrollbar},
-    v_flex,
+    v_flex, v_virtual_list,
 };
 use gpui::{
     AppContext, Axis, Bounds, ClickEvent, Context, Div, DragMoveEvent, ElementId, EventEmitter,
@@ -283,8 +283,15 @@ pub struct TableState<D: TableDelegate> {
     /// Enable/disable fixed columns feature.
     pub col_fixed: bool,
 
+    /// Vertical scroll handle for uniform rows. Its pixel offset and bounds
+    /// are shared with the mixed-height body; its item-based methods and
+    /// item-size metrics apply only to the uniform body.
+    /// Use [`Self::scroll_to_row`] to reveal a row in either layout.
     pub vertical_scroll_handle: UniformListScrollHandle,
     pub horizontal_scroll_handle: VirtualListScrollHandle,
+    variable_scroll_handle: VirtualListScrollHandle,
+    variable_row_layout: Option<VariableRowLayout>,
+    pending_row_reveal: Option<(usize, ScrollStrategy)>,
 
     selected_row: Option<usize>,
     selection_mode: SelectionMode,
@@ -316,12 +323,40 @@ pub struct TableState<D: TableDelegate> {
     _load_more_task: Task<()>,
 }
 
+struct VariableRowLayout {
+    heights: Rc<Vec<Pixels>>,
+    sizes: Rc<Vec<gpui::Size<Pixels>>>,
+    total_height: Pixels,
+}
+
+impl VariableRowLayout {
+    fn new(heights: Rc<Vec<Pixels>>) -> Self {
+        let mut total_height = px(0.);
+        let sizes = heights
+            .iter()
+            .map(|&height| {
+                total_height += height;
+                gpui::size(px(0.), height)
+            })
+            .collect();
+        Self {
+            heights,
+            sizes: Rc::new(sizes),
+            total_height,
+        }
+    }
+}
+
 impl<D> TableState<D>
 where
     D: TableDelegate,
 {
     /// Create a new TableState with the given delegate.
     pub fn new(delegate: D, _: &mut Window, cx: &mut Context<Self>) -> Self {
+        // Both body layouts share the offset used by the scrollbar, mask and bounce.
+        let vertical_scroll_handle = UniformListScrollHandle::new();
+        let variable_scroll_handle =
+            VirtualListScrollHandle::from(vertical_scroll_handle.0.borrow().base_handle.clone());
         let mut this = Self {
             focus_handle: cx.focus_handle().tab_stop(true),
             options: TableOptions::default(),
@@ -329,7 +364,10 @@ where
             col_groups: Vec::new(),
             header_layout: Vec::new(),
             horizontal_scroll_handle: VirtualListScrollHandle::new(),
-            vertical_scroll_handle: UniformListScrollHandle::new(),
+            vertical_scroll_handle,
+            variable_scroll_handle,
+            variable_row_layout: None,
+            pending_row_reveal: None,
             selection_mode: SelectionMode::Row,
             selected_row: None,
             right_clicked_row: None,
@@ -459,9 +497,18 @@ where
 
     /// Scroll to the row at the given index.
     pub fn scroll_to_row(&mut self, row_ix: usize, cx: &mut Context<Self>) {
-        self.vertical_scroll_handle
-            .scroll_to_item(row_ix, ScrollStrategy::Top);
+        self.reveal_row(row_ix, ScrollStrategy::Top);
         cx.notify();
+    }
+
+    fn body_row_heights(&self, cx: &App) -> Option<Rc<Vec<Pixels>>> {
+        self.delegate
+            .row_heights(cx)
+            .filter(|heights| heights.len() == self.delegate.rows_count(cx))
+    }
+
+    fn reveal_row(&mut self, row_ix: usize, strategy: ScrollStrategy) {
+        self.pending_row_reveal = Some((row_ix, strategy));
     }
 
     // Scroll to the column at the given index.
@@ -569,7 +616,7 @@ where
         self.right_clicked_row = None;
         self.selected_row = Some(row_ix);
         if scroll {
-            self.vertical_scroll_handle.scroll_to_item(
+            self.reveal_row(
                 row_ix,
                 if is_down {
                     ScrollStrategy::Bottom
@@ -670,8 +717,7 @@ where
         self.right_clicked_cell = None;
 
         if scroll {
-            self.vertical_scroll_handle
-                .scroll_to_item(row_ix, ScrollStrategy::Center);
+            self.reveal_row(row_ix, ScrollStrategy::Center);
             self.scroll_to_col(col_ix, cx);
         }
 
@@ -881,11 +927,30 @@ where
         self.header_row_height() * self.header_layout.len().max(1) as f32
     }
 
-    fn page_item_count(&self) -> usize {
-        let row_height = self.options.size.table_row_height();
+    fn page_item_count(&self, down: bool, cx: &App) -> usize {
         let body_height = (self.bounds.size.height - self.header_band_height()).max(px(0.));
-        let count = (body_height / row_height).floor() as usize;
-        count.max(1)
+        if let Some(heights) = self.body_row_heights(cx) {
+            let current = if self.selection_mode.is_cell() {
+                self.selected_cell.map(|(row, _)| row)
+            } else {
+                self.selected_row
+            }
+            .unwrap_or(0)
+            .min(heights.len());
+            let mut remaining = body_height;
+            let fits = |height: &&Pixels| {
+                remaining -= **height;
+                remaining >= px(0.)
+            };
+            return if down {
+                heights[current..].iter().take_while(fits).count()
+            } else {
+                heights[..current].iter().rev().take_while(fits).count()
+            }
+            .max(1);
+        }
+        let row_height = self.options.size.table_row_height();
+        ((body_height / row_height).floor() as usize).max(1)
     }
 
     fn on_row_right_click(
@@ -1172,7 +1237,7 @@ where
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let step = self.page_item_count();
+        let step = self.page_item_count(false, cx);
 
         // Cell selection mode: move up by page within the same column
         if self.selection_mode.is_cell() {
@@ -1206,7 +1271,7 @@ where
             return;
         }
 
-        let step = self.page_item_count();
+        let step = self.page_item_count(true, cx);
 
         // Cell selection mode: move down by page within the same column
         if self.selection_mode.is_cell() {
@@ -2411,6 +2476,7 @@ where
         col_sizes: Rc<Vec<gpui::Size<Pixels>>>,
         columns_count: usize,
         is_filled: bool,
+        variable_sizes: Option<&[gpui::Size<Pixels>]>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
@@ -2419,7 +2485,10 @@ where
         // column never highlights its row.
         let is_selected = self.selected_row() == Some(row_ix);
         let view = cx.entity();
-        let row_height = self.options.size.table_row_height();
+        let variable_height = variable_sizes
+            .and_then(|sizes| sizes.get(row_ix))
+            .map(|size| size.height);
+        let row_height = variable_height.unwrap_or_else(|| self.options.size.table_row_height());
 
         if row_ix < rows_count {
             let is_last_row = row_ix + 1 == rows_count;
@@ -2454,6 +2523,9 @@ where
                 })
                 .when(is_stripe_row, |this| this.bg(cx.theme().tokens.table_even))
                 .refine_style(&style)
+                .when_some(variable_height, |this, height| {
+                    this.min_h(height).max_h(height).h(height)
+                })
                 .hover(|this| {
                     if is_selected || self.right_clicked_row == Some(row_ix) {
                         this
@@ -2875,7 +2947,36 @@ where
             .bounds()
             .size
             .height;
-        let actual_height = row_height * rows_count as f32;
+        let heights = self.body_row_heights(cx);
+        if let Some(heights) = heights {
+            if self
+                .variable_row_layout
+                .as_ref()
+                .is_none_or(|layout| !Rc::ptr_eq(&layout.heights, &heights))
+            {
+                self.variable_row_layout = Some(VariableRowLayout::new(heights));
+            }
+            let mut uniform = self.vertical_scroll_handle.0.borrow_mut();
+            uniform.deferred_scroll_to_item = None;
+            uniform.last_item_size = None;
+        } else {
+            self.variable_row_layout = None;
+        }
+        if !loading
+            && rows_count > 0
+            && let Some((row, strategy)) = self.pending_row_reveal.take()
+        {
+            let row = row.min(rows_count - 1);
+            if self.variable_row_layout.is_some() {
+                self.variable_scroll_handle.scroll_to_item(row, strategy);
+            } else {
+                self.vertical_scroll_handle.scroll_to_item(row, strategy);
+            }
+        }
+        let actual_height = self
+            .variable_row_layout
+            .as_ref()
+            .map_or(row_height * rows_count as f32, |layout| layout.total_height);
         let extra_rows_count =
             self.calculate_extra_rows_needed(total_height, actual_height, row_height);
         let render_rows_count = if self.options.stripe {
@@ -2885,6 +2986,15 @@ where
         };
         let has_right_click = self.right_clicked_row.is_some() || self.right_clicked_cell.is_some();
         let is_filled = total_height > Pixels::ZERO && total_height <= actual_height;
+        let variable_sizes = self.variable_row_layout.as_ref().map(|layout| {
+            if render_rows_count == rows_count {
+                layout.sizes.clone()
+            } else {
+                let mut sizes = layout.sizes.as_ref().clone();
+                sizes.resize(render_rows_count, gpui::size(px(0.), row_height));
+                Rc::new(sizes)
+            }
+        });
 
         let loading_view = if loading {
             Some(
@@ -2949,85 +3059,79 @@ where
                 if rows_count == 0 {
                     this.children(empty_view)
                 } else {
+                    let row_sizes = variable_sizes.clone();
+                    let render_rows =
+                        move |table: &mut Self,
+                              visible_range: Range<usize>,
+                              window: &mut Window,
+                              cx: &mut Context<Self>| {
+                            // Column widths are available before the first prepaint.
+                            let col_sizes: Rc<Vec<gpui::Size<Pixels>>> = Rc::new(
+                                table
+                                    .col_groups
+                                    .get(scrollable_cols.clone())
+                                    .unwrap_or_default()
+                                    .iter()
+                                    .map(|col| gpui::size(col.width, px(0.)))
+                                    .collect(),
+                            );
+                            table.load_more_if_need(rows_count, visible_range.end, window, cx);
+                            table.update_visible_range_if_need(
+                                visible_range.clone(),
+                                rows_count,
+                                Axis::Vertical,
+                                window,
+                                cx,
+                            );
+                            if visible_range.start >= rows_count {
+                                table.scroll_to_row(rows_count.saturating_sub(1), cx);
+                            }
+                            visible_range
+                                .map(|row_ix| {
+                                    table.render_table_row(
+                                        row_ix,
+                                        rows_count,
+                                        scrollable_cols.clone(),
+                                        col_sizes.clone(),
+                                        columns_count,
+                                        is_filled,
+                                        row_sizes.as_deref().map(Vec::as_slice),
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
+                    let rows = if let Some(sizes) = variable_sizes {
+                        v_virtual_list(cx.entity(), "table-variable-list", sizes, render_rows)
+                            .with_scroll_handle(&self.variable_scroll_handle)
+                            .track_scroll(&self.variable_scroll_handle)
+                            .map(|mut list| {
+                                list.style().overflow.y = Some(gpui::Overflow::Scroll);
+                                list
+                            })
+                            .with_sizing_behavior(ListSizingBehavior::Auto)
+                            .into_any_element()
+                    } else {
+                        uniform_list(
+                            "table-uniform-list",
+                            render_rows_count,
+                            cx.processor(render_rows),
+                        )
+                        .flex_grow_1()
+                        .size_full()
+                        .with_sizing_behavior(ListSizingBehavior::Auto)
+                        .track_scroll(&self.vertical_scroll_handle)
+                        .into_any_element()
+                    };
                     this.child(
                         h_flex().id("table-body").flex_grow_1().size_full().child(
-                            uniform_list(
-                                "table-uniform-list",
-                                render_rows_count,
-                                cx.processor(
-                                    move |table, visible_range: Range<usize>, window, cx| {
-                                        // Use `col.width` (always up-to-date) rather than
-                                        // `col.bounds.size.width`, which is only set after
-                                        // prepaint and is therefore zero on the first frame.
-                                        let col_sizes: Rc<Vec<gpui::Size<Pixels>>> = Rc::new(
-                                            table
-                                                .col_groups
-                                                .get(scrollable_cols.clone())
-                                                .unwrap_or_default()
-                                                .iter()
-                                                .map(|col| gpui::Size {
-                                                    width: col.width,
-                                                    height: px(0.),
-                                                })
-                                                .collect(),
-                                        );
-
-                                        table.load_more_if_need(
-                                            rows_count,
-                                            visible_range.end,
-                                            window,
-                                            cx,
-                                        );
-                                        table.update_visible_range_if_need(
-                                            visible_range.clone(),
-                                            rows_count,
-                                            Axis::Vertical,
-                                            window,
-                                            cx,
-                                        );
-
-                                        if visible_range.start >= rows_count {
-                                            table.scroll_to_row(rows_count.saturating_sub(1), cx);
-                                        }
-
-                                        let mut items = Vec::with_capacity(
-                                            visible_range.end.saturating_sub(visible_range.start),
-                                        );
-
-                                        // Render fake rows to fill the table
-                                        visible_range.for_each(|row_ix| {
-                                            // Render real rows for available data
-                                            items.push(table.render_table_row(
-                                                row_ix,
-                                                rows_count,
-                                                scrollable_cols.clone(),
-                                                col_sizes.clone(),
-                                                columns_count,
-                                                is_filled,
-                                                window,
-                                                cx,
-                                            ));
-                                        });
-
-                                        items
-                                    },
-                                ),
+                            gpui_base::ScrollBounce::new(
+                                "table-scroll-bounce",
+                                &self.vertical_scroll_handle,
+                                rows,
                             )
-                            .flex_grow_1()
-                            .size_full()
-                            .with_sizing_behavior(ListSizingBehavior::Auto)
-                            .track_scroll(&self.vertical_scroll_handle)
-                            .map(|rows| {
-                                gpui_base::ScrollBounce::new(
-                                    "table-scroll-bounce",
-                                    &self.vertical_scroll_handle,
-                                    rows,
-                                )
-                                .when_some(self.options.scroll_bounce, |bounce, on| {
-                                    bounce.enabled(on)
-                                })
-                            })
-                            .into_any_element(),
+                            .when_some(self.options.scroll_bounce, |bounce, on| bounce.enabled(on)),
                         ),
                     )
                 }
@@ -3089,14 +3193,17 @@ mod tests {
 
     struct WidthsDelegate;
 
-    struct BounceDelegate;
+    struct BounceDelegate(Option<Rc<Vec<Pixels>>>);
 
     impl TableDelegate for BounceDelegate {
         fn columns_count(&self, _: &App) -> usize {
             1
         }
         fn rows_count(&self, _: &App) -> usize {
-            40
+            self.0.as_ref().map_or(40, |heights| heights.len())
+        }
+        fn row_heights(&self, _: &App) -> Option<Rc<Vec<Pixels>>> {
+            self.0.clone()
         }
         fn column(&self, _: usize, _: &App) -> Column {
             Column::new("value", "Value")
@@ -3124,12 +3231,118 @@ mod tests {
     }
 
     #[gpui::test]
+    fn variable_rows_hit_test_and_scroll_using_supplied_heights(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let heights = (0..40)
+                .map(|row| px(if row % 2 == 0 { 12. } else { 52. }))
+                .collect();
+            BounceTable(
+                cx.new(|cx| TableState::new(BounceDelegate(Some(Rc::new(heights))), window, cx)),
+            )
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        let header = state.read_with(cx, |state, _| state.header_band_height());
+
+        for (y, expected) in [(11., 0), (13., 1), (65., 2)] {
+            cx.simulate_click(gpui::point(px(50.), header + px(y)), Default::default());
+            assert_eq!(
+                state.read_with(cx, |state, _| state.selected_row()),
+                Some(expected)
+            );
+        }
+
+        state.update(cx, |state, cx| state.scroll_to_row(39, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(state.read_with(cx, |state, _| state.visible_range.rows().contains(&39)));
+        cx.simulate_click(gpui::point(px(50.), px(190.)), Default::default());
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_row()),
+            Some(39)
+        );
+    }
+
+    #[gpui::test]
+    fn replacing_heights_and_returning_to_uniform_updates_hit_targets(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let heights = Some(Rc::new(vec![px(48.); 40]));
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate(heights), window, cx)))
+        });
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        state.update(cx, |state, cx| state.scroll_to_row(39, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let header = state.read_with(cx, |state, _| state.header_band_height());
+        let click = |cx: &mut gpui::VisualTestContext, y| {
+            cx.simulate_click(gpui::point(px(50.), header + px(y)), Default::default());
+            state.read_with(cx, |state, _| state.selected_row())
+        };
+
+        state.update(cx, |state, cx| {
+            state.delegate_mut().0 = Some(Rc::new(vec![px(12.), px(52.), px(12.)]));
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(click(cx, 13.), Some(1));
+
+        state.update(cx, |state, cx| {
+            state.delegate_mut().0 = Some(Rc::new(vec![px(52.), px(12.), px(12.)]));
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(click(cx, 13.), Some(0));
+
+        state.update(cx, |state, cx| {
+            state.delegate_mut().0 = None;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let uniform = state.read_with(cx, |state, _| state.options.size.table_row_height());
+        assert_eq!(click(cx, f32::from(uniform + px(2.))), Some(1));
+        state.update(cx, |state, cx| {
+            state
+                .vertical_scroll_handle
+                .scroll_to_item(39, ScrollStrategy::Top);
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(state.read_with(cx, |state, _| state.visible_range.rows().contains(&39)));
+    }
+
+    #[gpui::test]
+    fn mixed_height_page_navigation_uses_the_selected_rows_geometry(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let heights = Some(Rc::new(
+                (0..40)
+                    .map(|row| px(if row < 8 { 20. } else { 70. }))
+                    .collect(),
+            ));
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate(heights), window, cx)))
+        });
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_selected_row(0, cx);
+                state.action_select_page_down(&SelectPageDown, window, cx);
+                assert_eq!(state.selected_row(), Some(8));
+                state.action_select_page_down(&SelectPageDown, window, cx);
+                assert_eq!(state.selected_row(), Some(10));
+                state.action_select_page_up(&SelectPageUp, window, cx);
+                assert_eq!(state.selected_row(), Some(7));
+            });
+        });
+    }
+
+    #[gpui::test]
     fn scroll_bounce_table_keeps_headers_fixed_and_accepts_new_wheel_input(
         cx: &mut TestAppContext,
     ) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|window, cx| {
-            BounceTable(cx.new(|cx| TableState::new(BounceDelegate, window, cx)))
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate(None), window, cx)))
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let state = view.read_with(cx, |view, _| view.0.clone());
@@ -3186,7 +3399,7 @@ mod tests {
     fn programmatic_selection_keeps_the_viewport_but_keyboard_reveals(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|window, cx| {
-            BounceTable(cx.new(|cx| TableState::new(BounceDelegate, window, cx)))
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate(None), window, cx)))
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let state = view.read_with(cx, |view, _| view.0.clone());
