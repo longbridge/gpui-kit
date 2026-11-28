@@ -679,11 +679,23 @@ impl RenderOnce for TabBar {
         if rtl {
             rendered_tabs.reverse();
         }
+        // Left to right the empty space is a direct item of the strip, so one
+        // that grows (the dock's drop target past the last tab) fills the rest
+        // of the bar at full height. Right to left it needs a wrapper for the
+        // auto margin that pushes the tabs to the end; the wrapper stretches so
+        // the space keeps the bar's height.
         let last_empty_space = has_suffix_or_menu.then(|| {
-            div()
-                .flex_shrink_0()
-                .when(rtl, |this| this.ml_auto())
-                .child(self.last_empty_space)
+            if rtl {
+                div()
+                    .flex()
+                    .flex_shrink_0()
+                    .self_stretch()
+                    .ml_auto()
+                    .child(self.last_empty_space)
+                    .into_any_element()
+            } else {
+                self.last_empty_space
+            }
         });
 
         tabs.group("tab-bar")
