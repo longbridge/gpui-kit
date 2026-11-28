@@ -6,133 +6,98 @@ order: -2
 
 # Getting Started
 
-本指南创建一个带 GPUI Kit 按钮的小型桌面窗口。你需要 Rust、Cargo，以及对应平台的系统库；macOS、Windows 和 Linux 的要求见[安装](./installation.md)。学习这里的视图模型后，如需浏览器目标可继续阅读 [WebAssembly](./webassembly.md)。
+本指南从一个空目录开始，创建一个带文字和按钮的桌面窗口。开始前先安装 Rust 和对应平台的系统库，详见[安装](./installation.md)。
 
 ## 创建项目
 
-```sh
-cargo new gpui-hello
-cd gpui-hello
-```
+1. 新建 Cargo 项目：
 
-在生成的 `Cargo.toml` 中加入 GPUI Kit：
+   ```sh
+   cargo new gpui-hello
+   cd gpui-hello
+   ```
 
-```toml
-[dependencies]
-gpui-kit = "{{gpui_kit_version}}"
-```
+2. 在生成的 `Cargo.toml` 中加入 GPUI Kit：
 
-只需这一个依赖，即可使用 GPUI、GPUI Base、带样式的 GPUI Component 和默认图标资源。应用代码通过 `use gpui_kit::*;` 使用 GPUI，通过 `gpui_kit::component` 使用组件。以后可以调整 feature 选择，详见[图标与资源](./assets.md)。
+   ```toml
+   [dependencies]
+   gpui-kit = "{{gpui_kit_version}}"
+   ```
 
-### 使用 GPUI Fast
+这一个依赖就包含了 GPUI、GPUI Base、带样式的 GPUI Component 和默认图标。代码通过 `use gpui_kit::*;` 使用 GPUI，通过 `gpui_kit::component` 使用组件。以后如需调整 feature 选择，见[图标与资源](./assets.md)。
 
-GPUI Kit 默认使用固定版本的上游 GPUI 快照。启用 `gpui-fast` 后，可切换到
-GPUI Fast 的保留渲染和布局引擎：
+## 添加视图并运行
 
-```toml
-[dependencies]
-gpui-kit = { version = "{{gpui_kit_version}}", features = ["gpui-fast"] }
-```
+1. 将 `src/main.rs` 替换为：
 
-这个 feature 会统一切换 GPUI、原生平台、WebAssembly 后端，以及所有已启用的 Kit 层。
-继续使用 `gpui_kit::*`、`gpui_kit::component` 和 `#[gpui_kit::test]` 即可，
-无需 `[patch]`、额外的引擎依赖或 crate 别名。它也支持 `default-features = false`，
-并可与 `assets`、`test-support`、`inspector`、`profiler` 配合使用。
-GPUI Fast 依赖采用 `0.1.0` 版本要求，`cargo update` 可以更新到兼容的 `0.1.x` 版本。
+   ```rust
+   use gpui_kit::component::{
+       button::{Button, ButtonVariants},
+       label::Label,
+   };
+   use gpui_kit::*;
 
-Cargo features 是累加的：启用 Fast 后，整个依赖图通过 Kit 使用的公开类型都会来自 Fast，
-但上游包仍然是构建依赖。不要将 Kit 的 Fast 类型与直接依赖上游 GPUI 得到的类型混用。
-单独使用 Base、Component、资源、FPS、WebView 或 Shell 时，也可以启用各自的
-`gpui-fast` feature 来显式选择后端。
+   struct HelloWorld;
 
-在此仓库中，可以分别运行 `cargo run` 和 `cargo run --features gpui-fast` 对比组件展厅。
-WebAssembly 构建使用 [WebAssembly](./webassembly.md) 中说明的 nightly 工具链。
+   impl Render for HelloWorld {
+       fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+           div()
+               .flex()
+               .flex_col()
+               .size_full()
+               .items_center()
+               .justify_center()
+               .gap_2()
+               .child(Label::new("Hello, World!"))
+               .child(
+                   Button::new("hello")
+                       .primary()
+                       .label("Click me")
+                       .on_click(|_, _, _| println!("Clicked!")),
+               )
+       }
+   }
 
-### macOS 文字渲染：`font-kit`
+   fn main() {
+       application()
+           .with_assets(assets::Assets)
+           .run(|cx| {
+               init(cx);
 
-**macOS 需要启用 `gpui-pre-platform` 的 `font-kit` feature 才能渲染文字。**
-上面的 `gpui-kit` 依赖已经启用了它，按本指南创建应用时无需额外添加依赖或配置 feature。
+               open_window(WindowOptions::default(), cx, |_, cx| {
+                   cx.new(|_| HelloWorld)
+               })
+               .expect("Failed to open window");
+           });
+   }
+   ```
 
-如果你维护的应用直接依赖 GPUI，需要在 `gpui_platform` 依赖上启用这个 feature。
-仅面向 macOS 的 GPUI 应用可使用以下依赖配置：
+2. 在项目目录运行：
 
-```toml
-[dependencies]
-gpui = { package = "gpui-pre", version = "={{gpui_pre_version}}" }
-gpui_platform = { package = "gpui-pre-platform", version = "={{gpui_pre_version}}", features = ["font-kit"] }
-```
+   ```sh
+   cargo run
+   ```
 
-保留应用原有的其他平台 features，并保持 GPUI 快照版本一致。这是直接使用 GPUI 时的配置；
-本页后续 Kit 示例仍只需 `gpui-kit` 一个依赖。不要把 `features = ["font-kit"]` 加到
-`gpui` 或 `gpui-kit` 上，也无需单独添加 `font-kit` crate：这个 feature 属于
-`gpui-pre-platform`，会启用 `gpui-pre-macos/font-kit`。
+   首次构建需要编译全部依赖，会花一些时间。
 
-`gpui-pre-platform` 默认不启用 `font-kit`。未启用时，macOS 后端会使用 `NoopTextSystem`：
-窗口可以打开，但不会渲染文字，`all_font_names()` 也会返回空列表。修改 manifest 后，
-重新运行 `cargo run`。在 macOS 上，可以用 `cargo tree -e features -i gpui-pre-macos`
-查看后端的 features 由哪些依赖启用，确认其中包含 `font-kit`。
+窗口打开后，"Hello, World!" 下方是 **Click me** 按钮。点击按钮，终端会输出 `Clicked!`。
 
-## 添加视图
+### 代码做了什么
 
-将 `src/main.rs` 替换为：
+1. `application()` 创建桌面应用；`.with_assets(...)` 注册默认图标资源。
+2. `init(cx)` 初始化启用的 Kit 层，包括组件主题。只调用一次，并且要先于打开窗口或构造组件。
+3. `open_window(...)` 从闭包创建 `Entity<HelloWorld>`，再用 [`Root`](./window) 包裹它。`Root` 承载窗口的对话框、抽屉和通知。闭包返回内容视图，不要再返回一个 `Root`。
 
-```rust
-use gpui_kit::component::{
-    button::{Button, ButtonVariants},
-    label::Label,
-};
-use gpui_kit::*;
+`HelloWorld` 实现了 GPUI 的 [`Render`](./render) trait。GPUI 每次渲染这个视图时，`render` 都会返回一棵[元素树](./element)：一个包含 `Label` 和 `Button` 的 `div`。
 
-struct HelloWorld;
-
-impl Render for HelloWorld {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .gap_2()
-            .child(Label::new("Hello, World!"))
-            .child(
-                Button::new("hello")
-                    .primary()
-                    .label("Click me")
-                    .on_click(|_, _, _| println!("Clicked!")),
-            )
-    }
-}
-
-fn main() {
-    application()
-        .with_assets(assets::Assets)
-        .run(|cx| {
-            init(cx);
-
-            open_window(WindowOptions::default(), cx, |_, cx| {
-                cx.new(|_| HelloWorld)
-            })
-            .expect("Failed to open window");
-        });
-}
-```
-
-在项目目录执行 `cargo run`。窗口会显示文字和按钮；点击按钮后，终端会输出 `Clicked!`。
-
-示例中的文字用 `Label` 而不是直接写字符串。`Label` 会把文字放进无障碍树，读屏软件才能读到。直接写字符串（如 `.child("Hello")`）显示效果一样，但辅助技术读不到。
-
-启动过程分为三步：
-
-1. `gpui_kit::application()` 创建桌面应用；`.with_assets(...)` 注册默认图标资源。
-2. `gpui_kit::init(cx)` 初始化启用的 Kit 层，包括组件主题。只调用一次，并且要先于打开应用窗口或构造组件。
-3. `gpui_kit::open_window(...)` 从闭包创建 `Entity<HelloWorld>`，再用 [`Root`](./window) 包裹它。`Root` 管理窗口的浮层，包括对话框、抽屉和通知。闭包返回内容视图，不要再自行返回一个 `Root`。
-
-`HelloWorld` 实现 GPUI 的 [`Render`](./render) trait。GPUI 渲染视图时，`render` 返回[元素树](./element)：一个包含文字和 `Button` 的 `div`。按钮是在本次渲染中构建的值；如果控件需要持久状态，比如输入框文字，所属视图应保存对应的状态 [Entity](./entity)，不要在 `render` 中重新创建。
+问候语用 `Label` 而不是直接写字符串，是为了让读屏软件能读到。`.child("Hello")` 显示效果一样，但辅助技术读不到。
 
 ## 一个简短的心智模型
 
-[Entity<T>](./entity) 保存跨帧状态。它可以持有不参与绘制的 model；当 `T` 实现 `Render` 且被挂载时，这个 Entity 就是持久的 **View**，每次渲染都会生成新的元素树。[RenderOnce](./render-once) 组件则把输入作为一个值，描述树中可复用的一部分。调用方提供当前状态和 handler 时适合用它；它仍可使用少量带 key 的元素状态。复杂状态、订阅和任务则需要持久的 owner。
+- [Entity<T>](./entity) 保存跨帧状态，也可以只持有不参与绘制的 model。
+- 当 `T` 实现 `Render` 且被挂载时，这个 Entity 就是持久的 **View**，每次渲染都会生成新的元素树。
+- 上面的 `Button` 这类元素只是为一次渲染构建的值。如果控件需要持久状态，比如输入框文字，就由所属视图保存对应的状态 [Entity](./entity)，不要在 `render` 中重新创建。
+- [RenderOnce](./render-once) 组件把输入作为一个值，描述树中可复用的一部分。调用方提供状态和 handler 时适合用它；它仍可保留少量带 key 的元素状态。复杂状态、订阅和任务需要持久的 owner。
 
 ```text
 Application entry → feature units (model, command, view)
@@ -142,29 +107,76 @@ Application entry → feature units (model, command, view)
                                └─ RenderOnce values compose reusable parts
 ```
 
-应用增长后，拥有独立流程的功能可以把 model 和 View 放在同一个 feature crate 内；只有需要真正面向整个应用的状态时，才在其中使用私有 [Global](./global)。功能之间通过小型公开接口、event 或 `Entity` handle 协作。这样可复用部分容易接入，团队成员或 AI 代理并行修改时也有清晰边界。何时拆分以及如何确定所有权和依赖方向，详见[编码指南](./coding-guides)。
+应用增长后，拥有独立流程的功能可以把 model 和 View 放在同一个 feature crate 内。只有真正面向整个应用的状态，才使用私有 [Global](./global)。功能之间通过小型公开接口、event 或 `Entity` handle 协作，可复用部分容易接入，团队成员或 AI 代理并行修改时也有清晰边界。何时拆分以及如何确定所有权和依赖方向，详见[编码指南](./coding-guides)。
+
+## 可选配置
+
+上面的示例不需要以下任何配置。需要切换渲染后端，或不通过 Kit 直接依赖 GPUI 时，再回来看。
+
+### 使用 GPUI Fast
+
+GPUI Kit 默认使用固定版本的上游 GPUI 快照。启用 `gpui-fast` 可切换到 GPUI Fast 的保留渲染和布局引擎：
+
+```toml
+[dependencies]
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["gpui-fast"] }
+```
+
+- 这个 feature 会统一切换 GPUI、原生平台、WebAssembly 后端和所有已启用的 Kit 层。
+- 代码无需改动：继续使用 `gpui_kit::*`、`gpui_kit::component` 和 `#[gpui_kit::test]`，不需要 `[patch]`、额外的引擎依赖或 crate 别名。
+- 支持 `default-features = false`，也可与 `assets`、`test-support`、`inspector`、`profiler` 配合使用。
+- GPUI Fast 依赖采用 `0.1.0` 版本要求，`cargo update` 可以更新到兼容的 `0.1.x` 版本。
+- Cargo features 是累加的：启用 Fast 后，整个依赖图使用的公开类型都来自 Fast，上游包仍是构建依赖。不要将 Kit 的 Fast 类型与直接依赖上游 GPUI 得到的类型混用。
+- 单独使用 Base、Component、资源、FPS、WebView 或 Shell 时，显式选择后端也要启用各自的 `gpui-fast` feature。
+
+在此仓库中，可以分别运行 `cargo run` 和 `cargo run --features gpui-fast` 对比组件展厅。WebAssembly 构建使用 [WebAssembly](./webassembly.md) 中说明的 nightly 工具链。
+
+### macOS 文字渲染：`font-kit`
+
+**如果依赖的是 `gpui-kit`，可以跳过本节：它已经启用了 `font-kit`。** 本节只适用于直接依赖 GPUI 的应用。
+
+GPUI 以固定版本的快照 crate 发布在 crates.io 上：`gpui-pre` 是 GPUI 本身，`gpui-pre-platform` 包含各原生平台后端。`gpui-kit` 已替你依赖了版本匹配的这两个 crate。在 macOS 上，文字渲染需要 `gpui-pre-platform` 的 `font-kit` feature，它默认不启用。未启用时，后端会退回 `NoopTextSystem`：窗口可以打开但不显示文字，`all_font_names()` 也返回空列表。
+
+在直接使用 GPUI 的应用中启用它：
+
+1. 在 `gpui_platform` 依赖上加入这个 feature。仅面向 macOS 的应用可以这样写：
+
+   ```toml
+   [dependencies]
+   gpui = { package = "gpui-pre", version = "={{gpui_pre_version}}" }
+   gpui_platform = { package = "gpui-pre-platform", version = "={{gpui_pre_version}}", features = ["font-kit"] }
+   ```
+
+   保留应用原有的其他平台 features，并保持两个快照版本一致。
+
+2. 运行 `cargo run` 重新构建。
+3. 如需确认，在 macOS 上运行 `cargo tree -e features -i gpui-pre-macos`，检查其中包含 `font-kit`。
+
+这个 feature 属于 `gpui-pre-platform`，会启用 `gpui-pre-macos/font-kit`。不要把 `features = ["font-kit"]` 加到 `gpui` 或 `gpui-kit` 上，不要单独添加 `font-kit` 依赖，也不要在已使用 `gpui-kit` 的项目中加入上述配置。
 
 ## 接下来读什么
 
 随着应用扩展，可按顺序阅读：
 
-1. 阅读 [Entity](./entity.md)、[Context](./context.md) 和 [Render](./render.md)：持有一个值，在按钮回调中修改它，并确认窗口显示新值。再读 [Window](./window.md)，了解 `Root` 如何承载视图和浮层。
-2. 阅读 [Element](./element.md) 和 [RenderOnce](./render-once.md)：区分每次重建的元素树与持久状态。跟着 [Paint](./paint.md) 运行 Brush 练习，确认按下指针会改变绘制结果。
-3. 阅读 [Focus](./focus.md)、[Action](./action.md) 和 [Event](./event.md)：用 Tab 到达交互目标，触发一个命令并观察状态变化。再按 [Task](./task.md) 运行流式示例；连续点击两次 Replay，确认旧分片不会重新出现。
-4. 阅读[无障碍](./accessibility.md)和[测试](./test.md)：用键盘完成 Save 流程，检查焦点与可见结果，再运行文档中的 UI 测试，确认渲染状态和保存的模型值。在目标平台上另行检查辅助技术的实际表现。
-5. 从[组件目录](../component/index.md)选择应用需要的控件；按界面需求继续阅读[图标与资源](./assets.md)和[字体](./fonts.md)。
+1. [Entity](./entity.md)、[Context](./context.md) 和 [Render](./render.md)：持有一个值，在按钮回调中修改它，并确认窗口显示新值。[Window](./window.md) 说明 `Root` 如何承载视图和浮层。
+2. [Element](./element.md) 和 [RenderOnce](./render-once.md)：区分每次重建的元素树与持久状态。运行 [Paint](./paint.md) 中的 Brush 练习，确认按下指针会改变绘制结果。
+3. [Focus](./focus.md)、[Action](./action.md) 和 [Event](./event.md)：用 Tab 到达交互目标，触发一个命令并观察状态变化。运行 [Task](./task.md) 中的流式示例；连续点击两次 Replay，确认旧分片不会重新出现。
+4. [无障碍](./accessibility.md)和[测试](./test.md)：用键盘完成 Save 流程，检查焦点与可见结果，再运行文档中的 UI 测试，确认渲染状态和保存的模型值。在各目标平台上另行检查辅助技术的实际表现。
+5. [组件目录](../component/index.md)：选择应用需要的控件，再按界面需求阅读[图标与资源](./assets.md)和[字体](./fonts.md)。
 
-如需了解持久输入状态与订阅，请看[应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)中的测试用例。[编码指南](./coding-guides.md)说明了这些示例遵循的约定。
+如需浏览器目标，请继续阅读 [WebAssembly](./webassembly.md)。持久输入状态与订阅的测试用例见[应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)，[编码指南](./coding-guides.md)说明了这些示例遵循的约定。
 
 ## 完整且经过测试的 View
 
-以下设置界面展示如何持有 InputState 并管理订阅。代码会与[对应的 Rust 源文件](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs)保持同步。仓库中的 `gpui-kit-recipes` 默认可执行程序只打开一个简单的 bootstrap 视图，不会显示这个设置界面。[设置界面交互测试](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/tests/settings.rs)会在 GPUI 测试窗口中挂载 `Settings`。在仓库根目录执行：
+以下设置界面展示如何持有输入状态并管理订阅。它是可编译的示例，与[对应的 Rust 源文件](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs)保持同步。
+
+如需验证，在仓库根目录运行[设置界面交互测试](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/tests/settings.rs)，它会在 GPUI 测试窗口中挂载 `Settings`：
 
 ```sh
 cargo test -p gpui-kit-recipes --test settings
 ```
 
-测试通过时，输入后预览值先变为 `a`；在一次无关的重新绘制后继续输入，预览值变为 `ab`，变更次数依次为 1 和 2。这验证了测试窗口内的输入订阅和状态生命周期，不等同于原生界面的视觉验收。
+测试通过时，输入后预览值先变为 `a`；在一次无关的重新绘制后继续输入，预览值变为 `ab`，变更次数依次为 1 和 2。这验证的是输入订阅和状态生命周期，不等同于原生界面的视觉验收。仓库中的 `gpui-kit-recipes` 默认可执行程序只打开一个简单的 bootstrap 视图，不会显示这个设置界面。
 
 <!-- recipe:settings:start -->
 ```rust
