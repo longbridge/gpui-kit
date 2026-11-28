@@ -522,10 +522,19 @@ DataTable::new(&state)
 ```
 
 For mixed-height body rows (for example, compact group labels among regular
-records), implement `TableDelegate::row_sizes`. Supply one positive height per
-row in display order and reuse the returned `Rc` until the geometry changes.
-Widths are ignored. The virtualized body uses these heights for both layout
-and navigation; use `TableState::scroll_to_row` to reveal a row.
+records), implement `TableDelegate::row_heights`. Supply one positive, finite
+height per row in display order and reuse the returned `Rc` until the heights
+change. `None` or a row-count mismatch uses the uniform layout. Geometry changes
+keep the pixel scroll offset where possible and clamp it if the content shrinks.
+Use `TableState::scroll_to_row` to reveal a row in either layout. The public
+uniform handle still exposes the shared pixel offset and bounds, but its
+item-based methods and item-size metrics apply only to uniform rows.
+
+Try a real table with compact team labels, taller records, and nested scrolling:
+
+```sh
+cargo run -p table_in_scrollable -- --mixed-rows
+```
 
 ## Examples
 

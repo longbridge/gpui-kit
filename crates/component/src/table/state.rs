@@ -283,10 +283,15 @@ pub struct TableState<D: TableDelegate> {
     /// Enable/disable fixed columns feature.
     pub col_fixed: bool,
 
+    /// Vertical scroll handle for uniform rows. Its pixel offset and bounds
+    /// are shared with the mixed-height body; its item-based methods and
+    /// item-size metrics apply only to the uniform body.
+    /// Use [`Self::scroll_to_row`] to reveal a row in either layout.
     pub vertical_scroll_handle: UniformListScrollHandle,
     pub horizontal_scroll_handle: VirtualListScrollHandle,
     variable_scroll_handle: VirtualListScrollHandle,
-    variable_row_sizes: Option<(Rc<Vec<gpui::Size<Pixels>>>, Pixels)>,
+    variable_row_layout: Option<VariableRowLayout>,
+    pending_row_reveal: Option<(usize, ScrollStrategy)>,
 
     selected_row: Option<usize>,
     selection_mode: SelectionMode,
@@ -318,6 +323,30 @@ pub struct TableState<D: TableDelegate> {
     _load_more_task: Task<()>,
 }
 
+struct VariableRowLayout {
+    heights: Rc<Vec<Pixels>>,
+    sizes: Rc<Vec<gpui::Size<Pixels>>>,
+    total_height: Pixels,
+}
+
+impl VariableRowLayout {
+    fn new(heights: Rc<Vec<Pixels>>) -> Self {
+        let mut total_height = px(0.);
+        let sizes = heights
+            .iter()
+            .map(|&height| {
+                total_height += height;
+                gpui::size(px(0.), height)
+            })
+            .collect();
+        Self {
+            heights,
+            sizes: Rc::new(sizes),
+            total_height,
+        }
+    }
+}
+
 impl<D> TableState<D>
 where
     D: TableDelegate,
@@ -337,7 +366,8 @@ where
             horizontal_scroll_handle: VirtualListScrollHandle::new(),
             vertical_scroll_handle,
             variable_scroll_handle,
-            variable_row_sizes: None,
+            variable_row_layout: None,
+            pending_row_reveal: None,
             selection_mode: SelectionMode::Row,
             selected_row: None,
             right_clicked_row: None,
@@ -467,25 +497,18 @@ where
 
     /// Scroll to the row at the given index.
     pub fn scroll_to_row(&mut self, row_ix: usize, cx: &mut Context<Self>) {
-        self.reveal_row(row_ix, ScrollStrategy::Top, cx);
+        self.reveal_row(row_ix, ScrollStrategy::Top);
         cx.notify();
     }
 
-    fn body_row_sizes(&self, cx: &App) -> Option<Rc<Vec<gpui::Size<Pixels>>>> {
+    fn body_row_heights(&self, cx: &App) -> Option<Rc<Vec<Pixels>>> {
         self.delegate
-            .row_sizes(cx)
-            .filter(|sizes| sizes.len() == self.delegate.rows_count(cx))
+            .row_heights(cx)
+            .filter(|heights| heights.len() == self.delegate.rows_count(cx))
     }
 
-    fn reveal_row(&self, row_ix: usize, strategy: ScrollStrategy, cx: &App) {
-        if let Some(sizes) = self.body_row_sizes(cx) {
-            if !sizes.is_empty() {
-                self.variable_scroll_handle
-                    .scroll_to_item(row_ix.min(sizes.len() - 1), strategy);
-            }
-        } else {
-            self.vertical_scroll_handle.scroll_to_item(row_ix, strategy);
-        }
+    fn reveal_row(&mut self, row_ix: usize, strategy: ScrollStrategy) {
+        self.pending_row_reveal = Some((row_ix, strategy));
     }
 
     // Scroll to the column at the given index.
@@ -600,7 +623,6 @@ where
                 } else {
                     ScrollStrategy::Top
                 },
-                cx,
             );
         }
         cx.emit(TableEvent::SelectRow(row_ix));
@@ -695,7 +717,7 @@ where
         self.right_clicked_cell = None;
 
         if scroll {
-            self.reveal_row(row_ix, ScrollStrategy::Center, cx);
+            self.reveal_row(row_ix, ScrollStrategy::Center);
             self.scroll_to_col(col_ix, cx);
         }
 
@@ -907,23 +929,23 @@ where
 
     fn page_item_count(&self, down: bool, cx: &App) -> usize {
         let body_height = (self.bounds.size.height - self.header_band_height()).max(px(0.));
-        if let Some(sizes) = self.body_row_sizes(cx) {
+        if let Some(heights) = self.body_row_heights(cx) {
             let current = if self.selection_mode.is_cell() {
                 self.selected_cell.map(|(row, _)| row)
             } else {
                 self.selected_row
             }
             .unwrap_or(0)
-            .min(sizes.len());
+            .min(heights.len());
             let mut remaining = body_height;
-            let fits = |size: &&gpui::Size<Pixels>| {
-                remaining -= size.height;
+            let fits = |height: &&Pixels| {
+                remaining -= **height;
                 remaining >= px(0.)
             };
             return if down {
-                sizes[current..].iter().take_while(fits).count()
+                heights[current..].iter().take_while(fits).count()
             } else {
-                sizes[..current].iter().rev().take_while(fits).count()
+                heights[..current].iter().rev().take_while(fits).count()
             }
             .max(1);
         }
@@ -2925,20 +2947,36 @@ where
             .bounds()
             .size
             .height;
-        let sizes = self.body_row_sizes(cx);
-        let actual_height = if let Some(sizes) = &sizes {
-            match &self.variable_row_sizes {
-                Some((previous, height)) if Rc::ptr_eq(previous, sizes) => *height,
-                _ => {
-                    let height = sizes.iter().map(|size| size.height).sum();
-                    self.variable_row_sizes = Some((sizes.clone(), height));
-                    height
-                }
+        let heights = self.body_row_heights(cx);
+        if let Some(heights) = heights {
+            if self
+                .variable_row_layout
+                .as_ref()
+                .is_none_or(|layout| !Rc::ptr_eq(&layout.heights, &heights))
+            {
+                self.variable_row_layout = Some(VariableRowLayout::new(heights));
             }
+            let mut uniform = self.vertical_scroll_handle.0.borrow_mut();
+            uniform.deferred_scroll_to_item = None;
+            uniform.last_item_size = None;
         } else {
-            self.variable_row_sizes = None;
-            row_height * rows_count as f32
-        };
+            self.variable_row_layout = None;
+        }
+        if !loading
+            && rows_count > 0
+            && let Some((row, strategy)) = self.pending_row_reveal.take()
+        {
+            let row = row.min(rows_count - 1);
+            if self.variable_row_layout.is_some() {
+                self.variable_scroll_handle.scroll_to_item(row, strategy);
+            } else {
+                self.vertical_scroll_handle.scroll_to_item(row, strategy);
+            }
+        }
+        let actual_height = self
+            .variable_row_layout
+            .as_ref()
+            .map_or(row_height * rows_count as f32, |layout| layout.total_height);
         let extra_rows_count =
             self.calculate_extra_rows_needed(total_height, actual_height, row_height);
         let render_rows_count = if self.options.stripe {
@@ -2948,11 +2986,11 @@ where
         };
         let has_right_click = self.right_clicked_row.is_some() || self.right_clicked_cell.is_some();
         let is_filled = total_height > Pixels::ZERO && total_height <= actual_height;
-        let variable_sizes = sizes.map(|sizes| {
+        let variable_sizes = self.variable_row_layout.as_ref().map(|layout| {
             if render_rows_count == rows_count {
-                sizes
+                layout.sizes.clone()
             } else {
-                let mut sizes = sizes.as_ref().clone();
+                let mut sizes = layout.sizes.as_ref().clone();
                 sizes.resize(render_rows_count, gpui::size(px(0.), row_height));
                 Rc::new(sizes)
             }
@@ -3155,16 +3193,16 @@ mod tests {
 
     struct WidthsDelegate;
 
-    struct BounceDelegate(Option<Rc<Vec<gpui::Size<Pixels>>>>);
+    struct BounceDelegate(Option<Rc<Vec<Pixels>>>);
 
     impl TableDelegate for BounceDelegate {
         fn columns_count(&self, _: &App) -> usize {
             1
         }
         fn rows_count(&self, _: &App) -> usize {
-            40
+            self.0.as_ref().map_or(40, |heights| heights.len())
         }
-        fn row_sizes(&self, _: &App) -> Option<Rc<Vec<gpui::Size<Pixels>>>> {
+        fn row_heights(&self, _: &App) -> Option<Rc<Vec<Pixels>>> {
             self.0.clone()
         }
         fn column(&self, _: usize, _: &App) -> Column {
@@ -3196,11 +3234,11 @@ mod tests {
     fn variable_rows_hit_test_and_scroll_using_supplied_heights(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|window, cx| {
-            let sizes = (0..40)
-                .map(|row| gpui::size(px(0.), px(if row % 2 == 0 { 12. } else { 52. })))
+            let heights = (0..40)
+                .map(|row| px(if row % 2 == 0 { 12. } else { 52. }))
                 .collect();
             BounceTable(
-                cx.new(|cx| TableState::new(BounceDelegate(Some(Rc::new(sizes))), window, cx)),
+                cx.new(|cx| TableState::new(BounceDelegate(Some(Rc::new(heights))), window, cx)),
             )
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
@@ -3223,6 +3261,79 @@ mod tests {
             state.read_with(cx, |state, _| state.selected_row()),
             Some(39)
         );
+    }
+
+    #[gpui::test]
+    fn replacing_heights_and_returning_to_uniform_updates_hit_targets(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let heights = Some(Rc::new(vec![px(48.); 40]));
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate(heights), window, cx)))
+        });
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        state.update(cx, |state, cx| state.scroll_to_row(39, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let header = state.read_with(cx, |state, _| state.header_band_height());
+        let click = |cx: &mut gpui::VisualTestContext, y| {
+            cx.simulate_click(gpui::point(px(50.), header + px(y)), Default::default());
+            state.read_with(cx, |state, _| state.selected_row())
+        };
+
+        state.update(cx, |state, cx| {
+            state.delegate_mut().0 = Some(Rc::new(vec![px(12.), px(52.), px(12.)]));
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(click(cx, 13.), Some(1));
+
+        state.update(cx, |state, cx| {
+            state.delegate_mut().0 = Some(Rc::new(vec![px(52.), px(12.), px(12.)]));
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(click(cx, 13.), Some(0));
+
+        state.update(cx, |state, cx| {
+            state.delegate_mut().0 = None;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let uniform = state.read_with(cx, |state, _| state.options.size.table_row_height());
+        assert_eq!(click(cx, f32::from(uniform + px(2.))), Some(1));
+        state.update(cx, |state, cx| {
+            state
+                .vertical_scroll_handle
+                .scroll_to_item(39, ScrollStrategy::Top);
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(state.read_with(cx, |state, _| state.visible_range.rows().contains(&39)));
+    }
+
+    #[gpui::test]
+    fn mixed_height_page_navigation_uses_the_selected_rows_geometry(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let heights = Some(Rc::new(
+                (0..40)
+                    .map(|row| px(if row < 8 { 20. } else { 70. }))
+                    .collect(),
+            ));
+            BounceTable(cx.new(|cx| TableState::new(BounceDelegate(heights), window, cx)))
+        });
+        let state = view.read_with(cx, |view, _| view.0.clone());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_selected_row(0, cx);
+                state.action_select_page_down(&SelectPageDown, window, cx);
+                assert_eq!(state.selected_row(), Some(8));
+                state.action_select_page_down(&SelectPageDown, window, cx);
+                assert_eq!(state.selected_row(), Some(10));
+                state.action_select_page_up(&SelectPageUp, window, cx);
+                assert_eq!(state.selected_row(), Some(7));
+            });
+        });
     }
 
     #[gpui::test]

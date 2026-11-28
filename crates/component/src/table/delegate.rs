@@ -20,14 +20,13 @@ pub trait TableDelegate: Sized + 'static {
     /// Return the number of rows in the table.
     fn rows_count(&self, cx: &App) -> usize;
 
-    /// Opt into variable body-row heights. Return one size per row, in display
-    /// order, with positive, finite heights. Widths are ignored. Reuse the
-    /// same `Rc` until the row order or sizes change. `None` (the default)
-    /// retains the uniform-height list.
+    /// Opt into variable body-row heights. Return one positive, finite height
+    /// per row in display order. Return the same `Rc` until the heights change.
+    /// `None` or a length different from `rows_count` uses uniform heights.
     ///
-    /// In this mode the supplied heights take precedence over `render_tr`
-    /// height styles. Use [`TableState::scroll_to_row`] to reveal a row.
-    fn row_sizes(&self, cx: &App) -> Option<Rc<Vec<gpui::Size<Pixels>>>> {
+    /// These heights override the height styles set by `render_tr`. Use
+    /// [`TableState::scroll_to_row`] to reveal a row in either layout.
+    fn row_heights(&self, cx: &App) -> Option<Rc<Vec<Pixels>>> {
         None
     }
 
