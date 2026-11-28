@@ -417,7 +417,7 @@ fn resume_suspended_process(process_id: u32) -> Result<(), String> {
         if resumed == u32::MAX {
             return Err(format!(
                 "resuming the suspended Windows thread failed: {}",
-                windows::core::Error::from_win32()
+                windows::core::Error::from_thread()
             ));
         }
         Ok(())

@@ -120,7 +120,7 @@ errno = { version = "0.3.14", default-features = false }
 
 [workspace.dependencies.windows]
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices"]
-version = "0.58.0"
+version = "0.62"
 
 [workspace.lints.clippy]
 almost_complete_range = "allow"

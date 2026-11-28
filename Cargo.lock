@@ -3789,7 +3789,7 @@ dependencies = [
  "unicode-linebreak",
  "unicode-segmentation",
  "web-time",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -3911,7 +3911,9 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "uuid",
- "windows 0.58.0",
+ "windows 0.62.2",
+ "windows-collections 0.3.2",
+ "windows-future 0.3.2",
 ]
 
 [[package]]
@@ -4318,7 +4320,7 @@ dependencies = [
  "uuid",
  "wayland-client",
  "web-time",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -4953,7 +4955,7 @@ dependencies = [
  "tungstenite",
  "usvg",
  "wait-timeout",
- "windows 0.58.0",
+ "windows 0.62.2",
  "wry",
 ]
 
