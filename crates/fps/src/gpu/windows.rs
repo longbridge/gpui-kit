@@ -7,8 +7,9 @@ use std::collections::HashMap;
 
 use windows::{
     Win32::System::Performance::{
-        PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_MORE_DATA, PdhAddEnglishCounterW,
-        PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
+        PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,
+        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
+        PdhOpenQueryW,
     },
     core::w,
 };
@@ -29,8 +30,8 @@ const PDH_SUCCESS: u32 = 0;
 const ENGINE_TYPE: &str = "engtype_";
 
 pub(super) struct Probe {
-    query: isize,
-    counter: isize,
+    query: PDH_HQUERY,
+    counter: PDH_HCOUNTER,
     /// How every instance name this process owns opens, as in `pid_4242_`.
     owner: String,
     /// Reused across samples so a reading twice a second does not reallocate.
@@ -41,9 +42,13 @@ pub(super) struct Probe {
     buffer: Vec<u64>,
 }
 
+// SAFETY: The PDH query and counter handles are owned exclusively by this
+// `Probe`, accessed only through `&mut self`, and closed once in `Drop`.
+unsafe impl Send for Probe {}
+
 impl Probe {
     pub(super) fn new() -> Option<Self> {
-        let mut query = 0;
+        let mut query = PDH_HQUERY::default();
         // SAFETY: both handles are live out parameters, and the counter path is
         // a static wide string.
         let opened = unsafe { PdhOpenQueryW(None, 0, &mut query) };
@@ -53,7 +58,7 @@ impl Probe {
 
         let mut probe = Self {
             query,
-            counter: 0,
+            counter: PDH_HCOUNTER::default(),
             owner: format!("pid_{}_", std::process::id()),
             buffer: Vec::new(),
         };

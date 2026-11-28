@@ -45,7 +45,8 @@ speech = [
     "windows/Foundation_Collections",
     "windows/Globalization",
     "windows/Media_SpeechRecognition",
-    "windows/implement",
+    "dep:windows-collections",
+    "dep:windows-future",
 ]
 
 # For syntax highlighting in Markdown and CodeEditor.
@@ -264,6 +265,8 @@ windows = { workspace = true, features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+windows-collections = { version = "0.3", optional = true }
+windows-future = { version = "0.3", optional = true }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

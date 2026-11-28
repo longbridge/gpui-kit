@@ -15,10 +15,7 @@ use anyhow::anyhow;
 use gpui::{App, AsyncApp, SharedString, Task};
 use smol::channel::{Receiver, Sender, bounded, unbounded};
 use windows::{
-    Foundation::{
-        AsyncActionCompletedHandler, AsyncOperationCompletedHandler, Collections::IIterable,
-        EventRegistrationToken, IAsyncAction, IAsyncOperation, TypedEventHandler,
-    },
+    Foundation::TypedEventHandler,
     Globalization::Language,
     Media::SpeechRecognition::{
         SpeechContinuousRecognitionCompletedEventArgs,
@@ -29,7 +26,11 @@ use windows::{
         SpeechRecognizer as WinSpeechRecognizer,
     },
     Win32::Foundation::E_ACCESSDENIED,
-    core::{HRESULT, HSTRING, RuntimeType},
+    core::{HRESULT, HSTRING, Ref, RuntimeType},
+};
+use windows_collections::IIterable;
+use windows_future::{
+    AsyncActionCompletedHandler, AsyncOperationCompletedHandler, IAsyncAction, IAsyncOperation,
 };
 
 use super::SpeechLocale;
@@ -112,9 +113,8 @@ impl SpeechRecognizer for PlatformRecognizer {
         constraints.Append(&dictation).map_err(speech_error)?;
         // A list beside the topic favors its phrases during dictation.
         if !self.expected_phrases.is_empty() {
-            let phrases = IIterable::<HSTRING>::try_from(self.expected_phrases.clone())
-                .and_then(|phrases| SpeechRecognitionListConstraint::Create(&phrases))
-                .map_err(speech_error)?;
+            let phrases = IIterable::<HSTRING>::from(self.expected_phrases.clone());
+            let phrases = SpeechRecognitionListConstraint::Create(&phrases).map_err(speech_error)?;
             constraints.Append(&phrases).map_err(speech_error)?;
         }
 
@@ -122,8 +122,8 @@ impl SpeechRecognizer for PlatformRecognizer {
             recognizer
                 .HypothesisGenerated(&TypedEventHandler::new({
                     let messages = messages.clone();
-                    move |_, args: &Option<SpeechRecognitionHypothesisGeneratedEventArgs>| {
-                        if let Some(args) = args {
+                    move |_, args: Ref<SpeechRecognitionHypothesisGeneratedEventArgs>| {
+                        if let Some(args) = args.as_ref() {
                             let text = args.Hypothesis()?.Text()?;
                             _ = messages.try_send(Message::Hypothesis(text));
                         }
@@ -136,8 +136,8 @@ impl SpeechRecognizer for PlatformRecognizer {
             continuous
                 .ResultGenerated(&TypedEventHandler::new({
                     let messages = messages.clone();
-                    move |_, args: &Option<SpeechContinuousRecognitionResultGeneratedEventArgs>| {
-                        if let Some(args) = args {
+                    move |_, args: Ref<SpeechContinuousRecognitionResultGeneratedEventArgs>| {
+                        if let Some(args) = args.as_ref() {
                             _ = messages.try_send(Message::Result(args.Result()?));
                         }
                         Ok(())
@@ -147,15 +147,14 @@ impl SpeechRecognizer for PlatformRecognizer {
         );
         session.completed_token = Some(
             continuous
-                .Completed(&TypedEventHandler::new({
-                    let messages = messages.clone();
-                    move |_, args: &Option<SpeechContinuousRecognitionCompletedEventArgs>| {
-                        if let Some(args) = args {
+                .Completed(&TypedEventHandler::new(
+                    move |_, args: Ref<SpeechContinuousRecognitionCompletedEventArgs>| {
+                        if let Some(args) = args.as_ref() {
                             _ = messages.try_send(Message::Completed(args.Status()?));
                         }
                         Ok(())
-                    }
-                }))
+                    },
+                ))
                 .map_err(speech_error)?,
         );
 
@@ -182,9 +181,9 @@ enum Message {
 struct Session {
     recognizer: WinSpeechRecognizer,
     continuous: SpeechContinuousRecognitionSession,
-    hypothesis_token: Option<EventRegistrationToken>,
-    result_token: Option<EventRegistrationToken>,
-    completed_token: Option<EventRegistrationToken>,
+    hypothesis_token: Option<i64>,
+    result_token: Option<i64>,
+    completed_token: Option<i64>,
     messages: Sender<Message>,
     _task: Option<Task<()>>,
 }
